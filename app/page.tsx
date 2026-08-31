@@ -25,6 +25,7 @@ export default function Home() {
     src="/logo-guarani.png"
     alt="Sociedade Guarani"
     className="h-full w-full object-contain"
+    />
             <div>
              <div>
   <h1 className="text-xl font-bold tracking-wide">
