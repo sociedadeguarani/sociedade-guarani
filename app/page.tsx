@@ -20,18 +20,21 @@ export default function Home() {
       <header className="bg-[#063b28] text-white shadow-lg">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white p-1 shadow">
-              <span className="text-3xl">🏛️</span>
-            </div>
-
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white p-1 shadow-lg overflow-hidden">
+  <img
+    src="/logo-guarani.png"
+    alt="Sociedade Guarani"
+    className="h-full w-full object-contain"
             <div>
-              <h1 className="text-xl font-bold tracking-wide">
-                SOCIEDADE GUARANI
-              </h1>
-              <p className="text-sm text-[#f5d76e]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
+             <div>
+  <h1 className="text-xl font-bold tracking-wide">
+    SOCIEDADE GUARANI
+  </h1>
+
+  <p className="text-sm text-[#f5d76e]">
+    Sociedade Recreativa Guarani — S.R.G.
+  </p>
+</div>
           </div>
 
           <div className="hidden text-right sm:block">
