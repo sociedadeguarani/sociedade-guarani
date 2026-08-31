@@ -16,36 +16,44 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f4f6f3] text-[#123c2b]">
-      {/* CABEÇALHO */}
-      <header className="bg-[#063b28] text-white shadow-lg">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white p-1 shadow-lg overflow-hidden">
-  <img
-    src="/logo-guarani.png"
-    alt="Sociedade Guarani"
-    className="h-full w-full object-contain"
-    />
-            <div>
-             <div>
-  <h1 className="text-xl font-bold tracking-wide">
-    SOCIEDADE GUARANI
-  </h1>
+     {/* CABEÇALHO */}
+<header className="bg-[#063b28] text-white shadow-lg">
+  <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
 
-  <p className="text-sm text-[#f5d76e]">
-    Sociedade Recreativa Guarani — S.R.G.
-  </p>
-</div>
-          </div>
+    <div className="flex items-center gap-4">
 
-          <div className="hidden text-right sm:block">
-            <p className="text-sm text-gray-200">Sistema de Gestão</p>
-            <p className="font-semibold text-[#f5d76e]">
-              Área Administrativa
-            </p>
-          </div>
-        </div>
-      </header>
+      <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white p-1 shadow-lg">
+        <img
+          src="/logo-guarani.png"
+          alt="Sociedade Guarani"
+          className="h-full w-full object-contain"
+        />
+      </div>
+
+      <div>
+        <h1 className="text-xl font-bold tracking-wide">
+          SOCIEDADE GUARANI
+        </h1>
+
+        <p className="text-sm text-[#f5d76e]">
+          Sociedade Recreativa Guarani — S.R.G.
+        </p>
+      </div>
+
+    </div>
+
+    <div className="hidden text-right sm:block">
+      <p className="text-sm text-gray-200">
+        Sistema de Gestão
+      </p>
+
+      <p className="font-semibold text-[#f5d76e]">
+        Área Administrativa
+      </p>
+    </div>
+
+  </div>
+</header>
 
       <div className="mx-auto flex max-w-7xl">
         {/* MENU LATERAL */}
