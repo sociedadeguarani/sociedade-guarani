@@ -674,9 +674,11 @@ export default function Home() {
 ========================= */
 
 function Inicio({
+  socios,
   quantidadeSocios,
   abrirCadastro,
 }: {
+  socios: Socio[];
   quantidadeSocios: number;
   abrirCadastro: () => void;
 }) {
