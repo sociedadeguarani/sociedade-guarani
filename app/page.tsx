@@ -29,6 +29,17 @@ type Socio = {
   situacao: string | null;
   observacoes: string | null;
   foto_url: string | null;
+
+  tipo_socio: string | null;
+  responsavel_id: string | null;
+  parentesco: string | null;
+  possui_mensalidade: boolean | null;
+  valor_mensalidade: number | null;
+  dia_vencimento: number | null;
+  tipo_pagamento: string | null;
+  modalidade_temporada: string | null;
+  inicio_temporada: string | null;
+  fim_temporada: string | null;
 };
 
 const menus = [
@@ -61,7 +72,77 @@ const socioInicial: Partial<Socio> = {
   situacao: "ativo",
   observacoes: "",
   foto_url: "",
+
+  tipo_socio: "patrimonial",
+  responsavel_id: null,
+  parentesco: "",
+  possui_mensalidade: false,
+  valor_mensalidade: 0,
+  dia_vencimento: 10,
+  tipo_pagamento: "pix",
+  modalidade_temporada: null,
+  inicio_temporada: "",
+  fim_temporada: "",
 };
+
+const TIPOS_SOCIO = [
+  { value: "patrimonial", label: "Patrimonial" },
+  { value: "dependente_patrimonial", label: "Dependente Patrimonial" },
+  { value: "contribuinte", label: "Contribuinte" },
+  { value: "dependente_contribuinte", label: "Dependente Contribuinte" },
+  { value: "transitorio", label: "Transitório" },
+  { value: "dependente_transitorio", label: "Dependente Transitório" },
+  { value: "temporada_individual", label: "Temporada Individual" },
+  { value: "temporada_familiar", label: "Temporada Familiar" },
+  { value: "dependente_temporada_familiar", label: "Dependente Temporada Familiar" },
+];
+
+const PARENTESCOS = [
+  "Esposa",
+  "Esposo",
+  "Companheiro(a)",
+  "Filho(a)",
+  "Enteado(a)",
+  "Pai",
+  "Mãe",
+  "Irmão(ã)",
+  "Outro",
+];
+
+const FORMAS_PAGAMENTO = [
+  "pix",
+  "debito_em_conta",
+  "boleto",
+  "dinheiro",
+];
+
+function tipoSocioLabel(tipo?: string | null) {
+  return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
+}
+
+function tipoSocioClasse(tipo?: string | null) {
+  switch (tipo) {
+    case "patrimonial":
+      return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+    case "dependente_patrimonial":
+      return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+    case "contribuinte":
+      return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
+    case "dependente_contribuinte":
+      return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
+    case "transitorio":
+      return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+    case "dependente_transitorio":
+      return "bg-[#fff8df] text-[#9a790c] ring-1 ring-[#f3df9b]";
+    case "temporada_individual":
+    case "temporada_familiar":
+      return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+    case "dependente_temporada_familiar":
+      return "bg-[#fff1e6] text-[#c66a25] ring-1 ring-[#f3c6a3]";
+    default:
+      return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
+  }
+}
 
 export default function Home() {
   const [menu, setMenu] = useState("Início");
@@ -76,6 +157,7 @@ export default function Home() {
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
+  const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
 
   function selecionarFoto(file: File | null) {
     setFotoArquivo(file);
@@ -146,7 +228,10 @@ export default function Home() {
   function alterarCampo(campo: keyof Socio, valor: string) {
     setForm((atual) => ({
       ...atual,
-      [campo]: valor,
+      [campo]:
+        campo === "possui_mensalidade"
+          ? valor === "true"
+          : valor,
     }));
   }
 
@@ -177,6 +262,17 @@ export default function Home() {
       categoria: form.categoria || "Titular",
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
+
+      tipo_socio: form.tipo_socio || "patrimonial",
+      responsavel_id: form.responsavel_id || null,
+      parentesco: form.parentesco || null,
+      possui_mensalidade: Boolean(form.possui_mensalidade),
+      valor_mensalidade: Number(form.valor_mensalidade || 0),
+      dia_vencimento: Number(form.dia_vencimento || 10),
+      tipo_pagamento: form.tipo_pagamento || "pix",
+      modalidade_temporada: form.modalidade_temporada || null,
+      inicio_temporada: form.inicio_temporada || null,
+      fim_temporada: form.fim_temporada || null,
     };
 
     try {
@@ -280,16 +376,21 @@ export default function Home() {
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
-    if (!termo) return socios;
-
     return socios.filter((socio) => {
-      return (
+      const correspondeBusca =
+        !termo ||
         socio.nome?.toLowerCase().includes(termo) ||
         socio.cpf?.toLowerCase().includes(termo) ||
-        String(socio.matricula || "").includes(termo)
-      );
+        String(socio.matricula || "").includes(termo);
+
+      const correspondeTipo =
+        !mostrarSomenteDependentes ||
+        Boolean(socio.responsavel_id) ||
+        (socio.tipo_socio || "").startsWith("dependente_");
+
+      return correspondeBusca && correspondeTipo;
     });
-  }, [socios, busca]);
+  }, [socios, busca, mostrarSomenteDependentes]);
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
@@ -423,6 +524,8 @@ export default function Home() {
               editarSocio={editarSocio}
               excluirSocio={excluirSocio}
               carregando={carregando}
+              mostrarSomenteDependentes={mostrarSomenteDependentes}
+              setMostrarSomenteDependentes={setMostrarSomenteDependentes}
             />
           )}
 
@@ -489,13 +592,20 @@ function Inicio({
 
       </div>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
 
         <DashboardCard
           titulo="Sócios"
           valor={String(quantidadeSocios)}
           descricao="Sócios cadastrados"
           icone="👥"
+        />
+
+        <DashboardCard
+          titulo="Dependentes"
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
+          descricao="Vinculados a responsáveis"
+          icone="👨‍👩‍👧‍👦"
         />
 
         <DashboardCard
@@ -589,6 +699,8 @@ function Socios({
   editarSocio,
   excluirSocio,
   carregando,
+  mostrarSomenteDependentes,
+  setMostrarSomenteDependentes,
 }: {
   socios: Socio[];
   quantidadeTotal: number;
@@ -598,6 +710,8 @@ function Socios({
   editarSocio: (socio: Socio) => void;
   excluirSocio: (socio: Socio) => void;
   carregando: boolean;
+  mostrarSomenteDependentes: boolean;
+  setMostrarSomenteDependentes: (valor: boolean) => void;
 }) {
   return (
     <div>
@@ -711,7 +825,15 @@ function Socios({
                 </th>
 
                 <th className="px-5 py-4">
-                  Categoria
+                  Tipo
+                </th>
+
+                <th className="px-5 py-4">
+                  Responsável
+                </th>
+
+                <th className="px-5 py-4">
+                  Mensalidade
                 </th>
 
                 <th className="px-5 py-4">
@@ -731,7 +853,7 @@ function Socios({
               {carregando && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-5 py-12 text-center text-gray-500"
                   >
                     Carregando sócios...
@@ -742,7 +864,7 @@ function Socios({
               {!carregando && socios.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-5 py-12 text-center"
                   >
                     <div className="text-4xl">
@@ -813,9 +935,21 @@ function Socios({
                     </td>
 
                     <td className="px-5 py-4 text-sm">
-                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${categoriaClasse(socio.categoria)}`}>
-                        {socio.categoria || "-"}
+                      <span className={`inline-flex max-w-[190px] rounded-full px-3 py-1 text-xs font-extrabold ${tipoSocioClasse(socio.tipo_socio)}`}>
+                        {tipoSocioLabel(socio.tipo_socio)}
                       </span>
+                    </td>
+
+                    <td className="px-5 py-4 text-sm text-gray-600">
+                      {socio.responsavel_id
+                        ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
+                        : "—"}
+                    </td>
+
+                    <td className="px-5 py-4 text-sm">
+                      {socio.possui_mensalidade
+                        ? `R$ ${Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}`
+                        : "Sem mensalidade"}
                     </td>
 
                     <td className="px-5 py-4">
@@ -1098,19 +1232,16 @@ function ModalSocio({
             />
 
             <SelectCampo
-              label="Categoria"
-              value={form.categoria || "Titular"}
-              onChange={(v) => alterarCampo("categoria", v)}
-              opcoes={[
-                "Titular",
-                "Dependente",
-                "Benemérito",
-                "Remido",
-              ]}
+              label="Tipo de associado"
+              value={form.tipo_socio || "patrimonial"}
+              onChange={(v) => alterarCampo("tipo_socio", v)}
+              opcoes={TIPOS_SOCIO.map((item) => item.value)}
+              labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
             />
 
             <SelectCampo
               label="Situação"
+
               value={form.situacao || "ativo"}
               onChange={(v) => alterarCampo("situacao", v)}
               opcoes={[
@@ -1119,6 +1250,126 @@ function ModalSocio({
                 "suspenso",
               ]}
             />
+
+            {Boolean(form.responsavel_id) ||
+              String(form.tipo_socio || "").startsWith("dependente_") ? (
+              <>
+                <SelectCampo
+                  label="Parentesco"
+                  value={form.parentesco || "Filho(a)"}
+                  onChange={(v) => alterarCampo("parentesco", v)}
+                  opcoes={PARENTESCOS}
+                />
+
+                <SelectCampo
+                  label="Responsável"
+                  value={form.responsavel_id || ""}
+                  onChange={(v) => alterarCampo("responsavel_id", v)}
+                  opcoes={[
+                    "",
+                    ...socios
+                      .filter((p) => p.id !== socioEditando?.id)
+                      .map((p) => p.id),
+                  ]}
+                  labels={{
+                    "": "Selecione o responsável",
+                    ...Object.fromEntries(
+                      socios
+                        .filter((p) => p.id !== socioEditando?.id)
+                        .map((p) => [p.id, p.nome])
+                    ),
+                  }}
+                />
+              </>
+            ) : null}
+
+            <div className="md:col-span-4 rounded-2xl border border-[#dfe9e3] bg-[#f7faf8] p-4">
+              <div className="mb-4">
+                <p className="text-sm font-extrabold text-[#003d2b]">
+                  💰 Mensalidade
+                </p>
+                <p className="mt-1 text-xs text-[#718079]">
+                  Cada associado ou dependente pode ter sua própria mensalidade.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-4">
+                <SelectCampo
+                  label="Possui mensalidade?"
+                  value={form.possui_mensalidade ? "sim" : "nao"}
+                  onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
+                  opcoes={["sim", "nao"]}
+                  labels={{ sim: "Sim", nao: "Não" }}
+                />
+
+                {form.possui_mensalidade ? (
+                  <>
+                    <Campo
+                      label="Valor mensal"
+                      type="number"
+                      value={form.valor_mensalidade}
+                      onChange={(v) => alterarCampo("valor_mensalidade", v)}
+                      placeholder="0,00"
+                    />
+
+                    <Campo
+                      label="Dia do vencimento"
+                      type="number"
+                      value={form.dia_vencimento}
+                      onChange={(v) => alterarCampo("dia_vencimento", v)}
+                      placeholder="10"
+                    />
+
+                    <SelectCampo
+                      label="Tipo de pagamento"
+                      value={form.tipo_pagamento || "pix"}
+                      onChange={(v) => alterarCampo("tipo_pagamento", v)}
+                      opcoes={FORMAS_PAGAMENTO}
+                      labels={{
+                        pix: "PIX",
+                        debito_em_conta: "Débito em conta",
+                        boleto: "Boleto",
+                        dinheiro: "Dinheiro",
+                      }}
+                    />
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            {(form.tipo_socio === "temporada_individual" ||
+              form.tipo_socio === "temporada_familiar" ||
+              form.tipo_socio === "dependente_temporada_familiar") ? (
+              <div className="md:col-span-4 rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
+                <p className="mb-4 text-sm font-extrabold text-[#b65308]">
+                  🗓️ Período da temporada
+                </p>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SelectCampo
+                    label="Modalidade"
+                    value={form.modalidade_temporada || "individual"}
+                    onChange={(v) => alterarCampo("modalidade_temporada", v)}
+                    opcoes={["individual", "familiar"]}
+                    labels={{ individual: "Individual", familiar: "Familiar" }}
+                  />
+
+                  <Campo
+                    label="Início"
+                    type="date"
+                    value={form.inicio_temporada}
+                    onChange={(v) => alterarCampo("inicio_temporada", v)}
+                  />
+
+                  <Campo
+                    label="Fim"
+                    type="date"
+                    value={form.fim_temporada}
+                    onChange={(v) => alterarCampo("fim_temporada", v)}
+                  />
+                </div>
+              </div>
+            ) : null}
 
             <div className="md:col-span-3">
 
@@ -1252,11 +1503,13 @@ function SelectCampo({
   value,
   onChange,
   opcoes,
+  labels = {},
 }: {
   label: string;
   value: string;
   onChange: (valor: string) => void;
   opcoes: string[];
+  labels?: Record<string, string>;
 }) {
   return (
     <div>
@@ -1273,7 +1526,7 @@ function SelectCampo({
 
         {opcoes.map((opcao) => (
           <option key={opcao} value={opcao}>
-            {opcao}
+            {labels[opcao] || opcao}
           </option>
         ))}
 
