@@ -508,6 +508,7 @@ export default function Home() {
           {/* INÍCIO */}
           {menu === "Início" && (
             <Inicio
+              socios={socios}
               quantidadeSocios={socios.length}
               abrirCadastro={novoSocio}
             />
@@ -567,9 +568,11 @@ export default function Home() {
 ========================= */
 
 function Inicio({
+  socios,
   quantidadeSocios,
   abrirCadastro,
 }: {
+  socios: Socio[];
   quantidadeSocios: number;
   abrirCadastro: () => void;
 }) {
