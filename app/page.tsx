@@ -1549,7 +1549,7 @@ function rotuloGenerico(valor: string) {
   return mapa[valor] || valor;
 }
 
-function rotuloFormaPagamento(valor: string | null) {
+function rotuloFormaPagamento(valor: string | null | undefined) {
   return valor ? rotuloGenerico(valor) : "-";
 }
 
