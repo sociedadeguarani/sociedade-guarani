@@ -28,6 +28,11 @@ type Socio = {
   categoria: string | null;
   situacao: string | null;
   observacoes: string | null;
+  valor_mensalidade: number | null;
+  dia_vencimento: number | null;
+  tipo_pagamento: string | null;
+  situacao_financeira: string | null;
+  data_ultimo_pagamento: string | null;
 };
 
 const menus = [
@@ -57,6 +62,11 @@ const socioInicial: Partial<Socio> = {
   categoria: "Titular",
   situacao: "ativo",
   observacoes: "",
+  valor_mensalidade: 0,
+  dia_vencimento: 10,
+  tipo_pagamento: "pix",
+  situacao_financeira: "em_dia",
+  data_ultimo_pagamento: "",
 };
 
 export default function Home() {
@@ -152,6 +162,21 @@ export default function Home() {
       categoria: form.categoria || "Titular",
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
+      valor_mensalidade:
+        form.valor_mensalidade === undefined ||
+        form.valor_mensalidade === null ||
+        form.valor_mensalidade === ""
+          ? 0
+          : Number(form.valor_mensalidade),
+      dia_vencimento:
+        form.dia_vencimento === undefined ||
+        form.dia_vencimento === null ||
+        form.dia_vencimento === ""
+          ? 10
+          : Number(form.dia_vencimento),
+      tipo_pagamento: form.tipo_pagamento || "pix",
+      situacao_financeira: form.situacao_financeira || "em_dia",
+      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
     let error;
@@ -455,10 +480,10 @@ function Inicio({
         />
 
         <DashboardCard
-          titulo="Espaços"
-          valor="4"
-          descricao="Espaços disponíveis"
-          icone="🏛️"
+          titulo="Financeiro"
+          valor="Em gestão"
+          descricao="Mensalidades e pagamentos"
+          icone="💰"
         />
 
       </div>
@@ -624,6 +649,10 @@ function Socios({
                   Situação
                 </th>
 
+                <th className="px-5 py-4">
+                  Financeiro
+                </th>
+
                 <th className="px-5 py-4 text-right">
                   Ações
                 </th>
@@ -637,7 +666,7 @@ function Socios({
               {carregando && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center text-gray-500"
                   >
                     Carregando sócios...
@@ -648,7 +677,7 @@ function Socios({
               {!carregando && socios.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center"
                   >
                     <div className="text-4xl">
@@ -728,6 +757,27 @@ function Socios({
                               : "Ativo"}
                       </span>
 
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <div
+                        className={`mb-1 inline-block rounded-full px-3 py-1 text-xs font-bold ${
+                          socio.situacao_financeira === "em_atraso"
+                            ? "bg-red-100 text-red-700"
+                            : socio.situacao_financeira === "isento"
+                              ? "bg-gray-100 text-gray-600"
+                              : "bg-green-100 text-green-700"
+                        }`}
+                      >
+                        {socio.situacao_financeira === "em_atraso"
+                          ? "Em atraso"
+                          : socio.situacao_financeira === "isento"
+                            ? "Isento"
+                            : "Em dia"}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        R$ {Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4">
@@ -974,6 +1024,75 @@ function ModalSocio({
 
           </FormularioSecao>
 
+          {/* FINANCEIRO */}
+          <FormularioSecao titulo="💰 Mensalidade e pagamento">
+            <Campo
+              label="Valor da mensalidade"
+              type="number"
+              value={form.valor_mensalidade ?? 0}
+              onChange={(v) => alterarCampo("valor_mensalidade", v)}
+              placeholder="0,00"
+            />
+
+            <Campo
+              label="Dia do vencimento"
+              type="number"
+              value={form.dia_vencimento ?? 10}
+              onChange={(v) => alterarCampo("dia_vencimento", v)}
+              placeholder="10"
+            />
+
+            <SelectCampo
+              label="Tipo de pagamento"
+              value={form.tipo_pagamento || "pix"}
+              onChange={(v) => alterarCampo("tipo_pagamento", v)}
+              opcoes={[
+                "debito_em_conta",
+                "pix",
+                "boleto",
+                "dinheiro",
+              ]}
+            />
+
+            <SelectCampo
+              label="Situação financeira"
+              value={form.situacao_financeira || "em_dia"}
+              onChange={(v) => alterarCampo("situacao_financeira", v)}
+              opcoes={[
+                "em_dia",
+                "em_atraso",
+                "isento",
+              ]}
+            />
+
+            <Campo
+              label="Data do último pagamento"
+              type="date"
+              value={form.data_ultimo_pagamento}
+              onChange={(v) => alterarCampo("data_ultimo_pagamento", v)}
+              className="md:col-span-2"
+            />
+
+            <div className="rounded-xl bg-[#eef3ef] p-4 md:col-span-2">
+              <p className="text-xs font-semibold text-gray-500">
+                Resumo financeiro
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#063b28]">
+                R$ {Number(form.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                Vencimento: dia {form.dia_vencimento || 10} •{" "}
+                {form.tipo_pagamento === "debito_em_conta"
+                  ? "Débito em conta"
+                  : form.tipo_pagamento === "pix"
+                    ? "PIX"
+                    : form.tipo_pagamento === "boleto"
+                      ? "Boleto"
+                      : "Dinheiro"}
+              </p>
+            </div>
+          </FormularioSecao>
+
           {mensagem && (
             <div className="rounded-xl bg-[#eef3ef] px-4 py-3 text-sm font-semibold text-[#063b28]">
               {mensagem}
@@ -1107,7 +1226,21 @@ function SelectCampo({
 
         {opcoes.map((opcao) => (
           <option key={opcao} value={opcao}>
-            {opcao}
+            {opcao === "debito_em_conta"
+              ? "Débito em conta"
+              : opcao === "pix"
+                ? "PIX"
+                : opcao === "boleto"
+                  ? "Boleto"
+                  : opcao === "dinheiro"
+                    ? "Dinheiro"
+                    : opcao === "em_dia"
+                      ? "Em dia"
+                      : opcao === "em_atraso"
+                        ? "Em atraso"
+                        : opcao === "isento"
+                          ? "Isento"
+                          : opcao}
           </option>
         ))}
 
