@@ -447,6 +447,8 @@ export default function Home() {
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
           salvar={salvarSocio}
+          selecionarFoto={selecionarFoto}
+          removerFoto={removerFoto}
         />
       )}
 
