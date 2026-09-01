@@ -546,6 +546,7 @@ export default function Home() {
       {/* MODAL CADASTRO */}
       {abrirCadastro && (
         <ModalSocio
+          socios={socios}
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
@@ -1020,6 +1021,7 @@ function Socios({
 ========================= */
 
 function ModalSocio({
+  socios,
   form,
   socioEditando,
   salvando,
@@ -1030,6 +1032,7 @@ function ModalSocio({
   selecionarFoto,
   removerFoto,
 }: {
+  socios: Socio[];
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
