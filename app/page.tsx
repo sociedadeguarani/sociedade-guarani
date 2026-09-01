@@ -34,10 +34,12 @@ type Socio = {
 const menus = [
   { nome: "Início", icone: "🏠" },
   { nome: "Sócios", icone: "👥" },
+  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦" },
   { nome: "Reservas", icone: "📅" },
   { nome: "Eventos", icone: "🎉" },
   { nome: "Financeiro", icone: "💰" },
   { nome: "Espaços", icone: "🏛️" },
+  { nome: "Relatórios", icone: "📊" },
 ];
 
 const socioInicial: Partial<Socio> = {
@@ -290,15 +292,15 @@ export default function Home() {
   }, [socios, busca]);
 
   return (
-    <main className="min-h-screen bg-[#f4f6f3] text-[#123c2b]">
+    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
       {/* CABEÇALHO */}
-      <header className="bg-[#063b28] text-white shadow-lg">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
+        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
 
           <div className="flex items-center gap-4">
 
-            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white p-1 shadow-lg">
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
               <img
                 src="/logo-guarani.png"
                 alt="Sociedade Guarani"
@@ -307,23 +309,23 @@ export default function Home() {
             </div>
 
             <div>
-              <h1 className="text-xl font-bold tracking-wide">
+              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
                 SOCIEDADE GUARANI
               </h1>
 
-              <p className="text-sm text-[#f5d76e]">
+              <p className="text-xs font-medium text-[#6b7d74]">
                 Sociedade Recreativa Guarani — S.R.G.
               </p>
             </div>
 
           </div>
 
-          <div className="hidden text-right sm:block">
+          <div className="hidden items-center gap-3 sm:flex">
             <p className="text-sm text-gray-200">
               Sistema de Gestão
             </p>
 
-            <p className="font-semibold text-[#f5d76e]">
+            <p className="font-bold text-[#005a3c]">
               Área Administrativa
             </p>
           </div>
@@ -331,12 +333,12 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl">
+      <div className="flex min-h-[calc(100vh-80px)]">
 
         {/* MENU LATERAL */}
-        <aside className="hidden min-h-[calc(100vh-96px)] w-64 border-r bg-white p-4 shadow-sm md:block">
+        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
 
-          <p className="mb-4 px-3 text-xs font-bold uppercase tracking-wider text-gray-400">
+          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
             Menu principal
           </p>
 
@@ -348,8 +350,8 @@ export default function Home() {
                 onClick={() => setMenu(item.nome)}
                 className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
                   menu === item.nome
-                    ? "bg-[#063b28] text-white shadow"
-                    : "text-gray-700 hover:bg-[#eef3ef]"
+                    ? "bg-[#005a3c] text-white shadow-sm"
+                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
                 }`}
               >
                 <span className="text-xl">
@@ -377,7 +379,7 @@ export default function Home() {
         </aside>
 
         {/* CONTEÚDO */}
-        <section className="flex-1 p-5 sm:p-8">
+        <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
 
           {/* MENU MOBILE */}
           <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
@@ -388,7 +390,7 @@ export default function Home() {
                 onClick={() => setMenu(item.nome)}
                 className={`rounded-xl p-3 text-xs font-semibold ${
                   menu === item.nome
-                    ? "bg-[#063b28] text-white"
+                    ? "bg-[#005a3c] text-white"
                     : "bg-white text-gray-700 shadow-sm"
                 }`}
               >
@@ -476,7 +478,7 @@ function Inicio({
           Bem-vindo ao sistema
         </p>
 
-        <h2 className="mt-1 text-3xl font-bold text-[#063b28]">
+        <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
           Painel da Sociedade Guarani
         </h2>
 
@@ -531,7 +533,7 @@ function Inicio({
 
         <button
           onClick={abrirCadastro}
-          className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#063b28] transition hover:bg-[#f5d76e]"
+          className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
         >
           👤 Cadastrar novo sócio
         </button>
@@ -541,6 +543,38 @@ function Inicio({
   );
 }
 
+
+/* =========================
+   CORES DAS CATEGORIAS
+========================= */
+
+function categoriaClasse(categoria?: string | null) {
+  const valor = (categoria || "").toLowerCase();
+
+  if (valor.includes("patrimonial") && valor.includes("depend")) {
+    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+  }
+  if (valor.includes("patrimonial")) {
+    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+  }
+  if (valor.includes("contribuinte") && valor.includes("depend")) {
+    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
+  }
+  if (valor.includes("contribuinte")) {
+    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
+  }
+  if (valor.includes("temporário") || valor.includes("temporario") ||
+      valor.includes("transitório") || valor.includes("transitorio")) {
+    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+  }
+  if (valor.includes("temporada")) {
+    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+  }
+  if (valor.includes("benemérito") || valor.includes("benemerito")) {
+    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
+  }
+  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
+}
 
 /* =========================
    SÓCIOS
@@ -575,7 +609,7 @@ function Socios({
             Administração
           </p>
 
-          <h2 className="mt-1 text-3xl font-bold text-[#063b28]">
+          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
             Sócios
           </h2>
 
@@ -586,7 +620,7 @@ function Socios({
 
         <button
           onClick={novoSocio}
-          className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#0a5138]"
+          className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
         >
           + Novo Sócio
         </button>
@@ -595,32 +629,32 @@ function Socios({
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
 
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">
             Total de sócios
           </p>
 
-          <p className="mt-1 text-3xl font-bold text-[#063b28]">
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">
             {quantidadeTotal}
           </p>
         </div>
 
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">
             Sócios ativos
           </p>
 
-          <p className="mt-1 text-3xl font-bold text-[#063b28]">
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">
             {socios.filter((s) => s.situacao?.toLowerCase() === "ativo").length}
           </p>
         </div>
 
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">
             Exibindo
           </p>
 
-          <p className="mt-1 text-3xl font-bold text-[#063b28]">
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">
             {socios.length}
           </p>
         </div>
@@ -646,13 +680,13 @@ function Socios({
 
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
 
         <div className="overflow-x-auto">
 
           <table className="w-full min-w-[900px]">
 
-            <thead className="bg-[#eef3ef]">
+            <thead className="bg-[#e8f3ee]">
 
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
 
@@ -748,13 +782,13 @@ function Socios({
                           className="h-11 w-11 rounded-full object-cover ring-2 ring-[#eef3ef]"
                         />
                       ) : (
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#eef3ef] text-lg">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f3ee] text-lg">
                           👤
                         </div>
                       )}
                     </td>
 
-                    <td className="px-5 py-4 font-semibold text-[#063b28]">
+                    <td className="px-5 py-4 font-semibold text-[#005a3c]">
                       {socio.matricula || "-"}
                     </td>
 
@@ -779,7 +813,9 @@ function Socios({
                     </td>
 
                     <td className="px-5 py-4 text-sm">
-                      {socio.categoria || "-"}
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${categoriaClasse(socio.categoria)}`}>
+                        {socio.categoria || "-"}
+                      </span>
                     </td>
 
                     <td className="px-5 py-4">
@@ -810,7 +846,7 @@ function Socios({
 
                         <button
                           onClick={() => editarSocio(socio)}
-                          className="rounded-lg bg-[#eef3ef] px-3 py-2 text-sm font-semibold text-[#063b28] hover:bg-[#dce8df]"
+                          className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
                         >
                           ✏️ Editar
                         </button>
@@ -868,7 +904,7 @@ function ModalSocio({
   removerFoto: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#001f16]/55 backdrop-blur-sm p-4">
 
       <div className="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
 
@@ -880,7 +916,7 @@ function ModalSocio({
               Sociedade Recreativa Guarani
             </p>
 
-            <h2 className="text-2xl font-bold text-[#063b28]">
+            <h2 className="text-2xl font-bold text-[#005a3c]">
               {socioEditando
                 ? "Editar Sócio"
                 : "Novo Sócio"}
@@ -957,7 +993,7 @@ function ModalSocio({
                   </p>
 
                   <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
-                    <label className="cursor-pointer rounded-xl bg-[#063b28] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#0a5138]">
+                    <label className="cursor-pointer rounded-xl bg-[#063b28] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#003d2b]">
                       📷 Escolher foto
                       <input
                         type="file"
@@ -1096,7 +1132,7 @@ function ModalSocio({
                   alterarCampo("observacoes", e.target.value)
                 }
                 rows={4}
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-[#063b28] focus:ring-2 focus:ring-[#063b28]/10"
+                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
                 placeholder="Observações sobre o associado..."
               />
 
@@ -1105,7 +1141,7 @@ function ModalSocio({
           </FormularioSecao>
 
           {mensagem && (
-            <div className="rounded-xl bg-[#eef3ef] px-4 py-3 text-sm font-semibold text-[#063b28]">
+            <div className="rounded-xl bg-[#e8f3ee] px-4 py-3 text-sm font-semibold text-[#005a3c]">
               {mensagem}
             </div>
           )}
@@ -1117,7 +1153,7 @@ function ModalSocio({
           <button
             onClick={fechar}
             disabled={salvando}
-            className="rounded-xl border border-gray-300 px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+            className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
           </button>
@@ -1125,7 +1161,7 @@ function ModalSocio({
           <button
             onClick={salvar}
             disabled={salvando}
-            className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#0a5138] disabled:opacity-50"
+            className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
             {salvando
               ? "Salvando..."
@@ -1157,7 +1193,7 @@ function FormularioSecao({
   return (
     <div>
 
-      <h3 className="mb-4 border-b pb-3 text-lg font-bold text-[#063b28]">
+      <h3 className="mb-4 border-b pb-3 text-lg font-bold text-[#005a3c]">
         {titulo}
       </h3>
 
@@ -1204,7 +1240,7 @@ function Campo({
         value={value || ""}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-[#063b28] focus:ring-2 focus:ring-[#063b28]/10"
+        className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none transition focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
       />
 
     </div>
@@ -1232,7 +1268,7 @@ function SelectCampo({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 outline-none focus:border-[#063b28] focus:ring-2 focus:ring-[#063b28]/10"
+        className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
       >
 
         {opcoes.map((opcao) => (
@@ -1259,7 +1295,7 @@ function DashboardCard({
   icone: string;
 }) {
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
 
       <div className="flex items-center justify-between">
 
@@ -1267,7 +1303,7 @@ function DashboardCard({
           {icone}
         </span>
 
-        <span className="rounded-full bg-[#eef3ef] px-3 py-1 text-xs font-semibold text-[#063b28]">
+        <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-semibold text-[#005a3c]">
           Ativo
         </span>
 
@@ -1277,7 +1313,7 @@ function DashboardCard({
         {titulo}
       </p>
 
-      <p className="mt-1 text-3xl font-bold text-[#063b28]">
+      <p className="mt-1 text-3xl font-bold text-[#005a3c]">
         {valor}
       </p>
 
@@ -1305,7 +1341,7 @@ function ModuloEmConstrucao({
           {icone}
         </div>
 
-        <h2 className="mt-4 text-2xl font-bold text-[#063b28]">
+        <h2 className="mt-4 text-2xl font-bold text-[#005a3c]">
           {nome}
         </h2>
 
