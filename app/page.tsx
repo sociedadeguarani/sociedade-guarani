@@ -28,6 +28,7 @@ type Socio = {
   categoria: string | null;
   situacao: string | null;
   observacoes: string | null;
+  foto_url: string | null;
 };
 
 const menus = [
@@ -57,6 +58,7 @@ const socioInicial: Partial<Socio> = {
   categoria: "Titular",
   situacao: "ativo",
   observacoes: "",
+  foto_url: "",
 };
 
 export default function Home() {
@@ -71,6 +73,25 @@ export default function Home() {
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
+
+  function selecionarFoto(file: File | null) {
+    setFotoArquivo(file);
+    if (file) {
+      setForm((atual) => ({
+        ...atual,
+        foto_url: URL.createObjectURL(file),
+      }));
+    }
+  }
+
+  function removerFoto() {
+    setFotoArquivo(null);
+    setForm((atual) => ({
+      ...atual,
+      foto_url: "",
+    }));
+  }
 
   async function carregarSocios() {
     setCarregando(true);
@@ -100,6 +121,7 @@ export default function Home() {
       ...socioInicial,
       data_associacao: new Date().toISOString().split("T")[0],
     });
+    setFotoArquivo(null);
     setAbrirCadastro(true);
     setMensagem("");
   }
@@ -107,6 +129,7 @@ export default function Home() {
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
+    setFotoArquivo(null);
     setAbrirCadastro(true);
     setMensagem("");
   }
@@ -134,7 +157,7 @@ export default function Home() {
     setSalvando(true);
     setMensagem("");
 
-    const dados = {
+    const dadosBase = {
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -154,47 +177,78 @@ export default function Home() {
       observacoes: form.observacoes || null,
     };
 
-    let error;
+    try {
+      let socioId = socioEditando?.id || "";
 
-    if (socioEditando) {
-      const resultado = await supabase
-        .from("socios")
-        .update(dados)
-        .eq("id", socioEditando.id);
+      if (socioEditando) {
+        const resultado = await supabase
+          .from("socios")
+          .update({
+            ...dadosBase,
+            foto_url: form.foto_url || null,
+          })
+          .eq("id", socioEditando.id);
 
-      error = resultado.error;
-    } else {
-      const resultado = await supabase
-        .from("socios")
-        .insert(dados);
+        if (resultado.error) throw resultado.error;
+      } else {
+        const resultado = await supabase
+          .from("socios")
+          .insert(dadosBase)
+          .select("id")
+          .single();
 
-      error = resultado.error;
-    }
+        if (resultado.error) throw resultado.error;
+        socioId = resultado.data.id;
+      }
 
-    if (error) {
+      if (fotoArquivo && socioId) {
+        const extensao =
+          fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+        const caminho = `socios/${socioId}.${extensao}`;
+
+        const upload = await supabase.storage
+          .from("fotos-associados")
+          .upload(caminho, fotoArquivo, {
+            upsert: true,
+            contentType: fotoArquivo.type || "image/jpeg",
+          });
+
+        if (upload.error) throw upload.error;
+
+        const { data: urlData } = supabase.storage
+          .from("fotos-associados")
+          .getPublicUrl(caminho);
+
+        const atualizacaoFoto = await supabase
+          .from("socios")
+          .update({ foto_url: urlData.publicUrl })
+          .eq("id", socioId);
+
+        if (atualizacaoFoto.error) throw atualizacaoFoto.error;
+      }
+
+      setMensagem(
+        socioEditando
+          ? "Sócio atualizado com sucesso!"
+          : "Sócio cadastrado com sucesso!"
+      );
+
+      setFotoArquivo(null);
+      await carregarSocios();
+
+      setTimeout(() => {
+        setAbrirCadastro(false);
+        setSocioEditando(null);
+        setMensagem("");
+      }, 900);
+    } catch (error) {
       console.error(error);
       setMensagem(
-        "Não foi possível salvar. Verifique a conexão com o Supabase."
+        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
       );
+    } finally {
       setSalvando(false);
-      return;
     }
-
-    setMensagem(
-      socioEditando
-        ? "Sócio atualizado com sucesso!"
-        : "Sócio cadastrado com sucesso!"
-    );
-
-    await carregarSocios();
-
-    setTimeout(() => {
-      setAbrirCadastro(false);
-      setSocioEditando(null);
-      setMensagem("");
-    }, 900);
-
-    setSalvando(false);
   }
 
   async function excluirSocio(socio: Socio) {
@@ -601,6 +655,10 @@ function Socios({
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
 
                 <th className="px-5 py-4">
+                  Foto
+                </th>
+
+                <th className="px-5 py-4">
                   Matrícula
                 </th>
 
@@ -637,7 +695,7 @@ function Socios({
               {carregando && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center text-gray-500"
                   >
                     Carregando sócios...
@@ -648,7 +706,7 @@ function Socios({
               {!carregando && socios.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center"
                   >
                     <div className="text-4xl">
@@ -679,6 +737,20 @@ function Socios({
                     key={socio.id}
                     className="transition hover:bg-[#fafcfb]"
                   >
+
+                    <td className="px-5 py-4">
+                      {socio.foto_url ? (
+                        <img
+                          src={socio.foto_url}
+                          alt={`Foto de ${socio.nome}`}
+                          className="h-11 w-11 rounded-full object-cover ring-2 ring-[#eef3ef]"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#eef3ef] text-lg">
+                          👤
+                        </div>
+                      )}
+                    </td>
 
                     <td className="px-5 py-4 font-semibold text-[#063b28]">
                       {socio.matricula || "-"}
@@ -780,6 +852,8 @@ function ModalSocio({
   fechar,
   alterarCampo,
   salvar,
+  selecionarFoto,
+  removerFoto,
 }: {
   form: Partial<Socio>;
   socioEditando: Socio | null;
@@ -788,6 +862,8 @@ function ModalSocio({
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
   salvar: () => void;
+  selecionarFoto: (file: File | null) => void;
+  removerFoto: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -852,6 +928,58 @@ function ModalSocio({
               onChange={(v) => alterarCampo("data_nascimento", v)}
             />
 
+          </FormularioSecao>
+
+          {/* FOTO */}
+          <FormularioSecao titulo="📷 Foto do associado">
+            <div className="md:col-span-4">
+              <div className="flex flex-col items-center gap-5 rounded-2xl border border-dashed border-gray-300 bg-[#fafcfb] p-6 sm:flex-row">
+                <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-white shadow-sm">
+                  {form.foto_url ? (
+                    <img
+                      src={form.foto_url}
+                      alt={`Foto de ${form.nome || "associado"}`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-5xl">👤</span>
+                  )}
+                </div>
+
+                <div className="flex-1 text-center sm:text-left">
+                  <p className="font-semibold text-gray-800">
+                    Foto do associado
+                  </p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Escolha uma foto para aparecer no cadastro e na lista de sócios.
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
+                    <label className="cursor-pointer rounded-xl bg-[#063b28] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#0a5138]">
+                      📷 Escolher foto
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) =>
+                          selecionarFoto(e.target.files?.[0] || null)
+                        }
+                      />
+                    </label>
+
+                    {form.foto_url && (
+                      <button
+                        type="button"
+                        onClick={removerFoto}
+                        className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100"
+                      >
+                        🗑️ Remover foto
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </FormularioSecao>
 
           {/* CONTATO */}
