@@ -793,16 +793,18 @@ export default function Home() {
           salvandoDependente={salvandoDependente}
           novoDependente={novoDependente}
           editarDependente={editarDependente}
-          excluirDependente={(dependente) =>
-            socioEditando
-              ? excluirDependente(dependente, socioEditando.id)
-              : undefined
-          }
-          salvarDependente={() =>
-            socioEditando
-              ? salvarDependente(socioEditando.id)
-              : setMensagem("Salve primeiro o titular para adicionar dependentes.")
-          }
+          excluirDependente={(dependente) => {
+            if (socioEditando) {
+              void excluirDependente(dependente, socioEditando.id);
+            }
+          }}
+          salvarDependente={() => {
+            if (socioEditando) {
+              void salvarDependente(socioEditando.id);
+            } else {
+              setMensagem("Salve primeiro o titular para adicionar dependentes.");
+            }
+          }}
           alterarDependente={(campo, valor) =>
             setDependenteForm((f) => ({ ...f, [campo]: valor }))
           }
@@ -1421,7 +1423,7 @@ function ModalSocio({
   salvandoDependente: boolean;
   novoDependente: () => void;
   editarDependente: (dependente: Dependente) => void;
-  excluirDependente: (dependente: Dependente) => void | undefined;
+  excluirDependente: (dependente: Dependente) => void;
   salvarDependente: () => void;
   alterarDependente: (campo: keyof typeof dependenteForm, valor: string | boolean) => void;
 }) {
