@@ -35,6 +35,18 @@ type Socio = {
   data_ultimo_pagamento: string | null;
 };
 
+type Dependente = {
+  id: string;
+  socio_id: string;
+  nome: string;
+  cpf: string | null;
+  data_nascimento: string | null;
+  parentesco: string | null;
+  telefone: string | null;
+  ativo: boolean;
+  created_at?: string;
+};
+
 type Mensalidade = {
   id: string;
   socio_id: string;
@@ -82,7 +94,7 @@ const socioInicial: Partial<Socio> = {
   estado: "RS",
   cep: "",
   data_associacao: "",
-  categoria: "Titular",
+  categoria: "Contribuinte",
   situacao: "ativo",
   observacoes: "",
   valor_mensalidade: 0,
@@ -116,6 +128,19 @@ export default function Home() {
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+
+  const [dependentes, setDependentes] = useState<Dependente[]>([]);
+  const [carregandoDependentes, setCarregandoDependentes] = useState(false);
+  const [dependenteForm, setDependenteForm] = useState({
+    nome: "",
+    cpf: "",
+    data_nascimento: "",
+    parentesco: "Filho(a)",
+    telefone: "",
+    ativo: true,
+  });
+  const [dependenteEditando, setDependenteEditando] = useState<Dependente | null>(null);
+  const [salvandoDependente, setSalvandoDependente] = useState(false);
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
@@ -162,6 +187,114 @@ export default function Home() {
     setCarregando(false);
   }
 
+  async function carregarDependentes(socioId: string) {
+    setCarregandoDependentes(true);
+    const { data, error } = await supabase
+      .from("dependentes")
+      .select("*")
+      .eq("socio_id", socioId)
+      .order("nome", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      setMensagem("Erro ao carregar os dependentes.");
+      setDependentes([]);
+    } else {
+      setDependentes((data || []) as Dependente[]);
+    }
+    setCarregandoDependentes(false);
+  }
+
+  function limparDependenteForm() {
+    setDependenteEditando(null);
+    setDependenteForm({
+      nome: "",
+      cpf: "",
+      data_nascimento: "",
+      parentesco: "Filho(a)",
+      telefone: "",
+      ativo: true,
+    });
+  }
+
+  function novoDependente() {
+    limparDependenteForm();
+  }
+
+  function editarDependente(dependente: Dependente) {
+    setDependenteEditando(dependente);
+    setDependenteForm({
+      nome: dependente.nome || "",
+      cpf: dependente.cpf || "",
+      data_nascimento: dependente.data_nascimento || "",
+      parentesco: dependente.parentesco || "Filho(a)",
+      telefone: dependente.telefone || "",
+      ativo: dependente.ativo !== false,
+    });
+  }
+
+  async function salvarDependente(socioId: string) {
+    if (!socioId) {
+      setMensagem("Salve primeiro o cadastro do titular para adicionar dependentes.");
+      return;
+    }
+    if (!dependenteForm.nome.trim()) {
+      setMensagem("Informe o nome do dependente.");
+      return;
+    }
+
+    setSalvandoDependente(true);
+
+    const dados = {
+      socio_id: socioId,
+      nome: dependenteForm.nome.trim(),
+      cpf: dependenteForm.cpf || null,
+      data_nascimento: dependenteForm.data_nascimento || null,
+      parentesco: dependenteForm.parentesco || null,
+      telefone: dependenteForm.telefone || null,
+      ativo: dependenteForm.ativo,
+    };
+
+    const result = dependenteEditando
+      ? await supabase
+          .from("dependentes")
+          .update(dados)
+          .eq("id", dependenteEditando.id)
+      : await supabase.from("dependentes").insert(dados);
+
+    if (result.error) {
+      console.error(result.error);
+      setMensagem("Não foi possível salvar o dependente.");
+      setSalvandoDependente(false);
+      return;
+    }
+
+    await carregarDependentes(socioId);
+    limparDependenteForm();
+    setMensagem(dependenteEditando ? "Dependente atualizado." : "Dependente cadastrado.");
+    setSalvandoDependente(false);
+    setTimeout(() => setMensagem(""), 1500);
+  }
+
+  async function excluirDependente(dependente: Dependente, socioId: string) {
+    if (!window.confirm(`Excluir o dependente "${dependente.nome}"?`)) return;
+
+    const { error } = await supabase
+      .from("dependentes")
+      .delete()
+      .eq("id", dependente.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem("Não foi possível excluir o dependente.");
+      return;
+    }
+
+    await carregarDependentes(socioId);
+    setMensagem("Dependente excluído.");
+    setTimeout(() => setMensagem(""), 1500);
+  }
+
   async function carregarFinanceiro() {
     setCarregandoFinanceiro(true);
 
@@ -204,6 +337,8 @@ export default function Home() {
       ...socioInicial,
       data_associacao: new Date().toISOString().split("T")[0],
     });
+    setDependentes([]);
+    limparDependenteForm();
     setAbrirCadastro(true);
     setMensagem("");
   }
@@ -211,7 +346,9 @@ export default function Home() {
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
+    limparDependenteForm();
     setAbrirCadastro(true);
+    carregarDependentes(socio.id);
     setMensagem("");
   }
 
@@ -266,7 +403,8 @@ export default function Home() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    let error;
+    let error = null;
+    let socioId = socioEditando?.id || "";
 
     if (socioEditando) {
       const resultado = await supabase
@@ -275,11 +413,16 @@ export default function Home() {
         .eq("id", socioEditando.id);
       error = resultado.error;
     } else {
-      const resultado = await supabase.from("socios").insert(dados);
+      const resultado = await supabase
+        .from("socios")
+        .insert(dados)
+        .select("id")
+        .single();
       error = resultado.error;
+      socioId = resultado.data?.id || "";
     }
 
-    if (error) {
+    if (error || !socioId) {
       console.error(error);
       setMensagem(
         "Não foi possível salvar. Verifique a conexão e as colunas do Supabase."
@@ -287,6 +430,8 @@ export default function Home() {
       setSalvando(false);
       return;
     }
+
+    await carregarDependentes(socioId);
 
     setMensagem(
       socioEditando
@@ -641,6 +786,26 @@ export default function Home() {
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
           salvar={salvarSocio}
+          dependentes={dependentes}
+          carregandoDependentes={carregandoDependentes}
+          dependenteForm={dependenteForm}
+          dependenteEditando={dependenteEditando}
+          salvandoDependente={salvandoDependente}
+          novoDependente={novoDependente}
+          editarDependente={editarDependente}
+          excluirDependente={(dependente) =>
+            socioEditando
+              ? excluirDependente(dependente, socioEditando.id)
+              : undefined
+          }
+          salvarDependente={() =>
+            socioEditando
+              ? salvarDependente(socioEditando.id)
+              : setMensagem("Salve primeiro o titular para adicionar dependentes.")
+          }
+          alterarDependente={(campo, valor) =>
+            setDependenteForm((f) => ({ ...f, [campo]: valor }))
+          }
         />
       )}
 
@@ -1224,6 +1389,16 @@ function ModalSocio({
   fechar,
   alterarCampo,
   salvar,
+  dependentes,
+  carregandoDependentes,
+  dependenteForm,
+  dependenteEditando,
+  salvandoDependente,
+  novoDependente,
+  editarDependente,
+  excluirDependente,
+  salvarDependente,
+  alterarDependente,
 }: {
   form: Partial<Socio>;
   socioEditando: Socio | null;
@@ -1232,7 +1407,27 @@ function ModalSocio({
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
   salvar: () => void;
+  dependentes: Dependente[];
+  carregandoDependentes: boolean;
+  dependenteForm: {
+    nome: string;
+    cpf: string;
+    data_nascimento: string;
+    parentesco: string;
+    telefone: string;
+    ativo: boolean;
+  };
+  dependenteEditando: Dependente | null;
+  salvandoDependente: boolean;
+  novoDependente: () => void;
+  editarDependente: (dependente: Dependente) => void;
+  excluirDependente: (dependente: Dependente) => void | undefined;
+  salvarDependente: () => void;
+  alterarDependente: (campo: keyof typeof dependenteForm, valor: string | boolean) => void;
 }) {
+  const categoria = form.categoria || "Contribuinte";
+  const permiteDependentes = categoria !== "Dependente" && categoria !== "Temporada Individual";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
@@ -1273,10 +1468,17 @@ function ModalSocio({
             <Campo label="Data de associação" type="date" value={form.data_associacao} onChange={(v) => alterarCampo("data_associacao", v)} />
 
             <SelectCampo
-              label="Categoria"
-              value={form.categoria || "Titular"}
+              label="Tipo de sócio"
+              value={categoria}
               onChange={(v) => alterarCampo("categoria", v)}
-              opcoes={["Titular", "Dependente", "Benemérito", "Remido"]}
+              opcoes={[
+                "Patrimonial",
+                "Contribuinte",
+                "Transitório",
+                "Temporada Individual",
+                "Temporada Familiar",
+                "Dependente",
+              ]}
             />
 
             <SelectCampo
@@ -1286,7 +1488,11 @@ function ModalSocio({
               opcoes={["ativo", "inativo", "suspenso"]}
             />
 
-            <div className="md:col-span-3">
+            <div className="md:col-span-4 rounded-xl bg-[#f7edbd] p-4 text-sm text-[#705c00]">
+              <strong>Regra:</strong> sócios Patrimoniais, Contribuintes, Transitórios e Temporada Familiar podem ter dependentes vinculados.
+            </div>
+
+            <div className="md:col-span-4">
               <label className="mb-2 block text-sm font-semibold">Observações</label>
               <textarea
                 value={form.observacoes || ""}
@@ -1327,6 +1533,148 @@ function ModalSocio({
               </p>
             </div>
           </FormularioSecao>
+
+          <div>
+            <div className="mb-4 flex flex-col justify-between gap-3 border-b pb-3 sm:flex-row sm:items-center">
+              <div>
+                <h3 className="text-lg font-bold text-[#063b28]">👨‍👩‍👧 Dependentes</h3>
+                <p className="text-sm text-gray-500">
+                  Cadastre esposa, filhos ou outros dependentes vinculados a este associado.
+                </p>
+              </div>
+              {permiteDependentes && socioEditando && (
+                <button
+                  onClick={novoDependente}
+                  className="rounded-xl bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
+                >
+                  + Novo dependente
+                </button>
+              )}
+            </div>
+
+            {!socioEditando && (
+              <div className="rounded-xl border border-[#f5d76e] bg-[#fffbea] p-4 text-sm text-[#705c00]">
+                Salve o cadastro do titular primeiro. Depois você poderá cadastrar os dependentes vinculados à matrícula.
+              </div>
+            )}
+
+            {!permiteDependentes && socioEditando && (
+              <div className="rounded-xl bg-gray-100 p-4 text-sm text-gray-600">
+                Este tipo de sócio não possui dependentes vinculados.
+              </div>
+            )}
+
+            {permiteDependentes && socioEditando && (
+              <>
+                <div className="mb-5 mt-4 rounded-2xl bg-[#f4f6f3] p-4">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-[#063b28]">
+                        {dependenteEditando ? "Editar dependente" : "Novo dependente"}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        O dependente fica vinculado à matrícula do titular.
+                      </p>
+                    </div>
+                    {dependenteEditando && (
+                      <button onClick={novoDependente} className="text-sm font-semibold text-gray-500">
+                        Cancelar edição
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <Campo label="Nome completo" obrigatorio value={dependenteForm.nome} onChange={(v) => alterarDependente("nome", v)} className="md:col-span-2" />
+                    <Campo label="CPF" value={dependenteForm.cpf} onChange={(v) => alterarDependente("cpf", v)} />
+                    <Campo label="Data de nascimento" type="date" value={dependenteForm.data_nascimento} onChange={(v) => alterarDependente("data_nascimento", v)} />
+                    <SelectCampo
+                      label="Parentesco"
+                      value={dependenteForm.parentesco}
+                      onChange={(v) => alterarDependente("parentesco", v)}
+                      opcoes={["Cônjuge", "Filho(a)", "Pai/Mãe", "Irmão(ã)", "Outro"]}
+                    />
+                    <Campo label="Telefone" value={dependenteForm.telefone} onChange={(v) => alterarDependente("telefone", v)} />
+                    <div className="flex items-end gap-3">
+                      <label className="flex h-12 cursor-pointer items-center gap-3 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={dependenteForm.ativo}
+                          onChange={(e) => alterarDependente("ativo", e.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        Dependente ativo
+                      </label>
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <button
+                        onClick={salvarDependente}
+                        disabled={salvandoDependente}
+                        className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white disabled:opacity-50"
+                      >
+                        {salvandoDependente ? "Salvando..." : dependenteEditando ? "💾 Atualizar" : "💾 Cadastrar"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-gray-200">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[750px]">
+                      <thead className="bg-[#eef3ef]">
+                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                          <th className="px-4 py-3">Nome</th>
+                          <th className="px-4 py-3">Parentesco</th>
+                          <th className="px-4 py-3">CPF</th>
+                          <th className="px-4 py-3">Nascimento</th>
+                          <th className="px-4 py-3">Situação</th>
+                          <th className="px-4 py-3 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y bg-white">
+                        {carregandoDependentes && (
+                          <tr>
+                            <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                              Carregando dependentes...
+                            </td>
+                          </tr>
+                        )}
+                        {!carregandoDependentes && dependentes.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                              Nenhum dependente cadastrado.
+                            </td>
+                          </tr>
+                        )}
+                        {!carregandoDependentes && dependentes.map((dependente) => (
+                          <tr key={dependente.id}>
+                            <td className="px-4 py-3 font-semibold text-[#063b28]">{dependente.nome}</td>
+                            <td className="px-4 py-3">{dependente.parentesco || "-"}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{dependente.cpf || "-"}</td>
+                            <td className="px-4 py-3 text-sm">{formatDate(dependente.data_nascimento)}</td>
+                            <td className="px-4 py-3">
+                              <span className={dependente.ativo ? "rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700" : "rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600"}>
+                                {dependente.ativo ? "Ativo" : "Inativo"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end gap-2">
+                                <button onClick={() => editarDependente(dependente)} className="rounded-lg bg-[#eef3ef] px-3 py-2 text-sm font-semibold text-[#063b28]">
+                                  ✏️
+                                </button>
+                                <button onClick={() => excluirDependente(dependente)} className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
+                                  🗑️
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           {mensagem && (
             <div className="rounded-xl bg-[#eef3ef] px-4 py-3 text-sm font-semibold text-[#063b28]">
@@ -1539,6 +1887,11 @@ function rotuloGenerico(valor: string) {
     pago: "Pago",
     atrasado: "Atrasado",
     Titular: "Titular",
+    Patrimonial: "Patrimonial",
+    Contribuinte: "Contribuinte",
+    Transitório: "Transitório",
+    "Temporada Individual": "Temporada Individual",
+    "Temporada Familiar": "Temporada Familiar",
     Dependente: "Dependente",
     Benemérito: "Benemérito",
     Remido: "Remido",
