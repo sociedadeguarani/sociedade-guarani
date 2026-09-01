@@ -73,7 +73,7 @@ const socioInicial: Partial<Socio> = {
   observacoes: "",
   foto_url: "",
 
-  tipo_socio: "patrimonial",
+  tipo_socio: "patrimonial_individual",
   responsavel_id: null,
   parentesco: "",
   possui_mensalidade: false,
@@ -86,15 +86,34 @@ const socioInicial: Partial<Socio> = {
 };
 
 const TIPOS_SOCIO = [
-  { value: "patrimonial", label: "Patrimonial" },
-  { value: "dependente_patrimonial", label: "Dependente Patrimonial" },
-  { value: "contribuinte", label: "Contribuinte" },
-  { value: "dependente_contribuinte", label: "Dependente Contribuinte" },
-  { value: "transitorio", label: "Transitório" },
-  { value: "dependente_transitorio", label: "Dependente Transitório" },
+  { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
+  { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
+  {
+    value: "dependente_patrimonial_familiar_mensalidade",
+    label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
+  },
+  {
+    value: "dependente_patrimonial_individual_mensalidade",
+    label: "Dependente Sócio Patrimonial Individual com Mensalidade",
+  },
+  { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
+  { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
+  {
+    value: "dependente_contribuinte_familiar_mensalidade",
+    label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
+  },
+  {
+    value: "dependente_contribuinte_individual_mensalidade",
+    label: "Dependente Sócio Contribuinte Individual com Mensalidade",
+  },
+  { value: "remido", label: "Sócio Remido" },
   { value: "temporada_individual", label: "Temporada Individual" },
   { value: "temporada_familiar", label: "Temporada Familiar" },
-  { value: "dependente_temporada_familiar", label: "Dependente Temporada Familiar" },
+  { value: "transitorio", label: "Transitório" },
+  { value: "dependente_transitorio", label: "Dependente Transitório" },
+  { value: "convite_semanal", label: "Convite Semanal" },
+  { value: "convite_diario", label: "Convite Diário" },
+  { value: "convite_mes", label: "Convite Mês" },
 ];
 
 const PARENTESCOS = [
@@ -116,29 +135,68 @@ const FORMAS_PAGAMENTO = [
   "dinheiro",
 ];
 
+function podeTerDependentes(tipo?: string | null) {
+  return [
+    "patrimonial_familiar",
+    "contribuinte_familiar",
+    "temporada_familiar",
+    "transitorio",
+    "dependente_patrimonial_familiar_mensalidade",
+    "dependente_contribuinte_familiar_mensalidade",
+  ].includes(tipo || "");
+}
+
+function tipoDependenteParaResponsavel(tipo?: string | null) {
+  switch (tipo) {
+    case "patrimonial_familiar":
+    case "dependente_patrimonial_familiar_mensalidade":
+      return "dependente_patrimonial_familiar_mensalidade";
+    case "contribuinte_familiar":
+    case "dependente_contribuinte_familiar_mensalidade":
+      return "dependente_contribuinte_familiar_mensalidade";
+    case "temporada_familiar":
+      return "dependente_patrimonial_familiar_mensalidade";
+    case "transitorio":
+      return "dependente_transitorio";
+    default:
+      return "dependente_patrimonial_familiar_mensalidade";
+  }
+}
+
 function tipoSocioLabel(tipo?: string | null) {
   return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
 }
 
 function tipoSocioClasse(tipo?: string | null) {
   switch (tipo) {
-    case "patrimonial":
+    case "patrimonial_individual":
       return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "dependente_patrimonial":
+    case "patrimonial_familiar":
+      return "bg-[#cfe7dc] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+    case "dependente_patrimonial_familiar_mensalidade":
       return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-    case "contribuinte":
+    case "dependente_patrimonial_individual_mensalidade":
+      return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+    case "contribuinte_individual":
       return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "dependente_contribuinte":
+    case "contribuinte_familiar":
+      return "bg-[#cddff4] text-[#064b9b] ring-1 ring-[#aac4e4]";
+    case "dependente_contribuinte_familiar_mensalidade":
       return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-    case "transitorio":
-      return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-    case "dependente_transitorio":
-      return "bg-[#fff8df] text-[#9a790c] ring-1 ring-[#f3df9b]";
+    case "dependente_contribuinte_individual_mensalidade":
+      return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
+    case "remido":
+      return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
     case "temporada_individual":
     case "temporada_familiar":
       return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-    case "dependente_temporada_familiar":
-      return "bg-[#fff1e6] text-[#c66a25] ring-1 ring-[#f3c6a3]";
+    case "transitorio":
+    case "dependente_transitorio":
+      return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+    case "convite_semanal":
+    case "convite_diario":
+    case "convite_mes":
+      return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
     default:
       return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
   }
@@ -210,6 +268,27 @@ export default function Home() {
     setMensagem("");
   }
 
+  function novoDependente(responsavel: Socio) {
+    if (!podeTerDependentes(responsavel.tipo_socio)) {
+      setMensagem("Este tipo de sócio não possui dependentes.");
+      return;
+    }
+
+    setSocioEditando(null);
+    setForm({
+      ...socioInicial,
+      tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
+      responsavel_id: responsavel.id,
+      parentesco: "Filho(a)",
+      possui_mensalidade: true,
+      valor_mensalidade: 0,
+      data_associacao: new Date().toISOString().split("T")[0],
+    });
+    setFotoArquivo(null);
+    setAbrirCadastro(true);
+    setMensagem("");
+  }
+
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
@@ -226,13 +305,39 @@ export default function Home() {
   }
 
   function alterarCampo(campo: keyof Socio, valor: string) {
-    setForm((atual) => ({
-      ...atual,
-      [campo]:
-        campo === "possui_mensalidade"
-          ? valor === "true"
-          : valor,
-    }));
+    setForm((atual) => {
+      const proximo = {
+        ...atual,
+        [campo]:
+          campo === "possui_mensalidade"
+            ? valor === "true"
+            : valor,
+      };
+
+      if (campo === "tipo_socio") {
+        const tipo = valor;
+        const mensalidadeObrigatoria = [
+          "dependente_patrimonial_familiar_mensalidade",
+          "dependente_patrimonial_individual_mensalidade",
+          "dependente_contribuinte_familiar_mensalidade",
+          "dependente_contribuinte_individual_mensalidade",
+        ].includes(tipo);
+
+        if (tipo === "remido") {
+          proximo.possui_mensalidade = false;
+          proximo.valor_mensalidade = 0;
+        } else if (mensalidadeObrigatoria) {
+          proximo.possui_mensalidade = true;
+        }
+
+        if (!tipo.startsWith("dependente_")) {
+          proximo.responsavel_id = null;
+          proximo.parentesco = "";
+        }
+      }
+
+      return proximo;
+    });
   }
 
   async function salvarSocio() {
@@ -508,7 +613,6 @@ export default function Home() {
           {/* INÍCIO */}
           {menu === "Início" && (
             <Inicio
-              socios={socios}
               quantidadeSocios={socios.length}
               abrirCadastro={novoSocio}
             />
@@ -522,6 +626,7 @@ export default function Home() {
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
+              novoDependente={novoDependente}
               editarSocio={editarSocio}
               excluirSocio={excluirSocio}
               carregando={carregando}
@@ -569,11 +674,9 @@ export default function Home() {
 ========================= */
 
 function Inicio({
-  socios,
   quantidadeSocios,
   abrirCadastro,
 }: {
-  socios: Socio[];
   quantidadeSocios: number;
   abrirCadastro: () => void;
 }) {
@@ -700,6 +803,7 @@ function Socios({
   busca,
   setBusca,
   novoSocio,
+  novoDependente,
   editarSocio,
   excluirSocio,
   carregando,
@@ -711,6 +815,7 @@ function Socios({
   busca: string;
   setBusca: (valor: string) => void;
   novoSocio: () => void;
+  novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
   excluirSocio: (socio: Socio) => void;
   carregando: boolean;
@@ -982,6 +1087,16 @@ function Socios({
 
                       <div className="flex justify-end gap-2">
 
+                        {podeTerDependentes(socio.tipo_socio) && (
+                          <button
+                            onClick={() => novoDependente(socio)}
+                            className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
+                            title="Adicionar dependente"
+                          >
+                            👨‍👩‍👧 + Dependente
+                          </button>
+                        )}
+
                         <button
                           onClick={() => editarSocio(socio)}
                           className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
@@ -1239,7 +1354,7 @@ function ModalSocio({
 
             <SelectCampo
               label="Tipo de associado"
-              value={form.tipo_socio || "patrimonial"}
+              value={form.tipo_socio || "patrimonial_individual"}
               onChange={(v) => alterarCampo("tipo_socio", v)}
               opcoes={TIPOS_SOCIO.map((item) => item.value)}
               labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
