@@ -55,7 +55,7 @@ const socioInicial: Partial<Socio> = {
   cep: "",
   data_associacao: "",
   categoria: "Titular",
-  situacao: "Ativo",
+  situacao: "ativo",
   observacoes: "",
 };
 
@@ -106,7 +106,7 @@ export default function Home() {
 
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
-    setForm(socio);
+    setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
     setAbrirCadastro(true);
     setMensagem("");
   }
@@ -150,7 +150,7 @@ export default function Home() {
       cep: form.cep || null,
       data_associacao: form.data_associacao || null,
       categoria: form.categoria || "Titular",
-      situacao: form.situacao || "Ativo",
+      situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
     };
 
@@ -555,7 +555,7 @@ function Socios({
           </p>
 
           <p className="mt-1 text-3xl font-bold text-[#063b28]">
-            {socios.filter((s) => s.situacao === "Ativo").length}
+            {socios.filter((s) => s.situacao?.toLowerCase() === "ativo").length}
           </p>
         </div>
 
@@ -712,12 +712,20 @@ function Socios({
 
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          socio.situacao === "Ativo"
+                          socio.situacao?.toLowerCase() === "ativo"
                             ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700"
+                            : socio.situacao?.toLowerCase() === "suspenso"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-red-100 text-red-700"
                         }`}
                       >
-                        {socio.situacao || "Ativo"}
+                        {socio.situacao?.toLowerCase() === "ativo"
+                          ? "Ativo"
+                          : socio.situacao?.toLowerCase() === "inativo"
+                            ? "Inativo"
+                            : socio.situacao?.toLowerCase() === "suspenso"
+                              ? "Suspenso"
+                              : "Ativo"}
                       </span>
 
                     </td>
@@ -937,12 +945,12 @@ function ModalSocio({
 
             <SelectCampo
               label="Situação"
-              value={form.situacao || "Ativo"}
+              value={form.situacao || "ativo"}
               onChange={(v) => alterarCampo("situacao", v)}
               opcoes={[
-                "Ativo",
-                "Inativo",
-                "Suspenso",
+                "ativo",
+                "inativo",
+                "suspenso",
               ]}
             />
 
