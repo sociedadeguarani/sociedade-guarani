@@ -613,6 +613,7 @@ export default function Home() {
           {/* INÍCIO */}
           {menu === "Início" && (
             <Inicio
+              socios={socios}
               quantidadeSocios={socios.length}
               abrirCadastro={novoSocio}
             />
