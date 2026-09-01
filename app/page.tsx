@@ -163,15 +163,11 @@ export default function Home() {
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
       valor_mensalidade:
-        form.valor_mensalidade === undefined ||
-        form.valor_mensalidade === null ||
-        form.valor_mensalidade === ""
+        form.valor_mensalidade === undefined || form.valor_mensalidade === null
           ? 0
           : Number(form.valor_mensalidade),
       dia_vencimento:
-        form.dia_vencimento === undefined ||
-        form.dia_vencimento === null ||
-        form.dia_vencimento === ""
+        form.dia_vencimento === undefined || form.dia_vencimento === null
           ? 10
           : Number(form.dia_vencimento),
       tipo_pagamento: form.tipo_pagamento || "pix",
