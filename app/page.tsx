@@ -255,43 +255,6 @@ export default function Home() {
   });
 
 
-  function primeiroDiaDoMes(referencia: string) {
-    return `${referencia}-01`;
-  }
-
-  function calcularVencimento(referencia: string, dia: number | null | undefined) {
-    const [ano, mes] = referencia.split("-").map(Number);
-    const ultimoDia = new Date(ano, mes, 0).getDate();
-    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
-    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
-  }
-
-  function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "Pago";
-      case "em_atraso":
-        return "Em atraso";
-      case "isento":
-        return "Isento";
-      default:
-        return "Em aberto";
-    }
-  }
-
-  function classeSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "bg-green-100 text-green-700";
-      case "em_atraso":
-        return "bg-red-100 text-red-700";
-      case "isento":
-        return "bg-gray-100 text-gray-600";
-      default:
-        return "bg-yellow-100 text-yellow-700";
-    }
-  }
-
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
 
@@ -1553,6 +1516,43 @@ function Socios({
 /* =========================
    FINANCEIRO
 ========================= */
+
+function primeiroDiaDoMes(referencia: string) {
+    return `${referencia}-01`;
+  }
+
+function calcularVencimento(referencia: string, dia: number | null | undefined) {
+    const [ano, mes] = referencia.split("-").map(Number);
+    const ultimoDia = new Date(ano, mes, 0).getDate();
+    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
+    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
+  }
+
+function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "Pago";
+      case "em_atraso":
+        return "Em atraso";
+      case "isento":
+        return "Isento";
+      default:
+        return "Em aberto";
+    }
+  }
+
+function classeSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "bg-green-100 text-green-700";
+      case "em_atraso":
+        return "bg-red-100 text-red-700";
+      case "isento":
+        return "bg-gray-100 text-gray-600";
+      default:
+        return "bg-yellow-100 text-yellow-700";
+    }
+  }
 
 function formatarMoeda(valor: number | null | undefined) {
   return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
