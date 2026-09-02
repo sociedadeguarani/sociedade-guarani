@@ -1159,7 +1159,9 @@ function Dependentes({
   editarSocio: (socio: Socio) => void;
 }) {
   const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
-  const responsaveis = socios.filter((s) => podeTerDependentes(s.tipo_socio));
+  const responsaveis = socios.filter((s) =>
+    socios.some((filho) => filho.responsavel_id === s.id)
+  );
 
   function filhosDe(id: string) {
     return socios.filter((s) => s.responsavel_id === id);
@@ -1215,9 +1217,16 @@ function Dependentes({
 
           <div className="flex flex-wrap items-center gap-2">
             {pessoa.possui_mensalidade ? (
-              <span className="rounded-full bg-[#fff4cc] px-3 py-1.5 text-xs font-bold text-[#8a6700]">
-                R$ {Number(pessoa.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
-              </span>
+              <div className="text-right">
+                <span className="inline-flex rounded-full bg-[#fff4cc] px-3 py-1.5 text-xs font-bold text-[#8a6700]">
+                  Mensalidade · R$ {Number(pessoa.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
+                </span>
+                {pessoa.dia_vencimento && (
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Vencimento dia {pessoa.dia_vencimento}
+                  </p>
+                )}
+              </div>
             ) : (
               <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-500">
                 Sem mensalidade
@@ -1334,6 +1343,12 @@ function Dependentes({
                     + Adicionar dependente
                   </button>
                 )}
+              </div>
+
+              <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-[#587066]">
+                <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#dfe9e3]">
+                  {filhosDe(raiz.id).length} dependente{filhosDe(raiz.id).length === 1 ? "" : "s"} direto{filhosDe(raiz.id).length === 1 ? "" : "s"}
+                </span>
               </div>
 
               {arvore(raiz)}
