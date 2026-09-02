@@ -256,6 +256,12 @@ export default function Home() {
     observacoes: "",
   });
 
+  const [relatorioCompetencia, setRelatorioCompetencia] = useState(new Date().toISOString().slice(0, 7));
+  const [relatorioMensalidades, setRelatorioMensalidades] = useState<Mensalidade[]>([]);
+  const [relatorioFormaPagamento, setRelatorioFormaPagamento] = useState("todas");
+  const [relatorioSituacao, setRelatorioSituacao] = useState("todas");
+  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
+
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
@@ -566,6 +572,30 @@ export default function Home() {
       ...atual,
       foto_url: "",
     }));
+  }
+
+  async function carregarRelatorioFinanceiro(referencia = relatorioCompetencia) {
+    setCarregandoRelatorio(true);
+    const competencia = primeiroDiaDoMes(referencia);
+    const { data, error } = await supabase
+      .from("mensalidades")
+      .select("*")
+      .eq("competencia", competencia)
+      .order("data_vencimento", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      setRelatorioMensalidades([]);
+      setMensagem("Erro ao carregar o relatório financeiro.");
+    } else {
+      setRelatorioMensalidades((data || []) as Mensalidade[]);
+    }
+    setCarregandoRelatorio(false);
+  }
+
+  function abrirRelatorios() {
+    setMenu("Relatórios");
+    void carregarRelatorioFinanceiro(relatorioCompetencia);
   }
 
   async function carregarSocios() {
@@ -892,6 +922,8 @@ export default function Home() {
                 onClick={() => {
                     if (item.nome === "Financeiro") {
                       void abrirFinanceiro();
+                    } else if (item.nome === "Relatórios") {
+                      abrirRelatorios();
                     } else {
                       setMenu(item.nome);
                     }
@@ -938,6 +970,8 @@ export default function Home() {
                 onClick={() => {
                     if (item.nome === "Financeiro") {
                       void abrirFinanceiro();
+                    } else if (item.nome === "Relatórios") {
+                      abrirRelatorios();
                     } else {
                       setMenu(item.nome);
                     }
@@ -1013,11 +1047,30 @@ export default function Home() {
             />
           )}
 
+          {/* RELATÓRIOS FINANCEIROS */}
+          {menu === "Relatórios" && (
+            <RelatoriosFinanceiros
+              socios={socios}
+              mensalidades={relatorioMensalidades}
+              competencia={relatorioCompetencia}
+              setCompetencia={(valor) => {
+                setRelatorioCompetencia(valor);
+                void carregarRelatorioFinanceiro(valor);
+              }}
+              formaPagamento={relatorioFormaPagamento}
+              setFormaPagamento={setRelatorioFormaPagamento}
+              situacao={relatorioSituacao}
+              setSituacao={setRelatorioSituacao}
+              carregando={carregandoRelatorio}
+            />
+          )}
+
           {/* OUTROS MÓDULOS */}
           {menu !== "Início" &&
             menu !== "Sócios" &&
             menu !== "Dependentes" &&
-            menu !== "Financeiro" && (
+            menu !== "Financeiro" &&
+             menu !== "Relatórios" && (
               <ModuloEmConstrucao
                 nome={menu}
                 icone={
@@ -3132,6 +3185,68 @@ function DashboardCard({
         {descricao}
       </p>
 
+    </div>
+  );
+}
+
+function RelatoriosFinanceiros({
+  socios, mensalidades, competencia, setCompetencia, formaPagamento, setFormaPagamento, situacao, setSituacao, carregando,
+}: {
+  socios: Socio[]; mensalidades: Mensalidade[]; competencia: string; setCompetencia: (valor: string) => void;
+  formaPagamento: string; setFormaPagamento: (valor: string) => void; situacao: string; setSituacao: (valor: string) => void; carregando: boolean;
+}) {
+  const formas: Record<string, string> = { pix: "PIX", debito_em_conta: "Débito em conta", boleto: "Boleto", dinheiro: "Dinheiro", transferencia: "Transferência", outro: "Outro" };
+  const situacoes: Record<string, string> = { pago: "Pago", em_aberto: "Em aberto", em_atraso: "Em atraso", isento: "Isento" };
+  const filtradas = mensalidades.filter((m) =>
+    (formaPagamento === "todas" || (m.tipo_pagamento || "") === formaPagamento) &&
+    (situacao === "todas" || (m.situacao || "") === situacao)
+  );
+  const soma = (lista: Mensalidade[]) => lista.reduce((s, m) => s + Number(m.valor || 0), 0);
+  const total = soma(filtradas);
+  const recebido = soma(filtradas.filter((m) => m.situacao === "pago"));
+  const aberto = soma(filtradas.filter((m) => m.situacao === "em_aberto"));
+  const atrasado = soma(filtradas.filter((m) => m.situacao === "em_atraso"));
+  const isento = soma(filtradas.filter((m) => m.situacao === "isento"));
+  const pagos = filtradas.filter((m) => m.situacao === "pago").length;
+  const abertos = filtradas.filter((m) => m.situacao === "em_aberto").length;
+  const atrasados = filtradas.filter((m) => m.situacao === "em_atraso").length;
+  const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const dataBR = (v?: string | null) => v ? `${v.slice(8,10)}/${v.slice(5,7)}/${v.slice(0,4)}` : "—";
+  const compBR = `${competencia.slice(5,7)}/${competencia.slice(0,4)}`;
+  const porForma = Object.entries(formas).map(([codigo, label]) => {
+    const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
+    return { codigo, label, qtd: itens.length, valor: soma(itens) };
+  }).filter((x) => x.qtd > 0);
+  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
+
+  return (
+    <div className="relatorio-area">
+      <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
+      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
+        <div className="relatorio-acoes"><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
+      </div>
+      <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
+        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
+        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Forma de pagamento</label><select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(formas).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
+        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Situação</label><select value={situacao} onChange={(e) => setSituacao(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(situacoes).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
+      </div>
+      {carregando ? <div className="rounded-2xl border border-[#e2ebe6] bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório...</div> : <>
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <ResumoFinanceiroGuarani titulo="Total lançado" valor={moeda(total)} /><ResumoFinanceiroGuarani titulo="Recebido" valor={moeda(recebido)} /><ResumoFinanceiroGuarani titulo="Em aberto" valor={moeda(aberto)} /><ResumoFinanceiroGuarani titulo="Em atraso" valor={moeda(atrasado)} /><ResumoFinanceiroGuarani titulo="Isento" valor={moeda(isento)} />
+        </div>
+        <div className="mb-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Mensalidades pagas</p><p className="mt-1 text-3xl font-bold text-[#005a3c]">{pagos}</p></div>
+          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Em aberto</p><p className="mt-1 text-3xl font-bold text-[#8a6700]">{abertos}</p></div>
+          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Inadimplentes</p><p className="mt-1 text-3xl font-bold text-red-600">{atrasados}</p></div>
+        </div>
+        <div className="mb-6 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Recebimentos por forma de pagamento</h3><div className="mt-4 space-y-3">{porForma.length === 0 ? <p className="text-sm text-gray-500">Nenhum pagamento encontrado.</p> : porForma.map((x) => <div key={x.codigo} className="flex items-center justify-between rounded-xl bg-[#f7faf8] px-4 py-3"><div><p className="font-semibold">{x.label}</p><p className="text-xs text-gray-500">{x.qtd} lançamento(s)</p></div><p className="font-bold text-[#005a3c]">{moeda(x.valor)}</p></div>)}</div></div>
+          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
+        </div>
+        <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
+      </>}
     </div>
   );
 }
