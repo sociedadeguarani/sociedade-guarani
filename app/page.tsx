@@ -1972,13 +1972,13 @@ function ResumoFinanceiroGuarani({
   valor,
 }: {
   titulo: string;
-  valor: number;
+  valor: string;
 }) {
   return (
     <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
       <p className="text-sm text-gray-500">{titulo}</p>
       <p className="mt-1 text-2xl font-bold text-[#005a3c]">
-        {formatarMoeda(valor)}
+        {valor}
       </p>
     </div>
   );
