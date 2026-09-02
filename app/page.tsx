@@ -55,6 +55,7 @@ type Mensalidade = {
   tipo_pagamento: string | null;
   comprovante_url: string | null;
   observacoes: string | null;
+  numero_recibo?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -472,6 +473,30 @@ export default function Home() {
         comprovantePath = caminho;
       }
 
+      const competenciaRecibo = mensalidadePagamento.competencia.slice(0, 7);
+
+      const { data: recibosExistentes, error: erroRecibos } = await supabase
+        .from("mensalidades")
+        .select("numero_recibo")
+        .eq("competencia", mensalidadePagamento.competencia)
+        .not("numero_recibo", "is", null);
+
+      if (erroRecibos) throw erroRecibos;
+
+      const numerosExistentes = (recibosExistentes || [])
+        .map((item: { numero_recibo?: string | null }) => {
+          const numero = String(item.numero_recibo || "");
+          const parte = numero.split("-").pop() || "";
+          return Number(parte);
+        })
+        .filter((numero: number) => Number.isFinite(numero) && numero > 0);
+
+      const proximoNumero =
+        numerosExistentes.length > 0 ? Math.max(...numerosExistentes) + 1 : 1;
+      const numeroRecibo = `REC-${competenciaRecibo.replace("-", "")}-${String(
+        proximoNumero
+      ).padStart(3, "0")}`;
+
       const { error } = await supabase
         .from("mensalidades")
         .update({
@@ -481,6 +506,7 @@ export default function Home() {
           tipo_pagamento: pagamentoForm.tipo_pagamento || null,
           comprovante_url: comprovantePath,
           observacoes: pagamentoForm.observacoes || null,
+          numero_recibo: numeroRecibo,
         })
         .eq("id", mensalidadePagamento.id);
 
@@ -2021,9 +2047,11 @@ function ReciboPagamentoGuarani({
   mensalidade: Mensalidade;
   fechar: () => void;
 }) {
-  const numeroRecibo = `REC-${mensalidade.competencia.slice(0, 7).replace("-", "")}-${
-    socio?.matricula || mensalidade.id.slice(0, 8).toUpperCase()
-  }`;
+  const numeroRecibo =
+    mensalidade.numero_recibo ||
+    `REC-${mensalidade.competencia.slice(0, 7).replace("-", "")}-${
+      socio?.matricula || mensalidade.id.slice(0, 8).toUpperCase()
+    }`;
 
   const formaPagamento: Record<string, string> = {
     pix: "PIX",
@@ -2038,40 +2066,68 @@ function ReciboPagamentoGuarani({
     <>
       <style jsx global>{`
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 0;
+          }
+
+          html,
+          body {
+            width: 210mm !important;
+            min-height: 297mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
+
           body * {
             visibility: hidden !important;
           }
+
+          .recibo-overlay {
+            position: static !important;
+            display: block !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
+            padding: 0 !important;
+            background: white !important;
+            overflow: visible !important;
+          }
+
           .recibo-impressao,
           .recibo-impressao * {
             visibility: visible !important;
           }
+
           .recibo-impressao {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
+            position: relative !important;
+            left: auto !important;
+            top: auto !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
+            max-height: none !important;
             margin: 0 !important;
-            padding: 20mm !important;
+            padding: 18mm !important;
+            overflow: visible !important;
+            border-radius: 0 !important;
             box-shadow: none !important;
             border: 0 !important;
           }
+
           .print-hide {
             display: none !important;
           }
         }
       `}</style>
 
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#001f16]/70 p-4 backdrop-blur-sm">
+      <div className="recibo-overlay fixed inset-0 z-[80] flex items-center justify-center bg-[#001f16]/70 p-4 backdrop-blur-sm">
         <div className="recibo-impressao max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
           <div className="print-hide flex items-center justify-between border-b px-6 py-5">
             <div>
               <p className="text-sm text-gray-500">Financeiro</p>
               <h2 className="text-2xl font-bold text-[#005a3c]">Recibo de pagamento</h2>
             </div>
-            <button
-              onClick={fechar}
-              className="rounded-full bg-gray-100 px-3 py-2 text-lg"
-            >
+            <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
               ✕
             </button>
           </div>
@@ -2079,24 +2135,13 @@ function ReciboPagamentoGuarani({
           <div className="p-8 sm:p-10">
             <div className="flex items-start justify-between gap-6 border-b-2 border-[#005a3c] pb-6">
               <div className="flex items-center gap-4">
-                <img
-                  src="/logo-guarani.png"
-                  alt="Sociedade Guarani"
-                  className="h-20 w-20 object-contain"
-                />
+                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-20 w-20 object-contain" />
                 <div>
-                  <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">
-                    Sociedade Guarani
-                  </h1>
-                  <p className="text-sm text-gray-600">
-                    Sociedade Recreativa Guarani — S.R.G.
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Recibo de pagamento de mensalidade
-                  </p>
+                  <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">Sociedade Guarani</h1>
+                  <p className="text-sm text-gray-600">Sociedade Recreativa Guarani — S.R.G.</p>
+                  <p className="mt-1 text-xs text-gray-500">Recibo de pagamento de mensalidade</p>
                 </div>
               </div>
-
               <div className="text-right text-xs text-gray-500">
                 <p className="font-bold text-[#003d2b]">Nº do recibo</p>
                 <p className="mt-1 font-mono text-sm">{numeroRecibo}</p>
@@ -2106,11 +2151,12 @@ function ReciboPagamentoGuarani({
             <div className="mt-8 space-y-5">
               <div className="rounded-2xl bg-[#e8f3ee] p-5">
                 <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Associado</p>
-                <p className="mt-1 text-xl font-bold text-[#003d2b]">
+                <p className="mt-1 text-xl font-bold uppercase text-[#003d2b]">
                   {socio?.nome || "Associado não encontrado"}
                 </p>
-                <div className="mt-2 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-3">
                   <p><strong>Matrícula:</strong> {socio?.matricula || "—"}</p>
+                  <p><strong>CPF:</strong> {socio?.cpf || "—"}</p>
                   <p><strong>Tipo:</strong> {tipoSocioLabel(socio?.tipo_socio)}</p>
                 </div>
               </div>
@@ -2118,15 +2164,11 @@ function ReciboPagamentoGuarani({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="rounded-xl border border-[#dfe9e3] p-4">
                   <p className="text-xs font-bold uppercase text-gray-500">Competência</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">
-                    {formatarCompetencia(mensalidade.competencia.slice(0, 7))}
-                  </p>
+                  <p className="mt-1 font-bold text-[#003d2b]">{formatarCompetencia(mensalidade.competencia.slice(0, 7))}</p>
                 </div>
                 <div className="rounded-xl border border-[#dfe9e3] p-4">
                   <p className="text-xs font-bold uppercase text-gray-500">Data do pagamento</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">
-                    {formatarDataFinanceiro(mensalidade.data_pagamento)}
-                  </p>
+                  <p className="mt-1 font-bold text-[#003d2b]">{formatarDataFinanceiro(mensalidade.data_pagamento)}</p>
                 </div>
                 <div className="rounded-xl border border-[#dfe9e3] p-4">
                   <p className="text-xs font-bold uppercase text-gray-500">Forma de pagamento</p>
@@ -2136,9 +2178,7 @@ function ReciboPagamentoGuarani({
                 </div>
                 <div className="rounded-xl border border-[#dfe9e3] p-4">
                   <p className="text-xs font-bold uppercase text-gray-500">Valor pago</p>
-                  <p className="mt-1 text-xl font-extrabold text-[#005a3c]">
-                    {formatarMoeda(mensalidade.valor)}
-                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-[#005a3c]">{formatarMoeda(mensalidade.valor)}</p>
                 </div>
               </div>
 
@@ -2150,11 +2190,10 @@ function ReciboPagamentoGuarani({
               )}
 
               <p className="pt-4 text-center text-sm leading-6 text-gray-600">
-                Recebemos do associado acima identificado o valor referente à mensalidade
-                indicada neste recibo.
+                Recebemos do associado acima identificado o valor referente à mensalidade indicada neste recibo.
               </p>
 
-              <div className="pt-10 text-center">
+              <div className="pt-14 text-center">
                 <div className="mx-auto w-64 border-t border-gray-400 pt-2 text-sm text-gray-600">
                   Sociedade Recreativa Guarani
                 </div>
@@ -2163,16 +2202,10 @@ function ReciboPagamentoGuarani({
           </div>
 
           <div className="print-hide flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
-            <button
-              onClick={fechar}
-              className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
-            >
+            <button onClick={fechar} className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700">
               Fechar
             </button>
-            <button
-              onClick={() => window.print()}
-              className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
-            >
+            <button onClick={() => window.print()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">
               🖨️ Imprimir / Salvar PDF
             </button>
           </div>
