@@ -259,10 +259,6 @@ export default function Home() {
     return `${referencia}-01`;
   }
 
-  function formatarMoeda(valor: number | null | undefined) {
-    return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
-  }
-
   function calcularVencimento(referencia: string, dia: number | null | undefined) {
     const [ano, mes] = referencia.split("-").map(Number);
     const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -1557,6 +1553,10 @@ function Socios({
 /* =========================
    FINANCEIRO
 ========================= */
+
+function formatarMoeda(valor: number | null | undefined) {
+  return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
+}
 
 function formatarCompetencia(referencia: string) {
   const [ano, mes] = referencia.split("-");
