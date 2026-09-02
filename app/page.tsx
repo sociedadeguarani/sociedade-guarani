@@ -246,6 +246,7 @@ export default function Home() {
   const [mensalidadeEditando, setMensalidadeEditando] = useState<Mensalidade | null>(null);
   const [abrirPagamento, setAbrirPagamento] = useState(false);
   const [mensalidadePagamento, setMensalidadePagamento] = useState<Mensalidade | null>(null);
+  const [reciboMensalidade, setReciboMensalidade] = useState<Mensalidade | null>(null);
   const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
   const [pagamentoForm, setPagamentoForm] = useState({
     valor: "",
@@ -982,6 +983,7 @@ export default function Home() {
               excluirMensalidade={excluirMensalidade}
               registrarPagamento={abrirRegistroPagamento}
               abrirComprovante={abrirComprovante}
+              emitirRecibo={(item) => setReciboMensalidade(item)}
             />
           )}
 
@@ -1024,6 +1026,14 @@ export default function Home() {
           }}
           salvar={() => void confirmarPagamento()}
           salvando={salvando}
+        />
+      )}
+
+      {reciboMensalidade && (
+        <ReciboPagamentoGuarani
+          socio={socios.find((s) => s.id === reciboMensalidade.socio_id) || null}
+          mensalidade={reciboMensalidade}
+          fechar={() => setReciboMensalidade(null)}
         />
       )}
 
@@ -1585,6 +1595,7 @@ function Financeiro({
   excluirMensalidade,
   registrarPagamento,
   abrirComprovante,
+  emitirRecibo,
 }: {
   socios: Socio[];
   mensalidades: Mensalidade[];
@@ -1599,6 +1610,7 @@ function Financeiro({
   excluirMensalidade: (item: Mensalidade) => void;
   registrarPagamento: (item: Mensalidade) => void;
   abrirComprovante: (path: string | null) => void;
+  emitirRecibo: (item: Mensalidade) => void;
 }) {
   const termo = busca.toLowerCase().trim();
 
@@ -1816,6 +1828,16 @@ function Financeiro({
                             </button>
                           )}
 
+                          {item.situacao === "pago" && (
+                            <button
+                              onClick={() => emitirRecibo(item)}
+                              className="rounded-lg bg-[#fff4cc] px-3 py-2 text-sm font-bold text-[#705c00]"
+                              title="Emitir recibo"
+                            >
+                              🧾 Recibo
+                            </button>
+                          )}
+
                           <button
                             onClick={() => editarMensalidade(item)}
                             className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
@@ -1987,6 +2009,176 @@ function ModalEdicaoMensalidade({
         </div>
       </div>
     </div>
+  );
+}
+
+function ReciboPagamentoGuarani({
+  socio,
+  mensalidade,
+  fechar,
+}: {
+  socio: Socio | null;
+  mensalidade: Mensalidade;
+  fechar: () => void;
+}) {
+  const numeroRecibo = `REC-${mensalidade.competencia.slice(0, 7).replace("-", "")}-${
+    socio?.matricula || mensalidade.id.slice(0, 8).toUpperCase()
+  }`;
+
+  const formaPagamento: Record<string, string> = {
+    pix: "PIX",
+    debito_em_conta: "Débito em conta",
+    boleto: "Boleto",
+    dinheiro: "Dinheiro",
+    transferencia: "Transferência",
+    outro: "Outro",
+  };
+
+  return (
+    <>
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          .recibo-impressao,
+          .recibo-impressao * {
+            visibility: visible !important;
+          }
+          .recibo-impressao {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 20mm !important;
+            box-shadow: none !important;
+            border: 0 !important;
+          }
+          .print-hide {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#001f16]/70 p-4 backdrop-blur-sm">
+        <div className="recibo-impressao max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+          <div className="print-hide flex items-center justify-between border-b px-6 py-5">
+            <div>
+              <p className="text-sm text-gray-500">Financeiro</p>
+              <h2 className="text-2xl font-bold text-[#005a3c]">Recibo de pagamento</h2>
+            </div>
+            <button
+              onClick={fechar}
+              className="rounded-full bg-gray-100 px-3 py-2 text-lg"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="p-8 sm:p-10">
+            <div className="flex items-start justify-between gap-6 border-b-2 border-[#005a3c] pb-6">
+              <div className="flex items-center gap-4">
+                <img
+                  src="/logo-guarani.png"
+                  alt="Sociedade Guarani"
+                  className="h-20 w-20 object-contain"
+                />
+                <div>
+                  <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">
+                    Sociedade Guarani
+                  </h1>
+                  <p className="text-sm text-gray-600">
+                    Sociedade Recreativa Guarani — S.R.G.
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Recibo de pagamento de mensalidade
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right text-xs text-gray-500">
+                <p className="font-bold text-[#003d2b]">Nº do recibo</p>
+                <p className="mt-1 font-mono text-sm">{numeroRecibo}</p>
+              </div>
+            </div>
+
+            <div className="mt-8 space-y-5">
+              <div className="rounded-2xl bg-[#e8f3ee] p-5">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Associado</p>
+                <p className="mt-1 text-xl font-bold text-[#003d2b]">
+                  {socio?.nome || "Associado não encontrado"}
+                </p>
+                <div className="mt-2 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                  <p><strong>Matrícula:</strong> {socio?.matricula || "—"}</p>
+                  <p><strong>Tipo:</strong> {tipoSocioLabel(socio?.tipo_socio)}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-[#dfe9e3] p-4">
+                  <p className="text-xs font-bold uppercase text-gray-500">Competência</p>
+                  <p className="mt-1 font-bold text-[#003d2b]">
+                    {formatarCompetencia(mensalidade.competencia.slice(0, 7))}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[#dfe9e3] p-4">
+                  <p className="text-xs font-bold uppercase text-gray-500">Data do pagamento</p>
+                  <p className="mt-1 font-bold text-[#003d2b]">
+                    {formatarDataFinanceiro(mensalidade.data_pagamento)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[#dfe9e3] p-4">
+                  <p className="text-xs font-bold uppercase text-gray-500">Forma de pagamento</p>
+                  <p className="mt-1 font-bold text-[#003d2b]">
+                    {formaPagamento[mensalidade.tipo_pagamento || ""] || mensalidade.tipo_pagamento || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[#dfe9e3] p-4">
+                  <p className="text-xs font-bold uppercase text-gray-500">Valor pago</p>
+                  <p className="mt-1 text-xl font-extrabold text-[#005a3c]">
+                    {formatarMoeda(mensalidade.valor)}
+                  </p>
+                </div>
+              </div>
+
+              {mensalidade.observacoes && (
+                <div className="rounded-xl border border-[#dfe9e3] p-4 text-sm">
+                  <p className="font-bold text-[#003d2b]">Observações</p>
+                  <p className="mt-1 text-gray-600">{mensalidade.observacoes}</p>
+                </div>
+              )}
+
+              <p className="pt-4 text-center text-sm leading-6 text-gray-600">
+                Recebemos do associado acima identificado o valor referente à mensalidade
+                indicada neste recibo.
+              </p>
+
+              <div className="pt-10 text-center">
+                <div className="mx-auto w-64 border-t border-gray-400 pt-2 text-sm text-gray-600">
+                  Sociedade Recreativa Guarani
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="print-hide flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
+            <button
+              onClick={fechar}
+              className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
+            >
+              Fechar
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
+            >
+              🖨️ Imprimir / Salvar PDF
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
