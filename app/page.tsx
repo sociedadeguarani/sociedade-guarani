@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -40,6 +40,23 @@ type Socio = {
   modalidade_temporada: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
+  situacao_financeira: string | null;
+  data_ultimo_pagamento: string | null;
+};
+
+type Mensalidade = {
+  id: string;
+  socio_id: string;
+  competencia: string;
+  valor: number;
+  data_vencimento: string | null;
+  situacao: string | null;
+  data_pagamento: string | null;
+  tipo_pagamento: string | null;
+  comprovante_url: string | null;
+  observacoes: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 const menus = [
@@ -83,6 +100,8 @@ const socioInicial: Partial<Socio> = {
   modalidade_temporada: null,
   inicio_temporada: "",
   fim_temporada: "",
+  situacao_financeira: "isento",
+  data_ultimo_pagamento: "",
 };
 
 const TIPOS_SOCIO = [
@@ -217,6 +236,334 @@ export default function Home() {
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
 
+  const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
+  const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
+  const [buscaFinanceiro, setBuscaFinanceiro] = useState("");
+  const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(false);
+  const [gerandoMensalidades, setGerandoMensalidades] = useState(false);
+  const [mensalidadeEditando, setMensalidadeEditando] = useState<Mensalidade | null>(null);
+  const [abrirPagamento, setAbrirPagamento] = useState(false);
+  const [mensalidadePagamento, setMensalidadePagamento] = useState<Mensalidade | null>(null);
+  const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
+  const [pagamentoForm, setPagamentoForm] = useState({
+    valor: "",
+    data_pagamento: new Date().toISOString().slice(0, 10),
+    tipo_pagamento: "pix",
+    observacoes: "",
+  });
+
+
+  function primeiroDiaDoMes(referencia: string) {
+    return `${referencia}-01`;
+  }
+
+  function formatarMoeda(valor: number | null | undefined) {
+    return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
+  }
+
+  function calcularVencimento(referencia: string, dia: number | null | undefined) {
+    const [ano, mes] = referencia.split("-").map(Number);
+    const ultimoDia = new Date(ano, mes, 0).getDate();
+    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
+    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
+  }
+
+  function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "Pago";
+      case "em_atraso":
+        return "Em atraso";
+      case "isento":
+        return "Isento";
+      default:
+        return "Em aberto";
+    }
+  }
+
+  function classeSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "bg-green-100 text-green-700";
+      case "em_atraso":
+        return "bg-red-100 text-red-700";
+      case "isento":
+        return "bg-gray-100 text-gray-600";
+      default:
+        return "bg-yellow-100 text-yellow-700";
+    }
+  }
+
+  async function carregarMensalidades(referencia = competenciaFinanceiro) {
+    setCarregandoFinanceiro(true);
+
+    const inicio = primeiroDiaDoMes(referencia);
+    const { data, error } = await supabase
+      .from("mensalidades")
+      .select("*")
+      .eq("competencia", inicio)
+      .order("data_vencimento", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      setMensagem("Erro ao carregar as mensalidades.");
+      setMensalidades([]);
+    } else {
+      const itens = (data || []) as Mensalidade[];
+      const hoje = new Date().toISOString().slice(0, 10);
+
+      const idsParaAtraso = itens
+        .filter(
+          (item) =>
+            item.situacao === "em_aberto" &&
+            item.data_vencimento &&
+            item.data_vencimento < hoje
+        )
+        .map((item) => item.id);
+
+      if (idsParaAtraso.length > 0) {
+        await supabase
+          .from("mensalidades")
+          .update({ situacao: "em_atraso" })
+          .in("id", idsParaAtraso);
+
+        itens.forEach((item) => {
+          if (idsParaAtraso.includes(item.id)) item.situacao = "em_atraso";
+        });
+      }
+
+      setMensalidades(itens);
+    }
+
+    setCarregandoFinanceiro(false);
+  }
+
+  async function gerarMensalidadesCompetencia(referencia = competenciaFinanceiro) {
+    setGerandoMensalidades(true);
+    setMensagem("");
+
+    try {
+      const pessoasComMensalidade = socios.filter(
+        (s) =>
+          s.possui_mensalidade === true &&
+          Number(s.valor_mensalidade || 0) >= 0 &&
+          s.situacao?.toLowerCase() !== "inativo"
+      );
+
+      if (pessoasComMensalidade.length === 0) {
+        setMensalidades([]);
+        setMensagem("Nenhum associado/dependente possui mensalidade ativa.");
+        return;
+      }
+
+      const competencia = primeiroDiaDoMes(referencia);
+
+      const { data: existentes, error: erroBusca } = await supabase
+        .from("mensalidades")
+        .select("socio_id")
+        .eq("competencia", competencia);
+
+      if (erroBusca) throw erroBusca;
+
+      const idsExistentes = new Set(
+        (existentes || []).map((item: { socio_id: string }) => item.socio_id)
+      );
+
+      const novos = pessoasComMensalidade
+        .filter((socio) => !idsExistentes.has(socio.id))
+        .map((socio) => ({
+          socio_id: socio.id,
+          competencia,
+          valor: Number(socio.valor_mensalidade || 0),
+          data_vencimento: calcularVencimento(
+            referencia,
+            socio.dia_vencimento
+          ),
+          situacao:
+            Number(socio.valor_mensalidade || 0) === 0
+              ? "isento"
+              : "em_aberto",
+          data_pagamento: null,
+          tipo_pagamento: socio.tipo_pagamento || null,
+          comprovante_url: null,
+          observacoes: null,
+        }));
+
+      if (novos.length > 0) {
+        const { error: erroInsercao } = await supabase
+          .from("mensalidades")
+          .insert(novos);
+
+        if (erroInsercao) throw erroInsercao;
+      }
+
+      await carregarMensalidades(referencia);
+      setMensagem(
+        novos.length > 0
+          ? `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
+          : `As mensalidades de ${formatarCompetencia(referencia)} já estavam geradas.`
+      );
+    } catch (error) {
+      console.error(error);
+      setMensagem("Não foi possível gerar as mensalidades.");
+    } finally {
+      setGerandoMensalidades(false);
+    }
+  }
+
+  async function abrirFinanceiro() {
+    setMenu("Financeiro");
+    await carregarMensalidades(competenciaFinanceiro);
+  }
+
+  function alterarCompetenciaFinanceiro(valor: string) {
+    setCompetenciaFinanceiro(valor);
+    void carregarMensalidades(valor);
+  }
+
+  function editarMensalidade(item: Mensalidade) {
+    setMensalidadeEditando(item);
+  }
+
+  async function salvarEdicaoMensalidade(
+    item: Mensalidade,
+    valor: number,
+    vencimento: string,
+    situacao: string,
+    tipoPagamento: string,
+    observacoes: string
+  ) {
+    const { error } = await supabase
+      .from("mensalidades")
+      .update({
+        valor,
+        data_vencimento: vencimento || null,
+        situacao,
+        tipo_pagamento: tipoPagamento || null,
+        observacoes: observacoes || null,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem("Não foi possível atualizar a mensalidade.");
+      return;
+    }
+
+    setMensagem("Mensalidade atualizada com sucesso.");
+    setMensalidadeEditando(null);
+    await carregarMensalidades();
+  }
+
+  async function excluirMensalidade(item: Mensalidade) {
+    if (!window.confirm("Deseja realmente excluir esta mensalidade?")) return;
+
+    const { error } = await supabase
+      .from("mensalidades")
+      .delete()
+      .eq("id", item.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem("Não foi possível excluir a mensalidade.");
+      return;
+    }
+
+    setMensagem("Mensalidade excluída.");
+    await carregarMensalidades();
+  }
+
+  function abrirRegistroPagamento(item: Mensalidade) {
+    setMensalidadePagamento(item);
+    setArquivoComprovante(null);
+    setPagamentoForm({
+      valor: String(Number(item.valor || 0)),
+      data_pagamento: new Date().toISOString().slice(0, 10),
+      tipo_pagamento: item.tipo_pagamento || "pix",
+      observacoes: "",
+    });
+    setAbrirPagamento(true);
+  }
+
+  async function confirmarPagamento() {
+    if (!mensalidadePagamento) return;
+
+    setSalvando(true);
+    setMensagem("");
+
+    try {
+      let comprovantePath = mensalidadePagamento.comprovante_url || null;
+
+      if (arquivoComprovante) {
+        const extensao =
+          arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
+        const caminho = `mensalidades/${mensalidadePagamento.id}.${extensao}`;
+
+        const upload = await supabase.storage
+          .from("comprovantes-financeiro")
+          .upload(caminho, arquivoComprovante, {
+            upsert: true,
+            contentType: arquivoComprovante.type || "application/octet-stream",
+          });
+
+        if (upload.error) throw upload.error;
+        comprovantePath = caminho;
+      }
+
+      const { error } = await supabase
+        .from("mensalidades")
+        .update({
+          valor: Number(pagamentoForm.valor || 0),
+          situacao: "pago",
+          data_pagamento: pagamentoForm.data_pagamento || null,
+          tipo_pagamento: pagamentoForm.tipo_pagamento || null,
+          comprovante_url: comprovantePath,
+          observacoes: pagamentoForm.observacoes || null,
+        })
+        .eq("id", mensalidadePagamento.id);
+
+      if (error) throw error;
+
+      await supabase
+        .from("socios")
+        .update({
+          situacao_financeira: "em_dia",
+          data_ultimo_pagamento: pagamentoForm.data_pagamento || null,
+        })
+        .eq("id", mensalidadePagamento.socio_id);
+
+      setAbrirPagamento(false);
+      setMensalidadePagamento(null);
+      setArquivoComprovante(null);
+      setMensagem("Pagamento registrado com sucesso.");
+      await carregarMensalidades();
+      await carregarSocios();
+    } catch (error) {
+      console.error(error);
+      setMensagem("Não foi possível registrar o pagamento.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function abrirComprovante(path: string | null) {
+    if (!path) return;
+
+    const { data, error } = await supabase.storage
+      .from("comprovantes-financeiro")
+      .createSignedUrl(path, 60 * 10);
+
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      setMensagem("Não foi possível abrir o comprovante.");
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank");
+  }
+
   function selecionarFoto(file: File | null) {
     setFotoArquivo(file);
     if (file) {
@@ -255,6 +602,7 @@ export default function Home() {
 
   useEffect(() => {
     carregarSocios();
+    void carregarMensalidades(competenciaFinanceiro);
   }, []);
 
   function novoSocio() {
@@ -378,6 +726,8 @@ export default function Home() {
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
+      situacao_financeira: form.situacao_financeira || "isento",
+      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
     try {
@@ -553,7 +903,13 @@ export default function Home() {
             {menus.map((item) => (
               <button
                 key={item.nome}
-                onClick={() => setMenu(item.nome)}
+                onClick={() => {
+                    if (item.nome === "Financeiro") {
+                      void abrirFinanceiro();
+                    } else {
+                      setMenu(item.nome);
+                    }
+                  }}
                 className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
                   menu === item.nome
                     ? "bg-[#005a3c] text-white shadow-sm"
@@ -593,7 +949,13 @@ export default function Home() {
             {menus.map((item) => (
               <button
                 key={item.nome}
-                onClick={() => setMenu(item.nome)}
+                onClick={() => {
+                    if (item.nome === "Financeiro") {
+                      void abrirFinanceiro();
+                    } else {
+                      setMenu(item.nome);
+                    }
+                  }}
                 className={`rounded-xl p-3 text-xs font-semibold ${
                   menu === item.nome
                     ? "bg-[#005a3c] text-white"
@@ -645,10 +1007,30 @@ export default function Home() {
             />
           )}
 
+          {/* FINANCEIRO */}
+          {menu === "Financeiro" && (
+            <Financeiro
+              socios={socios}
+              mensalidades={mensalidades}
+              competencia={competenciaFinanceiro}
+              busca={buscaFinanceiro}
+              setBusca={setBuscaFinanceiro}
+              carregando={carregandoFinanceiro}
+              gerando={gerandoMensalidades}
+              gerarMensalidades={() => void gerarMensalidadesCompetencia()}
+              alterarCompetencia={alterarCompetenciaFinanceiro}
+              editarMensalidade={editarMensalidade}
+              excluirMensalidade={excluirMensalidade}
+              registrarPagamento={abrirRegistroPagamento}
+              abrirComprovante={abrirComprovante}
+            />
+          )}
+
           {/* OUTROS MÓDULOS */}
           {menu !== "Início" &&
             menu !== "Sócios" &&
-            menu !== "Dependentes" && (
+            menu !== "Dependentes" &&
+            menu !== "Financeiro" && (
               <ModuloEmConstrucao
                 nome={menu}
                 icone={
@@ -659,6 +1041,32 @@ export default function Home() {
 
         </section>
       </div>
+
+      {mensalidadeEditando && (
+        <ModalEdicaoMensalidade
+          item={mensalidadeEditando}
+          fechar={() => setMensalidadeEditando(null)}
+          salvar={salvarEdicaoMensalidade}
+        />
+      )}
+
+      {abrirPagamento && mensalidadePagamento && (
+        <ModalPagamentoGuarani
+          socio={socios.find((s) => s.id === mensalidadePagamento.socio_id) || null}
+          mensalidade={mensalidadePagamento}
+          form={pagamentoForm}
+          setForm={setPagamentoForm}
+          arquivo={arquivoComprovante}
+          setArquivo={setArquivoComprovante}
+          fechar={() => {
+            setAbrirPagamento(false);
+            setMensalidadePagamento(null);
+            setArquivoComprovante(null);
+          }}
+          salvar={() => void confirmarPagamento()}
+          salvando={salvando}
+        />
+      )}
 
       {/* MODAL CADASTRO */}
       {abrirCadastro && (
@@ -1145,6 +1553,580 @@ function Socios({
 }
 
 
+
+/* =========================
+   FINANCEIRO
+========================= */
+
+function formatarCompetencia(referencia: string) {
+  const [ano, mes] = referencia.split("-");
+  if (!ano || !mes) return referencia;
+  return `${mes}/${ano}`;
+}
+
+function formatarDataFinanceiro(data: string | null | undefined) {
+  if (!data) return "—";
+  const partes = data.slice(0, 10).split("-");
+  if (partes.length !== 3) return data;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+function Financeiro({
+  socios,
+  mensalidades,
+  competencia,
+  busca,
+  setBusca,
+  carregando,
+  gerando,
+  gerarMensalidades,
+  alterarCompetencia,
+  editarMensalidade,
+  excluirMensalidade,
+  registrarPagamento,
+  abrirComprovante,
+}: {
+  socios: Socio[];
+  mensalidades: Mensalidade[];
+  competencia: string;
+  busca: string;
+  setBusca: (valor: string) => void;
+  carregando: boolean;
+  gerando: boolean;
+  gerarMensalidades: () => void;
+  alterarCompetencia: (valor: string) => void;
+  editarMensalidade: (item: Mensalidade) => void;
+  excluirMensalidade: (item: Mensalidade) => void;
+  registrarPagamento: (item: Mensalidade) => void;
+  abrirComprovante: (path: string | null) => void;
+}) {
+  const termo = busca.toLowerCase().trim();
+
+  const filtradas = mensalidades.filter((item) => {
+    const socio = socios.find((s) => s.id === item.socio_id);
+    return (
+      !termo ||
+      socio?.nome?.toLowerCase().includes(termo) ||
+      String(socio?.matricula || "").includes(termo)
+    );
+  });
+
+  const total = filtradas.reduce((s, m) => s + Number(m.valor || 0), 0);
+  const recebido = filtradas
+    .filter((m) => m.situacao === "pago")
+    .reduce((s, m) => s + Number(m.valor || 0), 0);
+  const aberto = filtradas
+    .filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso")
+    .reduce((s, m) => s + Number(m.valor || 0), 0);
+  const atrasado = filtradas
+    .filter((m) => m.situacao === "em_atraso")
+    .reduce((s, m) => s + Number(m.valor || 0), 0);
+
+  const pessoasComMensalidade = socios.filter(
+    (s) => s.possui_mensalidade === true && s.situacao?.toLowerCase() !== "inativo"
+  ).length;
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div>
+          <p className="text-sm font-medium text-gray-500">Administração</p>
+          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Financeiro</h2>
+          <p className="mt-1 text-gray-500">
+            Controle mensal de cobranças, vencimentos e pagamentos.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <div className="rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
+            <label className="mr-2 text-xs font-bold text-gray-500">Competência</label>
+            <input
+              type="month"
+              value={competencia}
+              onChange={(e) => alterarCompetencia(e.target.value)}
+              className="font-semibold text-[#005a3c] outline-none"
+            />
+          </div>
+
+          <button
+            onClick={gerarMensalidades}
+            disabled={gerando}
+            className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
+          >
+            {gerando ? "Gerando..." : "⚡ Gerar mensalidades"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <ResumoFinanceiroGuarani titulo="Total lançado" valor={total} />
+        <ResumoFinanceiroGuarani titulo="Recebido" valor={recebido} />
+        <ResumoFinanceiroGuarani titulo="Em aberto" valor={aberto} />
+        <ResumoFinanceiroGuarani titulo="Em atraso" valor={atrasado} />
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">Com mensalidade</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{pessoasComMensalidade}</p>
+          <p className="mt-1 text-xs text-gray-500">Associados e dependentes</p>
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">🔎</span>
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar por nome ou matrícula..."
+            className="w-full bg-transparent py-2 outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <div>
+            <p className="font-bold text-[#003d2b]">
+              Competência {formatarCompetencia(competencia)}
+            </p>
+            <p className="mt-1 text-sm text-[#587066]">
+              O sistema cria automaticamente uma cobrança para cada pessoa com mensalidade,
+              sem duplicar registros existentes.
+            </p>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#005a3c] ring-1 ring-[#cfe3d8]">
+            {mensalidades.length} lançamento(s)
+          </span>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px]">
+            <thead className="bg-[#e8f3ee]">
+              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                <th className="px-5 py-4">Associado</th>
+                <th className="px-5 py-4">Competência</th>
+                <th className="px-5 py-4">Vencimento</th>
+                <th className="px-5 py-4">Valor</th>
+                <th className="px-5 py-4">Situação</th>
+                <th className="px-5 py-4">Pagamento</th>
+                <th className="px-5 py-4 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {carregando && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center text-gray-500">
+                    Carregando financeiro...
+                  </td>
+                </tr>
+              )}
+
+              {!carregando && filtradas.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center">
+                    <div className="text-4xl">💰</div>
+                    <p className="mt-3 font-semibold text-gray-700">
+                      Nenhuma mensalidade nesta competência
+                    </p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Clique em “Gerar mensalidades” para criar os lançamentos das pessoas com mensalidade.
+                    </p>
+                  </td>
+                </tr>
+              )}
+
+              {!carregando &&
+                filtradas.map((item) => {
+                  const socio = socios.find((s) => s.id === item.socio_id);
+
+                  return (
+                    <tr key={item.id} className="transition hover:bg-[#fafcfb]">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          {socio?.foto_url ? (
+                            <img
+                              src={socio.foto_url}
+                              alt={`Foto de ${socio.nome}`}
+                              className="h-11 w-11 rounded-full object-cover ring-2 ring-[#e8f3ee]"
+                            />
+                          ) : (
+                            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f3ee]">
+                              👤
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-bold text-[#173d2e]">
+                              {socio?.nome || "Associado não encontrado"}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Matrícula {socio?.matricula || "—"}
+                              {socio?.responsavel_id ? " · Dependente" : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 font-medium">
+                        {formatarCompetencia(competencia)}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        {formatarDataFinanceiro(item.data_vencimento)}
+                      </td>
+
+                      <td className="px-5 py-4 font-bold text-[#005a3c]">
+                        {formatarMoeda(item.valor)}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <span
+                          className={`rounded-full px-3 py-1.5 text-xs font-bold ${classeSituacaoFinanceira(
+                            item.situacao
+                          )}`}
+                        >
+                          {rotuloSituacaoFinanceira(item.situacao)}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-sm text-gray-600">
+                        {item.data_pagamento
+                          ? `${formatarDataFinanceiro(item.data_pagamento)} · ${
+                              item.tipo_pagamento || "—"
+                            }`
+                          : "—"}
+                        {item.comprovante_url && (
+                          <button
+                            onClick={() => abrirComprovante(item.comprovante_url)}
+                            className="ml-2 text-xs font-bold text-[#005a3c] underline"
+                          >
+                            Comprovante
+                          </button>
+                        )}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-2">
+                          {item.situacao !== "pago" && item.situacao !== "isento" && (
+                            <button
+                              onClick={() => registrarPagamento(item)}
+                              className="rounded-lg bg-[#005a3c] px-3 py-2 text-sm font-bold text-white"
+                            >
+                              💳 Pagar
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => editarMensalidade(item)}
+                            className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
+                          >
+                            ✏️
+                          </button>
+
+                          <button
+                            onClick={() => excluirMensalidade(item)}
+                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-600"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+        <h3 className="font-bold text-[#003d2b]">Como funciona</h3>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl bg-[#f7faf8] p-4">
+            <p className="font-bold text-[#005a3c]">1. Cadastre a mensalidade</p>
+            <p className="mt-1 text-sm text-gray-500">
+              Defina no cadastro de cada pessoa se possui mensalidade, valor e dia de vencimento.
+            </p>
+          </div>
+          <div className="rounded-xl bg-[#f7faf8] p-4">
+            <p className="font-bold text-[#005a3c]">2. Gere a competência</p>
+            <p className="mt-1 text-sm text-gray-500">
+              O sistema cria os lançamentos somente para quem ainda não possui cobrança naquele mês.
+            </p>
+          </div>
+          <div className="rounded-xl bg-[#f7faf8] p-4">
+            <p className="font-bold text-[#005a3c]">3. Registre o pagamento</p>
+            <p className="mt-1 text-sm text-gray-500">
+              Informe a forma, data e, se quiser, anexe o comprovante.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResumoFinanceiroGuarani({
+  titulo,
+  valor,
+}: {
+  titulo: string;
+  valor: number;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+      <p className="text-sm text-gray-500">{titulo}</p>
+      <p className="mt-1 text-2xl font-bold text-[#005a3c]">
+        {formatarMoeda(valor)}
+      </p>
+    </div>
+  );
+}
+
+function ModalEdicaoMensalidade({
+  item,
+  fechar,
+  salvar,
+}: {
+  item: Mensalidade;
+  fechar: () => void;
+  salvar: (
+    item: Mensalidade,
+    valor: number,
+    vencimento: string,
+    situacao: string,
+    tipoPagamento: string,
+    observacoes: string
+  ) => void;
+}) {
+  const [valor, setValor] = useState(String(item.valor ?? 0));
+  const [vencimento, setVencimento] = useState(item.data_vencimento || "");
+  const [situacao, setSituacao] = useState(item.situacao || "em_aberto");
+  const [tipoPagamento, setTipoPagamento] = useState(item.tipo_pagamento || "");
+  const [observacoes, setObservacoes] = useState(item.observacoes || "");
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#001f16]/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-6 py-5">
+          <div>
+            <p className="text-sm text-gray-500">Financeiro</p>
+            <h2 className="text-2xl font-bold text-[#005a3c]">Editar mensalidade</h2>
+          </div>
+          <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
+            ✕
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-6 md:grid-cols-2">
+          <Campo label="Valor" type="number" value={valor} onChange={setValor} />
+          <Campo label="Vencimento" type="date" value={vencimento} onChange={setVencimento} />
+
+          <SelectCampo
+            label="Situação"
+            value={situacao}
+            onChange={setSituacao}
+            opcoes={["em_aberto", "em_atraso", "pago", "isento"]}
+            labels={{
+              em_aberto: "Em aberto",
+              em_atraso: "Em atraso",
+              pago: "Pago",
+              isento: "Isento",
+            }}
+          />
+
+          <SelectCampo
+            label="Forma de pagamento"
+            value={tipoPagamento}
+            onChange={setTipoPagamento}
+            opcoes={["", "pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]}
+            labels={{
+              "": "Não informado",
+              pix: "PIX",
+              debito_em_conta: "Débito em conta",
+              boleto: "Boleto",
+              dinheiro: "Dinheiro",
+              transferencia: "Transferência",
+              outro: "Outro",
+            }}
+          />
+
+          <div className="md:col-span-2">
+            <label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label>
+            <textarea
+              value={observacoes}
+              onChange={(e) => setObservacoes(e.target.value)}
+              rows={3}
+              className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
+          <button
+            onClick={fechar}
+            className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() =>
+              salvar(
+                item,
+                Number(valor || 0),
+                vencimento,
+                situacao,
+                tipoPagamento,
+                observacoes
+              )
+            }
+            className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
+          >
+            Salvar alterações
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalPagamentoGuarani({
+  socio,
+  mensalidade,
+  form,
+  setForm,
+  arquivo,
+  setArquivo,
+  fechar,
+  salvar,
+  salvando,
+}: {
+  socio: Socio | null;
+  mensalidade: Mensalidade;
+  form: {
+    valor: string;
+    data_pagamento: string;
+    tipo_pagamento: string;
+    observacoes: string;
+  };
+  setForm: React.Dispatch<
+    React.SetStateAction<{
+      valor: string;
+      data_pagamento: string;
+      tipo_pagamento: string;
+      observacoes: string;
+    }>
+  >;
+  arquivo: File | null;
+  setArquivo: (file: File | null) => void;
+  fechar: () => void;
+  salvar: () => void;
+  salvando: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#001f16]/60 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-6 py-5">
+          <div>
+            <p className="text-sm text-gray-500">Financeiro</p>
+            <h2 className="text-2xl font-bold text-[#005a3c]">Registrar pagamento</h2>
+          </div>
+          <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-5 p-6">
+          <div className="rounded-2xl bg-[#e8f3ee] p-4">
+            <p className="text-xs text-gray-500">Associado</p>
+            <p className="font-bold text-[#003d2b]">{socio?.nome || "Associado"}</p>
+            <p className="mt-1 text-sm text-gray-600">
+              Competência: {formatarCompetencia(mensalidade.competencia.slice(0, 7))} ·{" "}
+              {formatarMoeda(mensalidade.valor)}
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Campo
+              label="Valor pago"
+              type="number"
+              value={form.valor}
+              onChange={(v) => setForm((x) => ({ ...x, valor: v }))}
+            />
+
+            <Campo
+              label="Data do pagamento"
+              type="date"
+              value={form.data_pagamento}
+              onChange={(v) => setForm((x) => ({ ...x, data_pagamento: v }))}
+            />
+
+            <SelectCampo
+              label="Forma de pagamento"
+              value={form.tipo_pagamento}
+              onChange={(v) => setForm((x) => ({ ...x, tipo_pagamento: v }))}
+              opcoes={["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]}
+              labels={{
+                pix: "PIX",
+                debito_em_conta: "Débito em conta",
+                boleto: "Boleto",
+                dinheiro: "Dinheiro",
+                transferencia: "Transferência",
+                outro: "Outro",
+              }}
+            />
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">
+                Comprovante
+              </label>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setArquivo(e.target.files?.[0] || null)}
+                className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm"
+              />
+              {arquivo && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Arquivo: {arquivo.name}
+                </p>
+              )}
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-gray-700">
+                Observações
+              </label>
+              <textarea
+                value={form.observacoes}
+                onChange={(e) => setForm((x) => ({ ...x, observacoes: e.target.value }))}
+                rows={3}
+                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
+          <button
+            onClick={fechar}
+            className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={salvar}
+            disabled={salvando}
+            className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60"
+          >
+            {salvando ? "Salvando..." : "Confirmar pagamento"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* =========================
    DEPENDENTES / FAMÍLIAS
 ========================= */
@@ -1167,7 +2149,7 @@ function Dependentes({
     return socios.filter((s) => s.responsavel_id === id);
   }
 
-  function arvore(pessoa: Socio, nivel = 0): React.ReactNode {
+  function arvore(pessoa: Socio, nivel = 0): ReactNode {
     const filhos = filhosDe(pessoa.id);
 
     return (
@@ -1790,7 +2772,7 @@ function FormularioSecao({
   children,
 }: {
   titulo: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div>
