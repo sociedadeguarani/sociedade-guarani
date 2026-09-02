@@ -368,7 +368,7 @@ export default function Home() {
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
 
-      tipo_socio: form.tipo_socio || "patrimonial",
+      tipo_socio: form.tipo_socio || "patrimonial_individual",
       responsavel_id: form.responsavel_id || null,
       parentesco: form.parentesco || null,
       possui_mensalidade: Boolean(form.possui_mensalidade),
@@ -636,15 +636,26 @@ export default function Home() {
             />
           )}
 
-          {/* OUTROS MÓDULOS */}
-          {menu !== "Início" && menu !== "Sócios" && (
-            <ModuloEmConstrucao
-              nome={menu}
-              icone={
-                menus.find((x) => x.nome === menu)?.icone || "📋"
-              }
+          {/* DEPENDENTES / FAMÍLIAS */}
+          {menu === "Dependentes" && (
+            <Dependentes
+              socios={socios}
+              novoDependente={novoDependente}
+              editarSocio={editarSocio}
             />
           )}
+
+          {/* OUTROS MÓDULOS */}
+          {menu !== "Início" &&
+            menu !== "Sócios" &&
+            menu !== "Dependentes" && (
+              <ModuloEmConstrucao
+                nome={menu}
+                icone={
+                  menus.find((x) => x.nome === menu)?.icone || "📋"
+                }
+              />
+            )}
 
         </section>
       </div>
@@ -1129,6 +1140,207 @@ function Socios({
 
       </div>
 
+    </div>
+  );
+}
+
+
+/* =========================
+   DEPENDENTES / FAMÍLIAS
+========================= */
+
+function Dependentes({
+  socios,
+  novoDependente,
+  editarSocio,
+}: {
+  socios: Socio[];
+  novoDependente: (responsavel: Socio) => void;
+  editarSocio: (socio: Socio) => void;
+}) {
+  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
+  const responsaveis = socios.filter((s) => podeTerDependentes(s.tipo_socio));
+
+  function filhosDe(id: string) {
+    return socios.filter((s) => s.responsavel_id === id);
+  }
+
+  function arvore(pessoa: Socio, nivel = 0): React.ReactNode {
+    const filhos = filhosDe(pessoa.id);
+
+    return (
+      <div key={pessoa.id}>
+        <div
+          className="flex flex-col gap-4 rounded-2xl border border-[#dfe9e3] bg-white p-4 shadow-sm sm:flex-row sm:items-center"
+          style={{ marginLeft: nivel * 24 }}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            {pessoa.foto_url ? (
+              <img
+                src={pessoa.foto_url}
+                alt={`Foto de ${pessoa.nome}`}
+                className="h-14 w-14 shrink-0 rounded-full object-cover ring-2 ring-[#e8f3ee]"
+              />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#e8f3ee] text-2xl">
+                👤
+              </div>
+            )}
+
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-bold text-[#173d2e]">
+                  {pessoa.nome}
+                </p>
+
+                {nivel === 0 && (
+                  <span className="rounded-full bg-[#005a3c] px-2.5 py-1 text-[10px] font-bold text-white">
+                    TITULAR / RESPONSÁVEL
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-1 text-xs text-gray-500">
+                Matrícula {pessoa.matricula || "—"} ·{" "}
+                {tipoSocioLabel(pessoa.tipo_socio)}
+              </p>
+
+              {pessoa.responsavel_id && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Parentesco: {pessoa.parentesco || "Não informado"}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {pessoa.possui_mensalidade ? (
+              <span className="rounded-full bg-[#fff4cc] px-3 py-1.5 text-xs font-bold text-[#8a6700]">
+                R$ {Number(pessoa.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
+              </span>
+            ) : (
+              <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-500">
+                Sem mensalidade
+              </span>
+            )}
+
+            <button
+              onClick={() => editarSocio(pessoa)}
+              className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c] hover:bg-[#dce8df]"
+            >
+              ✏️ Editar
+            </button>
+
+            {podeTerDependentes(pessoa.tipo_socio) && (
+              <button
+                onClick={() => novoDependente(pessoa)}
+                className="rounded-xl bg-[#005a3c] px-3 py-2 text-sm font-bold text-white hover:bg-[#003d2b]"
+              >
+                👨‍👩‍👧 + Dependente
+              </button>
+            )}
+          </div>
+        </div>
+
+        {filhos.length > 0 && (
+          <div className="mt-3 space-y-3 border-l-2 border-[#cfe3d8] pl-3">
+            {filhos.map((filho) => arvore(filho, nivel + 1))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const raizes = socios.filter(
+    (s) =>
+      !s.responsavel_id &&
+      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
+  );
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-sm font-medium text-gray-500">
+            Administração
+          </p>
+          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
+            Famílias e Dependentes
+          </h2>
+          <p className="mt-1 text-gray-500">
+            Visualize a estrutura familiar e quem está vinculado a cada responsável.
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">Pessoas cadastradas</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{socios.length}</p>
+        </div>
+
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">Dependentes</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{dependentes.length}</p>
+        </div>
+
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">Responsáveis familiares</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{responsaveis.length}</p>
+        </div>
+      </div>
+
+      {socios.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-[#cfe3d8] bg-white p-12 text-center shadow-sm">
+          <div className="text-5xl">👨‍👩‍👧‍👦</div>
+          <h3 className="mt-4 text-lg font-bold text-[#173d2e]">
+            Nenhuma família cadastrada
+          </h3>
+          <p className="mt-2 text-sm text-gray-500">
+            Cadastre um Sócio Patrimonial Familiar ou Sócio Contribuinte Familiar para começar.
+          </p>
+        </div>
+      ) : raizes.length === 0 ? (
+        <div className="rounded-3xl border border-[#e2ebe6] bg-white p-8 text-center shadow-sm">
+          <p className="font-semibold text-gray-700">
+            Ainda não há uma família com dependentes.
+          </p>
+          <p className="mt-1 text-sm text-gray-500">
+            Os sócios individuais também aparecem no módulo Sócios.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {raizes.map((raiz) => (
+            <div
+              key={raiz.id}
+              className="rounded-3xl border border-[#dfe9e3] bg-[#f7faf8] p-4 shadow-sm sm:p-5"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-wider text-[#91a099]">
+                    Grupo familiar
+                  </p>
+                  <p className="font-bold text-[#005a3c]">
+                    {raiz.nome}
+                  </p>
+                </div>
+
+                {podeTerDependentes(raiz.tipo_socio) && (
+                  <button
+                    onClick={() => novoDependente(raiz)}
+                    className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-bold text-white hover:bg-[#003d2b]"
+                  >
+                    + Adicionar dependente
+                  </button>
+                )}
+              </div>
+
+              {arvore(raiz)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
