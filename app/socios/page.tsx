@@ -286,8 +286,10 @@ export default function SociosPage() {
       setMensagem(socioEditando ? "Sócio atualizado com sucesso!" : "Sócio cadastrado com sucesso!");
       setFotoArquivo(null); await carregarSocios();
       setTimeout(() => { setAbrirCadastro(false); setSocioEditando(null); setMensagem(""); }, 900);
-    } catch (error) {
-      console.error(error); setMensagem("Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados.");
+    } catch (error: any) {
+      console.error("ERRO AO SALVAR SÓCIO:", error);
+      const detalhe = error?.message || error?.details || error?.hint || "Erro desconhecido.";
+      setMensagem(`Erro ao salvar: ${detalhe}`);
     } finally { setSalvando(false); }
   }
 
