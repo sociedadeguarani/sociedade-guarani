@@ -45,6 +45,7 @@ type Socio = {
 };
 
 const socioInicial: Partial<Socio> = {
+  matricula: null,
   nome: "", cpf: "", rg: "", data_nascimento: "", telefone: "", whatsapp: "",
   email: "", endereco: "", numero: "", bairro: "", cidade: "", estado: "RS",
   cep: "", data_associacao: "", categoria: "Titular", situacao: "ativo",
@@ -205,8 +206,20 @@ export default function SociosPage() {
 
   async function salvarSocio() {
     if (!form.nome?.trim()) { setMensagem("Informe o nome completo do sócio."); return; }
+
+    const matriculaInformada =
+      form.matricula === null || form.matricula === undefined || String(form.matricula).trim() === ""
+        ? null
+        : Number(form.matricula);
+
+    if (matriculaInformada !== null && (!Number.isInteger(matriculaInformada) || matriculaInformada <= 0)) {
+      setMensagem("A matrícula deve ser um número inteiro maior que zero.");
+      return;
+    }
+
     setSalvando(true); setMensagem("");
     const dadosBase = {
+      matricula: matriculaInformada,
       nome: form.nome.trim(), cpf: form.cpf || null, rg: form.rg || null, data_nascimento: form.data_nascimento || null,
       telefone: form.telefone || null, whatsapp: form.whatsapp || null, email: form.email || null,
       endereco: form.endereco || null, numero: form.numero || null, bairro: form.bairro || null, cidade: form.cidade || null,
@@ -221,6 +234,38 @@ export default function SociosPage() {
     };
     try {
       let socioId = socioEditando?.id || "";
+      let matriculaFinal = matriculaInformada;
+
+      if (!socioEditando && matriculaFinal === null) {
+        const { data: ultimaMatricula, error: erroMatricula } = await supabase
+          .from("socios")
+          .select("matricula")
+          .not("matricula", "is", null)
+          .order("matricula", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (erroMatricula) throw erroMatricula;
+        matriculaFinal = Number(ultimaMatricula?.matricula || 0) + 1;
+      }
+
+      if (matriculaFinal !== null) {
+        const consultaDuplicada = await supabase
+          .from("socios")
+          .select("id, nome")
+          .eq("matricula", matriculaFinal)
+          .maybeSingle();
+
+        if (consultaDuplicada.error) throw consultaDuplicada.error;
+
+        if (consultaDuplicada.data && consultaDuplicada.data.id !== socioEditando?.id) {
+          setMensagem(`A matrícula ${matriculaFinal} já está cadastrada para ${consultaDuplicada.data.nome}.`);
+          return;
+        }
+      }
+
+      dadosBase.matricula = matriculaFinal;
+
       if (socioEditando) {
         const resultado = await supabase.from("socios").update({ ...dadosBase, foto_url: form.foto_url || null }).eq("id", socioEditando.id);
         if (resultado.error) throw resultado.error;
@@ -843,6 +888,18 @@ function ModalSocio({
 
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
+
+            <Campo
+              label="Matrícula"
+              type="number"
+              value={form.matricula ?? ""}
+              onChange={(v) => alterarCampo("matricula", v)}
+              placeholder="Ex.: 157"
+            />
+
+            <div className="flex items-end pb-2">
+              <p className="text-xs text-gray-500">Deixe em branco para gerar automaticamente a próxima matrícula disponível.</p>
+            </div>
 
             <Campo
               label="Data de associação"
