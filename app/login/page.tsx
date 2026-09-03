@@ -16,7 +16,6 @@ export default function LoginPage() {
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
-
     setErro("");
     setCarregando(true);
 
@@ -31,7 +30,7 @@ export default function LoginPage() {
       return;
     }
 
-    window.location.href = "/";
+    window.location.replace("/painel");
   }
 
   return (
@@ -85,13 +84,7 @@ export default function LoginPage() {
             Sociedade Guarani
           </h1>
 
-          <p
-            style={{
-              marginTop: "8px",
-              color: "#66736D",
-              fontSize: "14px",
-            }}
-          >
+          <p style={{ marginTop: "8px", color: "#66736D", fontSize: "14px" }}>
             Sistema de Gestão
           </p>
         </div>
