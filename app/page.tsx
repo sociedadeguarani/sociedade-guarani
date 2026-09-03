@@ -630,8 +630,6 @@ export default function Home() {
         return;
       }
 
-      if (!montado) return;
-
       await carregarSocios();
       await carregarMensalidades(competenciaFinanceiro);
 
@@ -655,19 +653,6 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
-
-  if (verificandoLogin) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" />
-          <p className="font-semibold text-[#005a3c]">
-            Verificando acesso...
-          </p>
-        </div>
-      </main>
-    );
-  }
 
   function novoSocio() {
     setSocioEditando(null);
@@ -910,6 +895,19 @@ export default function Home() {
       return correspondeBusca && correspondeTipo;
     });
   }, [socios, busca, mostrarSomenteDependentes]);
+
+  if (verificandoLogin) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" />
+          <p className="font-semibold text-[#005a3c]">
+            Verificando acesso...
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
