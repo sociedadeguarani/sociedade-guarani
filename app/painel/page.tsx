@@ -1289,7 +1289,9 @@ function Inicio({
         </p>
 
         <button
-          onClick={abrirCadastro}
+          onClick={() => {
+            window.location.href = "/socios";
+          }}
           className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
         >
           👤 Cadastrar novo sócio
