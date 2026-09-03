@@ -990,6 +990,8 @@ export default function Home() {
                       void abrirFinanceiro();
                     } else if (item.nome === "Relatórios") {
                       abrirRelatorios();
+                    } else if (item.nome === "Sócios") {
+                      window.location.href = "/socios";
                     } else {
                       setMenu(item.nome);
                     }
@@ -1038,6 +1040,8 @@ export default function Home() {
                       void abrirFinanceiro();
                     } else if (item.nome === "Relatórios") {
                       abrirRelatorios();
+                    } else if (item.nome === "Sócios") {
+                      window.location.href = "/socios";
                     } else {
                       setMenu(item.nome);
                     }
