@@ -140,6 +140,12 @@ export default function DependentesPage() {
       parentesco: "",
       telefone: "",
       ativo: true,
+      possui_mensalidade: false,
+      valor_mensalidade: 0,
+      dia_vencimento: 10,
+      tipo_pagamento: "pix",
+      situacao_financeira: "isento",
+      data_ultimo_pagamento: "",
     });
     setErro("");
     setSucesso("");
@@ -411,4 +417,3 @@ export default function DependentesPage() {
     </main>
   );
 }
-
