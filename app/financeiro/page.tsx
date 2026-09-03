@@ -55,7 +55,6 @@ type Mensalidade = {
   tipo_pagamento: string | null;
   comprovante_url: string | null;
   observacoes: string | null;
-  numero_recibo?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -224,8 +223,6 @@ function tipoSocioClasse(tipo?: string | null) {
 
 export default function Home() {
   const [menu, setMenu] = useState("Início");
-  const [verificandoLogin, setVerificandoLogin] = useState(true);
-  const [usuarioEmail, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [busca, setBusca] = useState("");
@@ -249,7 +246,6 @@ export default function Home() {
   const [mensalidadeEditando, setMensalidadeEditando] = useState<Mensalidade | null>(null);
   const [abrirPagamento, setAbrirPagamento] = useState(false);
   const [mensalidadePagamento, setMensalidadePagamento] = useState<Mensalidade | null>(null);
-  const [reciboMensalidade, setReciboMensalidade] = useState<Mensalidade | null>(null);
   const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
   const [pagamentoForm, setPagamentoForm] = useState({
     valor: "",
@@ -258,52 +254,46 @@ export default function Home() {
     observacoes: "",
   });
 
-  const [relatorioCompetencia, setRelatorioCompetencia] = useState(new Date().toISOString().slice(0, 7));
-  const [relatorioMensalidades, setRelatorioMensalidades] = useState<Mensalidade[]>([]);
-  const [relatorioFormaPagamento, setRelatorioFormaPagamento] = useState("todas");
-  const [relatorioSituacao, setRelatorioSituacao] = useState("todas");
-  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
 
-  useEffect(() => {
-    let montado = true;
+  function primeiroDiaDoMes(referencia: string) {
+    return `${referencia}-01`;
+  }
 
-    async function verificarSessao() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  function formatarMoeda(valor: number | null | undefined) {
+    return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
+  }
 
-      if (!session) {
-        window.location.replace("/login");
-        return;
-      }
+  function calcularVencimento(referencia: string, dia: number | null | undefined) {
+    const [ano, mes] = referencia.split("-").map(Number);
+    const ultimoDia = new Date(ano, mes, 0).getDate();
+    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
+    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
+  }
 
-      if (montado) {
-        setUsuarioEmail(session.user.email || "");
-        setVerificandoLogin(false);
-      }
+  function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "Pago";
+      case "em_atraso":
+        return "Em atraso";
+      case "isento":
+        return "Isento";
+      default:
+        return "Em aberto";
     }
+  }
 
-    void verificarSessao();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        window.location.replace("/login");
-      } else if (montado) {
-        setUsuarioEmail(session.user.email || "");
-      }
-    });
-
-    return () => {
-      montado = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function sair() {
-    await supabase.auth.signOut();
-    window.location.replace("/login");
+  function classeSituacaoFinanceira(situacao: string | null | undefined) {
+    switch (situacao) {
+      case "pago":
+        return "bg-green-100 text-green-700";
+      case "em_atraso":
+        return "bg-red-100 text-red-700";
+      case "isento":
+        return "bg-gray-100 text-gray-600";
+      default:
+        return "bg-yellow-100 text-yellow-700";
+    }
   }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
@@ -522,30 +512,6 @@ export default function Home() {
         comprovantePath = caminho;
       }
 
-      const competenciaRecibo = mensalidadePagamento.competencia.slice(0, 7);
-
-      const { data: recibosExistentes, error: erroRecibos } = await supabase
-        .from("mensalidades")
-        .select("numero_recibo")
-        .eq("competencia", mensalidadePagamento.competencia)
-        .not("numero_recibo", "is", null);
-
-      if (erroRecibos) throw erroRecibos;
-
-      const numerosExistentes = (recibosExistentes || [])
-        .map((item: { numero_recibo?: string | null }) => {
-          const numero = String(item.numero_recibo || "");
-          const parte = numero.split("-").pop() || "";
-          return Number(parte);
-        })
-        .filter((numero: number) => Number.isFinite(numero) && numero > 0);
-
-      const proximoNumero =
-        numerosExistentes.length > 0 ? Math.max(...numerosExistentes) + 1 : 1;
-      const numeroRecibo = `REC-${competenciaRecibo.replace("-", "")}-${String(
-        proximoNumero
-      ).padStart(3, "0")}`;
-
       const { error } = await supabase
         .from("mensalidades")
         .update({
@@ -555,7 +521,6 @@ export default function Home() {
           tipo_pagamento: pagamentoForm.tipo_pagamento || null,
           comprovante_url: comprovantePath,
           observacoes: pagamentoForm.observacoes || null,
-          numero_recibo: numeroRecibo,
         })
         .eq("id", mensalidadePagamento.id);
 
@@ -615,30 +580,6 @@ export default function Home() {
       ...atual,
       foto_url: "",
     }));
-  }
-
-  async function carregarRelatorioFinanceiro(referencia = relatorioCompetencia) {
-    setCarregandoRelatorio(true);
-    const competencia = primeiroDiaDoMes(referencia);
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("*")
-      .eq("competencia", competencia)
-      .order("data_vencimento", { ascending: true });
-
-    if (error) {
-      console.error(error);
-      setRelatorioMensalidades([]);
-      setMensagem("Erro ao carregar o relatório financeiro.");
-    } else {
-      setRelatorioMensalidades((data || []) as Mensalidade[]);
-    }
-    setCarregandoRelatorio(false);
-  }
-
-  function abrirRelatorios() {
-    setMenu("Relatórios");
-    void carregarRelatorioFinanceiro(relatorioCompetencia);
   }
 
   async function carregarSocios() {
@@ -906,19 +847,6 @@ export default function Home() {
     });
   }, [socios, busca, mostrarSomenteDependentes]);
 
-  if (verificandoLogin) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" />
-          <p className="font-semibold text-[#005a3c]">
-            Verificando acesso...
-          </p>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
@@ -948,24 +876,14 @@ export default function Home() {
 
           </div>
 
-          <div className="hidden items-center gap-4 sm:flex">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">
-                {usuarioEmail || "Usuário autenticado"}
-              </p>
+          <div className="hidden items-center gap-3 sm:flex">
+            <p className="text-sm text-gray-200">
+              Sistema de Gestão
+            </p>
 
-              <p className="font-bold text-[#005a3c]">
-                Área Administrativa
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={sair}
-              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
-            >
-              Sair
-            </button>
+            <p className="font-bold text-[#005a3c]">
+              Área Administrativa
+            </p>
           </div>
 
         </div>
@@ -987,11 +905,7 @@ export default function Home() {
                 key={item.nome}
                 onClick={() => {
                     if (item.nome === "Financeiro") {
-                      window.location.href = "/financeiro";
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else if (item.nome === "Sócios") {
-                      window.location.href = "/socios";
+                      void abrirFinanceiro();
                     } else {
                       setMenu(item.nome);
                     }
@@ -1037,11 +951,7 @@ export default function Home() {
                 key={item.nome}
                 onClick={() => {
                     if (item.nome === "Financeiro") {
-                      window.location.href = "/financeiro";
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else if (item.nome === "Sócios") {
-                      window.location.href = "/socios";
+                      void abrirFinanceiro();
                     } else {
                       setMenu(item.nome);
                     }
@@ -1113,25 +1023,6 @@ export default function Home() {
               excluirMensalidade={excluirMensalidade}
               registrarPagamento={abrirRegistroPagamento}
               abrirComprovante={abrirComprovante}
-              emitirRecibo={(item) => setReciboMensalidade(item)}
-            />
-          )}
-
-          {/* RELATÓRIOS FINANCEIROS */}
-          {menu === "Relatórios" && (
-            <RelatoriosFinanceiros
-              socios={socios}
-              mensalidades={relatorioMensalidades}
-              competencia={relatorioCompetencia}
-              setCompetencia={(valor) => {
-                setRelatorioCompetencia(valor);
-                void carregarRelatorioFinanceiro(valor);
-              }}
-              formaPagamento={relatorioFormaPagamento}
-              setFormaPagamento={setRelatorioFormaPagamento}
-              situacao={relatorioSituacao}
-              setSituacao={setRelatorioSituacao}
-              carregando={carregandoRelatorio}
             />
           )}
 
@@ -1139,8 +1030,7 @@ export default function Home() {
           {menu !== "Início" &&
             menu !== "Sócios" &&
             menu !== "Dependentes" &&
-            menu !== "Financeiro" &&
-             menu !== "Relatórios" && (
+            menu !== "Financeiro" && (
               <ModuloEmConstrucao
                 nome={menu}
                 icone={
@@ -1175,14 +1065,6 @@ export default function Home() {
           }}
           salvar={() => void confirmarPagamento()}
           salvando={salvando}
-        />
-      )}
-
-      {reciboMensalidade && (
-        <ReciboPagamentoGuarani
-          socio={socios.find((s) => s.id === reciboMensalidade.socio_id) || null}
-          mensalidade={reciboMensalidade}
-          fechar={() => setReciboMensalidade(null)}
         />
       )}
 
@@ -1289,9 +1171,7 @@ function Inicio({
         </p>
 
         <button
-          onClick={() => {
-            window.location.href = "/socios";
-          }}
+          onClick={abrirCadastro}
           className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
         >
           👤 Cadastrar novo sócio
@@ -1678,47 +1558,6 @@ function Socios({
    FINANCEIRO
 ========================= */
 
-function primeiroDiaDoMes(referencia: string) {
-    return `${referencia}-01`;
-  }
-
-function calcularVencimento(referencia: string, dia: number | null | undefined) {
-    const [ano, mes] = referencia.split("-").map(Number);
-    const ultimoDia = new Date(ano, mes, 0).getDate();
-    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
-    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
-  }
-
-function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "Pago";
-      case "em_atraso":
-        return "Em atraso";
-      case "isento":
-        return "Isento";
-      default:
-        return "Em aberto";
-    }
-  }
-
-function classeSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "bg-green-100 text-green-700";
-      case "em_atraso":
-        return "bg-red-100 text-red-700";
-      case "isento":
-        return "bg-gray-100 text-gray-600";
-      default:
-        return "bg-yellow-100 text-yellow-700";
-    }
-  }
-
-function formatarMoeda(valor: number | null | undefined) {
-  return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
-}
-
 function formatarCompetencia(referencia: string) {
   const [ano, mes] = referencia.split("-");
   if (!ano || !mes) return referencia;
@@ -1746,7 +1585,6 @@ function Financeiro({
   excluirMensalidade,
   registrarPagamento,
   abrirComprovante,
-  emitirRecibo,
 }: {
   socios: Socio[];
   mensalidades: Mensalidade[];
@@ -1761,7 +1599,6 @@ function Financeiro({
   excluirMensalidade: (item: Mensalidade) => void;
   registrarPagamento: (item: Mensalidade) => void;
   abrirComprovante: (path: string | null) => void;
-  emitirRecibo: (item: Mensalidade) => void;
 }) {
   const termo = busca.toLowerCase().trim();
 
@@ -1979,16 +1816,6 @@ function Financeiro({
                             </button>
                           )}
 
-                          {item.situacao === "pago" && (
-                            <button
-                              onClick={() => emitirRecibo(item)}
-                              className="rounded-lg bg-[#fff4cc] px-3 py-2 text-sm font-bold text-[#705c00]"
-                              title="Emitir recibo"
-                            >
-                              🧾 Recibo
-                            </button>
-                          )}
-
                           <button
                             onClick={() => editarMensalidade(item)}
                             className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
@@ -2044,13 +1871,13 @@ function ResumoFinanceiroGuarani({
   valor,
 }: {
   titulo: string;
-  valor: string | number;
+  valor: number;
 }) {
   return (
     <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
       <p className="text-sm text-gray-500">{titulo}</p>
       <p className="mt-1 text-2xl font-bold text-[#005a3c]">
-        {typeof valor === "number" ? formatarMoeda(valor) : valor}
+        {formatarMoeda(valor)}
       </p>
     </div>
   );
@@ -2160,183 +1987,6 @@ function ModalEdicaoMensalidade({
         </div>
       </div>
     </div>
-  );
-}
-
-function ReciboPagamentoGuarani({
-  socio,
-  mensalidade,
-  fechar,
-}: {
-  socio: Socio | null;
-  mensalidade: Mensalidade;
-  fechar: () => void;
-}) {
-  const numeroRecibo =
-    mensalidade.numero_recibo ||
-    `REC-${mensalidade.competencia.slice(0, 7).replace("-", "")}-${
-      socio?.matricula || mensalidade.id.slice(0, 8).toUpperCase()
-    }`;
-
-  const formaPagamento: Record<string, string> = {
-    pix: "PIX",
-    debito_em_conta: "Débito em conta",
-    boleto: "Boleto",
-    dinheiro: "Dinheiro",
-    transferencia: "Transferência",
-    outro: "Outro",
-  };
-
-  return (
-    <>
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-
-          html,
-          body {
-            width: 210mm !important;
-            min-height: 297mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-          }
-
-          body * {
-            visibility: hidden !important;
-          }
-
-          .recibo-overlay {
-            position: static !important;
-            display: block !important;
-            width: 210mm !important;
-            min-height: 297mm !important;
-            padding: 0 !important;
-            background: white !important;
-            overflow: visible !important;
-          }
-
-          .recibo-impressao,
-          .recibo-impressao * {
-            visibility: visible !important;
-          }
-
-          .recibo-impressao {
-            position: relative !important;
-            left: auto !important;
-            top: auto !important;
-            width: 210mm !important;
-            min-height: 297mm !important;
-            max-height: none !important;
-            margin: 0 !important;
-            padding: 18mm !important;
-            overflow: visible !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            border: 0 !important;
-          }
-
-          .print-hide {
-            display: none !important;
-          }
-        }
-      `}</style>
-
-      <div className="recibo-overlay fixed inset-0 z-[80] flex items-center justify-center bg-[#001f16]/70 p-4 backdrop-blur-sm">
-        <div className="recibo-impressao max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-          <div className="print-hide flex items-center justify-between border-b px-6 py-5">
-            <div>
-              <p className="text-sm text-gray-500">Financeiro</p>
-              <h2 className="text-2xl font-bold text-[#005a3c]">Recibo de pagamento</h2>
-            </div>
-            <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
-              ✕
-            </button>
-          </div>
-
-          <div className="p-8 sm:p-10">
-            <div className="flex items-start justify-between gap-6 border-b-2 border-[#005a3c] pb-6">
-              <div className="flex items-center gap-4">
-                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-20 w-20 object-contain" />
-                <div>
-                  <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">Sociedade Guarani</h1>
-                  <p className="text-sm text-gray-600">Sociedade Recreativa Guarani — S.R.G.</p>
-                  <p className="mt-1 text-xs text-gray-500">Recibo de pagamento de mensalidade</p>
-                </div>
-              </div>
-              <div className="text-right text-xs text-gray-500">
-                <p className="font-bold text-[#003d2b]">Nº do recibo</p>
-                <p className="mt-1 font-mono text-sm">{numeroRecibo}</p>
-              </div>
-            </div>
-
-            <div className="mt-8 space-y-5">
-              <div className="rounded-2xl bg-[#e8f3ee] p-5">
-                <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Associado</p>
-                <p className="mt-1 text-xl font-bold uppercase text-[#003d2b]">
-                  {socio?.nome || "Associado não encontrado"}
-                </p>
-                <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-3">
-                  <p><strong>Matrícula:</strong> {socio?.matricula || "—"}</p>
-                  <p><strong>CPF:</strong> {socio?.cpf || "—"}</p>
-                  <p><strong>Tipo:</strong> {tipoSocioLabel(socio?.tipo_socio)}</p>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Competência</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">{formatarCompetencia(mensalidade.competencia.slice(0, 7))}</p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Data do pagamento</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">{formatarDataFinanceiro(mensalidade.data_pagamento)}</p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Forma de pagamento</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">
-                    {formaPagamento[mensalidade.tipo_pagamento || ""] || mensalidade.tipo_pagamento || "—"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Valor pago</p>
-                  <p className="mt-1 text-xl font-extrabold text-[#005a3c]">{formatarMoeda(mensalidade.valor)}</p>
-                </div>
-              </div>
-
-              {mensalidade.observacoes && (
-                <div className="rounded-xl border border-[#dfe9e3] p-4 text-sm">
-                  <p className="font-bold text-[#003d2b]">Observações</p>
-                  <p className="mt-1 text-gray-600">{mensalidade.observacoes}</p>
-                </div>
-              )}
-
-              <p className="pt-4 text-center text-sm leading-6 text-gray-600">
-                Recebemos do associado acima identificado o valor referente à mensalidade indicada neste recibo.
-              </p>
-
-              <div className="pt-14 text-center">
-                <div className="mx-auto w-64 border-t border-gray-400 pt-2 text-sm text-gray-600">
-                  Sociedade Recreativa Guarani
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="print-hide flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
-            <button onClick={fechar} className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700">
-              Fechar
-            </button>
-            <button onClick={() => window.print()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">
-              🖨️ Imprimir / Salvar PDF
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -3257,68 +2907,6 @@ function DashboardCard({
         {descricao}
       </p>
 
-    </div>
-  );
-}
-
-function RelatoriosFinanceiros({
-  socios, mensalidades, competencia, setCompetencia, formaPagamento, setFormaPagamento, situacao, setSituacao, carregando,
-}: {
-  socios: Socio[]; mensalidades: Mensalidade[]; competencia: string; setCompetencia: (valor: string) => void;
-  formaPagamento: string; setFormaPagamento: (valor: string) => void; situacao: string; setSituacao: (valor: string) => void; carregando: boolean;
-}) {
-  const formas: Record<string, string> = { pix: "PIX", debito_em_conta: "Débito em conta", boleto: "Boleto", dinheiro: "Dinheiro", transferencia: "Transferência", outro: "Outro" };
-  const situacoes: Record<string, string> = { pago: "Pago", em_aberto: "Em aberto", em_atraso: "Em atraso", isento: "Isento" };
-  const filtradas = mensalidades.filter((m) =>
-    (formaPagamento === "todas" || (m.tipo_pagamento || "") === formaPagamento) &&
-    (situacao === "todas" || (m.situacao || "") === situacao)
-  );
-  const soma = (lista: Mensalidade[]) => lista.reduce((s, m) => s + Number(m.valor || 0), 0);
-  const total = soma(filtradas);
-  const recebido = soma(filtradas.filter((m) => m.situacao === "pago"));
-  const aberto = soma(filtradas.filter((m) => m.situacao === "em_aberto"));
-  const atrasado = soma(filtradas.filter((m) => m.situacao === "em_atraso"));
-  const isento = soma(filtradas.filter((m) => m.situacao === "isento"));
-  const pagos = filtradas.filter((m) => m.situacao === "pago").length;
-  const abertos = filtradas.filter((m) => m.situacao === "em_aberto").length;
-  const atrasados = filtradas.filter((m) => m.situacao === "em_atraso").length;
-  const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const dataBR = (v?: string | null) => v ? `${v.slice(8,10)}/${v.slice(5,7)}/${v.slice(0,4)}` : "—";
-  const compBR = `${competencia.slice(5,7)}/${competencia.slice(0,4)}`;
-  const porForma = Object.entries(formas).map(([codigo, label]) => {
-    const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
-    return { codigo, label, qtd: itens.length, valor: soma(itens) };
-  }).filter((x) => x.qtd > 0);
-  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
-
-  return (
-    <div className="relatorio-area">
-      <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
-      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
-        <div className="relatorio-acoes"><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
-      </div>
-      <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Forma de pagamento</label><select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(formas).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Situação</label><select value={situacao} onChange={(e) => setSituacao(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(situacoes).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-      </div>
-      {carregando ? <div className="rounded-2xl border border-[#e2ebe6] bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório...</div> : <>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <ResumoFinanceiroGuarani titulo="Total lançado" valor={moeda(total)} /><ResumoFinanceiroGuarani titulo="Recebido" valor={moeda(recebido)} /><ResumoFinanceiroGuarani titulo="Em aberto" valor={moeda(aberto)} /><ResumoFinanceiroGuarani titulo="Em atraso" valor={moeda(atrasado)} /><ResumoFinanceiroGuarani titulo="Isento" valor={moeda(isento)} />
-        </div>
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Mensalidades pagas</p><p className="mt-1 text-3xl font-bold text-[#005a3c]">{pagos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Em aberto</p><p className="mt-1 text-3xl font-bold text-[#8a6700]">{abertos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Inadimplentes</p><p className="mt-1 text-3xl font-bold text-red-600">{atrasados}</p></div>
-        </div>
-        <div className="mb-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Recebimentos por forma de pagamento</h3><div className="mt-4 space-y-3">{porForma.length === 0 ? <p className="text-sm text-gray-500">Nenhum pagamento encontrado.</p> : porForma.map((x) => <div key={x.codigo} className="flex items-center justify-between rounded-xl bg-[#f7faf8] px-4 py-3"><div><p className="font-semibold">{x.label}</p><p className="text-xs text-gray-500">{x.qtd} lançamento(s)</p></div><p className="font-bold text-[#005a3c]">{moeda(x.valor)}</p></div>)}</div></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
-        </div>
-        <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
-      </>}
     </div>
   );
 }
