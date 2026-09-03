@@ -26,6 +26,12 @@ type Dependente = {
   telefone: string | null;
   ativo: boolean | null;
   created_at: string | null;
+  possui_mensalidade: boolean | null;
+  valor_mensalidade: number | null;
+  dia_vencimento: number | null;
+  tipo_pagamento: string | null;
+  situacao_financeira: string | null;
+  data_ultimo_pagamento: string | null;
 };
 
 const parentescos = [
@@ -116,7 +122,7 @@ export default function DependentesPage() {
     const [sociosResult, dependentesResult] = await Promise.all([
       supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
       supabase.from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
         .order("nome"),
     ]);
 
@@ -162,6 +168,12 @@ export default function DependentesPage() {
       parentesco: d.parentesco || "",
       telefone: d.telefone || "",
       ativo: d.ativo !== false,
+      possui_mensalidade: d.possui_mensalidade === true,
+      valor_mensalidade: Number(d.valor_mensalidade || 0),
+      dia_vencimento: Number(d.dia_vencimento || 10),
+      tipo_pagamento: d.tipo_pagamento || "pix",
+      situacao_financeira: d.situacao_financeira || (d.possui_mensalidade ? "em_dia" : "isento"),
+      data_ultimo_pagamento: d.data_ultimo_pagamento || "",
     });
     setErro("");
     setSucesso("");
@@ -193,6 +205,12 @@ export default function DependentesPage() {
       parentesco: form.parentesco || null,
       telefone: form.telefone.trim() || null,
       ativo: form.ativo,
+      possui_mensalidade: form.possui_mensalidade,
+      valor_mensalidade: form.possui_mensalidade ? Number(form.valor_mensalidade || 0) : 0,
+      dia_vencimento: Number(form.dia_vencimento || 10),
+      tipo_pagamento: form.possui_mensalidade ? form.tipo_pagamento : "pix",
+      situacao_financeira: form.possui_mensalidade ? form.situacao_financeira : "isento",
+      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
     const resultado = editando
@@ -337,10 +355,10 @@ export default function DependentesPage() {
                 <div className="p-12 text-center"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[980px] text-left">
+                  <table className="w-full min-w-[1250px] text-left">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-5 py-4">Nome</th><th className="px-5 py-4">Parentesco</th><th className="px-5 py-4">Nascimento</th><th className="px-5 py-4">CPF</th><th className="px-5 py-4">Responsável</th><th className="px-5 py-4">Telefone</th><th className="px-5 py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-5 py-4">Nome</th><th className="px-5 py-4">Parentesco</th><th className="px-5 py-4">Nascimento</th><th className="px-5 py-4">CPF</th><th className="px-5 py-4">Responsável</th><th className="px-5 py-4">Telefone</th><th className="px-5 py-4">Mensalidade</th><th className="px-5 py-4">Financeiro</th><th className="px-5 py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -354,6 +372,13 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
                             <td className="px-5 py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
+                            <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Sem mensalidade"}</td>
+                            <td className="px-5 py-4"><span className={`rounded-full px-3 py-1 text-xs font-black ${
+                              !d.possui_mensalidade || d.situacao_financeira === "isento" ? "bg-slate-100 text-slate-500" :
+                              d.situacao_financeira === "em_atraso" ? "bg-red-100 text-red-700" :
+                              d.situacao_financeira === "em_dia" ? "bg-emerald-100 text-emerald-700" :
+                              "bg-amber-100 text-amber-700"
+                            }`}>{!d.possui_mensalidade || d.situacao_financeira === "isento" ? "Isento" : d.situacao_financeira === "em_atraso" ? "Em atraso" : d.situacao_financeira === "em_dia" ? "Em dia" : "Pendente"}</span></td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button><button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button></div></td>
                           </tr>
@@ -396,6 +421,55 @@ export default function DependentesPage() {
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                 </div>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-[#F8FAF9] p-5">
+                <div className="mb-4 text-base font-black text-[#005A3C]">💰 Financeiro do dependente</div>
+                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <div className="font-bold text-slate-700">Possui mensalidade própria?</div>
+                    <div className="text-sm text-slate-500">A mensalidade do dependente será controlada separadamente do responsável.</div>
+                  </div>
+                  <button type="button" onClick={() => setForm({ ...form, possui_mensalidade: !form.possui_mensalidade, situacao_financeira: !form.possui_mensalidade ? "em_dia" : "isento" })} className={`relative h-7 w-12 rounded-full transition ${form.possui_mensalidade ? "bg-[#005A3C]" : "bg-slate-300"}`}>
+                    <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${form.possui_mensalidade ? "left-6" : "left-1"}`} />
+                  </button>
+                </label>
+
+                {form.possui_mensalidade && (
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Valor da mensalidade</span>
+                      <input type="number" min="0" step="0.01" value={form.valor_mensalidade} onChange={(e) => setForm({ ...form, valor_mensalidade: Number(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" placeholder="0,00" />
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Dia do vencimento</span>
+                      <input type="number" min="1" max="31" value={form.dia_vencimento} onChange={(e) => setForm({ ...form, dia_vencimento: Math.min(31, Math.max(1, Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Forma de pagamento</span>
+                      <select value={form.tipo_pagamento} onChange={(e) => setForm({ ...form, tipo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
+                        <option value="pix">PIX</option>
+                        <option value="debito_em_conta">Débito em conta</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="transferencia">Transferência</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Situação financeira</span>
+                      <select value={form.situacao_financeira} onChange={(e) => setForm({ ...form, situacao_financeira: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
+                        <option value="em_dia">🟢 Em dia</option>
+                        <option value="em_atraso">🔴 Em atraso</option>
+                        <option value="isento">⚪ Isento</option>
+                      </select>
+                    </label>
+                    <label className="md:col-span-2">
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Data do último pagamento</span>
+                      <input type="date" value={form.data_ultimo_pagamento} onChange={(e) => setForm({ ...form, data_ultimo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-white p-5">
