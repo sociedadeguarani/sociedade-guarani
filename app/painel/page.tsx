@@ -992,6 +992,8 @@ export default function Home() {
                       abrirRelatorios();
                     } else if (item.nome === "Sócios") {
                       window.location.href = "/socios";
+                    } else if (item.nome === "Dependentes") {
+                      window.location.href = "/dependentes";
                     } else {
                       setMenu(item.nome);
                     }
@@ -1042,6 +1044,8 @@ export default function Home() {
                       abrirRelatorios();
                     } else if (item.nome === "Sócios") {
                       window.location.href = "/socios";
+                    } else if (item.nome === "Dependentes") {
+                      window.location.href = "/dependentes";
                     } else {
                       setMenu(item.nome);
                     }
