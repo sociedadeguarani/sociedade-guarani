@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -30,6 +29,7 @@ type Socio = {
   situacao: string | null;
   observacoes: string | null;
   foto_url: string | null;
+
   tipo_socio: string | null;
   responsavel_id: string | null;
   parentesco: string | null;
@@ -40,59 +40,81 @@ type Socio = {
   modalidade_temporada: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
-  situacao_financeira: string | null;
-  data_ultimo_pagamento: string | null;
 };
 
+const menus = [
+  { nome: "Início", icone: "🏠" },
+  { nome: "Sócios", icone: "👥" },
+  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦" },
+  { nome: "Reservas", icone: "📅" },
+  { nome: "Eventos", icone: "🎉" },
+  { nome: "Financeiro", icone: "💰" },
+  { nome: "Espaços", icone: "🏛️" },
+  { nome: "Relatórios", icone: "📊" },
+];
+
 const socioInicial: Partial<Socio> = {
-  matricula: null,
-  nome: "", cpf: "", rg: "", data_nascimento: "", telefone: "", whatsapp: "",
-  email: "", endereco: "", numero: "", bairro: "", cidade: "", estado: "RS",
-  cep: "", data_associacao: "", categoria: "Titular", situacao: "ativo",
-  observacoes: "", foto_url: "", tipo_socio: "patrimonial_individual",
-  responsavel_id: null, parentesco: "", possui_mensalidade: false,
-  valor_mensalidade: 0, dia_vencimento: 10, tipo_pagamento: "pix",
-  modalidade_temporada: null, inicio_temporada: "", fim_temporada: "",
-  situacao_financeira: "isento", data_ultimo_pagamento: "",
+  nome: "",
+  cpf: "",
+  rg: "",
+  data_nascimento: "",
+  telefone: "",
+  whatsapp: "",
+  email: "",
+  endereco: "",
+  numero: "",
+  bairro: "",
+  cidade: "",
+  estado: "RS",
+  cep: "",
+  data_associacao: "",
+  categoria: "Titular",
+  situacao: "ativo",
+  observacoes: "",
+  foto_url: "",
+
+  tipo_socio: "patrimonial",
+  responsavel_id: null,
+  parentesco: "",
+  possui_mensalidade: false,
+  valor_mensalidade: 0,
+  dia_vencimento: 10,
+  tipo_pagamento: "pix",
+  modalidade_temporada: null,
+  inicio_temporada: "",
+  fim_temporada: "",
 };
 
 const TIPOS_SOCIO = [
-  { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
-  { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
-  { value: "dependente_patrimonial_familiar_mensalidade", label: "Dependente Sócio Patrimonial Familiar com Mensalidade" },
-  { value: "dependente_patrimonial_individual_mensalidade", label: "Dependente Sócio Patrimonial Individual com Mensalidade" },
-  { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
-  { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
-  { value: "dependente_contribuinte_familiar_mensalidade", label: "Dependente Sócio Contribuinte Familiar com Mensalidade" },
-  { value: "dependente_contribuinte_individual_mensalidade", label: "Dependente Sócio Contribuinte Individual com Mensalidade" },
-  { value: "remido", label: "Sócio Remido" },
-  { value: "temporada_individual", label: "Temporada Individual" },
-  { value: "temporada_familiar", label: "Temporada Familiar" },
+  { value: "patrimonial", label: "Patrimonial" },
+  { value: "dependente_patrimonial", label: "Dependente Patrimonial" },
+  { value: "contribuinte", label: "Contribuinte" },
+  { value: "dependente_contribuinte", label: "Dependente Contribuinte" },
   { value: "transitorio", label: "Transitório" },
   { value: "dependente_transitorio", label: "Dependente Transitório" },
-  { value: "convite_semanal", label: "Convite Semanal" },
-  { value: "convite_diario", label: "Convite Diário" },
-  { value: "convite_mes", label: "Convite Mês" },
+  { value: "temporada_individual", label: "Temporada Individual" },
+  { value: "temporada_familiar", label: "Temporada Familiar" },
+  { value: "dependente_temporada_familiar", label: "Dependente Temporada Familiar" },
 ];
 
-const PARENTESCOS = ["Esposa", "Esposo", "Companheiro(a)", "Filho(a)", "Enteado(a)", "Pai", "Mãe", "Irmão(ã)", "Outro"];
-const FORMAS_PAGAMENTO = ["pix", "debito_em_conta", "boleto", "dinheiro"];
+const PARENTESCOS = [
+  "Esposa",
+  "Esposo",
+  "Companheiro(a)",
+  "Filho(a)",
+  "Enteado(a)",
+  "Pai",
+  "Mãe",
+  "Irmão(ã)",
+  "Outro",
+];
 
-function podeTerDependentes(tipo?: string | null) {
-  return ["patrimonial_familiar", "contribuinte_familiar", "temporada_familiar", "transitorio", "dependente_patrimonial_familiar_mensalidade", "dependente_contribuinte_familiar_mensalidade"].includes(tipo || "");
-}
-
-function tipoDependenteParaResponsavel(tipo?: string | null) {
-  switch (tipo) {
-    case "patrimonial_familiar":
-    case "dependente_patrimonial_familiar_mensalidade": return "dependente_patrimonial_familiar_mensalidade";
-    case "contribuinte_familiar":
-    case "dependente_contribuinte_familiar_mensalidade": return "dependente_contribuinte_familiar_mensalidade";
-    case "temporada_familiar": return "dependente_patrimonial_familiar_mensalidade";
-    case "transitorio": return "dependente_transitorio";
-    default: return "dependente_patrimonial_familiar_mensalidade";
-  }
-}
+const FORMAS_PAGAMENTO = [
+  "pix",
+  "debito_em_conta",
+  "boleto",
+  "dinheiro",
+];
 
 function tipoSocioLabel(tipo?: string | null) {
   return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
@@ -100,247 +122,605 @@ function tipoSocioLabel(tipo?: string | null) {
 
 function tipoSocioClasse(tipo?: string | null) {
   switch (tipo) {
-    case "patrimonial_individual": return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "patrimonial_familiar": return "bg-[#cfe7dc] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "dependente_patrimonial_familiar_mensalidade":
-    case "dependente_patrimonial_individual_mensalidade": return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-    case "contribuinte_individual": return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "contribuinte_familiar": return "bg-[#cddff4] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "dependente_contribuinte_familiar_mensalidade":
-    case "dependente_contribuinte_individual_mensalidade": return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-    case "remido": return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-    case "temporada_individual":
-    case "temporada_familiar": return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+    case "patrimonial":
+      return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+    case "dependente_patrimonial":
+      return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+    case "contribuinte":
+      return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
+    case "dependente_contribuinte":
+      return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
     case "transitorio":
-    case "dependente_transitorio": return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-    default: return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
+      return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+    case "dependente_transitorio":
+      return "bg-[#fff8df] text-[#9a790c] ring-1 ring-[#f3df9b]";
+    case "temporada_individual":
+    case "temporada_familiar":
+      return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+    case "dependente_temporada_familiar":
+      return "bg-[#fff1e6] text-[#c66a25] ring-1 ring-[#f3c6a3]";
+    default:
+      return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
   }
 }
 
-const links = [
-  ["Início", "🏠", "/painel"],
-  ["Sócios", "👥", "/socios"],
-  ["Dependentes", "👨‍👩‍👧‍👦", "#"],
-  ["Reservas", "📅", "#"],
-  ["Eventos", "🎉", "#"],
-  ["Financeiro", "💰", "#"],
-  ["Espaços", "🏛️", "#"],
-  ["Relatórios", "📊", "#"],
-] as const;
+export default function Home() {
+  const [menu, setMenu] = useState("Início");
 
-export default function SociosPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [busca, setBusca] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
   const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
+
   const [form, setForm] = useState<Partial<Socio>>(socioInicial);
   const [salvando, setSalvando] = useState(false);
-  const [carregando, setCarregando] = useState(true);
+  const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
-  const [verificandoLogin, setVerificandoLogin] = useState(true);
-  const [usuarioEmail, setUsuarioEmail] = useState("");
 
-  useEffect(() => {
-    let montado = true;
-    async function iniciar() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { window.location.replace("/login"); return; }
-      if (montado) { setUsuarioEmail(session.user.email || ""); setVerificandoLogin(false); }
-      await carregarSocios();
+  function selecionarFoto(file: File | null) {
+    setFotoArquivo(file);
+    if (file) {
+      setForm((atual) => ({
+        ...atual,
+        foto_url: URL.createObjectURL(file),
+      }));
     }
-    void iniciar();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) window.location.replace("/login");
-      else if (montado) setUsuarioEmail(session.user.email || "");
-    });
-    return () => { montado = false; subscription.unsubscribe(); };
-  }, []);
+  }
+
+  function removerFoto() {
+    setFotoArquivo(null);
+    setForm((atual) => ({
+      ...atual,
+      foto_url: "",
+    }));
+  }
 
   async function carregarSocios() {
     setCarregando(true);
-    const { data, error } = await supabase.from("socios").select("*").order("matricula", { ascending: true });
+
+    const { data, error } = await supabase
+      .from("socios")
+      .select("*")
+      .order("matricula", { ascending: true });
+
     if (error) {
       console.error(error);
       setMensagem("Erro ao carregar os sócios.");
-    } else setSocios((data || []) as Socio[]);
+    } else {
+      setSocios(data || []);
+    }
+
     setCarregando(false);
   }
 
+  useEffect(() => {
+    carregarSocios();
+  }, []);
+
   function novoSocio() {
     setSocioEditando(null);
-    setForm({ ...socioInicial, data_associacao: new Date().toISOString().split("T")[0] });
-    setFotoArquivo(null); setAbrirCadastro(true); setMensagem("");
-  }
-
-  function novoDependente(responsavel: Socio) {
-    if (!podeTerDependentes(responsavel.tipo_socio)) { setMensagem("Este tipo de sócio não possui dependentes."); return; }
-    setSocioEditando(null);
-    setForm({ ...socioInicial, tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio), responsavel_id: responsavel.id, parentesco: "Filho(a)", possui_mensalidade: true, valor_mensalidade: 0, data_associacao: new Date().toISOString().split("T")[0] });
-    setFotoArquivo(null); setAbrirCadastro(true); setMensagem("");
+    setForm({
+      ...socioInicial,
+      data_associacao: new Date().toISOString().split("T")[0],
+    });
+    setFotoArquivo(null);
+    setAbrirCadastro(true);
+    setMensagem("");
   }
 
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
-    setFotoArquivo(null); setAbrirCadastro(true); setMensagem("");
+    setFotoArquivo(null);
+    setAbrirCadastro(true);
+    setMensagem("");
   }
 
   function fecharCadastro() {
-    if (!salvando) { setAbrirCadastro(false); setSocioEditando(null); }
+    if (!salvando) {
+      setAbrirCadastro(false);
+      setSocioEditando(null);
+    }
   }
 
   function alterarCampo(campo: keyof Socio, valor: string) {
-    setForm((atual) => {
-      const proximo = { ...atual, [campo]: campo === "possui_mensalidade" ? valor === "true" : valor };
-      if (campo === "tipo_socio") {
-        const mensalidadeObrigatoria = ["dependente_patrimonial_familiar_mensalidade", "dependente_patrimonial_individual_mensalidade", "dependente_contribuinte_familiar_mensalidade", "dependente_contribuinte_individual_mensalidade"].includes(valor);
-        if (valor === "remido") { proximo.possui_mensalidade = false; proximo.valor_mensalidade = 0; }
-        else if (mensalidadeObrigatoria) proximo.possui_mensalidade = true;
-        if (!valor.startsWith("dependente_")) { proximo.responsavel_id = null; proximo.parentesco = ""; }
-      }
-      return proximo;
-    });
+    setForm((atual) => ({
+      ...atual,
+      [campo]:
+        campo === "possui_mensalidade"
+          ? valor === "true"
+          : valor,
+    }));
   }
 
   async function salvarSocio() {
-    if (!form.nome?.trim()) { setMensagem("Informe o nome completo do sócio."); return; }
-
-    const matriculaInformada =
-      form.matricula === null || form.matricula === undefined || String(form.matricula).trim() === ""
-        ? null
-        : Number(form.matricula);
-
-    if (matriculaInformada !== null && (!Number.isInteger(matriculaInformada) || matriculaInformada <= 0)) {
-      setMensagem("A matrícula deve ser um número inteiro maior que zero.");
+    if (!form.nome?.trim()) {
+      setMensagem("Informe o nome completo do sócio.");
       return;
     }
 
-    setSalvando(true); setMensagem("");
+    setSalvando(true);
+    setMensagem("");
+
     const dadosBase = {
-      matricula: matriculaInformada,
-      nome: form.nome.trim(), cpf: form.cpf || null, rg: form.rg || null, data_nascimento: form.data_nascimento || null,
-      telefone: form.telefone || null, whatsapp: form.whatsapp || null, email: form.email || null,
-      endereco: form.endereco || null, numero: form.numero || null, bairro: form.bairro || null, cidade: form.cidade || null,
-      estado: form.estado || null, cep: form.cep || null, data_associacao: form.data_associacao || null,
-      categoria: form.categoria || "Titular", situacao: form.situacao || "ativo", observacoes: form.observacoes || null,
-      tipo_socio: form.tipo_socio || "patrimonial_individual", responsavel_id: form.responsavel_id || null,
-      parentesco: form.parentesco || null, possui_mensalidade: Boolean(form.possui_mensalidade),
-      valor_mensalidade: Number(form.valor_mensalidade || 0), dia_vencimento: Number(form.dia_vencimento || 10),
-      tipo_pagamento: form.tipo_pagamento || "pix", modalidade_temporada: form.modalidade_temporada || null,
-      inicio_temporada: form.inicio_temporada || null, fim_temporada: form.fim_temporada || null,
-      situacao_financeira: form.situacao_financeira || "isento", data_ultimo_pagamento: form.data_ultimo_pagamento || null,
+      nome: form.nome?.trim(),
+      cpf: form.cpf || null,
+      rg: form.rg || null,
+      data_nascimento: form.data_nascimento || null,
+      telefone: form.telefone || null,
+      whatsapp: form.whatsapp || null,
+      email: form.email || null,
+      endereco: form.endereco || null,
+      numero: form.numero || null,
+      bairro: form.bairro || null,
+      cidade: form.cidade || null,
+      estado: form.estado || null,
+      cep: form.cep || null,
+      data_associacao: form.data_associacao || null,
+      categoria: form.categoria || "Titular",
+      situacao: form.situacao || "ativo",
+      observacoes: form.observacoes || null,
+
+      tipo_socio: form.tipo_socio || "patrimonial",
+      responsavel_id: form.responsavel_id || null,
+      parentesco: form.parentesco || null,
+      possui_mensalidade: Boolean(form.possui_mensalidade),
+      valor_mensalidade: Number(form.valor_mensalidade || 0),
+      dia_vencimento: Number(form.dia_vencimento || 10),
+      tipo_pagamento: form.tipo_pagamento || "pix",
+      modalidade_temporada: form.modalidade_temporada || null,
+      inicio_temporada: form.inicio_temporada || null,
+      fim_temporada: form.fim_temporada || null,
     };
+
     try {
       let socioId = socioEditando?.id || "";
-      let matriculaFinal = matriculaInformada;
-
-      if (!socioEditando && matriculaFinal === null) {
-        const { data: ultimaMatricula, error: erroMatricula } = await supabase
-          .from("socios")
-          .select("matricula")
-          .not("matricula", "is", null)
-          .order("matricula", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (erroMatricula) throw erroMatricula;
-        matriculaFinal = Number(ultimaMatricula?.matricula || 0) + 1;
-      }
-
-      if (matriculaFinal !== null) {
-        const consultaDuplicada = await supabase
-          .from("socios")
-          .select("id, nome")
-          .eq("matricula", matriculaFinal)
-          .maybeSingle();
-
-        if (consultaDuplicada.error) throw consultaDuplicada.error;
-
-        if (consultaDuplicada.data && consultaDuplicada.data.id !== socioEditando?.id) {
-          setMensagem(`A matrícula ${matriculaFinal} já está cadastrada para ${consultaDuplicada.data.nome}.`);
-          return;
-        }
-      }
-
-      dadosBase.matricula = matriculaFinal;
 
       if (socioEditando) {
-        const resultado = await supabase.from("socios").update({ ...dadosBase, foto_url: form.foto_url || null }).eq("id", socioEditando.id);
+        const resultado = await supabase
+          .from("socios")
+          .update({
+            ...dadosBase,
+            foto_url: form.foto_url || null,
+          })
+          .eq("id", socioEditando.id);
+
         if (resultado.error) throw resultado.error;
       } else {
-        const resultado = await supabase.from("socios").insert(dadosBase).select("id").single();
+        const resultado = await supabase
+          .from("socios")
+          .insert(dadosBase)
+          .select("id")
+          .single();
+
         if (resultado.error) throw resultado.error;
         socioId = resultado.data.id;
       }
+
       if (fotoArquivo && socioId) {
-        const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+        const extensao =
+          fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
         const caminho = `socios/${socioId}.${extensao}`;
-        const upload = await supabase.storage.from("fotos-associados").upload(caminho, fotoArquivo, { upsert: true, contentType: fotoArquivo.type || "image/jpeg" });
+
+        const upload = await supabase.storage
+          .from("fotos-associados")
+          .upload(caminho, fotoArquivo, {
+            upsert: true,
+            contentType: fotoArquivo.type || "image/jpeg",
+          });
+
         if (upload.error) throw upload.error;
-        const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
-        const atualizacaoFoto = await supabase.from("socios").update({ foto_url: urlData.publicUrl }).eq("id", socioId);
+
+        const { data: urlData } = supabase.storage
+          .from("fotos-associados")
+          .getPublicUrl(caminho);
+
+        const atualizacaoFoto = await supabase
+          .from("socios")
+          .update({ foto_url: urlData.publicUrl })
+          .eq("id", socioId);
+
         if (atualizacaoFoto.error) throw atualizacaoFoto.error;
       }
-      setMensagem(socioEditando ? "Sócio atualizado com sucesso!" : "Sócio cadastrado com sucesso!");
-      setFotoArquivo(null); await carregarSocios();
-      setTimeout(() => { setAbrirCadastro(false); setSocioEditando(null); setMensagem(""); }, 900);
-    } catch (error: any) {
-      console.error("ERRO AO SALVAR SÓCIO:", error);
-      const detalhe = error?.message || error?.details || error?.hint || "Erro desconhecido.";
-      setMensagem(`Erro ao salvar: ${detalhe}`);
-    } finally { setSalvando(false); }
+
+      setMensagem(
+        socioEditando
+          ? "Sócio atualizado com sucesso!"
+          : "Sócio cadastrado com sucesso!"
+      );
+
+      setFotoArquivo(null);
+      await carregarSocios();
+
+      setTimeout(() => {
+        setAbrirCadastro(false);
+        setSocioEditando(null);
+        setMensagem("");
+      }, 900);
+    } catch (error) {
+      console.error(error);
+      setMensagem(
+        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
+      );
+    } finally {
+      setSalvando(false);
+    }
   }
 
   async function excluirSocio(socio: Socio) {
-    if (!window.confirm(`Deseja realmente excluir o sócio "${socio.nome}"?`)) return;
-    const { error } = await supabase.from("socios").delete().eq("id", socio.id);
-    if (error) { console.error(error); setMensagem("Não foi possível excluir o sócio."); return; }
-    setMensagem("Sócio excluído."); await carregarSocios(); setTimeout(() => setMensagem(""), 1500);
-  }
+    const confirmar = window.confirm(
+      `Deseja realmente excluir o sócio "${socio.nome}"?`
+    );
 
-  function selecionarFoto(file: File | null) {
-    setFotoArquivo(file);
-    if (file) setForm((atual) => ({ ...atual, foto_url: URL.createObjectURL(file) }));
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("socios")
+      .delete()
+      .eq("id", socio.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem("Não foi possível excluir o sócio.");
+      return;
+    }
+
+    setMensagem("Sócio excluído.");
+    await carregarSocios();
+
+    setTimeout(() => setMensagem(""), 1500);
   }
-  function removerFoto() { setFotoArquivo(null); setForm((atual) => ({ ...atual, foto_url: "" })); }
 
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
+
     return socios.filter((socio) => {
-      const correspondeBusca = !termo || socio.nome?.toLowerCase().includes(termo) || socio.cpf?.toLowerCase().includes(termo) || String(socio.matricula || "").includes(termo);
-      const correspondeTipo = !mostrarSomenteDependentes || Boolean(socio.responsavel_id) || (socio.tipo_socio || "").startsWith("dependente_");
+      const correspondeBusca =
+        !termo ||
+        socio.nome?.toLowerCase().includes(termo) ||
+        socio.cpf?.toLowerCase().includes(termo) ||
+        String(socio.matricula || "").includes(termo);
+
+      const correspondeTipo =
+        !mostrarSomenteDependentes ||
+        Boolean(socio.responsavel_id) ||
+        (socio.tipo_socio || "").startsWith("dependente_");
+
       return correspondeBusca && correspondeTipo;
     });
   }, [socios, busca, mostrarSomenteDependentes]);
 
-  if (verificandoLogin) return <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]"><div className="text-center"><div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" /><p className="font-semibold text-[#005a3c]">Verificando acesso...</p></div></main>;
-
-  async function sair() { await supabase.auth.signOut(); window.location.replace("/login"); }
-
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
+
+      {/* CABEÇALHO */}
+      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
         <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-          <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm"><img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-full w-full object-contain" /></div><div><h1 className="text-base font-extrabold tracking-tight sm:text-lg">SOCIEDADE GUARANI</h1><p className="text-xs font-medium text-[#6b7d74]">Sociedade Recreativa Guarani — S.R.G.</p></div></div>
-          <div className="hidden items-center gap-4 sm:flex"><div className="text-right"><p className="text-xs text-gray-500">{usuarioEmail || "Usuário autenticado"}</p><p className="font-bold text-[#005a3c]">Área Administrativa</p></div><button type="button" onClick={sair} className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm hover:bg-[#f0f7f3]">Sair</button></div>
+
+          <div className="flex items-center gap-4">
+
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
+              <img
+                src="/logo-guarani.png"
+                alt="Sociedade Guarani"
+                className="h-full w-full object-contain"
+              />
+            </div>
+
+            <div>
+              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
+                SOCIEDADE GUARANI
+              </h1>
+
+              <p className="text-xs font-medium text-[#6b7d74]">
+                Sociedade Recreativa Guarani — S.R.G.
+              </p>
+            </div>
+
+          </div>
+
+          <div className="hidden items-center gap-3 sm:flex">
+            <p className="text-sm text-gray-200">
+              Sistema de Gestão
+            </p>
+
+            <p className="font-bold text-[#005a3c]">
+              Área Administrativa
+            </p>
+          </div>
+
         </div>
       </header>
 
       <div className="flex min-h-[calc(100vh-80px)]">
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block"><p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">Menu principal</p><nav className="space-y-2">{links.map(([nome, icone, href]) => href === "#" ? <button key={nome} onClick={() => setMensagem(`${nome}: módulo em construção.`)} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"><span className="text-xl">{icone}</span>{nome}</button> : <Link key={nome} href={href} className={`flex items-center gap-3 rounded-xl px-4 py-3 font-medium transition ${nome === "Sócios" ? "bg-[#005a3c] text-white shadow-sm" : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"}`}><span className="text-xl">{icone}</span>{nome}</Link>)}</nav><div className="mt-10 rounded-2xl bg-[#f7edbd] p-4"><p className="text-xs font-bold text-[#705c00]">SOCIEDADE GUARANI</p><p className="mt-1 text-sm text-[#574900]">Sistema integrado de gestão</p></div></aside>
+
+        {/* MENU LATERAL */}
+        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
+
+          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
+            Menu principal
+          </p>
+
+          <nav className="space-y-2">
+
+            {menus.map((item) => (
+              <button
+                key={item.nome}
+                onClick={() => {
+                  const rotas: Record<string, string> = {
+                    "Início": "/painel",
+                    "Sócios": "/socios",
+                    "Dependentes": "/dependentes",
+                    "Financeiro": "/financeiro",
+                  };
+
+                  if (rotas[item.nome]) {
+                    window.location.href = rotas[item.nome];
+                    return;
+                  }
+
+                  setMenu(item.nome);
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
+                  menu === item.nome
+                    ? "bg-[#005a3c] text-white shadow-sm"
+                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+                }`}
+              >
+                <span className="text-xl">
+                  {item.icone}
+                </span>
+
+                {item.nome}
+              </button>
+            ))}
+
+          </nav>
+
+          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
+
+            <p className="text-xs font-bold text-[#705c00]">
+              SOCIEDADE GUARANI
+            </p>
+
+            <p className="mt-1 text-sm text-[#574900]">
+              Sistema integrado de gestão
+            </p>
+
+          </div>
+
+        </aside>
+
+        {/* CONTEÚDO */}
         <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
-          <div className="mb-6 rounded-2xl border border-[#dfe9e3] bg-white p-4 shadow-sm md:hidden"><div className="grid grid-cols-2 gap-2">{links.slice(0, 6).map(([nome, icone, href]) => href === "#" ? <button key={nome} onClick={() => setMensagem(`${nome}: módulo em construção.`)} className="rounded-xl bg-[#f7faf8] p-3 text-xs font-semibold"><div className="mb-1 text-xl">{icone}</div>{nome}</button> : <Link key={nome} href={href} className={`rounded-xl p-3 text-xs font-semibold ${nome === "Sócios" ? "bg-[#005a3c] text-white" : "bg-[#f7faf8]"}`}><div className="mb-1 text-xl">{icone}</div>{nome}</Link>)}</div></div>
-          <Socios socios={sociosFiltrados} quantidadeTotal={socios.length} busca={busca} setBusca={setBusca} novoSocio={novoSocio} novoDependente={novoDependente} editarSocio={editarSocio} excluirSocio={excluirSocio} carregando={carregando} mostrarSomenteDependentes={mostrarSomenteDependentes} setMostrarSomenteDependentes={setMostrarSomenteDependentes} />
+
+          {/* MENU MOBILE */}
+          <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
+
+            {menus.map((item) => (
+              <button
+                key={item.nome}
+                onClick={() => {
+                  const rotas: Record<string, string> = {
+                    "Início": "/painel",
+                    "Sócios": "/socios",
+                    "Dependentes": "/dependentes",
+                    "Financeiro": "/financeiro",
+                  };
+
+                  if (rotas[item.nome]) {
+                    window.location.href = rotas[item.nome];
+                    return;
+                  }
+
+                  setMenu(item.nome);
+                }}
+                className={`rounded-xl p-3 text-xs font-semibold ${
+                  menu === item.nome
+                    ? "bg-[#005a3c] text-white"
+                    : "bg-white text-gray-700 shadow-sm"
+                }`}
+              >
+                <div className="mb-1 text-xl">
+                  {item.icone}
+                </div>
+
+                {item.nome}
+              </button>
+            ))}
+
+          </div>
+
+          {/* INÍCIO */}
+          {menu === "Início" && (
+            <Inicio
+              socios={socios}
+              quantidadeSocios={socios.length}
+              abrirCadastro={novoSocio}
+            />
+          )}
+
+          {/* SÓCIOS */}
+          {menu === "Sócios" && (
+            <Socios
+              socios={sociosFiltrados}
+              quantidadeTotal={socios.length}
+              busca={busca}
+              setBusca={setBusca}
+              novoSocio={novoSocio}
+              editarSocio={editarSocio}
+              excluirSocio={excluirSocio}
+              carregando={carregando}
+              mostrarSomenteDependentes={mostrarSomenteDependentes}
+              setMostrarSomenteDependentes={setMostrarSomenteDependentes}
+            />
+          )}
+
+          {/* OUTROS MÓDULOS */}
+          {menu !== "Início" && menu !== "Sócios" && (
+            <ModuloEmConstrucao
+              nome={menu}
+              icone={
+                menus.find((x) => x.nome === menu)?.icone || "📋"
+              }
+            />
+          )}
+
         </section>
       </div>
 
-      {abrirCadastro && <ModalSocio socios={socios} form={form} socioEditando={socioEditando} salvando={salvando} mensagem={mensagem} fechar={fecharCadastro} alterarCampo={alterarCampo} salvar={salvarSocio} selecionarFoto={selecionarFoto} removerFoto={removerFoto} />}
-      {mensagem && !abrirCadastro && <div className="fixed bottom-5 right-5 z-50 rounded-xl bg-[#e8f3ee] px-5 py-3 text-sm font-semibold text-[#005a3c] shadow-lg">{mensagem}</div>}
+      {/* MODAL CADASTRO */}
+      {abrirCadastro && (
+        <ModalSocio
+          socios={socios}
+          form={form}
+          socioEditando={socioEditando}
+          salvando={salvando}
+          mensagem={mensagem}
+          fechar={fecharCadastro}
+          alterarCampo={alterarCampo}
+          salvar={salvarSocio}
+          selecionarFoto={selecionarFoto}
+          removerFoto={removerFoto}
+        />
+      )}
+
     </main>
   );
 }
+
+
+/* =========================
+   INÍCIO
+========================= */
+
+function Inicio({
+  socios,
+  quantidadeSocios,
+  abrirCadastro,
+}: {
+  socios: Socio[];
+  quantidadeSocios: number;
+  abrirCadastro: () => void;
+}) {
+  return (
+    <>
+      <div className="mb-8">
+
+        <p className="text-sm font-medium text-gray-500">
+          Bem-vindo ao sistema
+        </p>
+
+        <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
+          Painel da Sociedade Guarani
+        </h2>
+
+        <p className="mt-2 text-gray-600">
+          Gerencie sócios, reservas, eventos, espaços e financeiro
+          em um único lugar.
+        </p>
+
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+
+        <DashboardCard
+          titulo="Sócios"
+          valor={String(quantidadeSocios)}
+          descricao="Sócios cadastrados"
+          icone="👥"
+        />
+
+        <DashboardCard
+          titulo="Dependentes"
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
+          descricao="Vinculados a responsáveis"
+          icone="👨‍👩‍👧‍👦"
+        />
+
+        <DashboardCard
+          titulo="Reservas"
+          valor="0"
+          descricao="Reservas este mês"
+          icone="📅"
+        />
+
+        <DashboardCard
+          titulo="Eventos"
+          valor="0"
+          descricao="Eventos cadastrados"
+          icone="🎉"
+        />
+
+        <DashboardCard
+          titulo="Espaços"
+          valor="4"
+          descricao="Espaços disponíveis"
+          icone="🏛️"
+        />
+
+      </div>
+
+      <div className="mt-8 rounded-2xl bg-[#063b28] p-6 text-white shadow-lg">
+
+        <h3 className="text-xl font-bold">
+          Acesso rápido
+        </h3>
+
+        <p className="mt-1 text-sm text-gray-200">
+          Comece uma nova operação no sistema.
+        </p>
+
+        <button
+          onClick={abrirCadastro}
+          className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
+        >
+          👤 Cadastrar novo sócio
+        </button>
+
+      </div>
+    </>
+  );
+}
+
+
+/* =========================
+   CORES DAS CATEGORIAS
+========================= */
+
+function categoriaClasse(categoria?: string | null) {
+  const valor = (categoria || "").toLowerCase();
+
+  if (valor.includes("patrimonial") && valor.includes("depend")) {
+    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+  }
+  if (valor.includes("patrimonial")) {
+    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+  }
+  if (valor.includes("contribuinte") && valor.includes("depend")) {
+    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
+  }
+  if (valor.includes("contribuinte")) {
+    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
+  }
+  if (valor.includes("temporário") || valor.includes("temporario") ||
+      valor.includes("transitório") || valor.includes("transitorio")) {
+    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+  }
+  if (valor.includes("temporada")) {
+    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+  }
+  if (valor.includes("benemérito") || valor.includes("benemerito")) {
+    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
+  }
+  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
+}
+
+/* =========================
+   SÓCIOS
+========================= */
 
 function Socios({
   socios,
@@ -348,7 +728,6 @@ function Socios({
   busca,
   setBusca,
   novoSocio,
-  novoDependente,
   editarSocio,
   excluirSocio,
   carregando,
@@ -360,7 +739,6 @@ function Socios({
   busca: string;
   setBusca: (valor: string) => void;
   novoSocio: () => void;
-  novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
   excluirSocio: (socio: Socio) => void;
   carregando: boolean;
@@ -632,16 +1010,6 @@ function Socios({
 
                       <div className="flex justify-end gap-2">
 
-                        {podeTerDependentes(socio.tipo_socio) && (
-                          <button
-                            onClick={() => novoDependente(socio)}
-                            className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
-                            title="Adicionar dependente"
-                          >
-                            👨‍👩‍👧 + Dependente
-                          </button>
-                        )}
-
                         <button
                           onClick={() => editarSocio(socio)}
                           className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
@@ -676,9 +1044,8 @@ function Socios({
 }
 
 
-
 /* =========================
-   FINANCEIRO
+   MODAL DO SÓCIO
 ========================= */
 
 function ModalSocio({
@@ -892,18 +1259,6 @@ function ModalSocio({
           <FormularioSecao titulo="🏛️ Dados da associação">
 
             <Campo
-              label="Matrícula"
-              type="number"
-              value={form.matricula ?? ""}
-              onChange={(v) => alterarCampo("matricula", v)}
-              placeholder="Ex.: 157"
-            />
-
-            <div className="flex items-end pb-2">
-              <p className="text-xs text-gray-500">Deixe em branco para gerar automaticamente a próxima matrícula disponível.</p>
-            </div>
-
-            <Campo
               label="Data de associação"
               type="date"
               value={form.data_associacao}
@@ -912,7 +1267,7 @@ function ModalSocio({
 
             <SelectCampo
               label="Tipo de associado"
-              value={form.tipo_socio || "patrimonial_individual"}
+              value={form.tipo_socio || "patrimonial"}
               onChange={(v) => alterarCampo("tipo_socio", v)}
               opcoes={TIPOS_SOCIO.map((item) => item.value)}
               labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
@@ -1118,7 +1473,7 @@ function FormularioSecao({
   children,
 }: {
   titulo: string;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
   return (
     <div>
@@ -1215,3 +1570,74 @@ function SelectCampo({
   );
 }
 
+function DashboardCard({
+  titulo,
+  valor,
+  descricao,
+  icone,
+}: {
+  titulo: string;
+  valor: string;
+  descricao: string;
+  icone: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+
+      <div className="flex items-center justify-between">
+
+        <span className="text-3xl">
+          {icone}
+        </span>
+
+        <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-semibold text-[#005a3c]">
+          Ativo
+        </span>
+
+      </div>
+
+      <p className="mt-5 text-sm font-medium text-gray-500">
+        {titulo}
+      </p>
+
+      <p className="mt-1 text-3xl font-bold text-[#005a3c]">
+        {valor}
+      </p>
+
+      <p className="mt-1 text-xs text-gray-500">
+        {descricao}
+      </p>
+
+    </div>
+  );
+}
+
+function ModuloEmConstrucao({
+  nome,
+  icone,
+}: {
+  nome: string;
+  icone: string;
+}) {
+  return (
+    <div className="flex min-h-[500px] items-center justify-center">
+
+      <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
+
+        <div className="text-5xl">
+          {icone}
+        </div>
+
+        <h2 className="mt-4 text-2xl font-bold text-[#005a3c]">
+          {nome}
+        </h2>
+
+        <p className="mt-2 text-gray-500">
+          Este módulo será configurado na próxima etapa.
+        </p>
+
+      </div>
+
+    </div>
+  );
+}
