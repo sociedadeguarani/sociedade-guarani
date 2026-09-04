@@ -215,7 +215,7 @@ export default function InadimplenciaPage() {
           ...g,
           competencias: Array.from(g.competencias),
           meses,
-          nivel: meses >= 3 ? "vermelho" : "amarelo",
+          nivel: meses >= 3 ? ("vermelho" as const) : ("amarelo" as const),
         };
       })
       .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
@@ -520,4 +520,3 @@ export default function InadimplenciaPage() {
     </div>
   );
 }
-
