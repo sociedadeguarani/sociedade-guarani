@@ -49,6 +49,7 @@ type Mensalidade = {
   tipo_pagamento: string | null;
   comprovante_url: string | null;
   observacoes: string | null;
+  numero_recibo?: string | null;
   created_at?: string;
 };
 
@@ -172,7 +173,7 @@ export default function FinanceiroPage() {
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroAtraso, setFiltroAtraso] = useState<
-    "todos" | "verde" | "amarelo" | "vermelho"
+    "todos" | "atrasados" | "verde" | "amarelo" | "vermelho"
   >("todos");
 
   const [pagamento, setPagamento] = useState<Mensalidade | null>(null);
@@ -189,6 +190,9 @@ export default function FinanceiroPage() {
   const [edicaoValor, setEdicaoValor] = useState("");
   const [edicaoVencimento, setEdicaoVencimento] = useState("");
   const [edicaoSituacao, setEdicaoSituacao] = useState("em_aberto");
+
+  const [recibo, setRecibo] = useState<Mensalidade | null>(null);
+  const [processandoEstorno, setProcessandoEstorno] = useState(false);
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
     const responsaveis = new Map(socios.map((s) => [s.id, s.nome]));
@@ -683,6 +687,119 @@ export default function FinanceiroPage() {
     setMensagem("Mensalidade excluída.");
   }
 
+  async function gerarNumeroRecibo(item: Mensalidade) {
+    if (item.numero_recibo) return item.numero_recibo;
+
+    const { data, error } = await supabase
+      .from("mensalidades")
+      .select("numero_recibo")
+      .eq("competencia", item.competencia)
+      .not("numero_recibo", "is", null);
+
+    if (error) throw error;
+
+    const maior = (data || [])
+      .map((row) => {
+        const valor = String(row.numero_recibo || "");
+        const match = valor.match(/-(\d+)$/);
+        return match ? Number(match[1]) : 0;
+      })
+      .reduce((max, atual) => Math.max(max, atual), 0);
+
+    const numero = `REC-${item.competencia.slice(0, 7).replace("-", "")}-${String(
+      maior + 1
+    ).padStart(3, "0")}`;
+
+    const { error: updateError } = await supabase
+      .from("mensalidades")
+      .update({ numero_recibo: numero })
+      .eq("id", item.id);
+
+    if (updateError) throw updateError;
+
+    setMensalidades((lista) =>
+      lista.map((m) =>
+        m.id === item.id ? { ...m, numero_recibo: numero } : m
+      )
+    );
+
+    return numero;
+  }
+
+  async function abrirRecibo(item: Mensalidade) {
+    if (item.situacao !== "pago") return;
+
+    try {
+      const numero = await gerarNumeroRecibo(item);
+      setRecibo({ ...item, numero_recibo: numero });
+    } catch (error) {
+      console.error(error);
+      setMensagem(
+        `Não foi possível gerar o recibo. ${
+          error instanceof Error ? error.message : ""
+        }`
+      );
+    }
+  }
+
+  async function estornarPagamento(item: Mensalidade) {
+    if (item.situacao !== "pago") return;
+
+    const confirmar = window.confirm(
+      "Deseja estornar este pagamento? A mensalidade voltará para Em aberto."
+    );
+
+    if (!confirmar) return;
+
+    setProcessandoEstorno(true);
+    setMensagem("");
+
+    try {
+      const { error } = await supabase
+        .from("mensalidades")
+        .update({
+          situacao: "em_aberto",
+          data_pagamento: null,
+          tipo_pagamento: null,
+          comprovante_url: null,
+          observacoes: "Pagamento estornado.",
+        })
+        .eq("id", item.id);
+
+      if (error) throw error;
+
+      setMensalidades((lista) =>
+        lista.map((m) =>
+          m.id === item.id
+            ? {
+                ...m,
+                situacao: "em_aberto",
+                data_pagamento: null,
+                tipo_pagamento: null,
+                comprovante_url: null,
+                observacoes: "Pagamento estornado.",
+              }
+            : m
+        )
+      );
+
+      setMensagem("Pagamento estornado com sucesso.");
+    } catch (error) {
+      console.error(error);
+      setMensagem(
+        `Não foi possível estornar o pagamento. ${
+          error instanceof Error ? error.message : ""
+        }`
+      );
+    } finally {
+      setProcessandoEstorno(false);
+    }
+  }
+
+  function imprimirRecibo() {
+    window.print();
+  }
+
   async function abrirComprovante(path: string | null) {
     if (!path) return;
 
@@ -888,7 +1005,7 @@ export default function FinanceiroPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  {(["todos", "verde", "amarelo", "vermelho"] as const).map(
+                  {(["todos", "atrasados", "verde", "amarelo", "vermelho"] as const).map(
                     (filtro) => (
                       <button
                         key={filtro}
@@ -901,11 +1018,13 @@ export default function FinanceiroPage() {
                       >
                         {filtro === "todos"
                           ? "Todos"
-                          : filtro === "verde"
-                            ? "🟢"
-                            : filtro === "amarelo"
-                              ? "🟡"
-                              : "🔴"}
+                          : filtro === "atrasados"
+                            ? "⚠️"
+                            : filtro === "verde"
+                              ? "🟢"
+                              : filtro === "amarelo"
+                                ? "🟡"
+                                : "🔴"}
                       </button>
                     )
                   )}
@@ -916,6 +1035,7 @@ export default function FinanceiroPage() {
                 {atrasoPessoas
                   .filter((x) => {
                     if (filtroAtraso === "todos") return true;
+                    if (filtroAtraso === "atrasados") return x.meses > 0;
                     if (filtroAtraso === "verde") return x.meses === 0;
                     if (filtroAtraso === "amarelo")
                       return x.meses >= 1 && x.meses <= 2;
@@ -1107,6 +1227,24 @@ export default function FinanceiroPage() {
                                   </button>
                                 )}
 
+                              {item.situacao === "pago" && (
+                                <>
+                                  <button
+                                    onClick={() => void abrirRecibo(item)}
+                                    className="rounded-lg bg-[#eef5ff] px-3 py-2 text-xs font-bold text-[#064b9b]"
+                                  >
+                                    🧾 Recibo
+                                  </button>
+                                  <button
+                                    onClick={() => void estornarPagamento(item)}
+                                    disabled={processandoEstorno}
+                                    className="rounded-lg bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 disabled:opacity-50"
+                                  >
+                                    ↩️ Estornar
+                                  </button>
+                                </>
+                              )}
+
                               <button
                                 onClick={() => abrirEdicao(item)}
                                 className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
@@ -1242,6 +1380,87 @@ export default function FinanceiroPage() {
         </Modal>
       )}
 
+      {recibo && (
+        <Modal titulo="Recibo de pagamento" fechar={() => setRecibo(null)}>
+          <div id="recibo-impressao" className="space-y-5">
+            <div className="border-b pb-4 text-center">
+              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-2">
+                <img
+                  src="/logo-guarani.png"
+                  alt="Sociedade Guarani"
+                  className="h-full w-full object-contain"
+                />
+              </div>
+              <h3 className="text-xl font-extrabold text-[#003d2b]">
+                SOCIEDADE GUARANI
+              </h3>
+              <p className="text-sm text-gray-500">
+                Recibo de pagamento de mensalidade
+              </p>
+            </div>
+
+            <div className="grid gap-3 rounded-2xl bg-[#f7faf8] p-5 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-gray-500">Recibo</p>
+                <p className="font-bold text-[#003d2b]">
+                  {recibo.numero_recibo || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Competência</p>
+                <p className="font-bold">{formatarCompetencia(recibo.competencia)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Associado</p>
+                <p className="font-bold">
+                  {pessoaDoLancamento(recibo)?.nome || "Associado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">CPF</p>
+                <p className="font-bold">
+                  {pessoaDoLancamento(recibo)?.cpf || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Valor</p>
+                <p className="text-xl font-extrabold text-[#005a3c]">
+                  {formatarMoeda(recibo.valor)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Pagamento</p>
+                <p className="font-bold">
+                  {formatarData(recibo.data_pagamento)} ·{" "}
+                  {FORMAS.find(([v]) => v === recibo.tipo_pagamento)?.[1] ||
+                    recibo.tipo_pagamento ||
+                    "—"}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-center text-sm text-gray-500">
+              Pagamento registrado no sistema da Sociedade Recreativa Guarani.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setRecibo(null)}
+                className="rounded-xl border px-5 py-3 font-semibold"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={imprimirRecibo}
+                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
+              >
+                🖨️ Imprimir / Salvar PDF
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {edicao && (
         <Modal
           titulo="Editar mensalidade"
@@ -1294,6 +1513,27 @@ export default function FinanceiroPage() {
           </div>
         </Modal>
       )}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+
+          #recibo-impressao,
+          #recibo-impressao * {
+            visibility: visible !important;
+          }
+
+          #recibo-impressao {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            padding: 30px !important;
+            background: white !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
