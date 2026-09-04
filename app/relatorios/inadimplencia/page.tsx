@@ -25,10 +25,9 @@ type Mensalidade = {
   id: string;
   socio_id: string | null;
   dependente_id: string | null;
-  referencia: string | null;
-  vencimento: string | null;
+  competencia: string | null;
+  data_vencimento: string | null;
   valor: number | string | null;
-  status: string | null;
   situacao: string | null;
 };
 
@@ -66,12 +65,12 @@ function competenciaBR(valor: string | null | undefined) {
 }
 
 function isPago(m: Mensalidade) {
-  const status = String(m.situacao || m.status || "").toLowerCase();
+  const status = String(m.situacao || "").toLowerCase();
   return ["pago", "paid", "quitado", "recebido"].includes(status);
 }
 
 function isIsento(m: Mensalidade) {
-  const status = String(m.situacao || m.status || "").toLowerCase();
+  const status = String(m.situacao || "").toLowerCase();
   return ["isento", "isenta"].includes(status);
 }
 
@@ -99,9 +98,9 @@ export default function InadimplenciaPage() {
         supabase
           .from("mensalidades")
           .select(
-            "id,socio_id,dependente_id,referencia,vencimento,valor,status,situacao"
+            "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao"
           )
-          .order("vencimento", { ascending: false }),
+          .order("data_vencimento", { ascending: false }),
       ]);
 
     if (sociosResult.error) {
@@ -170,7 +169,7 @@ export default function InadimplenciaPage() {
     >();
 
     for (const m of mensalidades) {
-      if (!m.vencimento || m.vencimento.slice(0, 10) >= hoje) continue;
+      if (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hoje) continue;
       if (isPago(m) || isIsento(m)) continue;
 
       const dependente = m.dependente_id
@@ -200,7 +199,7 @@ export default function InadimplenciaPage() {
       }
 
       const grupo = grupos.get(pessoaId)!;
-      const comp = competenciaBR(m.referencia || m.vencimento);
+      const comp = competenciaBR(m.competencia || m.data_vencimento);
 
       if (!grupo.competencias.has(comp)) {
         grupo.competencias.add(comp);
