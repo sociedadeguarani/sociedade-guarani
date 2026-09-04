@@ -101,6 +101,17 @@ type MovimentoFinanceiro = {
   observacoes: string | null;
 };
 
+type ConferenciaBancaria = {
+  id: string;
+  conta_bancaria_id: string;
+  saldo_sistema: number;
+  saldo_banco: number;
+  diferenca: number;
+  data_conferencia: string;
+  observacao: string | null;
+  created_at?: string;
+};
+
 const MENU = [
   ["Início", "🏠", "/painel"],
   ["Sócios", "👥", "/socios"],
@@ -232,6 +243,7 @@ export default function FinanceiroPage() {
 
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
+  const [conferenciasBancarias, setConferenciasBancarias] = useState<ConferenciaBancaria[]>([]);
   const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "contas" | "fluxo">("mensalidades");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
@@ -440,7 +452,7 @@ export default function FinanceiroPage() {
   async function carregarTudo() {
     setCarregando(true);
 
-    const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] =
+    const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult, conferenciasResult] =
       await Promise.all([
         supabase
           .from("socios")
@@ -469,6 +481,11 @@ export default function FinanceiroPage() {
           .select("*")
           .order("data_movimentacao", { ascending: false })
           .order("created_at", { ascending: false }),
+        supabase
+          .from("conferencias_bancarias")
+          .select("*")
+          .order("data_conferencia", { ascending: false })
+          .order("created_at", { ascending: false }),
       ]);
 
     const erros = [
@@ -477,6 +494,7 @@ export default function FinanceiroPage() {
       mensalidadesResult.error,
       contasResult.error,
       movimentosResult.error,
+      conferenciasResult.error,
     ].filter(Boolean);
 
     if (sociosResult.error) console.error(sociosResult.error);
@@ -484,6 +502,7 @@ export default function FinanceiroPage() {
     if (mensalidadesResult.error) console.error(mensalidadesResult.error);
     if (contasResult.error) console.error(contasResult.error);
     if (movimentosResult.error) console.error(movimentosResult.error);
+    if (conferenciasResult.error) console.error(conferenciasResult.error);
 
     if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
     if (dependentesResult.data)
@@ -492,6 +511,7 @@ export default function FinanceiroPage() {
       setMensalidades(mensalidadesResult.data as Mensalidade[]);
     if (contasResult.data) setContasBancarias(contasResult.data as ContaBancaria[]);
     if (movimentosResult.data) setMovimentosFinanceiros(movimentosResult.data as MovimentoFinanceiro[]);
+    if (conferenciasResult.data) setConferenciasBancarias(conferenciasResult.data as ConferenciaBancaria[]);
 
     if (erros.length > 0) {
       setMensagem(
@@ -1069,61 +1089,48 @@ export default function FinanceiroPage() {
 
   async function salvarConferenciaSaldo() {
     if (!contaConferindo) return;
+
     const saldoInformado = Number(String(saldoConferido).replace(",", "."));
     if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
       setMensagem("Informe um saldo bancário válido.");
       return;
     }
 
-    const saldoAtual = saldoConta(contaConferindo);
+    const saldoAtual = Number(saldoConta(contaConferindo).toFixed(2));
     const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
-
-    if (Math.abs(diferenca) < 0.01) {
-      setMensagem(`Saldo de ${contaConferindo.nome} já está conferido em ${formatarMoeda(saldoAtual)}.`);
-      setContaConferindo(null);
-      return;
-    }
 
     setSalvandoConferencia(true);
     try {
-      const tipo = diferenca > 0 ? "entrada" : "saida";
-      const descricao = diferenca > 0
-        ? `Ajuste de conciliação bancária - ${contaConferindo.nome}`
-        : `Ajuste de conciliação bancária - ${contaConferindo.nome}`;
-
+      // A conferência é apenas uma verificação.
+      // NUNCA cria entrada/saída artificial no fluxo de caixa.
       const payload = {
         conta_bancaria_id: contaConferindo.id,
-        conta_destino_id: null,
-        grupo_transferencia: null,
-        tipo,
-        categoria: "Conciliação bancária",
-        descricao,
-        valor: Math.abs(diferenca),
-        data_movimentacao: dataConferencia,
-        forma_pagamento: "outro",
-        origem_tipo: "ajuste_conciliacao",
-        origem_id: null,
-        socio_id: null,
-        dependente_id: null,
-        comprovante_url: null,
-        conciliado: true,
-        data_conciliacao: dataConferencia,
-        observacoes: `${observacaoConferencia || "Conferência do saldo bancário"}. Saldo anterior: ${formatarMoeda(saldoAtual)}. Saldo conferido: ${formatarMoeda(saldoInformado)}.`,
+        saldo_sistema: saldoAtual,
+        saldo_banco: saldoInformado,
+        diferenca,
+        data_conferencia: dataConferencia,
+        observacao: observacaoConferencia || "Conferência do saldo bancário",
       };
 
       const { data, error } = await supabase
-        .from("movimentacoes_financeiras")
+        .from("conferencias_bancarias")
         .insert(payload)
         .select("*")
         .single();
 
       if (error) throw error;
 
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]);
-      setMensagem(`Saldo de ${contaConferindo.nome} conferido com sucesso. Novo saldo: ${formatarMoeda(saldoInformado)}.`);
+      setConferenciasBancarias((lista) => [data as ConferenciaBancaria, ...lista]);
+
+      if (Math.abs(diferenca) < 0.01) {
+        setMensagem(`Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}. Nenhuma diferença encontrada.`);
+      } else {
+        setMensagem(`Conferência salva. Sistema: ${formatarMoeda(saldoAtual)} · Banco: ${formatarMoeda(saldoInformado)} · Diferença: ${formatarMoeda(Math.abs(diferenca))}. O fluxo de caixa NÃO foi alterado.`);
+      }
+
       setContaConferindo(null);
     } catch (error) {
-      setMensagem(`Não foi possível conferir o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+      setMensagem(`Não foi possível salvar a conferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
       setSalvandoConferencia(false);
     }
@@ -1428,7 +1435,17 @@ export default function FinanceiroPage() {
                     <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
                     <div className="flex gap-2"><button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
                   </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
+                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p>
+{(() => {
+  const ultima = conferenciasBancarias.find((x) => x.conta_bancaria_id === c.id);
+  return ultima ? (
+    <p className={`mt-2 text-xs ${Math.abs(Number(ultima.diferenca || 0)) < 0.01 ? "text-green-700" : "text-yellow-700"}`}>
+      Última conferência: {formatarData(ultima.data_conferencia)} · Banco {formatarMoeda(ultima.saldo_banco)}
+      {Math.abs(Number(ultima.diferenca || 0)) >= 0.01 ? ` · Diferença ${formatarMoeda(Math.abs(Number(ultima.diferenca || 0)))}` : " · OK"}
+    </p>
+  ) : null;
+})()}
+<div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
                 </div>
               )}
 
@@ -1691,7 +1708,7 @@ export default function FinanceiroPage() {
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
               <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">Se houver diferença, o sistema criará uma movimentação de conciliação para que o histórico continue transparente.</p>
+              <p className="mt-2 text-xs text-gray-500">Se houver diferença, ela será registrada somente na conferência. O fluxo de caixa não será alterado automaticamente.</p>
             </div>
             <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
             <div>
@@ -1699,7 +1716,7 @@ export default function FinanceiroPage() {
               <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
             </div>
             <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial não será apagado nem alterado. Se o saldo real for diferente, a diferença ficará registrada no livro financeiro como ajuste de conciliação.
+              <strong>Transparência:</strong> o saldo inicial e o fluxo de caixa não serão alterados. A conferência registra o saldo do sistema, o saldo informado pelo banco e a diferença encontrada.
             </div>
             <div className="flex justify-end gap-3">
               <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
