@@ -177,6 +177,7 @@ export default function FinanceiroPage() {
   >("todos");
 
   const [pagamento, setPagamento] = useState<Mensalidade | null>(null);
+  const [competenciaPagamento, setCompetenciaPagamento] = useState("");
   const [valorPagamento, setValorPagamento] = useState("");
   const [dataPagamento, setDataPagamento] = useState(
     new Date().toISOString().slice(0, 10)
@@ -539,11 +540,53 @@ export default function FinanceiroPage() {
 
   function abrirPagamento(item: Mensalidade) {
     setPagamento(item);
+    setCompetenciaPagamento(item.competencia.slice(0, 7));
     setValorPagamento(String(Number(item.valor || 0)));
     setDataPagamento(new Date().toISOString().slice(0, 10));
     setTipoPagamento(item.tipo_pagamento || "pix");
     setObservacoes("");
     setArquivo(null);
+  }
+
+  function alterarCompetenciaPagamento(valor: string) {
+    setCompetenciaPagamento(valor);
+
+    if (!pagamento || !valor) return;
+
+    const pessoa = pessoaDoLancamento(pagamento);
+    if (!pessoa) return;
+
+    const chave = pessoa.dependente_id
+      ? `dependente:${pessoa.dependente_id}`
+      : `socio:${pessoa.socio_id}`;
+
+    const existente = mensalidades.find((m) => {
+      const chaveLancamento = m.dependente_id
+        ? `dependente:${m.dependente_id}`
+        : `socio:${m.socio_id}`;
+
+      return (
+        chaveLancamento === chave &&
+        m.competencia?.slice(0, 7) === valor
+      );
+    });
+
+    setValorPagamento(
+      String(
+        Number(
+          existente?.valor ??
+            pessoa.valor_mensalidade ??
+            pagamento.valor ??
+            0
+        )
+      )
+    );
+
+    if (existente) {
+      setTipoPagamento(existente.tipo_pagamento || pessoa.tipo_pagamento || "pix");
+    } else {
+      setTipoPagamento(pessoa.tipo_pagamento || "pix");
+    }
   }
 
   async function confirmarPagamento() {
@@ -553,11 +596,68 @@ export default function FinanceiroPage() {
     setMensagem("");
 
     try {
-      let comprovante = pagamento.comprovante_url;
+      const pessoa = pessoaDoLancamento(pagamento);
+      if (!pessoa) throw new Error("Não foi possível identificar o associado.");
+
+      let alvo = pagamento;
+
+      // Permite que a administração escolha qualquer competência.
+      // Se ela ainda não existir, o sistema cria a cobrança e já a marca como paga.
+      if (competenciaPagamento !== pagamento.competencia.slice(0, 7)) {
+        const chave = pessoa.dependente_id
+          ? `dependente:${pessoa.dependente_id}`
+          : `socio:${pessoa.socio_id}`;
+
+        const existente = mensalidades.find((m) => {
+          const chaveLancamento = m.dependente_id
+            ? `dependente:${m.dependente_id}`
+            : `socio:${m.socio_id}`;
+
+          return (
+            chaveLancamento === chave &&
+            m.competencia?.slice(0, 7) === competenciaPagamento
+          );
+        });
+
+        if (existente) {
+          alvo = existente;
+        } else {
+          const novoLancamento = {
+            socio_id: pessoa.socio_id,
+            dependente_id: pessoa.dependente_id,
+            competencia: primeiroDia(competenciaPagamento),
+            valor: Number(
+              valorPagamento || pessoa.valor_mensalidade || 0
+            ),
+            data_vencimento: vencimentoCompetencia(
+              competenciaPagamento,
+              pessoa.dia_vencimento
+            ),
+            situacao: "em_aberto",
+            data_pagamento: null,
+            tipo_pagamento: pessoa.tipo_pagamento || "pix",
+            comprovante_url: null,
+            observacoes: "Lançamento criado no pagamento rápido.",
+          };
+
+          const { data, error } = await supabase
+            .from("mensalidades")
+            .insert(novoLancamento)
+            .select("*")
+            .single();
+
+          if (error) throw error;
+
+          alvo = data as Mensalidade;
+          setMensalidades((lista) => [alvo, ...lista]);
+        }
+      }
+
+      let comprovante = alvo.comprovante_url;
 
       if (arquivo) {
         const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
-        const caminho = `mensalidades/${pagamento.id}.${ext}`;
+        const caminho = `mensalidades/${alvo.id}.${ext}`;
 
         const upload = await supabase.storage
           .from("comprovantes-financeiro")
@@ -570,23 +670,23 @@ export default function FinanceiroPage() {
         comprovante = caminho;
       }
 
+      const atualizacao = {
+        valor: Number(valorPagamento || alvo.valor || 0),
+        situacao: "pago",
+        data_pagamento: dataPagamento || null,
+        tipo_pagamento: tipoPagamento || null,
+        comprovante_url: comprovante || null,
+        observacoes: observacoes || null,
+      };
+
       const { error } = await supabase
         .from("mensalidades")
-        .update({
-          valor: Number(valorPagamento || 0),
-          situacao: "pago",
-          data_pagamento: dataPagamento || null,
-          tipo_pagamento: tipoPagamento || null,
-          comprovante_url: comprovante || null,
-          observacoes: observacoes || null,
-        })
-        .eq("id", pagamento.id);
+        .update(atualizacao)
+        .eq("id", alvo.id);
 
       if (error) throw error;
 
-      const pessoa = pessoaDoLancamento(pagamento);
-
-      if (pessoa && !pessoa.dependente_id) {
+      if (!pessoa.dependente_id) {
         await supabase
           .from("socios")
           .update({
@@ -598,15 +698,10 @@ export default function FinanceiroPage() {
 
       setMensalidades((lista) =>
         lista.map((m) =>
-          m.id === pagamento.id
+          m.id === alvo.id
             ? {
                 ...m,
-                valor: Number(valorPagamento || 0),
-                situacao: "pago",
-                data_pagamento: dataPagamento || null,
-                tipo_pagamento: tipoPagamento || null,
-                comprovante_url: comprovante || null,
-                observacoes: observacoes || null,
+                ...atualizacao,
               }
             : m
         )
@@ -614,7 +709,11 @@ export default function FinanceiroPage() {
 
       setPagamento(null);
       setArquivo(null);
-      setMensagem("Pagamento registrado com sucesso.");
+      setMensagem(
+        `Pagamento da competência ${formatarCompetencia(
+          competenciaPagamento
+        )} registrado com sucesso.`
+      );
     } catch (error) {
       console.error(error);
       setMensagem(
@@ -1306,6 +1405,26 @@ export default function FinanceiroPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
+                <label className="mb-2 block text-sm font-extrabold text-[#003d2b]">
+                  Competência que está sendo paga
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="month"
+                    value={competenciaPagamento}
+                    onChange={(e) =>
+                      alterarCompetenciaPagamento(e.target.value)
+                    }
+                    className="w-full rounded-xl border border-[#c9d9d1] bg-white px-4 py-3 font-bold text-[#005a3c] outline-none sm:w-auto"
+                  />
+                  <p className="text-xs text-gray-600">
+                    Você pode escolher qualquer mês. Se a cobrança ainda não
+                    existir, ela será criada automaticamente e marcada como paga.
+                  </p>
+                </div>
+              </div>
+
               <Campo
                 label="Valor pago"
                 type="number"
