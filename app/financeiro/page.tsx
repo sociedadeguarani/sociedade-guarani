@@ -244,6 +244,11 @@ export default function FinanceiroPage() {
   const [contaSaldoInicial, setContaSaldoInicial] = useState("0");
   const [contaDataSaldo, setContaDataSaldo] = useState(new Date().toISOString().slice(0, 10));
   const [contaObservacoes, setContaObservacoes] = useState("");
+  const [contaConferindo, setContaConferindo] = useState<ContaBancaria | null>(null);
+  const [saldoConferido, setSaldoConferido] = useState("");
+  const [dataConferencia, setDataConferencia] = useState(new Date().toISOString().slice(0, 10));
+  const [observacaoConferencia, setObservacaoConferencia] = useState("");
+  const [salvandoConferencia, setSalvandoConferencia] = useState(false);
   const [movTipo, setMovTipo] = useState<"entrada" | "saida">("saida");
   const [movConta, setMovConta] = useState("");
   const [movCategoria, setMovCategoria] = useState("");
@@ -262,7 +267,7 @@ export default function FinanceiroPage() {
   const [contaPagamentoId, setContaPagamentoId] = useState("");
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map(socios.map((s) => [s.id, s.nome]));
+    const responsaveis = new Map<string, string>(socios.map((s) => [s.id, s.nome] as [string, string]));
     const resultado: PessoaFinanceira[] = [];
 
     for (const s of socios) {
@@ -1055,6 +1060,75 @@ export default function FinanceiroPage() {
   function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
   function editarConta(c: ContaBancaria) { setContaEditando(c); setContaNome(c.nome); setContaBanco(c.banco || ""); setContaAgencia(c.agencia || ""); setContaNumero(c.conta || ""); setContaSaldoInicial(String(c.saldo_inicial || 0)); setContaDataSaldo(c.data_saldo_inicial || new Date().toISOString().slice(0,10)); setContaObservacoes(c.observacoes || ""); setMostrarContaModal(true); }
 
+  function abrirConferenciaSaldo(c: ContaBancaria) {
+    setContaConferindo(c);
+    setSaldoConferido(saldoConta(c).toFixed(2));
+    setDataConferencia(new Date().toISOString().slice(0, 10));
+    setObservacaoConferencia("Conferência do saldo bancário");
+  }
+
+  async function salvarConferenciaSaldo() {
+    if (!contaConferindo) return;
+    const saldoInformado = Number(String(saldoConferido).replace(",", "."));
+    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
+      setMensagem("Informe um saldo bancário válido.");
+      return;
+    }
+
+    const saldoAtual = saldoConta(contaConferindo);
+    const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
+
+    if (Math.abs(diferenca) < 0.01) {
+      setMensagem(`Saldo de ${contaConferindo.nome} já está conferido em ${formatarMoeda(saldoAtual)}.`);
+      setContaConferindo(null);
+      return;
+    }
+
+    setSalvandoConferencia(true);
+    try {
+      const tipo = diferenca > 0 ? "entrada" : "saida";
+      const descricao = diferenca > 0
+        ? `Ajuste de conciliação bancária - ${contaConferindo.nome}`
+        : `Ajuste de conciliação bancária - ${contaConferindo.nome}`;
+
+      const payload = {
+        conta_bancaria_id: contaConferindo.id,
+        conta_destino_id: null,
+        grupo_transferencia: null,
+        tipo,
+        categoria: "Conciliação bancária",
+        descricao,
+        valor: Math.abs(diferenca),
+        data_movimentacao: dataConferencia,
+        forma_pagamento: "outro",
+        origem_tipo: "ajuste_conciliacao",
+        origem_id: null,
+        socio_id: null,
+        dependente_id: null,
+        comprovante_url: null,
+        conciliado: true,
+        data_conciliacao: dataConferencia,
+        observacoes: `${observacaoConferencia || "Conferência do saldo bancário"}. Saldo anterior: ${formatarMoeda(saldoAtual)}. Saldo conferido: ${formatarMoeda(saldoInformado)}.`,
+      };
+
+      const { data, error } = await supabase
+        .from("movimentacoes_financeiras")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+
+      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]);
+      setMensagem(`Saldo de ${contaConferindo.nome} conferido com sucesso. Novo saldo: ${formatarMoeda(saldoInformado)}.`);
+      setContaConferindo(null);
+    } catch (error) {
+      setMensagem(`Não foi possível conferir o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+    } finally {
+      setSalvandoConferencia(false);
+    }
+  }
+
   async function salvarMovimentoFinanceiro() {
     if (!movConta || !movDescricao.trim() || Number(movValor || 0) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
     let comprovante: string | null = null;
@@ -1354,7 +1428,7 @@ export default function FinanceiroPage() {
                     <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
                     <div className="flex gap-2"><button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
                   </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo inicial: {formatarMoeda(c.saldo_inicial)}</p></div>)}</div>}
+                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
                 </div>
               )}
 
@@ -1602,6 +1676,35 @@ export default function FinanceiroPage() {
             <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
             <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Salvar conta</button></div>
+          </div>
+        </Modal>
+      )}
+
+      {contaConferindo && (
+        <Modal titulo={`Conferir saldo — ${contaConferindo.nome}`} fechar={() => setContaConferindo(null)}>
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-[#e8f3ee] p-4">
+              <p className="text-sm text-gray-500">Saldo calculado pelo sistema</p>
+              <p className="mt-1 text-3xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(contaConferindo))}</p>
+              <p className="mt-1 text-xs text-gray-500">Saldo de abertura + entradas − saídas + transferências.</p>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
+              <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
+              <p className="mt-2 text-xs text-gray-500">Se houver diferença, o sistema criará uma movimentação de conciliação para que o histórico continue transparente.</p>
+            </div>
+            <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação</label>
+              <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
+            </div>
+            <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
+              <strong>Transparência:</strong> o saldo inicial não será apagado nem alterado. Se o saldo real for diferente, a diferença ficará registrada no livro financeiro como ajuste de conciliação.
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
+              <button disabled={salvandoConferencia} onClick={() => void salvarConferenciaSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConferencia ? "Salvando..." : "Conferir e salvar saldo"}</button>
+            </div>
           </div>
         </Modal>
       )}
