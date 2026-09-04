@@ -341,6 +341,7 @@ export default function FinanceiroPage() {
 
       const meses = historicoPorPessoa.get(pessoa.chave) || 0;
 
+      if (filtroAtraso === "atrasados") return meses > 0;
       if (filtroAtraso === "verde") return meses === 0;
       if (filtroAtraso === "amarelo") return meses >= 1 && meses <= 2;
       return meses >= 3;
@@ -719,6 +720,66 @@ export default function FinanceiroPage() {
     } finally {
       setSalvandoPagamento(false);
     }
+  }
+
+  function abrirEdicao(item: Mensalidade) {
+    setEdicao(item);
+    setEdicaoValor(String(Number(item.valor || 0)));
+    setEdicaoVencimento(item.data_vencimento || "");
+    setEdicaoSituacao(item.situacao || "em_aberto");
+  }
+
+  async function salvarEdicao() {
+    if (!edicao) return;
+
+    const { error } = await supabase
+      .from("mensalidades")
+      .update({
+        valor: Number(edicaoValor || 0),
+        data_vencimento: edicaoVencimento || null,
+        situacao: edicaoSituacao,
+      })
+      .eq("id", edicao.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem(`Não foi possível atualizar. ${error.message}`);
+      return;
+    }
+
+    setMensalidades((lista) =>
+      lista.map((m) =>
+        m.id === edicao.id
+          ? {
+              ...m,
+              valor: Number(edicaoValor || 0),
+              data_vencimento: edicaoVencimento || null,
+              situacao: edicaoSituacao,
+            }
+          : m
+      )
+    );
+
+    setEdicao(null);
+    setMensagem("Mensalidade atualizada.");
+  }
+
+  async function excluir(item: Mensalidade) {
+    if (!window.confirm("Deseja realmente excluir esta mensalidade?")) return;
+
+    const { error } = await supabase
+      .from("mensalidades")
+      .delete()
+      .eq("id", item.id);
+
+    if (error) {
+      console.error(error);
+      setMensagem(`Não foi possível excluir. ${error.message}`);
+      return;
+    }
+
+    setMensalidades((lista) => lista.filter((m) => m.id !== item.id));
+    setMensagem("Mensalidade excluída.");
   }
 
   async function gerarNumeroRecibo(item: Mensalidade) {
