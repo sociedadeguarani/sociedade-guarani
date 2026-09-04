@@ -177,7 +177,9 @@ export default function FinanceiroPage() {
   >("todos");
 
   const [pagamento, setPagamento] = useState<Mensalidade | null>(null);
-  const [competenciaPagamento, setCompetenciaPagamento] = useState("");
+  const [mesesPagamento, setMesesPagamento] = useState<Mensalidade[]>([]);
+  const [mesesSelecionados, setMesesSelecionados] = useState<string[]>([]);
+  const [carregandoMesesPagamento, setCarregandoMesesPagamento] = useState(false);
   const [valorPagamento, setValorPagamento] = useState("");
   const [dataPagamento, setDataPagamento] = useState(
     new Date().toISOString().slice(0, 10)
@@ -192,7 +194,7 @@ export default function FinanceiroPage() {
   const [edicaoVencimento, setEdicaoVencimento] = useState("");
   const [edicaoSituacao, setEdicaoSituacao] = useState("em_aberto");
 
-  const [recibo, setRecibo] = useState<Mensalidade | null>(null);
+  const [reciboItens, setReciboItens] = useState<Mensalidade[]>([]);
   const [processandoEstorno, setProcessandoEstorno] = useState(false);
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
@@ -538,126 +540,92 @@ export default function FinanceiroPage() {
     }
   }
 
-  function abrirPagamento(item: Mensalidade) {
+  async function abrirPagamento(item: Mensalidade) {
     setPagamento(item);
-    setCompetenciaPagamento(item.competencia.slice(0, 7));
     setValorPagamento(String(Number(item.valor || 0)));
     setDataPagamento(new Date().toISOString().slice(0, 10));
     setTipoPagamento(item.tipo_pagamento || "pix");
     setObservacoes("");
     setArquivo(null);
+    setMesesPagamento([]);
+    setMesesSelecionados([item.id]);
+    setCarregandoMesesPagamento(true);
+
+    try {
+      let query = supabase
+        .from("mensalidades")
+        .select("*")
+        .eq("socio_id", item.socio_id)
+        .order("competencia", { ascending: false });
+
+      query = item.dependente_id
+        ? query.eq("dependente_id", item.dependente_id)
+        : query.is("dependente_id", null);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const pendentes = ((data || []) as Mensalidade[]).filter(
+        (m) => m.situacao !== "pago" && m.situacao !== "isento"
+      );
+
+      const lista = pendentes.some((m) => m.id === item.id)
+        ? pendentes
+        : [item, ...pendentes];
+
+      setMesesPagamento(lista);
+      setMesesSelecionados([item.id]);
+      setValorPagamento(String(Number(item.valor || 0)));
+    } catch (error) {
+      console.error(error);
+      setMesesPagamento([item]);
+      setMesesSelecionados([item.id]);
+      setMensagem(
+        `Não foi possível carregar as mensalidades pendentes. ${
+          error instanceof Error ? error.message : ""
+        }`
+      );
+    } finally {
+      setCarregandoMesesPagamento(false);
+    }
   }
 
-  function alterarCompetenciaPagamento(valor: string) {
-    setCompetenciaPagamento(valor);
+  function alternarMesPagamento(id: string) {
+    setMesesSelecionados((atual) => {
+      const nova = atual.includes(id)
+        ? atual.filter((itemId) => itemId !== id)
+        : [...atual, id];
 
-    if (!pagamento || !valor) return;
+      const total = mesesPagamento
+        .filter((m) => nova.includes(m.id))
+        .reduce((soma, m) => soma + Number(m.valor || 0), 0);
 
-    const pessoa = pessoaDoLancamento(pagamento);
-    if (!pessoa) return;
-
-    const chave = pessoa.dependente_id
-      ? `dependente:${pessoa.dependente_id}`
-      : `socio:${pessoa.socio_id}`;
-
-    const existente = mensalidades.find((m) => {
-      const chaveLancamento = m.dependente_id
-        ? `dependente:${m.dependente_id}`
-        : `socio:${m.socio_id}`;
-
-      return (
-        chaveLancamento === chave &&
-        m.competencia?.slice(0, 7) === valor
-      );
+      setValorPagamento(String(total));
+      return nova;
     });
-
-    setValorPagamento(
-      String(
-        Number(
-          existente?.valor ??
-            pessoa.valor_mensalidade ??
-            pagamento.valor ??
-            0
-        )
-      )
-    );
-
-    if (existente) {
-      setTipoPagamento(existente.tipo_pagamento || pessoa.tipo_pagamento || "pix");
-    } else {
-      setTipoPagamento(pessoa.tipo_pagamento || "pix");
-    }
   }
 
   async function confirmarPagamento() {
     if (!pagamento) return;
 
+    const selecionadas = mesesPagamento.filter((m) =>
+      mesesSelecionados.includes(m.id)
+    );
+
+    if (selecionadas.length === 0) {
+      setMensagem("Selecione pelo menos uma competência.");
+      return;
+    }
+
     setSalvandoPagamento(true);
     setMensagem("");
 
     try {
-      const pessoa = pessoaDoLancamento(pagamento);
-      if (!pessoa) throw new Error("Não foi possível identificar o associado.");
-
-      let alvo = pagamento;
-
-      // Permite que a administração escolha qualquer competência.
-      // Se ela ainda não existir, o sistema cria a cobrança e já a marca como paga.
-      if (competenciaPagamento !== pagamento.competencia.slice(0, 7)) {
-        const chave = pessoa.dependente_id
-          ? `dependente:${pessoa.dependente_id}`
-          : `socio:${pessoa.socio_id}`;
-
-        const existente = mensalidades.find((m) => {
-          const chaveLancamento = m.dependente_id
-            ? `dependente:${m.dependente_id}`
-            : `socio:${m.socio_id}`;
-
-          return (
-            chaveLancamento === chave &&
-            m.competencia?.slice(0, 7) === competenciaPagamento
-          );
-        });
-
-        if (existente) {
-          alvo = existente;
-        } else {
-          const novoLancamento = {
-            socio_id: pessoa.socio_id,
-            dependente_id: pessoa.dependente_id,
-            competencia: primeiroDia(competenciaPagamento),
-            valor: Number(
-              valorPagamento || pessoa.valor_mensalidade || 0
-            ),
-            data_vencimento: vencimentoCompetencia(
-              competenciaPagamento,
-              pessoa.dia_vencimento
-            ),
-            situacao: "em_aberto",
-            data_pagamento: null,
-            tipo_pagamento: pessoa.tipo_pagamento || "pix",
-            comprovante_url: null,
-            observacoes: "Lançamento criado no pagamento rápido.",
-          };
-
-          const { data, error } = await supabase
-            .from("mensalidades")
-            .insert(novoLancamento)
-            .select("*")
-            .single();
-
-          if (error) throw error;
-
-          alvo = data as Mensalidade;
-          setMensalidades((lista) => [alvo, ...lista]);
-        }
-      }
-
-      let comprovante = alvo.comprovante_url;
+      let comprovante = selecionadas[0].comprovante_url;
 
       if (arquivo) {
         const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
-        const caminho = `mensalidades/${alvo.id}.${ext}`;
+        const caminho = `mensalidades/pagamento-${selecionadas[0].id}-${Date.now()}.${ext}`;
 
         const upload = await supabase.storage
           .from("comprovantes-financeiro")
@@ -670,23 +638,35 @@ export default function FinanceiroPage() {
         comprovante = caminho;
       }
 
-      const atualizacao = {
-        valor: Number(valorPagamento || alvo.valor || 0),
-        situacao: "pago",
-        data_pagamento: dataPagamento || null,
-        tipo_pagamento: tipoPagamento || null,
-        comprovante_url: comprovante || null,
-        observacoes: observacoes || null,
-      };
+      const ids = selecionadas.map((m) => m.id);
+
+      const totalSelecionado = selecionadas.reduce(
+        (soma, m) => soma + Number(m.valor || 0),
+        0
+      );
+      const totalInformado = Number(valorPagamento || 0);
+
+      if (Math.abs(totalInformado - totalSelecionado) > 0.01) {
+        throw new Error(
+          `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total das competências selecionadas (${formatarMoeda(totalSelecionado)}).`
+        );
+      }
 
       const { error } = await supabase
         .from("mensalidades")
-        .update(atualizacao)
-        .eq("id", alvo.id);
+        .update({
+          situacao: "pago",
+          data_pagamento: dataPagamento || null,
+          tipo_pagamento: tipoPagamento || null,
+          comprovante_url: comprovante || null,
+          observacoes: observacoes || null,
+        })
+        .in("id", ids);
 
       if (error) throw error;
 
-      if (!pessoa.dependente_id) {
+      const pessoa = pessoaDoLancamento(pagamento);
+      if (pessoa && !pessoa.dependente_id) {
         await supabase
           .from("socios")
           .update({
@@ -696,24 +676,39 @@ export default function FinanceiroPage() {
           .eq("id", pessoa.socio_id);
       }
 
+      const numero = await gerarNumeroRecibo(selecionadas[0]);
+
+      const { error: reciboError } = await supabase
+        .from("mensalidades")
+        .update({ numero_recibo: numero })
+        .in("id", ids);
+
+      if (reciboError) throw reciboError;
+
+      const atualizadas = selecionadas.map((m) => ({
+        ...m,
+        situacao: "pago",
+        data_pagamento: dataPagamento || null,
+        tipo_pagamento: tipoPagamento || null,
+        comprovante_url: comprovante || null,
+        observacoes: observacoes || null,
+        numero_recibo: numero,
+      }));
+
       setMensalidades((lista) =>
-        lista.map((m) =>
-          m.id === alvo.id
-            ? {
-                ...m,
-                ...atualizacao,
-              }
-            : m
-        )
+        lista.map((m) => atualizadas.find((a) => a.id === m.id) || m)
+      );
+
+      setMensagem(
+        selecionadas.length === 1
+          ? "Pagamento registrado com sucesso."
+          : `${selecionadas.length} mensalidades pagas em um único pagamento.`
       );
 
       setPagamento(null);
-      setArquivo(null);
-      setMensagem(
-        `Pagamento da competência ${formatarCompetencia(
-          competenciaPagamento
-        )} registrado com sucesso.`
-      );
+      setMesesPagamento([]);
+      setMesesSelecionados([]);
+      setReciboItens(atualizadas);
     } catch (error) {
       console.error(error);
       setMensagem(
@@ -724,66 +719,6 @@ export default function FinanceiroPage() {
     } finally {
       setSalvandoPagamento(false);
     }
-  }
-
-  function abrirEdicao(item: Mensalidade) {
-    setEdicao(item);
-    setEdicaoValor(String(Number(item.valor || 0)));
-    setEdicaoVencimento(item.data_vencimento || "");
-    setEdicaoSituacao(item.situacao || "em_aberto");
-  }
-
-  async function salvarEdicao() {
-    if (!edicao) return;
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .update({
-        valor: Number(edicaoValor || 0),
-        data_vencimento: edicaoVencimento || null,
-        situacao: edicaoSituacao,
-      })
-      .eq("id", edicao.id);
-
-    if (error) {
-      console.error(error);
-      setMensagem(`Não foi possível atualizar. ${error.message}`);
-      return;
-    }
-
-    setMensalidades((lista) =>
-      lista.map((m) =>
-        m.id === edicao.id
-          ? {
-              ...m,
-              valor: Number(edicaoValor || 0),
-              data_vencimento: edicaoVencimento || null,
-              situacao: edicaoSituacao,
-            }
-          : m
-      )
-    );
-
-    setEdicao(null);
-    setMensagem("Mensalidade atualizada.");
-  }
-
-  async function excluir(item: Mensalidade) {
-    if (!window.confirm("Deseja realmente excluir esta mensalidade?")) return;
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .delete()
-      .eq("id", item.id);
-
-    if (error) {
-      console.error(error);
-      setMensagem(`Não foi possível excluir. ${error.message}`);
-      return;
-    }
-
-    setMensalidades((lista) => lista.filter((m) => m.id !== item.id));
-    setMensagem("Mensalidade excluída.");
   }
 
   async function gerarNumeroRecibo(item: Mensalidade) {
@@ -830,7 +765,7 @@ export default function FinanceiroPage() {
 
     try {
       const numero = await gerarNumeroRecibo(item);
-      setRecibo({ ...item, numero_recibo: numero });
+      setReciboItens([{ ...item, numero_recibo: numero }]);
     } catch (error) {
       console.error(error);
       setMensagem(
@@ -1388,10 +1323,7 @@ export default function FinanceiroPage() {
       </div>
 
       {pagamento && (
-        <Modal
-          titulo="Registrar pagamento"
-          fechar={() => setPagamento(null)}
-        >
+        <Modal titulo="Registrar pagamento" fechar={() => setPagamento(null)}>
           <div className="space-y-5">
             <div className="rounded-2xl bg-[#e8f3ee] p-4">
               <p className="text-xs text-gray-500">Associado</p>
@@ -1399,66 +1331,110 @@ export default function FinanceiroPage() {
                 {pessoaDoLancamento(pagamento)?.nome || "Associado"}
               </p>
               <p className="mt-1 text-sm text-gray-600">
-                {formatarCompetencia(pagamento.competencia)} ·{" "}
-                {formatarMoeda(pagamento.valor)}
+                Marque os meses que estão sendo pagos neste mesmo pagamento.
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="md:col-span-2 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
-                <label className="mb-2 block text-sm font-extrabold text-[#003d2b]">
-                  Competência que está sendo paga
-                </label>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="month"
-                    value={competenciaPagamento}
-                    onChange={(e) =>
-                      alterarCompetenciaPagamento(e.target.value)
-                    }
-                    className="w-full rounded-xl border border-[#c9d9d1] bg-white px-4 py-3 font-bold text-[#005a3c] outline-none sm:w-auto"
-                  />
-                  <p className="text-xs text-gray-600">
-                    Você pode escolher qualquer mês. Se a cobrança ainda não
-                    existir, ela será criada automaticamente e marcada como paga.
+            <div className="rounded-2xl border border-[#d5e0da] p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-[#003d2b]">Competências do pagamento</p>
+                  <p className="text-xs text-gray-500">
+                    Você pode marcar 2, 3 ou vários meses juntos.
                   </p>
                 </div>
+                <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-bold text-[#005a3c]">
+                  {mesesSelecionados.length} mês(es)
+                </span>
               </div>
 
-              <Campo
-                label="Valor pago"
-                type="number"
-                value={valorPagamento}
-                onChange={setValorPagamento}
-              />
-              <Campo
-                label="Data do pagamento"
-                type="date"
-                value={dataPagamento}
-                onChange={setDataPagamento}
-              />
+              {carregandoMesesPagamento ? (
+                <div className="rounded-xl bg-gray-50 p-4 text-center text-sm text-gray-500">
+                  Carregando meses...
+                </div>
+              ) : (
+                <div className="max-h-64 space-y-2 overflow-y-auto">
+                  {mesesPagamento.map((mes) => {
+                    const selecionado = mesesSelecionados.includes(mes.id);
+                    const vencido =
+                      mes.data_vencimento &&
+                      new Date(`${mes.data_vencimento}T23:59:59`).getTime() < Date.now();
+
+                    return (
+                      <label
+                        key={mes.id}
+                        className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${
+                          selecionado
+                            ? "border-[#005a3c] bg-[#f0f8f4]"
+                            : "border-gray-200"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selecionado}
+                          onChange={() => alternarMesPagamento(mes.id)}
+                          className="h-5 w-5 accent-[#005a3c]"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-[#003d2b]">
+                              {formatarCompetencia(mes.competencia)}
+                            </span>
+                            {vencido && (
+                              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                                Em atraso
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Vencimento: {formatarData(mes.data_vencimento)}
+                          </p>
+                        </div>
+                        <span className="font-bold text-[#005a3c]">
+                          {formatarMoeda(mes.valor)}
+                        </span>
+                      </label>
+                    );
+                  })}
+                  {mesesPagamento.length === 0 && (
+                    <p className="rounded-xl bg-gray-50 p-4 text-center text-sm text-gray-500">
+                      Nenhuma mensalidade pendente encontrada.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center justify-between border-t pt-3">
+                <span className="text-sm font-semibold text-gray-600">Total</span>
+                <span className="text-xl font-extrabold text-[#005a3c]">
+                  {formatarMoeda(
+                    mesesPagamento
+                      .filter((m) => mesesSelecionados.includes(m.id))
+                      .reduce((soma, m) => soma + Number(m.valor || 0), 0)
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Campo label="Valor pago" type="number" value={valorPagamento} onChange={setValorPagamento} />
+              <Campo label="Data do pagamento" type="date" value={dataPagamento} onChange={setDataPagamento} />
 
               <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Forma de pagamento
-                </label>
+                <label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label>
                 <select
                   value={tipoPagamento}
                   onChange={(e) => setTipoPagamento(e.target.value)}
                   className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none"
                 >
                   {FORMAS.map(([valor, label]) => (
-                    <option key={valor} value={valor}>
-                      {label}
-                    </option>
+                    <option key={valor} value={valor}>{label}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Comprovante
-                </label>
+                <label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label>
                 <input
                   type="file"
                   accept="image/*,.pdf"
@@ -1468,28 +1444,29 @@ export default function FinanceiroPage() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Observações
-                </label>
+                <label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label>
                 <textarea
                   rows={3}
                   value={observacoes}
                   onChange={(e) => setObservacoes(e.target.value)}
+                  placeholder="Ex.: Pagamento conjunto de agosto e setembro."
                   className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none"
                 />
               </div>
             </div>
 
+            <div className="rounded-xl bg-yellow-50 p-3 text-xs text-yellow-800">
+              <strong>Atenção:</strong> todas as competências marcadas serão quitadas
+              com a mesma data, forma de pagamento e comprovante.
+            </div>
+
             <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setPagamento(null)}
-                className="rounded-xl border px-5 py-3 font-semibold"
-              >
+              <button onClick={() => setPagamento(null)} className="rounded-xl border px-5 py-3 font-semibold">
                 Cancelar
               </button>
               <button
                 onClick={() => void confirmarPagamento()}
-                disabled={salvandoPagamento}
+                disabled={salvandoPagamento || carregandoMesesPagamento || mesesSelecionados.length === 0}
                 className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60"
               >
                 {salvandoPagamento ? "Salvando..." : "Confirmar pagamento"}
@@ -1499,62 +1476,59 @@ export default function FinanceiroPage() {
         </Modal>
       )}
 
-      {recibo && (
-        <Modal titulo="Recibo de pagamento" fechar={() => setRecibo(null)}>
+      {reciboItens.length > 0 && (
+        <Modal titulo="Recibo de pagamento" fechar={() => setReciboItens([])}>
           <div id="recibo-impressao" className="space-y-5">
             <div className="border-b pb-4 text-center">
               <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-2">
-                <img
-                  src="/logo-guarani.png"
-                  alt="Sociedade Guarani"
-                  className="h-full w-full object-contain"
-                />
+                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-full w-full object-contain" />
               </div>
-              <h3 className="text-xl font-extrabold text-[#003d2b]">
-                SOCIEDADE GUARANI
-              </h3>
-              <p className="text-sm text-gray-500">
-                Recibo de pagamento de mensalidade
-              </p>
+              <h3 className="text-xl font-extrabold text-[#003d2b]">SOCIEDADE GUARANI</h3>
+              <p className="text-sm text-gray-500">Recibo de pagamento de mensalidade</p>
             </div>
 
-            <div className="grid gap-3 rounded-2xl bg-[#f7faf8] p-5 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-gray-500">Recibo</p>
-                <p className="font-bold text-[#003d2b]">
-                  {recibo.numero_recibo || "—"}
-                </p>
+            <div className="rounded-2xl bg-[#f7faf8] p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-gray-500">Recibo</p>
+                  <p className="font-bold text-[#003d2b]">{reciboItens[0].numero_recibo || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Associado</p>
+                  <p className="font-bold">{pessoaDoLancamento(reciboItens[0])?.nome || "Associado"}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-gray-500">Competência</p>
-                <p className="font-bold">{formatarCompetencia(recibo.competencia)}</p>
+
+              <div className="mt-4 space-y-2 border-t pt-4">
+                <p className="text-sm font-bold text-[#003d2b]">Competências pagas</p>
+                {reciboItens.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between text-sm">
+                    <span>{formatarCompetencia(item.competencia)}</span>
+                    <strong>{formatarMoeda(item.valor)}</strong>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between border-t pt-3 text-lg font-extrabold text-[#005a3c]">
+                  <span>Total pago</span>
+                  <span>
+                    {formatarMoeda(
+                      reciboItens.reduce((soma, item) => soma + Number(item.valor || 0), 0)
+                    )}
+                  </span>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-gray-500">Associado</p>
-                <p className="font-bold">
-                  {pessoaDoLancamento(recibo)?.nome || "Associado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">CPF</p>
-                <p className="font-bold">
-                  {pessoaDoLancamento(recibo)?.cpf || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Valor</p>
-                <p className="text-xl font-extrabold text-[#005a3c]">
-                  {formatarMoeda(recibo.valor)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Pagamento</p>
-                <p className="font-bold">
-                  {formatarData(recibo.data_pagamento)} ·{" "}
-                  {FORMAS.find(([v]) => v === recibo.tipo_pagamento)?.[1] ||
-                    recibo.tipo_pagamento ||
-                    "—"}
-                </p>
+
+              <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-gray-500">Data</p>
+                  <p className="font-bold">{formatarData(reciboItens[0].data_pagamento)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Forma</p>
+                  <p className="font-bold">
+                    {FORMAS.find(([valor]) => valor === reciboItens[0].tipo_pagamento)?.[1] ||
+                      reciboItens[0].tipo_pagamento || "—"}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1563,16 +1537,10 @@ export default function FinanceiroPage() {
             </p>
 
             <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setRecibo(null)}
-                className="rounded-xl border px-5 py-3 font-semibold"
-              >
+              <button onClick={() => setReciboItens([])} className="rounded-xl border px-5 py-3 font-semibold">
                 Fechar
               </button>
-              <button
-                onClick={imprimirRecibo}
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
-              >
+              <button onClick={() => window.print()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">
                 🖨️ Imprimir / Salvar PDF
               </button>
             </div>
