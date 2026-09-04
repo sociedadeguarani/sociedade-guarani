@@ -224,6 +224,8 @@ function tipoSocioClasse(tipo?: string | null) {
 
 export default function Home() {
   const [menu, setMenu] = useState("Início");
+  const [verificandoLogin, setVerificandoLogin] = useState(true);
+  const [usuarioEmail, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [busca, setBusca] = useState("");
@@ -262,6 +264,47 @@ export default function Home() {
   const [relatorioSituacao, setRelatorioSituacao] = useState("todas");
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
 
+  useEffect(() => {
+    let montado = true;
+
+    async function verificarSessao() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        window.location.replace("/login");
+        return;
+      }
+
+      if (montado) {
+        setUsuarioEmail(session.user.email || "");
+        setVerificandoLogin(false);
+      }
+    }
+
+    void verificarSessao();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        window.location.replace("/login");
+      } else if (montado) {
+        setUsuarioEmail(session.user.email || "");
+      }
+    });
+
+    return () => {
+      montado = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  async function sair() {
+    await supabase.auth.signOut();
+    window.location.replace("/login");
+  }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
@@ -863,6 +906,19 @@ export default function Home() {
     });
   }, [socios, busca, mostrarSomenteDependentes]);
 
+  if (verificandoLogin) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" />
+          <p className="font-semibold text-[#005a3c]">
+            Verificando acesso...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
@@ -892,14 +948,24 @@ export default function Home() {
 
           </div>
 
-          <div className="hidden items-center gap-3 sm:flex">
-            <p className="text-sm text-gray-200">
-              Sistema de Gestão
-            </p>
+          <div className="hidden items-center gap-4 sm:flex">
+            <div className="text-right">
+              <p className="text-xs text-gray-500">
+                {usuarioEmail || "Usuário autenticado"}
+              </p>
 
-            <p className="font-bold text-[#005a3c]">
-              Área Administrativa
-            </p>
+              <p className="font-bold text-[#005a3c]">
+                Área Administrativa
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={sair}
+              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
+            >
+              Sair
+            </button>
           </div>
 
         </div>
@@ -924,6 +990,8 @@ export default function Home() {
                       void abrirFinanceiro();
                     } else if (item.nome === "Relatórios") {
                       abrirRelatorios();
+                    } else if (item.nome === "Sócios") {
+                      window.location.href = "/socios";
                     } else {
                       setMenu(item.nome);
                     }
@@ -972,6 +1040,8 @@ export default function Home() {
                       void abrirFinanceiro();
                     } else if (item.nome === "Relatórios") {
                       abrirRelatorios();
+                    } else if (item.nome === "Sócios") {
+                      window.location.href = "/socios";
                     } else {
                       setMenu(item.nome);
                     }
@@ -1972,13 +2042,13 @@ function ResumoFinanceiroGuarani({
   valor,
 }: {
   titulo: string;
-  valor: number;
+  valor: string | number;
 }) {
   return (
     <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
       <p className="text-sm text-gray-500">{titulo}</p>
       <p className="mt-1 text-2xl font-bold text-[#005a3c]">
-        {formatarMoeda(valor)}
+        {typeof valor === "number" ? formatarMoeda(valor) : valor}
       </p>
     </div>
   );
@@ -3224,17 +3294,7 @@ function RelatoriosFinanceiros({
       <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
       <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
-        <div className="relatorio-acoes flex flex-wrap gap-3">
-          <button
-            onClick={() => { window.location.href = "/relatorios/inadimplencia"; }}
-            className="rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700"
-          >
-            🔴 Relatório de Inadimplência
-          </button>
-          <button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">
-            🖨️ Imprimir / Salvar PDF
-          </button>
-        </div>
+        <div className="relatorio-acoes flex flex-wrap gap-2"><button onClick={() => { window.location.href = "/relatorios/inadimplencia"; }} className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-bold text-red-700 shadow-sm">🔴 Relatório de Inadimplência</button><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
       </div>
       <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
         <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
