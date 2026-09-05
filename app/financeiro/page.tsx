@@ -232,7 +232,7 @@ export default function FinanceiroPage() {
 
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "contas" | "fluxo">("mensalidades");
+  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "inadimplencia" | "contas" | "fluxo">("mensalidades");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
   const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
@@ -396,6 +396,26 @@ export default function FinanceiroPage() {
   const quantidadeAtrasados = atrasoPessoas.length;
   const amarelos = atrasoPessoas.filter((x) => x.meses <= 2).length;
   const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
+
+  const inadimplentesDetalhados = useMemo(() => {
+    const hojeIso = new Date().toISOString().slice(0, 10);
+    const mapa = new Map<string, { pessoa: PessoaFinanceira; meses: number; valor: number; competencias: string[] }>();
+
+    for (const m of mensalidades) {
+      if (m.situacao === "pago" || m.situacao === "isento") continue;
+      const vencida = m.situacao === "em_atraso" || Boolean(m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso);
+      if (!vencida) continue;
+      const pessoa = pessoaDoLancamento(m);
+      if (!pessoa) continue;
+      const atual = mapa.get(pessoa.chave) || { pessoa, meses: 0, valor: 0, competencias: [] };
+      atual.meses += 1;
+      atual.valor += Number(m.valor || 0);
+      if (m.competencia) atual.competencias.push(m.competencia.slice(0, 7));
+      mapa.set(pessoa.chave, atual);
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => b.meses - a.meses || b.valor - a.valor);
+  }, [mensalidades, mapaPessoa]);
 
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -1428,7 +1448,7 @@ export default function FinanceiroPage() {
             </div>
           )}
 
-          <div className="mb-5 grid gap-2 rounded-2xl border border-[#e2ebe6] bg-white p-2 sm:grid-cols-3">
+          <div className="mb-5 grid gap-2 rounded-2xl border border-[#e2ebe6] bg-white p-2 sm:grid-cols-2 xl:grid-cols-4">
             {[
               ["mensalidades", "💰 Mensalidades"],
               ["contas", "🏦 Contas bancárias"],
@@ -1438,7 +1458,65 @@ export default function FinanceiroPage() {
             ))}
           </div>
 
-          {abaFinanceira !== "mensalidades" && (
+          {abaFinanceira === "inadimplencia" && (
+            <div className="mb-6 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <Resumo titulo="Total inadimplentes" valor={String(inadimplentesDetalhados.length)} subtitulo="Sócios e dependentes" />
+                <Resumo titulo="1–2 meses" valor={String(inadimplentesDetalhados.filter((x) => x.meses >= 1 && x.meses <= 2).length)} subtitulo="Atenção" />
+                <Resumo titulo="3+ meses" valor={String(inadimplentesDetalhados.filter((x) => x.meses >= 3).length)} subtitulo="Inadimplência crítica" />
+                <Resumo titulo="Valor total devido" valor={formatarMoeda(inadimplentesDetalhados.reduce((s, x) => s + x.valor, 0))} subtitulo="Mensalidades vencidas" />
+              </div>
+
+              <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-[#003d2b]">Lista de inadimplentes</h3>
+                    <p className="text-sm text-gray-500">1–2 meses = amarelo · 3 meses ou mais = vermelho.</p>
+                  </div>
+                  <button onClick={() => { window.location.href = "/relatorios/inadimplencia"; }} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">📊 Relatório completo</button>
+                </div>
+
+                <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
+                  <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">🟢 Em dia: não aparece aqui</span>
+                  <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">🟡 1–2 meses</span>
+                  <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">🔴 3+ meses</span>
+                </div>
+
+                {inadimplentesDetalhados.length === 0 ? (
+                  <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
+                    <p className="text-lg font-extrabold text-[#005a3c]">✓ Nenhum inadimplente</p>
+                    <p className="mt-1 text-sm text-gray-500">Todos os associados com mensalidade estão em dia.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[900px] text-left text-sm">
+                      <thead><tr className="border-b border-[#dfe9e3] bg-[#e8f3ee] text-xs uppercase tracking-wide text-[#50625a]">
+                        <th className="px-4 py-3">Associado</th><th className="px-4 py-3">Matrícula</th><th className="px-4 py-3">Responsável</th><th className="px-4 py-3">Meses</th><th className="px-4 py-3">Competências</th><th className="px-4 py-3">Valor devido</th><th className="px-4 py-3">Ação</th>
+                      </tr></thead>
+                      <tbody>
+                        {inadimplentesDetalhados.map((x) => {
+                          const nivel = nivelAtraso(x.meses);
+                          return (
+                            <tr key={x.pessoa.chave} className="border-b border-[#e2ebe6]">
+                              <td className="px-4 py-4 font-extrabold text-[#173d2e]">{x.pessoa.nome}</td>
+                              <td className="px-4 py-4">{x.pessoa.matricula || "—"}</td>
+                              <td className="px-4 py-4">{x.pessoa.responsavel_nome || "Titular"}</td>
+                              <td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-extrabold ${nivel.classe}`}>{x.meses} {x.meses === 1 ? "mês" : "meses"}</span></td>
+                              <td className="px-4 py-4 text-xs text-gray-600">{x.competencias.join(", ")}</td>
+                              <td className="px-4 py-4 font-extrabold text-red-600">{formatarMoeda(x.valor)}</td>
+                              <td className="px-4 py-4"><button onClick={() => { window.location.href = x.pessoa.dependente_id ? "/dependentes" : "/socios"; }} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Abrir cadastro</button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(abaFinanceira === "contas" || abaFinanceira === "fluxo") && (
             <div className="mb-6 space-y-5">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <Resumo titulo="Total nos bancos" valor={formatarMoeda(saldoTotalBancos)} subtitulo="Saldo inicial + movimentações" />
