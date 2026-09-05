@@ -68,39 +68,6 @@ type PessoaFinanceira = {
   tipo_pagamento: string;
 };
 
-type ContaBancaria = {
-  id: string;
-  nome: string;
-  banco: string | null;
-  agencia: string | null;
-  conta: string | null;
-  saldo_inicial: number;
-  data_saldo_inicial: string | null;
-  ativo: boolean;
-  observacoes: string | null;
-};
-
-type MovimentoFinanceiro = {
-  id: string;
-  conta_bancaria_id: string;
-  conta_destino_id: string | null;
-  grupo_transferencia: string | null;
-  tipo: "entrada" | "saida" | "transferencia";
-  categoria: string | null;
-  descricao: string;
-  valor: number;
-  data_movimentacao: string;
-  forma_pagamento: string | null;
-  origem_tipo: string | null;
-  origem_id: string | null;
-  socio_id: string | null;
-  dependente_id: string | null;
-  comprovante_url: string | null;
-  conciliado: boolean;
-  data_conciliacao: string | null;
-  observacoes: string | null;
-};
-
 const MENU = [
   ["Início", "🏠", "/painel"],
   ["Sócios", "👥", "/socios"],
@@ -230,50 +197,8 @@ export default function FinanceiroPage() {
   const [reciboItens, setReciboItens] = useState<Mensalidade[]>([]);
   const [processandoEstorno, setProcessandoEstorno] = useState(false);
 
-  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
-  const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "inadimplencia" | "contas" | "fluxo">("mensalidades");
-  const [mostrarContaModal, setMostrarContaModal] = useState(false);
-  const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
-  const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
-  const [contaEditando, setContaEditando] = useState<ContaBancaria | null>(null);
-  const [contaNome, setContaNome] = useState("");
-  const [contaBanco, setContaBanco] = useState("");
-  const [contaAgencia, setContaAgencia] = useState("");
-  const [contaNumero, setContaNumero] = useState("");
-  const [contaSaldoInicial, setContaSaldoInicial] = useState("0");
-  const [contaDataSaldo, setContaDataSaldo] = useState(new Date().toISOString().slice(0, 10));
-  const [contaObservacoes, setContaObservacoes] = useState("");
-  const [contaConferindo, setContaConferindo] = useState<ContaBancaria | null>(null);
-  const [saldoConferido, setSaldoConferido] = useState("");
-  const [dataConferencia, setDataConferencia] = useState(new Date().toISOString().slice(0, 10));
-  const [observacaoConferencia, setObservacaoConferencia] = useState("");
-  const [salvandoConferencia, setSalvandoConferencia] = useState(false);
-  const [movTipo, setMovTipo] = useState<"entrada" | "saida">("saida");
-  const [movConta, setMovConta] = useState("");
-  const [movCategoria, setMovCategoria] = useState("");
-  const [movDescricao, setMovDescricao] = useState("");
-  const [movValor, setMovValor] = useState("");
-  const [movData, setMovData] = useState(new Date().toISOString().slice(0, 10));
-  const [movForma, setMovForma] = useState("pix");
-  const [movObservacoes, setMovObservacoes] = useState("");
-  const [movArquivo, setMovArquivo] = useState<File | null>(null);
-  const [transOrigem, setTransOrigem] = useState("");
-  const [transDestino, setTransDestino] = useState("");
-  const [transValor, setTransValor] = useState("");
-  const [transData, setTransData] = useState(new Date().toISOString().slice(0, 10));
-  const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
-  const [transObservacoes, setTransObservacoes] = useState("");
-  const [contaPagamentoId, setContaPagamentoId] = useState("");
-
-  // Filtros do fluxo de caixa
-  const [fluxoInicio, setFluxoInicio] = useState("");
-  const [fluxoFim, setFluxoFim] = useState("");
-  const [fluxoConta, setFluxoConta] = useState("");
-  const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
-
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map<string, string>(socios.map((s) => [s.id, s.nome] as [string, string]));
+    const responsaveis = new Map(socios.map((s) => [s.id, s.nome]));
     const resultado: PessoaFinanceira[] = [];
 
     for (const s of socios) {
@@ -397,62 +322,6 @@ export default function FinanceiroPage() {
   const amarelos = atrasoPessoas.filter((x) => x.meses <= 2).length;
   const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
 
-  const inadimplenciaDetalhada = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-
-    return atrasoPessoas
-      .map((x) => {
-        const lancamentos = mensalidades
-          .filter((m) => {
-            const chave = m.dependente_id
-              ? `dependente:${m.dependente_id}`
-              : `socio:${m.socio_id}`;
-
-            if (chave !== x.pessoa.chave) return false;
-            if (m.situacao === "pago" || m.situacao === "isento") return false;
-
-            const vencida =
-              m.situacao === "em_atraso" ||
-              Boolean(
-                m.data_vencimento &&
-                  m.data_vencimento.slice(0, 10) <
-                    new Date().toISOString().slice(0, 10)
-              );
-
-            return vencida;
-          })
-          .sort((a, b) =>
-            String(b.competencia || "").localeCompare(
-              String(a.competencia || "")
-            )
-          );
-
-        const valorDevido = lancamentos.reduce(
-          (soma, item) => soma + Number(item.valor || 0),
-          0
-        );
-
-        const correspondeBusca =
-          !termo ||
-          x.pessoa.nome.toLowerCase().includes(termo) ||
-          String(x.pessoa.matricula || "").includes(termo) ||
-          String(x.pessoa.cpf || "").includes(termo) ||
-          String(x.pessoa.responsavel_nome || "")
-            .toLowerCase()
-            .includes(termo);
-
-        return {
-          ...x,
-          lancamentos,
-          valorDevido,
-          competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)),
-          ultimaCompetencia: lancamentos[0]?.competencia || null,
-          correspondeBusca,
-        };
-      })
-      .filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, mensalidades, busca]);
-
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
 
@@ -502,7 +371,7 @@ export default function FinanceiroPage() {
   async function carregarTudo() {
     setCarregando(true);
 
-    const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] =
+    const [sociosResult, dependentesResult, mensalidadesResult] =
       await Promise.all([
         supabase
           .from("socios")
@@ -521,39 +390,23 @@ export default function FinanceiroPage() {
           .select("*")
           .order("competencia", { ascending: false })
           .order("data_vencimento", { ascending: true }),
-        supabase
-          .from("contas_bancarias")
-          .select("*")
-          .eq("ativo", true)
-          .order("nome", { ascending: true }),
-        supabase
-          .from("movimentacoes_financeiras")
-          .select("*")
-          .order("data_movimentacao", { ascending: false })
-          .order("created_at", { ascending: false }),
       ]);
 
     const erros = [
       sociosResult.error,
       dependentesResult.error,
       mensalidadesResult.error,
-      contasResult.error,
-      movimentosResult.error,
     ].filter(Boolean);
 
     if (sociosResult.error) console.error(sociosResult.error);
     if (dependentesResult.error) console.error(dependentesResult.error);
     if (mensalidadesResult.error) console.error(mensalidadesResult.error);
-    if (contasResult.error) console.error(contasResult.error);
-    if (movimentosResult.error) console.error(movimentosResult.error);
 
     if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
     if (dependentesResult.data)
       setDependentes(dependentesResult.data as Dependente[]);
     if (mensalidadesResult.data)
       setMensalidades(mensalidadesResult.data as Mensalidade[]);
-    if (contasResult.data) setContasBancarias(contasResult.data as ContaBancaria[]);
-    if (movimentosResult.data) setMovimentosFinanceiros(movimentosResult.data as MovimentoFinanceiro[]);
 
     if (erros.length > 0) {
       setMensagem(
@@ -689,7 +542,6 @@ export default function FinanceiroPage() {
   }
 
   async function abrirPagamento(item: Mensalidade) {
-    setContaPagamentoId("");
     setPagamento(item);
     setValorPagamento(String(Number(item.valor || 0)));
     setDataPagamento(new Date().toISOString().slice(0, 10));
@@ -847,35 +699,6 @@ export default function FinanceiroPage() {
       setMensalidades((lista) =>
         lista.map((m) => atualizadas.find((a) => a.id === m.id) || m)
       );
-
-      if (contaPagamentoId) {
-        const pessoa = pessoaDoLancamento(pagamento);
-        const { data: movimentoData, error: movimentoError } = await supabase
-          .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: contaPagamentoId,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "entrada",
-            categoria: "Mensalidade",
-            descricao: `Mensalidade ${selecionadas.map((m) => formatarCompetencia(m.competencia)).join(", ")} - ${pessoa?.nome || "Associado"}`,
-            valor: totalSelecionado,
-            data_movimentacao: dataPagamento || new Date().toISOString().slice(0,10),
-            forma_pagamento: tipoPagamento || null,
-            origem_tipo: "mensalidade",
-            origem_id: selecionadas[0].id,
-            socio_id: pessoa?.socio_id || null,
-            dependente_id: pessoa?.dependente_id || null,
-            comprovante_url: comprovante || null,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: observacoes || null,
-          })
-          .select("*")
-          .single();
-        if (movimentoError) throw movimentoError;
-        setMovimentosFinanceiros((lista) => [movimentoData as MovimentoFinanceiro, ...lista]);
-      }
 
       setMensagem(
         selecionadas.length === 1
@@ -1087,150 +910,6 @@ export default function FinanceiroPage() {
     window.open(data.signedUrl, "_blank");
   }
 
-  const saldoConta = (conta: ContaBancaria) => {
-    const movimentos = movimentosFinanceiros.filter((m) => m.conta_bancaria_id === conta.id);
-    let saldo = Number(conta.saldo_inicial || 0);
-    for (const m of movimentos) {
-      if (m.tipo === "entrada") saldo += Number(m.valor || 0);
-      else if (m.tipo === "saida") saldo -= Number(m.valor || 0);
-      else if (m.tipo === "transferencia") {
-        saldo -= Number(m.valor || 0);
-      }
-    }
-    saldo += movimentosFinanceiros
-      .filter((m) => m.tipo === "transferencia" && m.conta_destino_id === conta.id)
-      .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-    return saldo;
-  };
-
-  const saldoTotalBancos = contasBancarias.reduce((sum, c) => sum + saldoConta(c), 0);
-
-  const movimentosFluxo = useMemo(() => {
-    return movimentosFinanceiros.filter((m) => {
-      const data = String(m.data_movimentacao || "").slice(0, 10);
-      if (fluxoInicio && data < fluxoInicio) return false;
-      if (fluxoFim && data > fluxoFim) return false;
-      if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
-      if (fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
-      return true;
-    });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo]);
-
-  const entradasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "entrada")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const saidasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "saida")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const transferenciasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "transferencia")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-
-  async function salvarContaBancaria() {
-    if (!contaNome.trim()) { setMensagem("Informe o nome da conta."); return; }
-    const payload = { nome: contaNome.trim(), banco: contaBanco || null, agencia: contaAgencia || null, conta: contaNumero || null, saldo_inicial: Number(contaSaldoInicial || 0), data_saldo_inicial: contaDataSaldo || null, ativo: true, observacoes: contaObservacoes || null };
-    const result = contaEditando
-      ? await supabase.from("contas_bancarias").update(payload).eq("id", contaEditando.id).select("*").single()
-      : await supabase.from("contas_bancarias").insert(payload).select("*").single();
-    if (result.error) { setMensagem(`Não foi possível salvar a conta. ${result.error.message}`); return; }
-    if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? result.data as ContaBancaria : c));
-    else setContasBancarias((lista) => [...lista, result.data as ContaBancaria].sort((a,b)=>a.nome.localeCompare(b.nome)));
-    setMostrarContaModal(false); setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes(""); setMensagem("Conta bancária salva com sucesso.");
-  }
-
-  function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
-  function editarConta(c: ContaBancaria) { setContaEditando(c); setContaNome(c.nome); setContaBanco(c.banco || ""); setContaAgencia(c.agencia || ""); setContaNumero(c.conta || ""); setContaSaldoInicial(String(c.saldo_inicial || 0)); setContaDataSaldo(c.data_saldo_inicial || new Date().toISOString().slice(0,10)); setContaObservacoes(c.observacoes || ""); setMostrarContaModal(true); }
-
-  function abrirConferenciaSaldo(c: ContaBancaria) {
-    setContaConferindo(c);
-    setSaldoConferido(saldoConta(c).toFixed(2));
-    setDataConferencia(new Date().toISOString().slice(0, 10));
-    setObservacaoConferencia("Conferência do saldo bancário");
-  }
-
-  async function salvarConferenciaSaldo() {
-    if (!contaConferindo) return;
-    const saldoInformado = Number(String(saldoConferido).replace(",", "."));
-    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
-      setMensagem("Informe um saldo bancário válido.");
-      return;
-    }
-
-    const saldoAtual = saldoConta(contaConferindo);
-    const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
-
-    if (Math.abs(diferenca) < 0.01) {
-      setMensagem(`Saldo de ${contaConferindo.nome} já está conferido em ${formatarMoeda(saldoAtual)}.`);
-      setContaConferindo(null);
-      return;
-    }
-
-    setSalvandoConferencia(true);
-    try {
-      const tipo = diferenca > 0 ? "entrada" : "saida";
-      const descricao = diferenca > 0
-        ? `Ajuste de conciliação bancária - ${contaConferindo.nome}`
-        : `Ajuste de conciliação bancária - ${contaConferindo.nome}`;
-
-      const payload = {
-        conta_bancaria_id: contaConferindo.id,
-        conta_destino_id: null,
-        grupo_transferencia: null,
-        tipo,
-        categoria: "Conciliação bancária",
-        descricao,
-        valor: Math.abs(diferenca),
-        data_movimentacao: dataConferencia,
-        forma_pagamento: "outro",
-        origem_tipo: "ajuste_conciliacao",
-        origem_id: null,
-        socio_id: null,
-        dependente_id: null,
-        comprovante_url: null,
-        conciliado: true,
-        data_conciliacao: dataConferencia,
-        observacoes: `${observacaoConferencia || "Conferência do saldo bancário"}. Saldo anterior: ${formatarMoeda(saldoAtual)}. Saldo conferido: ${formatarMoeda(saldoInformado)}.`,
-      };
-
-      const { data, error } = await supabase
-        .from("movimentacoes_financeiras")
-        .insert(payload)
-        .select("*")
-        .single();
-
-      if (error) throw error;
-
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]);
-      setMensagem(`Saldo de ${contaConferindo.nome} conferido com sucesso. Novo saldo: ${formatarMoeda(saldoInformado)}.`);
-      setContaConferindo(null);
-    } catch (error) {
-      setMensagem(`Não foi possível conferir o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoConferencia(false);
-    }
-  }
-
-  async function salvarMovimentoFinanceiro() {
-    if (!movConta || !movDescricao.trim() || Number(movValor || 0) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
-    let comprovante: string | null = null;
-    if (movArquivo) { const ext = movArquivo.name.split(".").pop()?.toLowerCase() || "bin"; const caminho = `movimentos/${Date.now()}-${movArquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; const up = await supabase.storage.from("comprovantes-financeiro").upload(caminho, movArquivo, { upsert: true, contentType: movArquivo.type || "application/octet-stream" }); if (up.error) { setMensagem(`Não foi possível enviar o comprovante. ${up.error.message}`); return; } comprovante = caminho; }
-    const payload = { conta_bancaria_id: movConta, conta_destino_id: null, grupo_transferencia: null, tipo: movTipo, categoria: movCategoria || null, descricao: movDescricao.trim(), valor: Number(movValor), data_movimentacao: movData, forma_pagamento: movForma || null, origem_tipo: "manual", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: comprovante, conciliado: false, data_conciliacao: null, observacoes: movObservacoes || null };
-    const { data, error } = await supabase.from("movimentacoes_financeiras").insert(payload).select("*").single();
-    if (error) { setMensagem(`Não foi possível registrar a movimentação. ${error.message}`); return; }
-    setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarMovimentoModal(false); setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null); setMensagem("Movimentação registrada com sucesso.");
-  }
-
-  async function salvarTransferencia() {
-    if (!transOrigem || !transDestino || transOrigem === transDestino || Number(transValor || 0) <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
-    const grupo = crypto.randomUUID();
-    const base = { grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao: transDescricao || "Transferência entre contas", valor: Number(transValor), data_movimentacao: transData, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes: transObservacoes || null };
-    const { data, error } = await supabase.from("movimentacoes_financeiras").insert({ ...base, conta_bancaria_id: transOrigem, conta_destino_id: transDestino }).select("*").single();
-    if (error) { setMensagem(`Não foi possível registrar a transferência. ${error.message}`); return; }
-    setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
-  }
-
-  async function abrirPagamentoComConta(item: Mensalidade) { setContaPagamentoId(""); await abrirPagamento(item); }
-
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
       <header className="sticky top-0 z-40 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
@@ -1313,6 +992,30 @@ export default function FinanceiroPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="mb-5 flex flex-wrap gap-2 rounded-2xl border border-[#dfe9e3] bg-white p-2 shadow-sm">
+            <button
+              type="button"
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-extrabold text-white shadow-sm"
+            >
+              💰 Mensalidades
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = "/relatorios/inadimplencia";
+              }}
+              className={`rounded-xl px-4 py-2.5 text-sm font-extrabold transition ${
+                quantidadeAtrasados > 0
+                  ? "bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100"
+                  : "bg-[#f1f5f2] text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+              }`}
+            >
+              🔴 Inadimplência{quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}
+            </button>
           </div>
 
           <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
@@ -1484,311 +1187,6 @@ export default function FinanceiroPage() {
             </div>
           )}
 
-          <div className="mb-5 grid gap-2 rounded-2xl border border-[#e2ebe6] bg-white p-2 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              ["mensalidades", "💰 Mensalidades"],
-              ["inadimplencia", `🚨 Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
-              ["contas", "🏦 Contas bancárias"],
-              ["fluxo", "📊 Fluxo de caixa"],
-            ].map(([id, label]) => (
-              <button key={id} onClick={() => setAbaFinanceira(id as typeof abaFinanceira)} className={`rounded-xl px-4 py-3 text-sm font-bold ${abaFinanceira === id ? "bg-[#005a3c] text-white" : "bg-[#f7faf8] text-[#50625a]"}`}>{label}</button>
-            ))}
-          </div>
-
-          {abaFinanceira === "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Resumo
-                  titulo="Total inadimplentes"
-                  valor={String(quantidadeAtrasados)}
-                  subtitulo="Sócios e dependentes"
-                />
-                <Resumo
-                  titulo="1 ou 2 meses"
-                  valor={String(amarelos)}
-                  subtitulo="Atenção"
-                />
-                <Resumo
-                  titulo="3+ meses"
-                  valor={String(vermelhos)}
-                  subtitulo="Inadimplência crítica"
-                />
-                <Resumo
-                  titulo="Valor total devido"
-                  valor={formatarMoeda(
-                    inadimplenciaDetalhada.reduce(
-                      (soma, item) => soma + item.valorDevido,
-                      0
-                    )
-                  )}
-                  subtitulo="Mensalidades vencidas"
-                />
-              </div>
-
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-lg font-extrabold text-red-700">
-                      {quantidadeAtrasados > 0
-                        ? `⚠️ ${quantidadeAtrasados} ${
-                            quantidadeAtrasados === 1 ? "sócio" : "sócios"
-                          } em atraso`
-                        : "✓ Nenhum sócio em atraso"}
-                    </p>
-                    <p className="mt-1 text-sm text-gray-600">
-                      🟡 1–2 meses em atraso · 🔴 3 meses ou mais.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() =>
-                      (window.location.href = "/relatorios/inadimplencia")
-                    }
-                    className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
-                  >
-                    📊 Relatório completo
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-lg font-extrabold text-[#003d2b]">
-                      Lista de inadimplentes
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      Controle quem está em atraso e quantos meses estão pendentes.
-                    </p>
-                  </div>
-                  <input
-                    value={busca}
-                    onChange={(e) => setBusca(e.target.value)}
-                    placeholder="Buscar nome, matrícula ou responsável..."
-                    className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-sm outline-none focus:border-[#005a3c] sm:max-w-md"
-                  />
-                </div>
-
-                <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
-                  <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">
-                    🟢 Em dia: não aparece nesta lista
-                  </span>
-                  <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 1–2 meses: {amarelos}
-                  </span>
-                  <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 3+ meses: {vermelhos}
-                  </span>
-                </div>
-
-                {inadimplenciaDetalhada.length === 0 ? (
-                  <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
-                    <div className="text-4xl">✅</div>
-                    <p className="mt-3 font-bold text-gray-700">
-                      Nenhum inadimplente encontrado
-                    </p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Quando houver mensalidades vencidas, elas aparecerão aqui.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[900px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Pessoa</th>
-                          <th className="px-4 py-3">Matrícula</th>
-                          <th className="px-4 py-3">Responsável</th>
-                          <th className="px-4 py-3">Meses</th>
-                          <th className="px-4 py-3">Competências</th>
-                          <th className="px-4 py-3">Valor devido</th>
-                          <th className="px-4 py-3 text-right">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {inadimplenciaDetalhada.map((item) => (
-                          <tr key={item.pessoa.chave} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-4">
-                              <p className="font-bold text-[#173d2e]">
-                                {item.pessoa.nome}
-                              </p>
-                              {item.pessoa.dependente_id && (
-                                <p className="text-xs text-gray-500">Dependente</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.matricula || "—"}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.responsavel_nome || "Titular"}
-                            </td>
-                            <td className="px-4 py-4">
-                              <span
-                                className={`rounded-full px-3 py-1.5 text-xs font-extrabold ${item.nivel.classe}`}
-                              >
-                                {item.meses}{" "}
-                                {item.meses === 1 ? "mês" : "meses"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              {item.competencias.join(", ")}
-                            </td>
-                            <td className="px-4 py-4 font-extrabold text-red-600">
-                              {formatarMoeda(item.valorDevido)}
-                            </td>
-                            <td className="px-4 py-4 text-right">
-                              <button
-                                onClick={() => {
-                                  window.location.href = "/socios";
-                                }}
-                                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]"
-                              >
-                                Abrir cadastro
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {abaFinanceira !== "mensalidades" &&
-            abaFinanceira !== "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Resumo titulo="Total nos bancos" valor={formatarMoeda(saldoTotalBancos)} subtitulo="Saldo inicial + movimentações" />
-                <Resumo titulo="Entradas registradas" valor={formatarMoeda(entradasPeriodo)} subtitulo="Livro financeiro" />
-                <Resumo titulo="Saídas registradas" valor={formatarMoeda(saidasPeriodo)} subtitulo="Livro financeiro" />
-                <Resumo titulo="Contas ativas" valor={String(contasBancarias.length)} subtitulo="Instituições cadastradas" />
-              </div>
-
-              {abaFinanceira === "contas" && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
-                    <div className="flex gap-2"><button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
-                  </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
-                </div>
-              )}
-
-              {abaFinanceira === "fluxo" && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-[#003d2b]">Livro de movimentações</h3>
-                      <p className="text-sm text-gray-500">Entradas, saídas e transferências ficam registradas para prestação de contas.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova movimentação</button>
-                      <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button>
-                    </div>
-                  </div>
-
-                  <div className="mb-5 rounded-2xl bg-[#f7faf8] p-4">
-                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="font-bold text-[#003d2b]">Filtros do fluxo de caixa</p>
-                        <p className="text-xs text-gray-500">Consulte por período, banco e tipo de movimentação.</p>
-                      </div>
-                      <button
-                        onClick={() => { setFluxoInicio(""); setFluxoFim(""); setFluxoConta(""); setFluxoTipo("todos"); }}
-                        className="rounded-lg border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]"
-                      >
-                        Limpar filtros
-                      </button>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <Campo label="Data inicial" type="date" value={fluxoInicio} onChange={setFluxoInicio} />
-                      <Campo label="Data final" type="date" value={fluxoFim} onChange={setFluxoFim} />
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Conta</label>
-                        <select value={fluxoConta} onChange={(e) => setFluxoConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="">Todas as contas</option>
-                          {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label>
-                        <select value={fluxoTipo} onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="todos">Todos</option>
-                          <option value="entrada">Entradas</option>
-                          <option value="saida">Saídas</option>
-                          <option value="transferencia">Transferências</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-5 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-green-100 bg-green-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Entradas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-green-700">{formatarMoeda(entradasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-red-100 bg-red-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Saídas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-red-700">{formatarMoeda(saidasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Transferências no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-blue-700">{formatarMoeda(transferenciasPeriodo)}</p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Data</th>
-                          <th className="px-4 py-3">Conta</th>
-                          <th className="px-4 py-3">Descrição</th>
-                          <th className="px-4 py-3">Tipo</th>
-                          <th className="px-4 py-3">Valor</th>
-                          <th className="px-4 py-3">Conciliação</th>
-                          <th className="px-4 py-3">Comprovante</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {movimentosFluxo.map((m) => (
-                          <tr key={m.id} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-3 text-sm">{formatarData(m.data_movimentacao)}</td>
-                            <td className="px-4 py-3 font-semibold">{contasBancarias.find((c) => c.id === m.conta_bancaria_id)?.nome || "—"}</td>
-                            <td className="px-4 py-3">
-                              <p className="font-semibold">{m.descricao}</p>
-                              <p className="text-xs text-gray-500">{m.categoria || "Sem categoria"}</p>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${m.tipo === "entrada" ? "bg-green-100 text-green-700" : m.tipo === "saida" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
-                                {m.tipo === "entrada" ? "Entrada" : m.tipo === "saida" ? "Saída" : "Transferência"}
-                              </span>
-                            </td>
-                            <td className={`px-4 py-3 font-bold ${m.tipo === "entrada" ? "text-green-700" : m.tipo === "saida" ? "text-red-700" : "text-blue-700"}`}>
-                              {m.tipo === "saida" ? "− " : m.tipo === "entrada" ? "+ " : "↔ "}{formatarMoeda(m.valor)}
-                            </td>
-                            <td className="px-4 py-3 text-sm">{m.conciliado ? "✅ Conferido" : "⏳ Pendente"}</td>
-                            <td className="px-4 py-3 text-sm">
-                              {m.comprovante_url ? (
-                                <button onClick={() => void abrirComprovante(m.comprovante_url)} className="font-bold text-[#005a3c] underline">Abrir</button>
-                              ) : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                        {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {abaFinanceira === "mensalidades" && (
-            <>
           <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
@@ -2006,86 +1404,8 @@ export default function FinanceiroPage() {
               />
             </div>
           </div>
-            </>
-          )}
         </section>
       </div>
-
-      {mostrarContaModal && (
-        <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Campo label="Nome da conta" value={contaNome} onChange={setContaNome} />
-            <Campo label="Banco" value={contaBanco} onChange={setContaBanco} />
-            <Campo label="Agência" value={contaAgencia} onChange={setContaAgencia} />
-            <Campo label="Número da conta" value={contaNumero} onChange={setContaNumero} />
-            <Campo label="Saldo inicial" type="number" value={contaSaldoInicial} onChange={setContaSaldoInicial} />
-            <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Salvar conta</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {contaConferindo && (
-        <Modal titulo={`Conferir saldo — ${contaConferindo.nome}`} fechar={() => setContaConferindo(null)}>
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-4">
-              <p className="text-sm text-gray-500">Saldo calculado pelo sistema</p>
-              <p className="mt-1 text-3xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(contaConferindo))}</p>
-              <p className="mt-1 text-xs text-gray-500">Saldo de abertura + entradas − saídas + transferências.</p>
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
-              <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">Se houver diferença, o sistema criará uma movimentação de conciliação para que o histórico continue transparente.</p>
-            </div>
-            <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação</label>
-              <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
-            </div>
-            <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial não será apagado nem alterado. Se o saldo real for diferente, a diferença ficará registrada no livro financeiro como ajuste de conciliação.
-            </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
-              <button disabled={salvandoConferencia} onClick={() => void salvarConferenciaSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConferencia ? "Salvando..." : "Conferir e salvar saldo"}</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarMovimentoModal && (
-        <Modal titulo="Nova movimentação financeira" fechar={() => setMostrarMovimentoModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label><select value={movTipo} onChange={(e)=>setMovTipo(e.target.value as "entrada"|"saida")} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta bancária</label><select value={movConta} onChange={(e)=>setMovConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome} — {c.banco || ""}</option>)}</select></div>
-            <Campo label="Categoria" value={movCategoria} onChange={setMovCategoria} />
-            <Campo label="Descrição" value={movDescricao} onChange={setMovDescricao} />
-            <Campo label="Valor" type="number" value={movValor} onChange={setMovValor} />
-            <Campo label="Data" type="date" value={movData} onChange={setMovData} />
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label><select value={movForma} onChange={(e)=>setMovForma(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3">{FORMAS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label><input type="file" accept="image/*,.pdf" onChange={(e)=>setMovArquivo(e.target.files?.[0]||null)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm" /></div>
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={movObservacoes} onChange={(e)=>setMovObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarMovimentoModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarMovimentoFinanceiro()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Registrar movimentação</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarTransferenciaModal && (
-        <Modal titulo="Transferência entre contas" fechar={() => setMostrarTransferenciaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de origem</label><select value={transOrigem} onChange={(e)=>setTransOrigem(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de destino</label><select value={transDestino} onChange={(e)=>setTransDestino(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <Campo label="Valor" type="number" value={transValor} onChange={setTransValor} />
-            <Campo label="Data" type="date" value={transData} onChange={setTransData} />
-            <Campo label="Descrição" value={transDescricao} onChange={setTransDescricao} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Transferir</button></div>
-          </div>
-        </Modal>
-      )}
 
       {pagamento && (
         <Modal titulo="Registrar pagamento" fechar={() => setPagamento(null)}>
@@ -2206,15 +1526,6 @@ export default function FinanceiroPage() {
                   onChange={(e) => setArquivo(e.target.files?.[0] || null)}
                   className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm"
                 />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Conta bancária da entrada</label>
-                <select value={contaPagamentoId} onChange={(e) => setContaPagamentoId(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none">
-                  <option value="">Não registrar saldo bancário</option>
-                  {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
-                </select>
-                <p className="mt-1 text-xs text-gray-500">Selecione a conta para que o recebimento seja somado automaticamente ao saldo.</p>
               </div>
 
               <div className="md:col-span-2">
