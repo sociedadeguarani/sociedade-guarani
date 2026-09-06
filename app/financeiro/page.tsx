@@ -522,6 +522,11 @@ export default function FinanceiroPage() {
 
       if (filtroAtraso === "todos") return true;
 
+      // O filtro pode chegar aqui mesmo quando o lançamento não encontrou
+      // um cadastro correspondente. Nesse caso, não tentamos acessar
+      // pessoa.chave para evitar erro de TypeScript/null em produção.
+      if (!pessoa) return false;
+
       const meses = historicoPorPessoa.get(pessoa.chave) || 0;
 
       if (filtroAtraso === "atrasados") return meses > 0;
