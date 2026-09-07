@@ -1,106 +1,59 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { CalendarDays, LogIn, ShieldCheck, Users } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 
-const MENU = [
-  { nome: "Início", icone: "🏠", href: "/painel" },
-  { nome: "Sócios", icone: "👥", href: "/socios" },
-  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦", href: "/dependentes" },
-  { nome: "Reservas", icone: "📅", href: "/reservas" },
-  { nome: "Eventos", icone: "🎉", href: "/eventos" },
-  { nome: "Financeiro", icone: "💰", href: "/financeiro" },
-  { nome: "Espaços", icone: "🏛️", href: "/espacos" },
-  { nome: "Relatórios", icone: "📊", href: "/relatorios" },
-  { nome: "Usuários", icone: "🔐", href: "/usuarios" },
-] as const;
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
-function Item({ nome, icone, href }: (typeof MENU)[number]) {
-  const pathname = usePathname();
-  const ativo =
-    pathname === href || (href !== "/painel" && pathname.startsWith(`${href}/`));
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [erro, setErro] = useState("");
+  const [carregando, setCarregando] = useState(false);
 
-  return (
-    <Link
-      href={href}
-      className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-        ativo
-          ? "bg-[#005a3c] font-bold text-white shadow-sm"
-          : "text-[#274338] hover:bg-[#e8f3ee]"
-      }`}
-    >
-      <span className="w-6 text-center text-lg leading-none">{icone}</span>
-      <span>{nome}</span>
-    </Link>
-  );
-}
+  async function entrar(e: React.FormEvent) {
+    e.preventDefault();
+    setErro("");
+    setCarregando(true);
 
-export default function MenuLateralPadrao() {
-  return (
-    <>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] border-r border-[#dfe7e2] bg-[#f8faf9] lg:block">
-        <div className="flex h-full flex-col">
-          <div className="border-b border-[#dfe7e2] px-5 py-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#005a3c] p-1 shadow-sm">
-                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-full w-full object-contain" />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-[17px] font-extrabold leading-5 text-[#003d2b]">
-                  SOCIEDADE GUARANI
-                </div>
-                <div className="mt-1 text-[11px] leading-4 text-gray-500">
-                  Sociedade Recreativa Guarani — S.R.G.
-                </div>
-              </div>
-            </div>
-          </div>
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: senha });
+    if (error || !data.user) {
+      setErro("E-mail ou senha incorretos.");
+      setCarregando(false);
+      return;
+    }
 
-          <div className="px-3 pb-3 pt-5">
-            <div className="px-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-gray-400">
-              MENU PRINCIPAL
-            </div>
-          </div>
+    const { data: usuario, error: usuarioError } = await supabase
+      .from("usuarios_sistema")
+      .select("id,perfil_id,socio_id,ativo,perfis:perfil_id(nome)")
+      .eq("id", data.user.id)
+      .maybeSingle();
 
-          <nav className="flex-1 space-y-1 px-2">
-            {MENU.map((item) => (
-              <Item key={item.href} {...item} />
-            ))}
-          </nav>
+    if (usuarioError || !usuario || !usuario.ativo) {
+      await supabase.auth.signOut();
+      setErro("Seu acesso não está ativo no sistema. Procure a administração.");
+      setCarregando(false);
+      return;
+    }
 
-          <div className="p-3">
-            <div className="rounded-2xl bg-[#fff2b8] px-4 py-4">
-              <div className="text-[11px] font-extrabold uppercase tracking-wide text-[#7b6400]">
-                SOCIEDADE GUARANI
-              </div>
-              <div className="mt-1 text-xs text-[#6f6125]">
-                Sistema integrado de gestão
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
+    const perfil = Array.isArray(usuario.perfis) ? usuario.perfis[0] : usuario.perfis;
+    try {
+      localStorage.setItem("guarani_usuario_email", email.trim().toLowerCase());
+      localStorage.setItem("guarani_usuario_id", data.user.id);
+      localStorage.setItem("guarani_usuario_perfil", perfil?.nome || "");
+      localStorage.setItem("guarani_usuario_socio_id", usuario.socio_id || "");
+    } catch {}
 
-      <nav className="sticky top-[76px] z-20 grid grid-cols-3 gap-2 border-b border-[#dfe7e2] bg-[#f8faf9] p-2 lg:hidden">
-        {MENU.map((item) => {
-          const pathname = usePathname();
-          const ativo =
-            pathname === item.href ||
-            (item.href !== "/painel" && pathname.startsWith(`${item.href}/`));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`rounded-xl px-2 py-2 text-center text-[11px] font-bold ${
-                ativo ? "bg-[#005a3c] text-white" : "bg-white text-[#274338] shadow-sm"
-              }`}
-            >
-              <span className="block text-lg">{item.icone}</span>
-              {item.nome}
-            </Link>
-          );
-        })}
-      </nav>
-    </>
-  );
+    window.location.replace("/painel");
+  }
+
+  return <main className="min-h-screen bg-[#f8faf9] px-4 py-8 text-[#17382c]"><div className="mx-auto flex min-h-[calc(100vh-64px)] max-w-5xl items-center justify-center"><div className="grid w-full overflow-hidden rounded-3xl border border-[#dfe7e2] bg-white shadow-xl md:grid-cols-2">
+    <div className="hidden bg-[#003d2b] p-10 text-white md:flex md:flex-col md:justify-center"><img src="/logo-guarani.png" alt="Sociedade Guarani" className="mb-6 h-16 w-16 rounded-2xl bg-white p-2 object-contain"/><h1 className="text-3xl font-extrabold">SOCIEDADE GUARANI</h1><p className="mt-2 text-sm text-white/75">Sociedade Recreativa Guarani — S.R.G.</p><div className="mt-10 space-y-4 text-sm"><div className="flex gap-3"><ShieldCheck className="h-5 w-5"/><span>Acesso conforme o perfil e as permissões do usuário.</span></div><div className="flex gap-3"><CalendarDays className="h-5 w-5"/><span>Reservas de quadras, quiosques e salões.</span></div></div></div>
+    <div className="p-7 sm:p-10"><div className="mb-8 text-center"><img src="/logo-guarani.png" alt="Sociedade Guarani" className="mx-auto mb-4 h-16 w-16 rounded-2xl bg-[#005a3c] p-2 object-contain md:hidden"/><p className="text-sm font-semibold text-gray-500">Bem-vindo</p><h2 className="mt-1 text-2xl font-extrabold text-[#003d2b]">Acesso à Sociedade Guarani</h2><p className="mt-2 text-sm text-gray-500">Entre com seu acesso ou continue como não sócio.</p></div>
+      <form onSubmit={entrar} className="space-y-4"><label className="block"><span className="mb-1.5 block text-sm font-bold">E-mail</span><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" required className="w-full rounded-xl border border-[#d6e1dc] px-4 py-3 outline-none focus:border-[#005a3c]"/></label><label className="block"><span className="mb-1.5 block text-sm font-bold">Senha</span><input type="password" value={senha} onChange={e=>setSenha(e.target.value)} placeholder="Digite sua senha" required className="w-full rounded-xl border border-[#d6e1dc] px-4 py-3 outline-none focus:border-[#005a3c]"/></label>{erro&&<div className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}<button disabled={carregando} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3.5 font-extrabold text-white disabled:opacity-60"><LogIn className="h-5 w-5"/>{carregando?"Entrando...":"Entrar no sistema"}</button></form>
+      <div className="my-6 flex items-center gap-3"><div className="h-px flex-1 bg-[#e2e9e5]"/><span className="text-xs font-bold uppercase text-gray-400">ou</span><div className="h-px flex-1 bg-[#e2e9e5]"/></div>
+      <button type="button" onClick={()=>window.location.href="/reservas?publico=1"} className="w-full rounded-xl border-2 border-[#005a3c] bg-white px-4 py-3.5 font-extrabold text-[#005a3c] hover:bg-[#e8f3ee]"><CalendarDays className="mr-2 inline h-5 w-5"/>Não sou sócio — fazer reserva</button>
+      <div className="mt-6 rounded-xl bg-[#f4f8f5] p-4 text-center text-xs leading-5 text-gray-500"><Users className="mx-auto mb-1 h-4 w-4 text-[#005a3c]"/>Usuários cadastrados entram conforme seu perfil. Não sócios podem fazer reserva sem entrar na área administrativa.</div>
+    </div></div></div></main>;
 }
