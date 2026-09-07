@@ -140,3 +140,26 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar usuário." }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json();
+    const id = String(body?.id || "").trim();
+    if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
+    const supabase = getAdminClient();
+    const { data: usuario, error: usuarioError } = await supabase
+      .from("usuarios_sistema")
+      .select("id,nome_exibicao")
+      .eq("id", id)
+      .maybeSingle();
+    if (usuarioError) throw new Error(usuarioError.message);
+    if (!usuario) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
+    const { error: sistemaError } = await supabase.from("usuarios_sistema").delete().eq("id", id);
+    if (sistemaError) throw new Error(sistemaError.message);
+    const { error: authError } = await supabase.auth.admin.deleteUser(id);
+    if (authError) return NextResponse.json({ error: `Cadastro do sistema excluído, mas o acesso Auth não foi excluído: ${authError.message}` }, { status: 500 });
+    return NextResponse.json({ ok: true, message: "Usuário excluído definitivamente." });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir usuário." }, { status: 500 });
+  }
+}
