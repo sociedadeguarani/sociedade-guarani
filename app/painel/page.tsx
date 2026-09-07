@@ -138,25 +138,6 @@ const TIPOS_SOCIO = [
   { value: "convite_mes", label: "Convite Mês" },
 ];
 
-const PARENTESCOS = [
-  "Esposa",
-  "Esposo",
-  "Companheiro(a)",
-  "Filho(a)",
-  "Enteado(a)",
-  "Pai",
-  "Mãe",
-  "Irmão(ã)",
-  "Outro",
-];
-
-const FORMAS_PAGAMENTO = [
-  "pix",
-  "debito_em_conta",
-  "boleto",
-  "dinheiro",
-];
-
 function podeTerDependentes(tipo?: string | null) {
   return [
     "patrimonial_familiar",
@@ -227,7 +208,7 @@ function tipoSocioClasse(tipo?: string | null) {
 export default function Home() {
   const [menu, setMenu] = useState("Início");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
-  const [usuarioEmail, setUsuarioEmail] = useState("");
+  const [, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [busca, setBusca] = useState("");
@@ -302,11 +283,6 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
-
-  async function sair() {
-    await supabase.auth.signOut();
-    window.location.replace("/login");
-  }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
@@ -423,11 +399,6 @@ export default function Home() {
     } finally {
       setGerandoMensalidades(false);
     }
-  }
-
-  async function abrirFinanceiro() {
-    setMenu("Financeiro");
-    await carregarMensalidades(competenciaFinanceiro);
   }
 
   function alterarCompetenciaFinanceiro(valor: string) {
@@ -636,11 +607,6 @@ export default function Home() {
       setRelatorioMensalidades((data || []) as Mensalidade[]);
     }
     setCarregandoRelatorio(false);
-  }
-
-  function abrirRelatorios() {
-    setMenu("Relatórios");
-    void carregarRelatorioFinanceiro(relatorioCompetencia);
   }
 
   async function carregarSocios() {
@@ -927,97 +893,91 @@ export default function Home() {
       <MenuLateralPadrao />
 
       <section className="min-w-0 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
-                  {/* INÍCIO */}
-          {menu === "Início" && (
-            <Inicio
-              socios={socios}
-              quantidadeSocios={socios.length}
-              abrirCadastro={novoSocio}
+        {/* INÍCIO */}
+        {menu === "Início" && (
+          <Inicio
+            socios={socios}
+            quantidadeSocios={socios.length}
+            abrirCadastro={novoSocio}
+          />
+        )}
+
+        {/* SÓCIOS */}
+        {menu === "Sócios" && (
+          <Socios
+            socios={sociosFiltrados}
+            quantidadeTotal={socios.length}
+            busca={busca}
+            setBusca={setBusca}
+            novoSocio={novoSocio}
+            novoDependente={novoDependente}
+            editarSocio={editarSocio}
+            excluirSocio={excluirSocio}
+            carregando={carregando}
+            mostrarSomenteDependentes={mostrarSomenteDependentes}
+            setMostrarSomenteDependentes={setMostrarSomenteDependentes}
+          />
+        )}
+
+        {/* DEPENDENTES / FAMÍLIAS */}
+        {menu === "Dependentes" && (
+          <Dependentes
+            socios={socios}
+            novoDependente={novoDependente}
+            editarSocio={editarSocio}
+          />
+        )}
+
+        {/* FINANCEIRO */}
+        {menu === "Financeiro" && (
+          <Financeiro
+            socios={socios}
+            mensalidades={mensalidades}
+            competencia={competenciaFinanceiro}
+            busca={buscaFinanceiro}
+            setBusca={setBuscaFinanceiro}
+            carregando={carregandoFinanceiro}
+            gerando={gerandoMensalidades}
+            gerarMensalidades={() => void gerarMensalidadesCompetencia()}
+            alterarCompetencia={alterarCompetenciaFinanceiro}
+            editarMensalidade={editarMensalidade}
+            excluirMensalidade={excluirMensalidade}
+            registrarPagamento={abrirRegistroPagamento}
+            abrirComprovante={abrirComprovante}
+            emitirRecibo={(item) => setReciboMensalidade(item)}
+          />
+        )}
+
+        {/* RELATÓRIOS FINANCEIROS */}
+        {menu === "Relatórios" && (
+          <RelatoriosFinanceiros
+            socios={socios}
+            mensalidades={relatorioMensalidades}
+            competencia={relatorioCompetencia}
+            setCompetencia={(valor) => {
+              setRelatorioCompetencia(valor);
+              void carregarRelatorioFinanceiro(valor);
+            }}
+            formaPagamento={relatorioFormaPagamento}
+            setFormaPagamento={setRelatorioFormaPagamento}
+            situacao={relatorioSituacao}
+            setSituacao={setRelatorioSituacao}
+            carregando={carregandoRelatorio}
+          />
+        )}
+
+        {/* OUTROS MÓDULOS */}
+        {menu !== "Início" &&
+          menu !== "Sócios" &&
+          menu !== "Dependentes" &&
+          menu !== "Financeiro" &&
+          menu !== "Relatórios" && (
+            <ModuloEmConstrucao
+              nome={menu}
+              icone={menus.find((x) => x.nome === menu)?.icone || "📋"}
             />
           )}
-
-          {/* SÓCIOS */}
-          {menu === "Sócios" && (
-            <Socios
-              socios={sociosFiltrados}
-              quantidadeTotal={socios.length}
-              busca={busca}
-              setBusca={setBusca}
-              novoSocio={novoSocio}
-              novoDependente={novoDependente}
-              editarSocio={editarSocio}
-              excluirSocio={excluirSocio}
-              carregando={carregando}
-              mostrarSomenteDependentes={mostrarSomenteDependentes}
-              setMostrarSomenteDependentes={setMostrarSomenteDependentes}
-            />
-          )}
-
-          {/* DEPENDENTES / FAMÍLIAS */}
-          {menu === "Dependentes" && (
-            <Dependentes
-              socios={socios}
-              novoDependente={novoDependente}
-              editarSocio={editarSocio}
-            />
-          )}
-
-          {/* FINANCEIRO */}
-          {menu === "Financeiro" && (
-            <Financeiro
-              socios={socios}
-              mensalidades={mensalidades}
-              competencia={competenciaFinanceiro}
-              busca={buscaFinanceiro}
-              setBusca={setBuscaFinanceiro}
-              carregando={carregandoFinanceiro}
-              gerando={gerandoMensalidades}
-              gerarMensalidades={() => void gerarMensalidadesCompetencia()}
-              alterarCompetencia={alterarCompetenciaFinanceiro}
-              editarMensalidade={editarMensalidade}
-              excluirMensalidade={excluirMensalidade}
-              registrarPagamento={abrirRegistroPagamento}
-              abrirComprovante={abrirComprovante}
-              emitirRecibo={(item) => setReciboMensalidade(item)}
-            />
-          )}
-
-          {/* RELATÓRIOS FINANCEIROS */}
-          {menu === "Relatórios" && (
-            <RelatoriosFinanceiros
-              socios={socios}
-              mensalidades={relatorioMensalidades}
-              competencia={relatorioCompetencia}
-              setCompetencia={(valor) => {
-                setRelatorioCompetencia(valor);
-                void carregarRelatorioFinanceiro(valor);
-              }}
-              formaPagamento={relatorioFormaPagamento}
-              setFormaPagamento={setRelatorioFormaPagamento}
-              situacao={relatorioSituacao}
-              setSituacao={setRelatorioSituacao}
-              carregando={carregandoRelatorio}
-            />
-          )}
-
-          {/* OUTROS MÓDULOS */}
-          {menu !== "Início" &&
-            menu !== "Sócios" &&
-            menu !== "Dependentes" &&
-            menu !== "Financeiro" &&
-             menu !== "Relatórios" && (
-              <ModuloEmConstrucao
-                nome={menu}
-                icone={
-                  menus.find((x) => x.nome === menu)?.icone || "📋"
-                }
-              />
-            )}
-
-
       </section>
-
-      
 
       {mensalidadeEditando && (
         <ModalEdicaoMensalidade
@@ -1068,20 +1028,40 @@ export default function Home() {
           removerFoto={removerFoto}
         />
       )}
-
     </main>
   );
 }
-
 
 /* =========================
    INÍCIO
 ========================= */
 
+function DashboardCard({
+  titulo,
+  valor,
+  descricao,
+  icone,
+}: {
+  titulo: string;
+  valor: string;
+  descricao: string;
+  icone: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-500">{titulo}</p>
+        <span className="text-xl">{icone}</span>
+      </div>
+      <p className="mt-2 text-3xl font-bold text-[#005a3c]">{valor}</p>
+      <p className="mt-1 text-xs text-gray-400">{descricao}</p>
+    </div>
+  );
+}
+
 function Inicio({
   socios,
   quantidadeSocios,
-  abrirCadastro,
 }: {
   socios: Socio[];
   quantidadeSocios: number;
@@ -1090,71 +1070,55 @@ function Inicio({
   return (
     <>
       <div className="mb-8">
-
         <p className="text-sm font-medium text-gray-500">
           Bem-vindo ao sistema
         </p>
-
         <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
           Painel da Sociedade Guarani
         </h2>
-
         <p className="mt-2 text-gray-600">
-          Gerencie sócios, reservas, eventos, espaços e financeiro
-          em um único lugar.
+          Gerencie sócios, reservas, eventos, espaços e financeiro em um único lugar.
         </p>
-
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
-
         <DashboardCard
           titulo="Sócios"
           valor={String(quantidadeSocios)}
           descricao="Sócios cadastrados"
           icone="👥"
         />
-
         <DashboardCard
           titulo="Dependentes"
           valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
           descricao="Vinculados a responsáveis"
           icone="👨‍👩‍👧‍👦"
         />
-
         <DashboardCard
           titulo="Reservas"
           valor="0"
           descricao="Reservas este mês"
           icone="📅"
         />
-
         <DashboardCard
           titulo="Eventos"
           valor="0"
           descricao="Eventos cadastrados"
           icone="🎉"
         />
-
         <DashboardCard
           titulo="Espaços"
           valor="4"
           descricao="Espaços disponíveis"
           icone="🏛️"
         />
-
       </div>
 
       <div className="mt-8 rounded-2xl bg-[#063b28] p-6 text-white shadow-lg">
-
-        <h3 className="text-xl font-bold">
-          Acesso rápido
-        </h3>
-
+        <h3 className="text-xl font-bold">Acesso rápido</h3>
         <p className="mt-1 text-sm text-gray-200">
           Comece uma nova operação no sistema.
         </p>
-
         <button
           onClick={() => {
             window.location.href = "/socios";
@@ -1163,43 +1127,9 @@ function Inicio({
         >
           👤 Cadastrar novo sócio
         </button>
-
       </div>
     </>
   );
-}
-
-
-/* =========================
-   CORES DAS CATEGORIAS
-========================= */
-
-function categoriaClasse(categoria?: string | null) {
-  const valor = (categoria || "").toLowerCase();
-
-  if (valor.includes("patrimonial") && valor.includes("depend")) {
-    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-  }
-  if (valor.includes("patrimonial")) {
-    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-  }
-  if (valor.includes("contribuinte") && valor.includes("depend")) {
-    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-  }
-  if (valor.includes("contribuinte")) {
-    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-  }
-  if (valor.includes("temporário") || valor.includes("temporario") ||
-      valor.includes("transitório") || valor.includes("transitorio")) {
-    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-  }
-  if (valor.includes("temporada")) {
-    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-  }
-  if (valor.includes("benemérito") || valor.includes("benemerito")) {
-    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-  }
-  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
 }
 
 /* =========================
@@ -1216,8 +1146,6 @@ function Socios({
   editarSocio,
   excluirSocio,
   carregando,
-  mostrarSomenteDependentes,
-  setMostrarSomenteDependentes,
 }: {
   socios: Socio[];
   quantidadeTotal: number;
@@ -1233,147 +1161,70 @@ function Socios({
 }) {
   return (
     <div>
-
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-
         <div>
-          <p className="text-sm font-medium text-gray-500">
-            Administração
-          </p>
-
-          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
-            Sócios
-          </h2>
-
-          <p className="mt-1 text-gray-500">
-            Cadastro e gerenciamento dos associados.
-          </p>
+          <p className="text-sm font-medium text-gray-500">Administração</p>
+          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Sócios</h2>
+          <p className="mt-1 text-gray-500">Cadastro e gerenciamento dos associados.</p>
         </div>
-
         <button
           onClick={novoSocio}
           className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
         >
           + Novo Sócio
         </button>
-
       </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">
-            Total de sócios
-          </p>
-
-          <p className="mt-1 text-3xl font-bold text-[#005a3c]">
-            {quantidadeTotal}
-          </p>
+          <p className="text-sm text-gray-500">Total de sócios</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{quantidadeTotal}</p>
         </div>
-
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">
-            Sócios ativos
-          </p>
-
+          <p className="text-sm text-gray-500">Sócios ativos</p>
           <p className="mt-1 text-3xl font-bold text-[#005a3c]">
             {socios.filter((s) => s.situacao?.toLowerCase() === "ativo").length}
           </p>
         </div>
-
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">
-            Exibindo
-          </p>
-
-          <p className="mt-1 text-3xl font-bold text-[#005a3c]">
-            {socios.length}
-          </p>
+          <p className="text-sm text-gray-500">Exibindo</p>
+          <p className="mt-1 text-3xl font-bold text-[#005a3c]">{socios.length}</p>
         </div>
-
       </div>
 
       <div className="mb-5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-
         <div className="flex items-center gap-3">
-
-          <span className="text-xl">
-            🔎
-          </span>
-
+          <span className="text-xl">🔎</span>
           <input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Buscar por nome, CPF ou matrícula..."
             className="w-full bg-transparent py-2 outline-none"
           />
-
         </div>
-
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
-
         <div className="overflow-x-auto">
-
           <table className="w-full min-w-[900px]">
-
             <thead className="bg-[#e8f3ee]">
-
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-
-                <th className="px-5 py-4">
-                  Foto
-                </th>
-
-                <th className="px-5 py-4">
-                  Matrícula
-                </th>
-
-                <th className="px-5 py-4">
-                  Nome
-                </th>
-
-                <th className="px-5 py-4">
-                  CPF
-                </th>
-
-                <th className="px-5 py-4">
-                  WhatsApp
-                </th>
-
-                <th className="px-5 py-4">
-                  Tipo
-                </th>
-
-                <th className="px-5 py-4">
-                  Responsável
-                </th>
-
-                <th className="px-5 py-4">
-                  Mensalidade
-                </th>
-
-                <th className="px-5 py-4">
-                  Situação
-                </th>
-
-                <th className="px-5 py-4 text-right">
-                  Ações
-                </th>
-
+                <th className="px-5 py-4">Foto</th>
+                <th className="px-5 py-4">Matrícula</th>
+                <th className="px-5 py-4">Nome</th>
+                <th className="px-5 py-4">CPF</th>
+                <th className="px-5 py-4">WhatsApp</th>
+                <th className="px-5 py-4">Tipo</th>
+                <th className="px-5 py-4">Responsável</th>
+                <th className="px-5 py-4">Mensalidade</th>
+                <th className="px-5 py-4">Situação</th>
+                <th className="px-5 py-4 text-right">Ações</th>
               </tr>
-
             </thead>
-
             <tbody className="divide-y">
-
               {carregando && (
                 <tr>
-                  <td
-                    colSpan={10}
-                    className="px-5 py-12 text-center text-gray-500"
-                  >
+                  <td colSpan={10} className="px-5 py-12 text-center text-gray-500">
                     Carregando sócios...
                   </td>
                 </tr>
@@ -1381,22 +1232,12 @@ function Socios({
 
               {!carregando && socios.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={10}
-                    className="px-5 py-12 text-center"
-                  >
-                    <div className="text-4xl">
-                      👥
-                    </div>
-
-                    <p className="mt-3 font-semibold text-gray-700">
-                      Nenhum sócio encontrado
-                    </p>
-
+                  <td colSpan={10} className="px-5 py-12 text-center">
+                    <div className="text-4xl">👥</div>
+                    <p className="mt-3 font-semibold text-gray-700">Nenhum sócio encontrado</p>
                     <p className="mt-1 text-sm text-gray-500">
                       Cadastre o primeiro sócio da Sociedade Guarani.
                     </p>
-
                     <button
                       onClick={novoSocio}
                       className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
@@ -1409,11 +1250,7 @@ function Socios({
 
               {!carregando &&
                 socios.map((socio) => (
-                  <tr
-                    key={socio.id}
-                    className="transition hover:bg-[#fafcfb]"
-                  >
-
+                  <tr key={socio.id} className="transition hover:bg-[#fafcfb]">
                     <td className="px-5 py-4">
                       {socio.foto_url ? (
                         <img
@@ -1427,51 +1264,33 @@ function Socios({
                         </div>
                       )}
                     </td>
-
                     <td className="px-5 py-4 font-semibold text-[#005a3c]">
                       {socio.matricula || "-"}
                     </td>
-
                     <td className="px-5 py-4">
-
-                      <div className="font-semibold">
-                        {socio.nome}
-                      </div>
-
-                      <div className="text-xs text-gray-400">
-                        {socio.email || "Sem e-mail"}
-                      </div>
-
+                      <div className="font-semibold">{socio.nome}</div>
+                      <div className="text-xs text-gray-400">{socio.email || "Sem e-mail"}</div>
                     </td>
-
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {socio.cpf || "-"}
-                    </td>
-
+                    <td className="px-5 py-4 text-sm text-gray-600">{socio.cpf || "-"}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {socio.whatsapp || socio.telefone || "-"}
                     </td>
-
                     <td className="px-5 py-4 text-sm">
                       <span className={`inline-flex max-w-[190px] rounded-full px-3 py-1 text-xs font-extrabold ${tipoSocioClasse(socio.tipo_socio)}`}>
                         {tipoSocioLabel(socio.tipo_socio)}
                       </span>
                     </td>
-
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {socio.responsavel_id
                         ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
                         : "—"}
                     </td>
-
                     <td className="px-5 py-4 text-sm">
                       {socio.possui_mensalidade
                         ? `R$ ${Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}`
                         : "Sem mensalidade"}
                     </td>
-
                     <td className="px-5 py-4">
-
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${
                           socio.situacao?.toLowerCase() === "ativo"
@@ -1489,13 +1308,9 @@ function Socios({
                               ? "Suspenso"
                               : "Ativo"}
                       </span>
-
                     </td>
-
                     <td className="px-5 py-4">
-
                       <div className="flex justify-end gap-2">
-
                         {podeTerDependentes(socio.tipo_socio) && (
                           <button
                             onClick={() => novoDependente(socio)}
@@ -1505,82 +1320,70 @@ function Socios({
                             👨‍👩‍👧 + Dependente
                           </button>
                         )}
-
                         <button
                           onClick={() => editarSocio(socio)}
                           className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
                         >
                           ✏️ Editar
                         </button>
-
                         <button
                           onClick={() => excluirSocio(socio)}
                           className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
                         >
                           🗑️
                         </button>
-
                       </div>
-
                     </td>
-
                   </tr>
                 ))}
-
             </tbody>
-
           </table>
-
         </div>
-
       </div>
-
     </div>
   );
 }
-
-
 
 /* =========================
    FINANCEIRO
 ========================= */
 
 function primeiroDiaDoMes(referencia: string) {
-    return `${referencia}-01`;
-  }
+  return `${referencia}-01`;
+}
 
 function calcularVencimento(referencia: string, dia: number | null | undefined) {
-    const [ano, mes] = referencia.split("-").map(Number);
-    const ultimoDia = new Date(ano, mes, 0).getDate();
-    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
-    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
-  }
+  const [ano, mes] = referencia.split("-").map(Number);
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
+  return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
+}
 
 function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "Pago";
-      case "em_atraso":
-        return "Em atraso";
-      case "isento":
-        return "Isento";
-      default:
-        return "Em aberto";
-    }
+  switch (situacao) {
+    case "pago":
+      return "Pago";
+    case "em_atraso":
+      return "Em atraso";
+    case "isento":
+      return "Isento";
+    default:
+      return "Em aberto";
   }
+}
 
 function classeSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "bg-green-100 text-green-700";
-      case "em_atraso":
-        return "bg-red-100 text-red-700";
-      case "isento":
-        return "bg-gray-100 text-gray-600";
-      default:
-        return "bg-yellow-100 text-yellow-700";
-    }
+  switch (situacao) {
+    case "pago":
+      return "bg-green-100 text-green-700";
+    case "em_atraso":
+      return "bg-red-100 text-red-700";
+    case "isento":
+      return "bg-gray-100 text-gray-600";
+    default:
+      return "bg-yellow-100 text-yellow-700";
   }
+}
 
 function formatarMoeda(valor: number | null | undefined) {
   return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
@@ -2469,9 +2272,7 @@ function Dependentes({
     <div>
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <p className="text-sm font-medium text-gray-500">
-            Administração
-          </p>
+          <p className="text-sm font-medium text-gray-500">Administração</p>
           <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
             Famílias e Dependentes
           </h2>
@@ -2559,13 +2360,11 @@ function Dependentes({
   );
 }
 
-
 /* =========================
    MODAL DO SÓCIO
 ========================= */
 
 function ModalSocio({
-  socios,
   form,
   socioEditando,
   salvando,
@@ -2589,39 +2388,31 @@ function ModalSocio({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#001f16]/55 backdrop-blur-sm p-4">
-
       <div className="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-5">
-
           <div>
-
-            <p className="text-sm text-gray-500">
-              Sociedade Recreativa Guarani
-            </p>
-
+            <p className="text-sm text-gray-500">Sociedade Recreativa Guarani</p>
             <h2 className="text-2xl font-bold text-[#005a3c]">
-              {socioEditando
-                ? "Editar Sócio"
-                : "Novo Sócio"}
+              {socioEditando ? "Editar Sócio" : "Novo Sócio"}
             </h2>
-
           </div>
-
           <button
             onClick={fechar}
             className="rounded-full bg-gray-100 px-3 py-2 text-lg hover:bg-gray-200"
           >
             ✕
           </button>
-
         </div>
 
         <div className="space-y-8 p-6">
+          {mensagem && (
+            <div className="rounded-xl bg-[#e8f3ee] p-4 text-sm font-semibold text-[#005a3c]">
+              {mensagem}
+            </div>
+          )}
 
           {/* DADOS PESSOAIS */}
           <FormularioSecao titulo="👤 Dados pessoais">
-
             <Campo
               label="Nome completo"
               obrigatorio
@@ -2629,27 +2420,23 @@ function ModalSocio({
               onChange={(v) => alterarCampo("nome", v)}
               className="md:col-span-2"
             />
-
             <Campo
               label="CPF"
               value={form.cpf}
               onChange={(v) => alterarCampo("cpf", v)}
               placeholder="000.000.000-00"
             />
-
             <Campo
               label="RG"
               value={form.rg}
               onChange={(v) => alterarCampo("rg", v)}
             />
-
             <Campo
               label="Data de nascimento"
               type="date"
               value={form.data_nascimento}
               onChange={(v) => alterarCampo("data_nascimento", v)}
             />
-
           </FormularioSecao>
 
           {/* FOTO */}
@@ -2669,9 +2456,7 @@ function ModalSocio({
                 </div>
 
                 <div className="flex-1 text-center sm:text-left">
-                  <p className="font-semibold text-gray-800">
-                    Foto do associado
-                  </p>
+                  <p className="font-semibold text-gray-800">Foto do associado</p>
                   <p className="mt-1 text-sm text-gray-500">
                     Escolha uma foto para aparecer no cadastro e na lista de sócios.
                   </p>
@@ -2706,19 +2491,16 @@ function ModalSocio({
 
           {/* CONTATO */}
           <FormularioSecao titulo="📞 Contato">
-
             <Campo
               label="Telefone"
               value={form.telefone}
               onChange={(v) => alterarCampo("telefone", v)}
             />
-
             <Campo
               label="WhatsApp"
               value={form.whatsapp}
               onChange={(v) => alterarCampo("whatsapp", v)}
             />
-
             <Campo
               label="E-mail"
               type="email"
@@ -2726,54 +2508,45 @@ function ModalSocio({
               onChange={(v) => alterarCampo("email", v)}
               className="md:col-span-2"
             />
-
           </FormularioSecao>
 
           {/* ENDEREÇO */}
           <FormularioSecao titulo="🏠 Endereço">
-
             <Campo
               label="CEP"
               value={form.cep}
               onChange={(v) => alterarCampo("cep", v)}
             />
-
             <Campo
               label="Número"
               value={form.numero}
               onChange={(v) => alterarCampo("numero", v)}
             />
-
             <Campo
               label="Endereço"
               value={form.endereco}
               onChange={(v) => alterarCampo("endereco", v)}
               className="md:col-span-2"
             />
-
             <Campo
               label="Bairro"
               value={form.bairro}
               onChange={(v) => alterarCampo("bairro", v)}
             />
-
             <Campo
               label="Cidade"
               value={form.cidade}
               onChange={(v) => alterarCampo("cidade", v)}
             />
-
             <Campo
               label="Estado"
               value={form.estado}
               onChange={(v) => alterarCampo("estado", v)}
             />
-
           </FormularioSecao>
 
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
-
             <Campo
               label="Data de associação"
               type="date"
@@ -2786,202 +2559,47 @@ function ModalSocio({
               value={form.tipo_socio || "patrimonial_individual"}
               onChange={(v) => alterarCampo("tipo_socio", v)}
               opcoes={TIPOS_SOCIO.map((item) => item.value)}
-              labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
+              labels={Object.fromEntries(
+                TIPOS_SOCIO.map((item) => [item.value, item.label])
+              )}
             />
 
             <SelectCampo
               label="Situação"
-
               value={form.situacao || "ativo"}
               onChange={(v) => alterarCampo("situacao", v)}
-              opcoes={[
-                "ativo",
-                "inativo",
-                "suspenso",
-              ]}
+              opcoes={["ativo", "inativo", "suspenso"]}
+              labels={{
+                ativo: "Ativo",
+                inativo: "Inativo",
+                suspenso: "Suspenso",
+              }}
             />
-
-            {Boolean(form.responsavel_id) ||
-              String(form.tipo_socio || "").startsWith("dependente_") ? (
-              <>
-                <SelectCampo
-                  label="Parentesco"
-                  value={form.parentesco || "Filho(a)"}
-                  onChange={(v) => alterarCampo("parentesco", v)}
-                  opcoes={PARENTESCOS}
-                />
-
-                <SelectCampo
-                  label="Responsável"
-                  value={form.responsavel_id || ""}
-                  onChange={(v) => alterarCampo("responsavel_id", v)}
-                  opcoes={[
-                    "",
-                    ...socios
-                      .filter((p) => p.id !== socioEditando?.id)
-                      .map((p) => p.id),
-                  ]}
-                  labels={{
-                    "": "Selecione o responsável",
-                    ...Object.fromEntries(
-                      socios
-                        .filter((p) => p.id !== socioEditando?.id)
-                        .map((p) => [p.id, p.nome])
-                    ),
-                  }}
-                />
-              </>
-            ) : null}
-
-            <div className="md:col-span-4 rounded-2xl border border-[#dfe9e3] bg-[#f7faf8] p-4">
-              <div className="mb-4">
-                <p className="text-sm font-extrabold text-[#003d2b]">
-                  💰 Mensalidade
-                </p>
-                <p className="mt-1 text-xs text-[#718079]">
-                  Cada associado ou dependente pode ter sua própria mensalidade.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-4">
-                <SelectCampo
-                  label="Possui mensalidade?"
-                  value={form.possui_mensalidade ? "sim" : "nao"}
-                  onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
-                  opcoes={["sim", "nao"]}
-                  labels={{ sim: "Sim", nao: "Não" }}
-                />
-
-                {form.possui_mensalidade ? (
-                  <>
-                    <Campo
-                      label="Valor mensal"
-                      type="number"
-                      value={form.valor_mensalidade}
-                      onChange={(v) => alterarCampo("valor_mensalidade", v)}
-                      placeholder="0,00"
-                    />
-
-                    <Campo
-                      label="Dia do vencimento"
-                      type="number"
-                      value={form.dia_vencimento}
-                      onChange={(v) => alterarCampo("dia_vencimento", v)}
-                      placeholder="10"
-                    />
-
-                    <SelectCampo
-                      label="Tipo de pagamento"
-                      value={form.tipo_pagamento || "pix"}
-                      onChange={(v) => alterarCampo("tipo_pagamento", v)}
-                      opcoes={FORMAS_PAGAMENTO}
-                      labels={{
-                        pix: "PIX",
-                        debito_em_conta: "Débito em conta",
-                        boleto: "Boleto",
-                        dinheiro: "Dinheiro",
-                      }}
-                    />
-                  </>
-                ) : null}
-              </div>
-            </div>
-
-            {(form.tipo_socio === "temporada_individual" ||
-              form.tipo_socio === "temporada_familiar" ||
-              form.tipo_socio === "dependente_temporada_familiar") ? (
-              <div className="md:col-span-4 rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
-                <p className="mb-4 text-sm font-extrabold text-[#b65308]">
-                  🗓️ Período da temporada
-                </p>
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <SelectCampo
-                    label="Modalidade"
-                    value={form.modalidade_temporada || "individual"}
-                    onChange={(v) => alterarCampo("modalidade_temporada", v)}
-                    opcoes={["individual", "familiar"]}
-                    labels={{ individual: "Individual", familiar: "Familiar" }}
-                  />
-
-                  <Campo
-                    label="Início"
-                    type="date"
-                    value={form.inicio_temporada}
-                    onChange={(v) => alterarCampo("inicio_temporada", v)}
-                  />
-
-                  <Campo
-                    label="Fim"
-                    type="date"
-                    value={form.fim_temporada}
-                    onChange={(v) => alterarCampo("fim_temporada", v)}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="md:col-span-3">
-
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Observações
-              </label>
-
-              <textarea
-                value={form.observacoes || ""}
-                onChange={(e) =>
-                  alterarCampo("observacoes", e.target.value)
-                }
-                rows={4}
-                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
-                placeholder="Observações sobre o associado..."
-              />
-
-            </div>
-
           </FormularioSecao>
-
-          {mensagem && (
-            <div className="rounded-xl bg-[#e8f3ee] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              {mensagem}
-            </div>
-          )}
-
         </div>
 
-        <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-white px-6 py-5">
-
+        <div className="flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
           <button
             onClick={fechar}
-            disabled={salvando}
-            className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+            className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
           </button>
-
           <button
             onClick={salvar}
             disabled={salvando}
-            className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
+            className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white hover:bg-[#003d2b] disabled:opacity-60"
           >
-            {salvando
-              ? "Salvando..."
-              : socioEditando
-                ? "💾 Salvar alterações"
-                : "💾 Cadastrar Sócio"}
+            {salvando ? "Salvando..." : "Salvar Sócio"}
           </button>
-
         </div>
-
       </div>
-
     </div>
   );
 }
 
-
 /* =========================
-   COMPONENTES
+   COMPONENTES AUXILIARES
 ========================= */
 
 function FormularioSecao({
@@ -2992,16 +2610,9 @@ function FormularioSecao({
   children: ReactNode;
 }) {
   return (
-    <div>
-
-      <h3 className="mb-4 border-b pb-3 text-lg font-bold text-[#005a3c]">
-        {titulo}
-      </h3>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        {children}
-      </div>
-
+    <div className="space-y-4">
+      <h3 className="text-lg font-bold text-[#005a3c]">{titulo}</h3>
+      <div className="grid gap-4 md:grid-cols-4">{children}</div>
     </div>
   );
 }
@@ -3017,7 +2628,7 @@ function Campo({
 }: {
   label: string;
   value?: string | number | null;
-  onChange: (valor: string) => void;
+  onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
   obrigatorio?: boolean;
@@ -3025,25 +2636,16 @@ function Campo({
 }) {
   return (
     <div className={className}>
-
       <label className="mb-2 block text-sm font-semibold text-gray-700">
-        {label}
-
-        {obrigatorio && (
-          <span className="ml-1 text-red-500">
-            *
-          </span>
-        )}
+        {label} {obrigatorio && <span className="text-red-500">*</span>}
       </label>
-
       <input
         type={type}
-        value={value || ""}
+        value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none transition focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+        className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c]"
       />
-
     </div>
   );
 }
@@ -3053,169 +2655,155 @@ function SelectCampo({
   value,
   onChange,
   opcoes,
-  labels = {},
+  labels,
+  className = "",
 }: {
   label: string;
-  value: string;
-  onChange: (valor: string) => void;
+  value?: string | null;
+  onChange: (v: string) => void;
   opcoes: string[];
-  labels?: Record<string, string>;
+  labels: Record<string, string>;
+  className?: string;
 }) {
   return (
-    <div>
-
+    <div className={className}>
       <label className="mb-2 block text-sm font-semibold text-gray-700">
         {label}
       </label>
-
       <select
-        value={value}
+        value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+        className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c]"
       >
-
-        {opcoes.map((opcao) => (
-          <option key={opcao} value={opcao}>
-            {labels[opcao] || opcao}
+        {opcoes.map((op) => (
+          <option key={op} value={op}>
+            {labels[op] || op}
           </option>
         ))}
-
       </select>
-
     </div>
   );
 }
 
-function DashboardCard({
-  titulo,
-  valor,
-  descricao,
-  icone,
-}: {
-  titulo: string;
-  valor: string;
-  descricao: string;
-  icone: string;
-}) {
+function ModuloEmConstrucao({ nome, icone }: { nome: string; icone: string }) {
   return (
-    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-
-      <div className="flex items-center justify-between">
-
-        <span className="text-3xl">
-          {icone}
-        </span>
-
-        <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-semibold text-[#005a3c]">
-          Ativo
-        </span>
-
-      </div>
-
-      <p className="mt-5 text-sm font-medium text-gray-500">
-        {titulo}
+    <div className="rounded-3xl border border-dashed border-[#cfe3d8] bg-white p-12 text-center shadow-sm">
+      <div className="text-6xl">{icone}</div>
+      <h3 className="mt-4 text-xl font-bold text-[#173d2e]">Módulo {nome}</h3>
+      <p className="mt-2 text-sm text-gray-500">
+        Este módulo está em desenvolvimento e estará disponível em breve.
       </p>
-
-      <p className="mt-1 text-3xl font-bold text-[#005a3c]">
-        {valor}
-      </p>
-
-      <p className="mt-1 text-xs text-gray-500">
-        {descricao}
-      </p>
-
     </div>
   );
 }
 
 function RelatoriosFinanceiros({
-  socios, mensalidades, competencia, setCompetencia, formaPagamento, setFormaPagamento, situacao, setSituacao, carregando,
+  socios,
+  mensalidades,
+  competencia,
+  setCompetencia,
+  formaPagamento,
+  setFormaPagamento,
+  situacao,
+  setSituacao,
+  carregando,
 }: {
-  socios: Socio[]; mensalidades: Mensalidade[]; competencia: string; setCompetencia: (valor: string) => void;
-  formaPagamento: string; setFormaPagamento: (valor: string) => void; situacao: string; setSituacao: (valor: string) => void; carregando: boolean;
+  socios: Socio[];
+  mensalidades: Mensalidade[];
+  competencia: string;
+  setCompetencia: (v: string) => void;
+  formaPagamento: string;
+  setFormaPagamento: (v: string) => void;
+  situacao: string;
+  setSituacao: (v: string) => void;
+  carregando: boolean;
 }) {
-  const formas: Record<string, string> = { pix: "PIX", debito_em_conta: "Débito em conta", boleto: "Boleto", dinheiro: "Dinheiro", transferencia: "Transferência", outro: "Outro" };
-  const situacoes: Record<string, string> = { pago: "Pago", em_aberto: "Em aberto", em_atraso: "Em atraso", isento: "Isento" };
-  const filtradas = mensalidades.filter((m) =>
-    (formaPagamento === "todas" || (m.tipo_pagamento || "") === formaPagamento) &&
-    (situacao === "todas" || (m.situacao || "") === situacao)
-  );
-  const soma = (lista: Mensalidade[]) => lista.reduce((s, m) => s + Number(m.valor || 0), 0);
-  const total = soma(filtradas);
-  const recebido = soma(filtradas.filter((m) => m.situacao === "pago"));
-  const aberto = soma(filtradas.filter((m) => m.situacao === "em_aberto"));
-  const atrasado = soma(filtradas.filter((m) => m.situacao === "em_atraso"));
-  const isento = soma(filtradas.filter((m) => m.situacao === "isento"));
-  const pagos = filtradas.filter((m) => m.situacao === "pago").length;
-  const abertos = filtradas.filter((m) => m.situacao === "em_aberto").length;
-  const atrasados = filtradas.filter((m) => m.situacao === "em_atraso").length;
-  const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const dataBR = (v?: string | null) => v ? `${v.slice(8,10)}/${v.slice(5,7)}/${v.slice(0,4)}` : "—";
-  const compBR = `${competencia.slice(5,7)}/${competencia.slice(0,4)}`;
-  const porForma = Object.entries(formas).map(([codigo, label]) => {
-    const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
-    return { codigo, label, qtd: itens.length, valor: soma(itens) };
-  }).filter((x) => x.qtd > 0);
-  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
+  const filtradas = mensalidades.filter((m) => {
+    const atendeForma =
+      formaPagamento === "todas" || m.tipo_pagamento === formaPagamento;
+    const atendeSituacao =
+      situacao === "todas" || m.situacao === situacao;
+    return atendeForma && atendeSituacao;
+  });
 
   return (
-    <div className="relatorio-area">
-      <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
-      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
-        <div className="relatorio-acoes"><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
-      </div>
-      <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Forma de pagamento</label><select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(formas).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Situação</label><select value={situacao} onChange={(e) => setSituacao(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(situacoes).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-      </div>
-      {carregando ? <div className="rounded-2xl border border-[#e2ebe6] bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório...</div> : <>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <ResumoFinanceiroGuarani titulo="Total lançado" valor={moeda(total)} /><ResumoFinanceiroGuarani titulo="Recebido" valor={moeda(recebido)} /><ResumoFinanceiroGuarani titulo="Em aberto" valor={moeda(aberto)} /><ResumoFinanceiroGuarani titulo="Em atraso" valor={moeda(atrasado)} /><ResumoFinanceiroGuarani titulo="Isento" valor={moeda(isento)} />
+    <div>
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-sm font-medium text-gray-500">Relatórios</p>
+          <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatório Financeiro</h2>
         </div>
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Mensalidades pagas</p><p className="mt-1 text-3xl font-bold text-[#005a3c]">{pagos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Em aberto</p><p className="mt-1 text-3xl font-bold text-[#8a6700]">{abertos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><p className="text-sm text-gray-500">Inadimplentes</p><p className="mt-1 text-3xl font-bold text-red-600">{atrasados}</p></div>
+        <div className="flex gap-2">
+          <input
+            type="month"
+            value={competencia}
+            onChange={(e) => setCompetencia(e.target.value)}
+            className="rounded-xl border border-[#d5e0da] bg-white px-4 py-2 font-semibold text-[#005a3c]"
+          />
         </div>
-        <div className="mb-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Recebimentos por forma de pagamento</h3><div className="mt-4 space-y-3">{porForma.length === 0 ? <p className="text-sm text-gray-500">Nenhum pagamento encontrado.</p> : porForma.map((x) => <div key={x.codigo} className="flex items-center justify-between rounded-xl bg-[#f7faf8] px-4 py-3"><div><p className="font-semibold">{x.label}</p><p className="text-xs text-gray-500">{x.qtd} lançamento(s)</p></div><p className="font-bold text-[#005a3c]">{moeda(x.valor)}</p></div>)}</div></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
-        </div>
-        <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
-      </>}
-    </div>
-  );
-}
-
-function ModuloEmConstrucao({
-  nome,
-  icone,
-}: {
-  nome: string;
-  icone: string;
-}) {
-  return (
-    <div className="flex min-h-[500px] items-center justify-center">
-
-      <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
-
-        <div className="text-5xl">
-          {icone}
-        </div>
-
-        <h2 className="mt-4 text-2xl font-bold text-[#005a3c]">
-          {nome}
-        </h2>
-
-        <p className="mt-2 text-gray-500">
-          Este módulo será configurado na próxima etapa.
-        </p>
-
       </div>
 
+      <div className="mb-6 flex flex-wrap gap-4 rounded-2xl bg-white p-4 shadow-sm">
+        <select
+          value={formaPagamento}
+          onChange={(e) => setFormaPagamento(e.target.value)}
+          className="rounded-xl border border-[#d5e0da] px-3 py-2 text-sm"
+        >
+          <option value="todas">Todas as Formas de Pagamento</option>
+          <option value="pix">PIX</option>
+          <option value="debito_em_conta">Débito em conta</option>
+          <option value="boleto">Boleto</option>
+          <option value="dinheiro">Dinheiro</option>
+        </select>
+
+        <select
+          value={situacao}
+          onChange={(e) => setSituacao(e.target.value)}
+          className="rounded-xl border border-[#d5e0da] px-3 py-2 text-sm"
+        >
+          <option value="todas">Todas as Situações</option>
+          <option value="pago">Pago</option>
+          <option value="em_aberto">Em aberto</option>
+          <option value="em_atraso">Em atraso</option>
+          <option value="isento">Isento</option>
+        </select>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
+        <table className="w-full text-left">
+          <thead className="bg-[#e8f3ee] text-xs uppercase text-gray-500">
+            <tr>
+              <th className="px-5 py-4">Sócio</th>
+              <th className="px-5 py-4">Valor</th>
+              <th className="px-5 py-4">Situação</th>
+              <th className="px-5 py-4">Forma</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y text-sm">
+            {carregando ? (
+              <tr>
+                <td colSpan={4} className="p-5 text-center">Carregando relatório...</td>
+              </tr>
+            ) : filtradas.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="p-5 text-center">Nenhum registro encontrado.</td>
+              </tr>
+            ) : (
+              filtradas.map((m) => {
+                const s = socios.find((x) => x.id === m.socio_id);
+                return (
+                  <tr key={m.id}>
+                    <td className="px-5 py-4 font-semibold">{s?.nome || "—"}</td>
+                    <td className="px-5 py-4">{formatarMoeda(m.valor)}</td>
+                    <td className="px-5 py-4">{rotuloSituacaoFinanceira(m.situacao)}</td>
+                    <td className="px-5 py-4">{m.tipo_pagamento || "—"}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
