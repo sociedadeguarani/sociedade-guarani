@@ -113,6 +113,28 @@ export default function UsuariosPage() {
     if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
   }
 
+  async function excluirUsuario(u: Usuario) {
+    if (u.email?.toLowerCase() === "mateus.grauncke@gmail.com") {
+      setErro("O administrador atualmente conectado não pode ser excluído por esta tela.");
+      return;
+    }
+    if (!confirm(`Excluir definitivamente o usuário ${u.nome_exibicao || u.email || "selecionado"}? Esta ação remove o acesso do Supabase Auth.`)) return;
+    setErro("");
+    try {
+      const response = await fetch("/api/usuarios", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: u.id }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Não foi possível excluir o usuário.");
+      setMensagem("Usuário excluído com sucesso.");
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao excluir usuário.");
+    }
+  }
+
   function socioNome(id: string | null) { return socios.find((s) => s.id === id)?.nome || "—"; }
   const perfilAtual = perfis.find((p) => p.id === form.perfil_id)?.nome || "";
   const grupos = Array.from(new Set(PERMISSOES.map((p) => p.grupo)));
@@ -131,7 +153,7 @@ export default function UsuariosPage() {
 
           <section className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row"><div className="flex flex-1 items-center gap-2 rounded-xl border border-gray-300 px-3"><Search className="h-4 w-4 text-gray-400" /><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou e-mail..." className="w-full py-3 outline-none" /></div><select value={filtroPerfil} onChange={(e) => setFiltroPerfil(e.target.value)} className="rounded-xl border border-gray-300 bg-white px-4 py-3 md:w-64"><option value="todos">Todos os perfis</option>{perfis.map((p) => <option key={p.id} value={p.id}>{nomePerfil(p.nome)}</option>)}</select></div>
-            <div className="mt-5 overflow-x-auto">{carregando ? <div className="py-12 text-center text-gray-500">Carregando...</div> : usuariosFiltrados.length === 0 ? <div className="py-12 text-center text-gray-500">Nenhum usuário encontrado.</div> : <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#e8f3ee] text-xs font-extrabold uppercase"><tr><th className="p-3">Nome</th><th className="p-3">Perfil</th><th className="p-3">Vínculo</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody className="divide-y">{usuariosFiltrados.map((u) => { const pv = PERFIL_VISUAL[u.perfil?.nome || ""]; return <tr key={u.id}><td className="p-3"><b>{u.nome_exibicao || "Sem nome"}</b><div className="text-xs text-gray-500">{u.email || ""}</div></td><td className="p-3"><span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: pv?.bg || "#eef3ef", color: pv?.color || "#50625a" }}>{nomePerfil(u.perfil?.nome || "sem perfil")}</span></td><td className="p-3">{u.socio_id ? socioNome(u.socio_id) : u.funcionario_id ? "Funcionário" : "—"}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${u.ativo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{u.ativo ? "Ativo" : "Inativo"}</span></td><td className="p-3"><button onClick={() => alternarAtivo(u)} className="rounded-lg border px-3 py-2 font-bold">{u.ativo ? "Desativar" : "Ativar"}</button></td></tr>; })}</tbody></table>}</div>
+            <div className="mt-5 overflow-x-auto">{carregando ? <div className="py-12 text-center text-gray-500">Carregando...</div> : usuariosFiltrados.length === 0 ? <div className="py-12 text-center text-gray-500">Nenhum usuário encontrado.</div> : <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#e8f3ee] text-xs font-extrabold uppercase"><tr><th className="p-3">Nome</th><th className="p-3">Perfil</th><th className="p-3">Vínculo</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody className="divide-y">{usuariosFiltrados.map((u) => { const pv = PERFIL_VISUAL[u.perfil?.nome || ""]; return <tr key={u.id}><td className="p-3"><b>{u.nome_exibicao || "Sem nome"}</b><div className="text-xs text-gray-500">{u.email || ""}</div></td><td className="p-3"><span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: pv?.bg || "#eef3ef", color: pv?.color || "#50625a" }}>{nomePerfil(u.perfil?.nome || "sem perfil")}</span></td><td className="p-3">{u.socio_id ? socioNome(u.socio_id) : u.funcionario_id ? "Funcionário" : "—"}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${u.ativo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{u.ativo ? "Ativo" : "Inativo"}</span></td><td className="p-3"><div className="flex gap-2"><button onClick={() => alternarAtivo(u)} className="rounded-lg border px-3 py-2 font-bold">{u.ativo ? "Desativar" : "Ativar"}</button><button onClick={() => excluirUsuario(u)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-bold text-red-700">Excluir</button></div></td></tr>; })}</tbody></table>}</div>
           </section>
 
           <section className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><UsersRound className="text-[#005a3c]" /><h2 className="text-xl font-extrabold text-[#003d2b]">Perfis de acesso</h2></div><p className="mt-1 text-sm text-gray-500">Administrador, Funcionário e Associado possuem regras diferentes.</p><div className="mt-5 grid gap-4 md:grid-cols-3">{perfis.map((p) => { const pv = PERFIL_VISUAL[p.nome]; const Icon = pv?.icon || UserRound; return <div key={p.id} className="rounded-2xl border p-5" style={{ background: pv?.bg || "#f8faf9" }}><Icon className="h-7 w-7" style={{ color: pv?.color || "#005a3c" }} /><div className="mt-3 text-lg font-extrabold" style={{ color: pv?.color || "#003d2b" }}>{nomePerfil(p.nome)}</div><p className="mt-1 text-sm text-gray-600">{pv?.desc || "Perfil de acesso."}</p></div>; })}</div></section>
