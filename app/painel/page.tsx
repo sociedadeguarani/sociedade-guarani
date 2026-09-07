@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -921,160 +923,11 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-      {/* CABEÇALHO */}
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-
-          <div className="flex items-center gap-4">
-
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
-                SOCIEDADE GUARANI
-              </h1>
-
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-
-          </div>
-
-          <div className="hidden items-center gap-4 sm:flex">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">
-                {usuarioEmail || "Usuário autenticado"}
-              </p>
-
-              <p className="font-bold text-[#005a3c]">
-                Área Administrativa
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={sair}
-              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
-            >
-              Sair
-            </button>
-          </div>
-
-        </div>
-      </header>
-
-      <div className="flex min-h-[calc(100vh-80px)]">
-
-        {/* MENU LATERAL */}
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
-
-          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
-
-          <nav className="space-y-2">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                onClick={() => {
-                    if (item.nome === "Início") {
-                      window.location.href = "/painel";
-                    } else if (item.nome === "Sócios") {
-                      window.location.href = "/socios";
-                    } else if (item.nome === "Dependentes") {
-                      window.location.href = "/dependentes";
-                    } else if (item.nome === "Financeiro") {
-                      window.location.href = "/financeiro";
-                    } else if (item.nome === "Relatórios") {
-                      window.location.href = "/relatorios";
-                    } else if (item.nome === "Usuários") {
-                      window.location.href = "/usuarios";
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  menu === item.nome
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">
-                  {item.icone}
-                </span>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-
-          </div>
-
-        </aside>
-
-        {/* CONTEÚDO */}
-        <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
-
-          {/* MENU MOBILE */}
-          <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                onClick={() => {
-                    if (item.nome === "Início") {
-                      window.location.href = "/painel";
-                    } else if (item.nome === "Sócios") {
-                      window.location.href = "/socios";
-                    } else if (item.nome === "Dependentes") {
-                      window.location.href = "/dependentes";
-                    } else if (item.nome === "Financeiro") {
-                      window.location.href = "/financeiro";
-                    } else if (item.nome === "Relatórios") {
-                      window.location.href = "/relatorios";
-                    } else if (item.nome === "Usuários") {
-                      window.location.href = "/usuarios";
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
-                className={`rounded-xl p-3 text-xs font-semibold ${
-                  menu === item.nome
-                    ? "bg-[#005a3c] text-white"
-                    : "bg-white text-gray-700 shadow-sm"
-                }`}
-              >
-                <div className="mb-1 text-xl">
-                  {item.icone}
-                </div>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </div>
-
-          {/* INÍCIO */}
+      <section className="min-w-0 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+                  {/* INÍCIO */}
           {menu === "Início" && (
             <Inicio
               socios={socios}
@@ -1161,8 +1014,10 @@ export default function Home() {
               />
             )}
 
-        </section>
-      </div>
+
+      </section>
+
+      
 
       {mensalidadeEditando && (
         <ModalEdicaoMensalidade
