@@ -986,12 +986,18 @@ export default function Home() {
               <button
                 key={item.nome}
                 onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
+                    if (item.nome === "Início") {
+                      window.location.href = "/painel";
                     } else if (item.nome === "Sócios") {
                       window.location.href = "/socios";
+                    } else if (item.nome === "Dependentes") {
+                      window.location.href = "/dependentes";
+                    } else if (item.nome === "Financeiro") {
+                      window.location.href = "/financeiro";
+                    } else if (item.nome === "Relatórios") {
+                      window.location.href = "/relatorios";
+                    } else if (item.nome === "Usuários") {
+                      window.location.href = "/usuarios";
                     } else {
                       setMenu(item.nome);
                     }
@@ -1036,12 +1042,18 @@ export default function Home() {
               <button
                 key={item.nome}
                 onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
+                    if (item.nome === "Início") {
+                      window.location.href = "/painel";
                     } else if (item.nome === "Sócios") {
                       window.location.href = "/socios";
+                    } else if (item.nome === "Dependentes") {
+                      window.location.href = "/dependentes";
+                    } else if (item.nome === "Financeiro") {
+                      window.location.href = "/financeiro";
+                    } else if (item.nome === "Relatórios") {
+                      window.location.href = "/relatorios";
+                    } else if (item.nome === "Usuários") {
+                      window.location.href = "/usuarios";
                     } else {
                       setMenu(item.nome);
                     }
@@ -1289,7 +1301,9 @@ function Inicio({
         </p>
 
         <button
-          onClick={abrirCadastro}
+          onClick={() => {
+            window.location.href = "/socios";
+          }}
           className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
         >
           👤 Cadastrar novo sócio
@@ -3294,7 +3308,7 @@ function RelatoriosFinanceiros({
       <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
       <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-3xl font-bold text-[#005a3c]">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
-        <div className="relatorio-acoes flex flex-wrap gap-2"><button onClick={() => { window.location.href = "/relatorios/inadimplencia"; }} className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-bold text-red-700 shadow-sm">🔴 Relatório de Inadimplência</button><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
+        <div className="relatorio-acoes"><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
       </div>
       <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
         <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
