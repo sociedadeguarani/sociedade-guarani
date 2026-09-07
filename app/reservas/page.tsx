@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabaseClient";
 import { CalendarDays, Check, Copy, CreditCard, LockKeyhole, Settings, Trash2, UserRound, UserRoundCheck, Users, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
 type TipoPessoa = "socio" | "nao_socio";
 type Espaco = { id:string; nome:string; categoria:string; cobranca:"hora"|"diaria"; precoSocio:number; precoNaoSocio:number; permiteNaoSocio:boolean; capacidade?:string };
