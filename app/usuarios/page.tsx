@@ -1,41 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { CheckCircle2, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+type Perfil = { id: string; nome: string; ativo: boolean };
+type Socio = { id: string; matricula: string | null; nome: string; cpf: string | null; email: string | null };
+type Usuario = { id: string; nome_exibicao: string | null; socio_id: string | null; funcionario_id: string | null; perfil_id: string; ativo: boolean; email?: string | null; perfil?: { id?: string; nome: string } | null };
 
-type Perfil = {
-  id: string;
-  nome: string;
-  ativo: boolean;
+const perfilVisual: Record<string, { label: string; desc: string; icon: typeof Crown; bg: string; color: string }> = {
+  administrador: { label: "Administrador", desc: "Acesso completo ao sistema.", icon: Crown, bg: "#E8F3EE", color: "#005A3C" },
+  funcionario: { label: "Funcionário", desc: "Acesso conforme permissões.", icon: ShieldCheck, bg: "#E8F0FB", color: "#064B9B" },
+  associado: { label: "Associado", desc: "Acesso aos próprios dados.", icon: UserRound, bg: "#FFF4CC", color: "#8A6700" },
 };
 
-type Socio = {
-  id: string;
-  matricula: string | null;
-  nome: string;
-  cpf: string | null;
-  email: string | null;
-};
-
-type Usuario = {
-  id: string;
-  nome_exibicao: string | null;
-  socio_id: string | null;
-  funcionario_id: string | null;
-  perfil_id: string;
-  ativo: boolean;
-  email?: string | null;
-  perfil?: { nome: string } | null;
-};
-
-const verde = "#005A3C";
-const verdeEscuro = "#003D2B";
-const fundo = "#F8FAF9";
+function nomePerfil(nome: string) {
+  return perfilVisual[nome]?.label || nome;
+}
 
 export default function UsuariosPage() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -43,563 +25,129 @@ export default function UsuariosPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
+  const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroPerfil, setFiltroPerfil] = useState("todos");
   const [modal, setModal] = useState(false);
-
-  const [form, setForm] = useState({
-    nome: "",
-    email: "",
-    senha: "",
-    perfil_id: "",
-    socio_id: "",
-    ativo: true,
-  });
+  const [form, setForm] = useState({ nome: "", email: "", senha: "", perfil_id: "", socio_id: "", ativo: true });
 
   async function carregar() {
     setCarregando(true);
     setErro("");
-
-    const [u, p, s] = await Promise.all([
-      supabase
-        .from("usuarios_sistema")
-        .select("id,nome_exibicao,socio_id,funcionario_id,perfil_id,ativo")
-        .order("nome_exibicao", { ascending: true }),
-      supabase
-        .from("perfis")
-        .select("id,nome,ativo")
-        .eq("ativo", true)
-        .order("nome"),
-      supabase
-        .from("socios")
-        .select("id,matricula,nome,cpf,email")
-        .order("nome"),
-    ]);
-
-    if (u.error) setErro(u.error.message);
-    if (p.error) setErro(p.error.message);
-    if (s.error) setErro(s.error.message);
-
-    const perfilMap = new Map((p.data || []).map((x) => [x.id, x]));
-    setUsuarios(
-      (u.data || []).map((x) => ({
-        ...x,
-        perfil: perfilMap.get(x.perfil_id)
-          ? { nome: perfilMap.get(x.perfil_id)!.nome }
-          : null,
-      }))
-    );
-    setPerfis(p.data || []);
-    setSocios(s.data || []);
-
-    if (!form.perfil_id && p.data?.length) {
-      const admin = p.data.find((x) => x.nome === "administrador");
-      setForm((f) => ({ ...f, perfil_id: admin?.id || p.data![0].id }));
+    try {
+      const response = await fetch("/api/usuarios", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os perfis.");
+      setPerfis(data.perfis || []);
+      setSocios(data.socios || []);
+      setUsuarios(data.usuarios || []);
+      if (!form.perfil_id && data.perfis?.length) {
+        const admin = data.perfis.find((p: Perfil) => p.nome === "administrador");
+        setForm((f) => ({ ...f, perfil_id: admin?.id || data.perfis[0].id }));
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar.");
+    } finally {
+      setCarregando(false);
     }
-
-    setCarregando(false);
   }
 
-  useEffect(() => {
-    carregar();
-  }, []);
+  useEffect(() => { void carregar(); }, []);
 
   const usuariosFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-
     return usuarios.filter((u) => {
-      const bateBusca =
-        !termo ||
-        (u.nome_exibicao || "").toLowerCase().includes(termo) ||
-        (u.email || "").toLowerCase().includes(termo);
-
-      const batePerfil =
-        filtroPerfil === "todos" || u.perfil_id === filtroPerfil;
-
-      return bateBusca && batePerfil;
+      const perfil = u.perfil?.nome || "";
+      return (!termo || (u.nome_exibicao || "").toLowerCase().includes(termo) || (u.email || "").toLowerCase().includes(termo)) &&
+        (filtroPerfil === "todos" || u.perfil_id === filtroPerfil);
     });
   }, [usuarios, busca, filtroPerfil]);
 
   function abrirNovo() {
-    const admin = perfis.find((x) => x.nome === "administrador");
-    setErro("");
-    setMensagem("");
-    setForm({
-      nome: "",
-      email: "",
-      senha: "",
-      perfil_id: admin?.id || perfis[0]?.id || "",
-      socio_id: "",
-      ativo: true,
-    });
+    const admin = perfis.find((p) => p.nome === "administrador");
+    setErro(""); setMensagem("");
+    setForm({ nome: "", email: "", senha: "", perfil_id: admin?.id || perfis[0]?.id || "", socio_id: "", ativo: true });
     setModal(true);
   }
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
-    setSalvando(true);
-    setErro("");
-    setMensagem("");
-
+    setSalvando(true); setErro(""); setMensagem("");
     try {
-      if (!form.nome.trim() || !form.email.trim() || !form.senha.trim()) {
-        throw new Error("Preencha nome, e-mail e senha.");
-      }
-
-      if (form.senha.length < 6) {
-        throw new Error("A senha precisa ter pelo menos 6 caracteres.");
-      }
-
-      const perfil = perfis.find((x) => x.id === form.perfil_id);
+      const perfil = perfis.find((p) => p.id === form.perfil_id);
+      if (!form.nome.trim() || !form.email.trim() || !form.senha.trim()) throw new Error("Preencha nome, e-mail e senha.");
+      if (form.senha.length < 6) throw new Error("A senha precisa ter pelo menos 6 caracteres.");
       if (!perfil) throw new Error("Selecione um perfil.");
-
-      if (perfil.nome === "associado" && !form.socio_id) {
-        throw new Error("Para usuário associado, selecione o sócio.");
-      }
+      if (perfil.nome === "associado" && !form.socio_id) throw new Error("Para usuário associado, selecione o sócio vinculado.");
 
       const response = await fetch("/api/usuarios", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nome: form.nome.trim(),
-          email: form.email.trim().toLowerCase(),
-          senha: form.senha,
-          perfil_id: form.perfil_id,
-          socio_id: form.socio_id || null,
-          ativo: form.ativo,
-        }),
+        body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Não foi possível criar o usuário.");
-      }
-
-      setMensagem("Usuário criado com sucesso.");
-      setModal(false);
-      await carregar();
-    } catch (err) {
-      setErro(err instanceof Error ? err.message : "Erro ao salvar.");
-    } finally {
-      setSalvando(false);
-    }
+      if (!response.ok) throw new Error(data?.error || "Não foi possível criar o usuário.");
+      setMensagem("Usuário criado com sucesso."); setModal(false); await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao salvar.");
+    } finally { setSalvando(false); }
   }
 
-  async function alternarAtivo(usuario: Usuario) {
+  async function alternarAtivo(u: Usuario) {
     setErro("");
-    const { error } = await supabase
-      .from("usuarios_sistema")
-      .update({ ativo: !usuario.ativo })
-      .eq("id", usuario.id);
-
-    if (error) setErro(error.message);
-    else await carregar();
+    const response = await fetch("/api/usuarios", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
+    const data = await response.json();
+    if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
   }
 
-  const nomeSocio = (id: string | null) =>
-    socios.find((s) => s.id === id)?.nome || "—";
+  function socioNome(id: string | null) { return socios.find((s) => s.id === id)?.nome || "—"; }
 
   return (
-    <main style={{ minHeight: "100vh", background: fundo, color: "#0F172A" }}>
-      <header
-        style={{
-          height: 78,
-          background: "#fff",
-          borderBottom: "1px solid #E2E8F0",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 28px",
-          position: "sticky",
-          top: 0,
-          zIndex: 5,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 12, color: "#64748B" }}>Administração</div>
-          <h1 style={{ margin: "3px 0 0", color: verdeEscuro, fontSize: 25 }}>
-            Usuários do sistema
-          </h1>
-        </div>
-        <button
-          onClick={() => window.location.replace("/painel")}
-          style={btnSecundario}
-        >
-          ← Voltar ao painel
-        </button>
-      </header>
-
-      <section style={{ maxWidth: 1250, margin: "0 auto", padding: 28 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 16,
-            alignItems: "center",
-            marginBottom: 20,
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0, color: verdeEscuro }}>Acessos</h2>
-            <p style={{ margin: "5px 0 0", color: "#64748B" }}>
-              Cadastre administradores, funcionários e associados.
-            </p>
-          </div>
-          <button onClick={abrirNovo} style={btnPrimario}>
-            + Novo usuário
-          </button>
-        </div>
-
-        {mensagem && <div style={sucesso}>{mensagem}</div>}
-        {erro && <div style={falha}>{erro}</div>}
-
-        <div style={card}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 240px",
-              gap: 12,
-              marginBottom: 18,
-            }}
-          >
-            <input
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="🔎 Buscar por nome ou e-mail..."
-              style={input}
-            />
-            <select
-              value={filtroPerfil}
-              onChange={(e) => setFiltroPerfil(e.target.value)}
-              style={input}
-            >
-              <option value="todos">Todos os perfis</option>
-              {perfis.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nome}
-                </option>
-              ))}
-            </select>
+    <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
+      <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
+        <div className="mx-auto max-w-[1400px] space-y-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div><p className="text-sm text-gray-500">Administração</p><h1 className="text-3xl font-extrabold text-[#005a3c]">Usuários do sistema</h1><p className="mt-1 text-sm text-gray-500">Gerencie administradores, funcionários e associados.</p></div>
+            <button onClick={abrirNovo} className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white hover:bg-[#003d2b]">+ Novo usuário</button>
           </div>
 
-          {carregando ? (
-            <p style={{ color: "#64748B" }}>Carregando...</p>
-          ) : usuariosFiltrados.length === 0 ? (
-            <div style={{ padding: 35, textAlign: "center", color: "#64748B" }}>
-              Nenhum usuário encontrado.
+          {mensagem && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 font-semibold text-green-700">{mensagem}</div>}
+          {erro && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-700">{erro}</div>}
+
+          <section className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row">
+              <div className="flex flex-1 items-center gap-2 rounded-xl border border-gray-300 px-3"><Search className="h-4 w-4 text-gray-400" /><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou e-mail..." className="w-full py-3 outline-none" /></div>
+              <select value={filtroPerfil} onChange={(e) => setFiltroPerfil(e.target.value)} className="rounded-xl border border-gray-300 bg-white px-4 py-3 md:w-64"><option value="todos">Todos os perfis</option>{perfis.map((p) => <option key={p.id} value={p.id}>{nomePerfil(p.nome)}</option>)}</select>
             </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    {["Nome", "Perfil", "Vínculo", "Status", "Ações"].map((h) => (
-                      <th key={h} style={th}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {usuariosFiltrados.map((u) => (
-                    <tr key={u.id}>
-                      <td style={td}>
-                        <strong>{u.nome_exibicao || "Sem nome"}</strong>
-                        {u.email && (
-                          <div style={{ fontSize: 12, color: "#64748B" }}>
-                            {u.email}
-                          </div>
-                        )}
-                      </td>
-                      <td style={td}>
-                        <span style={badge}>{u.perfil?.nome || "sem perfil"}</span>
-                      </td>
-                      <td style={td}>
-                        {u.socio_id ? nomeSocio(u.socio_id) : u.funcionario_id ? "Funcionário" : "—"}
-                      </td>
-                      <td style={td}>
-                        <span
-                          style={{
-                            ...badge,
-                            background: u.ativo ? "#DCFCE7" : "#FEE2E2",
-                            color: u.ativo ? "#166534" : "#991B1B",
-                          }}
-                        >
-                          {u.ativo ? "Ativo" : "Inativo"}
-                        </span>
-                      </td>
-                      <td style={td}>
-                        <button
-                          onClick={() => alternarAtivo(u)}
-                          style={{
-                            ...btnPequeno,
-                            background: u.ativo ? "#FFF7ED" : "#E8F3EE",
-                          }}
-                        >
-                          {u.ativo ? "Desativar" : "Ativar"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+            <div className="mt-5 overflow-x-auto">
+              {carregando ? <div className="py-12 text-center text-gray-500">Carregando usuários e perfis...</div> : usuariosFiltrados.length === 0 ? <div className="py-12 text-center text-gray-500">Nenhum usuário encontrado.</div> : (
+                <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#e8f3ee] text-xs font-extrabold uppercase text-[#275044]"><tr><th className="p-3">Nome</th><th className="p-3">Perfil</th><th className="p-3">Vínculo</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody className="divide-y divide-[#e5ece8]">
+                  {usuariosFiltrados.map((u) => { const pv = perfilVisual[u.perfil?.nome || ""]; return <tr key={u.id}><td className="p-3"><b>{u.nome_exibicao || "Sem nome"}</b><div className="text-xs text-gray-500">{u.email || ""}</div></td><td className="p-3"><span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: pv?.bg || "#eef3ef", color: pv?.color || "#50625a" }}>{nomePerfil(u.perfil?.nome || "sem perfil")}</span></td><td className="p-3">{u.socio_id ? socioNome(u.socio_id) : u.funcionario_id ? "Funcionário" : "—"}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${u.ativo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{u.ativo ? "Ativo" : "Inativo"}</span></td><td className="p-3"><button onClick={() => alternarAtivo(u)} className="rounded-lg border px-3 py-2 font-bold">{u.ativo ? "Desativar" : "Ativar"}</button></td></tr>; })}
+                </tbody></table>
+              )}
             </div>
-          )}
+          </section>
+
+          <section className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><UsersRound className="text-[#005a3c]" /><h2 className="text-xl font-extrabold text-[#003d2b]">Perfis de acesso</h2></div><p className="mt-1 text-sm text-gray-500">Os perfis cadastrados no Supabase aparecem abaixo e também no formulário de novo usuário.</p>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">{perfis.map((p) => { const pv = perfilVisual[p.nome]; const Icon = pv?.icon || UserRound; return <div key={p.id} className="rounded-2xl border p-5" style={{ background: pv?.bg || "#f8faf9" }}><Icon className="h-7 w-7" style={{ color: pv?.color || "#005a3c" }} /><div className="mt-3 text-lg font-extrabold" style={{ color: pv?.color || "#003d2b" }}>{nomePerfil(p.nome)}</div><p className="mt-1 text-sm text-gray-600">{pv?.desc || "Perfil de acesso ao sistema."}</p><div className="mt-3 text-xs font-bold uppercase text-gray-500">{p.ativo ? "Perfil ativo" : "Perfil inativo"}</div></div>; })}</div>
+            {perfis.length === 0 && !carregando && <div className="mt-4 rounded-xl bg-red-50 p-4 font-semibold text-red-700">Nenhum perfil ativo foi retornado pelo Supabase. Verifique a tabela <b>perfis</b>.</div>}
+          </section>
         </div>
+      </main>
 
-        <div style={{ ...card, marginTop: 18, background: "#F0FDF4" }}>
-          <strong style={{ color: verdeEscuro }}>Perfis de acesso</strong>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12,
-              marginTop: 12,
-            }}
-          >
-            <div style={perfilCard}>👑 <b>Administrador</b><br /><small>Acesso completo ao sistema.</small></div>
-            <div style={perfilCard}>👨‍💼 <b>Funcionário</b><br /><small>Acesso conforme permissões.</small></div>
-            <div style={perfilCard}>👤 <b>Associado</b><br /><small>Acesso aos próprios dados.</small></div>
-          </div>
-        </div>
-      </section>
-
-      {modal && (
-        <div style={overlay}>
-          <form onSubmit={salvar} style={modalBox}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <h2 style={{ margin: 0, color: verdeEscuro }}>Novo usuário</h2>
-                <p style={{ margin: "5px 0 0", color: "#64748B" }}>
-                  Crie o acesso e defina o vínculo.
-                </p>
-              </div>
-              <button type="button" onClick={() => setModal(false)} style={fechar}>×</button>
-            </div>
-
-            <label style={label}>Nome</label>
-            <input
-              required
-              value={form.nome}
-              onChange={(e) => setForm({ ...form, nome: e.target.value })}
-              style={input}
-              placeholder="Nome completo"
-            />
-
-            <label style={label}>E-mail de acesso</label>
-            <input
-              required
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              style={input}
-              placeholder="email@exemplo.com"
-            />
-
-            <label style={label}>Senha inicial</label>
-            <input
-              required
-              type="password"
-              minLength={6}
-              value={form.senha}
-              onChange={(e) => setForm({ ...form, senha: e.target.value })}
-              style={input}
-              placeholder="Mínimo de 6 caracteres"
-            />
-
-            <label style={label}>Perfil</label>
-            <select
-              value={form.perfil_id}
-              onChange={(e) => setForm({ ...form, perfil_id: e.target.value, socio_id: "" })}
-              style={input}
-            >
-              <option value="">Selecione</option>
-              {perfis.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nome}
-                </option>
-              ))}
-            </select>
-
-            {perfis.find((p) => p.id === form.perfil_id)?.nome === "associado" && (
-              <>
-                <label style={label}>Associado vinculado</label>
-                <select
-                  required
-                  value={form.socio_id}
-                  onChange={(e) => setForm({ ...form, socio_id: e.target.value })}
-                  style={input}
-                >
-                  <option value="">Selecione o sócio</option>
-                  {socios.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.matricula ? `${s.matricula} · ` : ""}{s.nome}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-
-            <label style={{ ...label, display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={form.ativo}
-                onChange={(e) => setForm({ ...form, ativo: e.target.checked })}
-              />
-              Usuário ativo
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
-              <button type="button" onClick={() => setModal(false)} style={btnSecundario}>
-                Cancelar
-              </button>
-              <button disabled={salvando} type="submit" style={btnPrimario}>
-                {salvando ? "Criando..." : "Criar usuário"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </main>
+      {modal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><form onSubmit={salvar} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h2 className="text-xl font-extrabold text-[#003d2b]">Novo usuário</h2><p className="text-sm text-gray-500">Escolha o perfil de acesso.</p></div><button type="button" onClick={() => setModal(false)} className="rounded-lg bg-gray-100 p-2"><X className="h-5 w-5" /></button></div>
+        <label className="mt-5 block text-sm font-bold">Nome<input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
+        <label className="mt-4 block text-sm font-bold">E-mail<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
+        <label className="mt-4 block text-sm font-bold">Senha inicial<input required minLength={6} type="password" value={form.senha} onChange={(e) => setForm({ ...form, senha: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
+        <div className="mt-4"><span className="text-sm font-bold">Perfil de acesso</span><div className="mt-2 grid gap-2 sm:grid-cols-3">{perfis.map((p) => { const pv = perfilVisual[p.nome]; const Icon = pv?.icon || UserRound; const ativo = form.perfil_id === p.id; return <button key={p.id} type="button" onClick={() => setForm({ ...form, perfil_id: p.id, socio_id: "" })} className={`rounded-xl border-2 p-3 text-left ${ativo ? "border-[#005a3c] ring-2 ring-[#005a3c]/10" : "border-gray-200"}`}><Icon className="h-5 w-5" style={{ color: pv?.color || "#005a3c" }} /><div className="mt-1 text-sm font-extrabold">{nomePerfil(p.nome)}</div>{ativo && <div className="mt-1 text-[10px] font-bold uppercase text-[#005a3c]">✓ Selecionado</div>}</button>; })}</div></div>
+        {perfis.find((p) => p.id === form.perfil_id)?.nome === "associado" && <label className="mt-4 block text-sm font-bold">Sócio vinculado<select required value={form.socio_id} onChange={(e) => setForm({ ...form, socio_id: e.target.value })} className="mt-1 w-full rounded-xl border bg-white px-3 py-3"><option value="">Selecione o sócio</option>{socios.map((s) => <option key={s.id} value={s.id}>{s.matricula ? `${s.matricula} · ` : ""}{s.nome}</option>)}</select></label>}
+        <label className="mt-4 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={form.ativo} onChange={(e) => setForm({ ...form, ativo: e.target.checked })} /> Usuário ativo</label>
+        <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setModal(false)} className="rounded-xl border px-4 py-3 font-bold">Cancelar</button><button disabled={salvando} className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white disabled:opacity-60">{salvando ? "Criando..." : "Criar usuário"}</button></div>
+      </form></div>}
+    </div>
   );
 }
-
-const card: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #E2E8F0",
-  borderRadius: 16,
-  padding: 20,
-  boxShadow: "0 2px 8px rgba(15, 23, 42, .04)",
-};
-
-const input: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  border: "1px solid #CBD5E1",
-  borderRadius: 10,
-  padding: "11px 12px",
-  fontSize: 14,
-  outline: "none",
-  background: "#fff",
-};
-
-const label: React.CSSProperties = {
-  display: "block",
-  marginTop: 15,
-  marginBottom: 6,
-  fontSize: 13,
-  fontWeight: 700,
-  color: "#334155",
-};
-
-const th: React.CSSProperties = {
-  textAlign: "left",
-  padding: "12px 10px",
-  borderBottom: "1px solid #E2E8F0",
-  fontSize: 12,
-  color: "#64748B",
-  textTransform: "uppercase",
-};
-
-const td: React.CSSProperties = {
-  padding: "14px 10px",
-  borderBottom: "1px solid #E2E8F0",
-  fontSize: 14,
-};
-
-const badge: React.CSSProperties = {
-  display: "inline-block",
-  padding: "5px 9px",
-  borderRadius: 999,
-  background: "#E8F3EE",
-  color: verdeEscuro,
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const btnPrimario: React.CSSProperties = {
-  border: 0,
-  borderRadius: 10,
-  padding: "11px 16px",
-  background: verde,
-  color: "#fff",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const btnSecundario: React.CSSProperties = {
-  border: "1px solid #CBD5E1",
-  borderRadius: 10,
-  padding: "10px 14px",
-  background: "#fff",
-  color: "#334155",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const btnPequeno: React.CSSProperties = {
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  padding: "7px 10px",
-  cursor: "pointer",
-  color: "#334155",
-  fontWeight: 600,
-};
-
-const sucesso: React.CSSProperties = {
-  background: "#DCFCE7",
-  color: "#166534",
-  border: "1px solid #BBF7D0",
-  padding: 12,
-  borderRadius: 10,
-  marginBottom: 14,
-};
-
-const falha: React.CSSProperties = {
-  background: "#FEF2F2",
-  color: "#991B1B",
-  border: "1px solid #FECACA",
-  padding: 12,
-  borderRadius: 10,
-  marginBottom: 14,
-};
-
-const perfilCard: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #DCFCE7",
-  borderRadius: 12,
-  padding: 14,
-  lineHeight: 1.6,
-};
-
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(15,23,42,.45)",
-  display: "grid",
-  placeItems: "center",
-  padding: 20,
-  zIndex: 20,
-};
-
-const modalBox: React.CSSProperties = {
-  width: "min(520px, 100%)",
-  maxHeight: "90vh",
-  overflowY: "auto",
-  background: "#fff",
-  borderRadius: 18,
-  padding: 24,
-  boxShadow: "0 20px 60px rgba(15,23,42,.2)",
-};
-
-const fechar: React.CSSProperties = {
-  border: 0,
-  background: "#F1F5F9",
-  borderRadius: 8,
-  width: 34,
-  height: 34,
-  fontSize: 24,
-  cursor: "pointer",
-};
-
