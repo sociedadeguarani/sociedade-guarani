@@ -232,7 +232,7 @@ export default function FinanceiroPage() {
 
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "inadimplencia" | "contas" | "fluxo">("mensalidades");
+  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("mensalidades");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
   const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
@@ -1168,10 +1168,18 @@ export default function FinanceiroPage() {
       if (fluxoInicio && data < fluxoInicio) return false;
       if (fluxoFim && data > fluxoFim) return false;
       if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
-      if (fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
+
+      if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
+      if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
+      if (
+        abaFinanceira === "aluguéis" &&
+        !String(m.categoria || "").toLowerCase().includes("alug")
+      ) return false;
+
+      if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
       return true;
     });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo]);
+  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, abaFinanceira]);
 
   const entradasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "entrada")
@@ -1207,6 +1215,7 @@ export default function FinanceiroPage() {
 
   async function salvarConferenciaSaldo() {
     if (!contaConferindo) return;
+
     const saldoInformado = Number(String(saldoConferido).replace(",", "."));
     if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
       setMensagem("Informe um saldo bancário válido.");
@@ -1216,52 +1225,36 @@ export default function FinanceiroPage() {
     const saldoAtual = saldoConta(contaConferindo);
     const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
 
-    if (Math.abs(diferenca) < 0.01) {
-      setMensagem(`Saldo de ${contaConferindo.nome} já está conferido em ${formatarMoeda(saldoAtual)}.`);
-      setContaConferindo(null);
-      return;
-    }
-
     setSalvandoConferencia(true);
+
     try {
-      const tipo = diferenca > 0 ? "entrada" : "saida";
-      const descricao = diferenca > 0
-        ? `Ajuste de conciliação bancária - ${contaConferindo.nome}`
-        : `Ajuste de conciliação bancária - ${contaConferindo.nome}`;
-
-      const payload = {
-        conta_bancaria_id: contaConferindo.id,
-        conta_destino_id: null,
-        grupo_transferencia: null,
-        tipo,
-        categoria: "Conciliação bancária",
-        descricao,
-        valor: Math.abs(diferenca),
-        data_movimentacao: dataConferencia,
-        forma_pagamento: "outro",
-        origem_tipo: "ajuste_conciliacao",
-        origem_id: null,
-        socio_id: null,
-        dependente_id: null,
-        comprovante_url: null,
-        conciliado: true,
-        data_conciliacao: dataConferencia,
-        observacoes: `${observacaoConferencia || "Conferência do saldo bancário"}. Saldo anterior: ${formatarMoeda(saldoAtual)}. Saldo conferido: ${formatarMoeda(saldoInformado)}.`,
-      };
-
-      const { data, error } = await supabase
-        .from("movimentacoes_financeiras")
-        .insert(payload)
-        .select("*")
-        .single();
+      const { error } = await supabase
+        .from("conferencias_bancarias")
+        .insert({
+          conta_bancaria_id: contaConferindo.id,
+          saldo_sistema: saldoAtual,
+          saldo_banco: saldoInformado,
+          diferenca,
+          data_conferencia: dataConferencia,
+          observacao:
+            observacaoConferencia ||
+            "Conferência do saldo bancário",
+        });
 
       if (error) throw error;
 
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]);
-      setMensagem(`Saldo de ${contaConferindo.nome} conferido com sucesso. Novo saldo: ${formatarMoeda(saldoInformado)}.`);
+      setMensagem(
+        diferenca === 0
+          ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
+          : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`
+      );
       setContaConferindo(null);
     } catch (error) {
-      setMensagem(`Não foi possível conferir o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+      setMensagem(
+        `Não foi possível registrar a conferência. ${
+          error instanceof Error ? error.message : "Erro desconhecido."
+        }`
+      );
     } finally {
       setSalvandoConferencia(false);
     }
@@ -1541,15 +1534,40 @@ export default function FinanceiroPage() {
             </div>
           )}
 
-          <div className="mb-5 grid gap-2 rounded-2xl border border-[#e2ebe6] bg-white p-2 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              ["mensalidades", "💰 Mensalidades"],
-              ["inadimplencia", `🚨 Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
-              ["contas", "🏦 Contas bancárias"],
-              ["fluxo", "📊 Fluxo de caixa"],
-            ].map(([id, label]) => (
-              <button key={id} onClick={() => setAbaFinanceira(id as typeof abaFinanceira)} className={`rounded-xl px-4 py-3 text-sm font-bold ${abaFinanceira === id ? "bg-[#005a3c] text-white" : "bg-[#f7faf8] text-[#50625a]"}`}>{label}</button>
-            ))}
+          <div className="mb-6 rounded-2xl border border-[#dfe9e3] bg-white p-2 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["mensalidades", "💰 Mensalidades"],
+                ["aluguéis", "🏠 Aluguéis"],
+                ["entradas", "💵 Entradas"],
+                ["saidas", "💸 Saídas"],
+                ["inadimplencia", `🚨 Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
+                ["contas", "🏦 Contas bancárias"],
+                ["fluxo", "📊 Fluxo de caixa"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    const aba = id as typeof abaFinanceira;
+                    setAbaFinanceira(aba);
+                    if (aba === "entradas") setFluxoTipo("entrada");
+                    else if (aba === "saidas") setFluxoTipo("saida");
+                    else if (aba === "fluxo") setFluxoTipo("todos");
+                    if (aba === "aluguéis") {
+                      setMovTipo("entrada");
+                      setMovCategoria("Aluguel");
+                    }
+                  }}
+                  className={`rounded-xl px-4 py-3 text-sm font-bold ${
+                    abaFinanceira === id
+                      ? "bg-[#005a3c] text-white shadow-sm"
+                      : "bg-[#f7faf8] text-[#50625a] hover:bg-[#e8f3ee]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {abaFinanceira === "inadimplencia" && (
@@ -1732,16 +1750,44 @@ export default function FinanceiroPage() {
                 </div>
               )}
 
-              {abaFinanceira === "fluxo" && (
+              {["fluxo", "entradas", "saidas", "aluguéis"].includes(abaFinanceira) && (
                 <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
                   <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <h3 className="text-lg font-extrabold text-[#003d2b]">Livro de movimentações</h3>
-                      <p className="text-sm text-gray-500">Entradas, saídas e transferências ficam registradas para prestação de contas.</p>
+                      <h3 className="text-lg font-extrabold text-[#003d2b]">
+                        {abaFinanceira === "aluguéis"
+                          ? "Aluguéis recebidos"
+                          : abaFinanceira === "entradas"
+                            ? "Entradas financeiras"
+                            : abaFinanceira === "saidas"
+                              ? "Saídas financeiras"
+                              : "Livro de movimentações"}
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        {abaFinanceira === "aluguéis"
+                          ? "Registre e acompanhe os valores recebidos pelo aluguel dos espaços da Sociedade."
+                          : "Entradas, saídas e transferências ficam registradas para prestação de contas."}
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova movimentação</button>
-                      <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button>
+                      <button
+                        onClick={() => {
+                          if (abaFinanceira === "aluguéis") {
+                            setMovTipo("entrada");
+                            setMovCategoria("Aluguel");
+                            setMovDescricao("");
+                          }
+                          setMostrarMovimentoModal(true);
+                        }}
+                        className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
+                      >
+                        ＋ {abaFinanceira === "aluguéis" ? "Novo aluguel" : "Nova movimentação"}
+                      </button>
+                      {abaFinanceira === "fluxo" && (
+                        <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
+                          ↔ Transferência
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1770,7 +1816,12 @@ export default function FinanceiroPage() {
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label>
-                        <select value={fluxoTipo} onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
+                        <select
+                          value={abaFinanceira === "entradas" ? "entrada" : abaFinanceira === "saidas" ? "saida" : fluxoTipo}
+                          disabled={abaFinanceira === "entradas" || abaFinanceira === "saidas"}
+                          onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)}
+                          className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 disabled:bg-gray-100"
+                        >
                           <option value="todos">Todos</option>
                           <option value="entrada">Entradas</option>
                           <option value="saida">Saídas</option>
@@ -2108,7 +2159,7 @@ export default function FinanceiroPage() {
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
               <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">Se houver diferença, o sistema criará uma movimentação de conciliação para que o histórico continue transparente.</p>
+              <p className="mt-2 text-xs text-gray-500">A conferência fica registrada separadamente e não cria entrada nem saída no caixa.</p>
             </div>
             <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
             <div>
@@ -2116,7 +2167,7 @@ export default function FinanceiroPage() {
               <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
             </div>
             <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial não será apagado nem alterado. Se o saldo real for diferente, a diferença ficará registrada no livro financeiro como ajuste de conciliação.
+              <strong>Transparência:</strong> o saldo inicial e as movimentações não serão alterados. A diferença ficará registrada apenas no histórico de conferência bancária.
             </div>
             <div className="flex justify-end gap-3">
               <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
