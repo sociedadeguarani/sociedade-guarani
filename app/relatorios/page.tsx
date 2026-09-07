@@ -885,6 +885,7 @@ export default function RelatoriosPage() {
       </main>
         </div>
       </div>
+    </div>
   );
 }
 
