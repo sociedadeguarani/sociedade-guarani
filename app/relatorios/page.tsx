@@ -276,8 +276,77 @@ export default function RelatoriosPage() {
     window.location.href = "/painel";
   }
 
+  function navegar(path: string) {
+    window.location.href = path;
+  }
+
+  const menu = [
+    ["Início", "🏠", "/painel"],
+    ["Sócios", "👤", "/socios"],
+    ["Dependentes", "👥", "/dependentes"],
+    ["Reservas", "📅", "/reservas"],
+    ["Eventos", "🎉", "/eventos"],
+    ["Financeiro", "💰", "/financeiro"],
+    ["Espaços", "🏛️", "/espacos"],
+    ["Relatórios", "📊", "/relatorios"],
+    ["Usuários", "🔐", "/usuarios"],
+  ] as const;
+
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#18362b]">
+      <div className="flex min-h-screen">
+        <aside className="nao-imprimir hidden w-[235px] shrink-0 border-r border-[#dfe7e2] bg-white lg:flex lg:flex-col">
+          <div className="border-b border-[#e7eee9] p-5">
+            <button
+              onClick={() => navegar("/painel")}
+              className="flex w-full items-center gap-3 text-left"
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005a3c] text-xl">
+                🏛️
+              </div>
+              <div>
+                <div className="text-base font-extrabold text-[#005a3c]">
+                  SOCIEDADE GUARANI
+                </div>
+                <div className="text-[11px] leading-4 text-gray-500">
+                  Sociedade Recreativa Guarani — S.R.G.
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <nav className="flex-1 space-y-1 p-3">
+            {menu.map(([nome, icone, caminho]) => {
+              const ativo = caminho === "/relatorios";
+
+              return (
+                <button
+                  key={caminho}
+                  onClick={() => navegar(caminho)}
+                  className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+                    ativo
+                      ? "bg-[#005a3c] text-white shadow-sm"
+                      : "text-[#355247] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+                  }`}
+                >
+                  <span className="w-6 text-center text-base">{icone}</span>
+                  <span>{nome}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="m-3 rounded-2xl bg-[#fff4c7] p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-[#716000]">
+              SOCIEDADE GUARANI
+            </p>
+            <p className="mt-1 text-xs text-[#6b5b16]">
+              Sistema integrado de gestão
+            </p>
+          </div>
+        </aside>
+
+        <div className="min-w-0 flex-1">
       <style jsx global>{`
         @media print {
           @page {
@@ -814,7 +883,8 @@ export default function RelatoriosPage() {
           </>
         )}
       </main>
-    </div>
+        </div>
+      </div>
   );
 }
 
@@ -874,4 +944,3 @@ function TipoBadge({ tipo }: { tipo: Movimento["tipo"] }) {
     </span>
   );
 }
-
