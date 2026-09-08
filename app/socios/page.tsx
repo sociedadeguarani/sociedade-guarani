@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -402,94 +404,11 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
-      {/* CABEÇALHO */}
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-          <div className="flex items-center gap-4">
-
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
-                SOCIEDADE GUARANI
-              </h1>
-
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-
-          </div>
-
-          <div className="hidden items-center gap-3 sm:flex">
-            <p className="text-sm text-gray-200">
-              Sistema de Gestão
-            </p>
-
-            <p className="font-bold text-[#005a3c]">
-              Área Administrativa
-            </p>
-          </div>
-
-        </div>
-      </header>
-
-      <div className="flex min-h-[calc(100vh-80px)]">
-
-        {/* MENU LATERAL */}
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
-
-          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
-
-          <nav className="space-y-2">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                onClick={() => {
-                  window.location.href = item.rota;
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  menu === item.nome
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">
-                  {item.icone}
-                </span>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-
-          </div>
-
-        </aside>
-
-        {/* CONTEÚDO */}
-        <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
+      {/* CONTEÚDO */}
+      <section className="min-w-0 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
 
           {/* MENU MOBILE */}
           <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
@@ -552,7 +471,6 @@ export default function Home() {
           )}
 
         </section>
-      </div>
 
       {/* MODAL CADASTRO */}
       {abrirCadastro && (
