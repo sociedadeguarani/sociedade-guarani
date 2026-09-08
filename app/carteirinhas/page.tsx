@@ -79,7 +79,7 @@ export default function CarteirinhasPage() {
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
-  const qrValue = selecionado ? `guarani:socio:${selecionado.id}` : "";
+  const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/qr/${selecionado.id}` : "";
 
   function imprimirCarteirinha() {
     if (!selecionado) return;
