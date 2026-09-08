@@ -99,7 +99,7 @@ export async function POST(request: Request) {
       const cpf = String(socio.cpf || "").replace(/\D/g, "");
       if (!matricula || cpf.length < 6) return NextResponse.json({ error: "O associado precisa ter matrícula e CPF com pelo menos 6 números para gerar o acesso." }, { status: 400 });
       emailFinal = `${matricula}@guarani.local`;
-      senhaFinal = cpf.slice(-6);
+      senhaFinal = cpf.slice(0, 6);
     } else {
       if (!emailFinal || !senhaFinal) return NextResponse.json({ error: "E-mail e senha são obrigatórios para funcionário/administrador." }, { status: 400 });
     }
