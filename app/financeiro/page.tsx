@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -105,6 +107,7 @@ const MENU = [
   ["Financeiro", "💰", "/financeiro"],
   ["Espaços", "🏛️", "/espacos"],
   ["Relatórios", "📊", "/relatorios"],
+  ["Inventário", "📦", "/inventario"],
 ] as const;
 
 const FORMAS = [
@@ -554,66 +557,53 @@ export default function FinanceiroPage() {
   async function carregarTudo() {
     setCarregando(true);
 
-    const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] =
-      await Promise.all([
-        supabase
-          .from("socios")
-          .select(
-            "id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento"
-          )
-          .order("matricula", { ascending: true }),
-        supabase
-          .from("dependentes")
-          .select(
-            "id,socio_id,nome,cpf,telefone,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento"
-          )
-          .order("nome", { ascending: true }),
-        supabase
-          .from("mensalidades")
-          .select("*")
-          .order("competencia", { ascending: false })
-          .order("data_vencimento", { ascending: true }),
-        supabase
-          .from("contas_bancarias")
-          .select("*")
-          .eq("ativo", true)
-          .order("nome", { ascending: true }),
-        supabase
-          .from("movimentacoes_financeiras")
-          .select("*")
-          .order("data_movimentacao", { ascending: false })
-          .order("created_at", { ascending: false }),
+    try {
+      const perfilLocal = typeof window !== "undefined" ? window.localStorage.getItem("guarani_usuario_perfil") : "";
+
+      if (perfilLocal === "administrador") {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          window.location.href = "/login";
+          return;
+        }
+
+        const response = await fetch("/api/financeiro", {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || "Não foi possível carregar o financeiro.");
+
+        setSocios((data.socios || []) as Socio[]);
+        setDependentes((data.dependentes || []) as Dependente[]);
+        setMensalidades((data.mensalidades || []) as Mensalidade[]);
+        setContasBancarias((data.contasBancarias || []) as ContaBancaria[]);
+        setMovimentosFinanceiros((data.movimentosFinanceiros || []) as MovimentoFinanceiro[]);
+        setMensagem("");
+        return;
+      }
+
+      const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] = await Promise.all([
+        supabase.from("socios").select("id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
+        supabase.from("dependentes").select("id,socio_id,nome,cpf,telefone,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
+        supabase.from("mensalidades").select("*").order("competencia", { ascending: false }).order("data_vencimento", { ascending: true }),
+        supabase.from("contas_bancarias").select("*").eq("ativo", true).order("nome", { ascending: true }),
+        supabase.from("movimentacoes_financeiras").select("*").order("data_movimentacao", { ascending: false }).order("created_at", { ascending: false }),
       ]);
 
-    const erros = [
-      sociosResult.error,
-      dependentesResult.error,
-      mensalidadesResult.error,
-      contasResult.error,
-      movimentosResult.error,
-    ].filter(Boolean);
-
-    if (sociosResult.error) console.error(sociosResult.error);
-    if (dependentesResult.error) console.error(dependentesResult.error);
-    if (mensalidadesResult.error) console.error(mensalidadesResult.error);
-    if (contasResult.error) console.error(contasResult.error);
-    if (movimentosResult.error) console.error(movimentosResult.error);
-
-    if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
-    if (dependentesResult.data)
-      setDependentes(dependentesResult.data as Dependente[]);
-    if (mensalidadesResult.data)
-      setMensalidades(mensalidadesResult.data as Mensalidade[]);
-    if (contasResult.data) setContasBancarias(contasResult.data as ContaBancaria[]);
-    if (movimentosResult.data) setMovimentosFinanceiros(movimentosResult.data as MovimentoFinanceiro[]);
-
-    if (erros.length > 0) {
-      setMensagem(
-        "Não foi possível carregar uma parte do financeiro. Verifique as permissões do Supabase."
-      );
+      const erros = [sociosResult.error, dependentesResult.error, mensalidadesResult.error, contasResult.error, movimentosResult.error].filter(Boolean);
+      if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
+      if (dependentesResult.data) setDependentes(dependentesResult.data as Dependente[]);
+      if (mensalidadesResult.data) setMensalidades(mensalidadesResult.data as Mensalidade[]);
+      if (contasResult.data) setContasBancarias(contasResult.data as ContaBancaria[]);
+      if (movimentosResult.data) setMovimentosFinanceiros(movimentosResult.data as MovimentoFinanceiro[]);
+      if (erros.length > 0) setMensagem("Não foi possível carregar uma parte do financeiro. Verifique as permissões do Supabase.");
+    } catch (error) {
+      console.error(error);
+      setMensagem(error instanceof Error ? error.message : "Não foi possível carregar o financeiro.");
+    } finally {
+      setCarregando(false);
     }
-
-    setCarregando(false);
   }
 
   useEffect(() => {
@@ -1278,67 +1268,10 @@ export default function FinanceiroPage() {
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
-      <header className="sticky top-0 z-40 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-            <div>
-              <h1 className="text-lg font-extrabold text-[#123c2b]">
-                SOCIEDADE GUARANI
-              </h1>
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-          </div>
-          <div className="hidden sm:block">
-            <span className="text-sm text-gray-400">Área Administrativa</span>
-          </div>
-        </div>
-      </header>
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-      <div className="flex min-h-[calc(100vh-80px)]">
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] p-3 md:block">
-          <p className="mb-3 px-3 pt-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
-
-          <nav className="space-y-2">
-            {MENU.map(([nome, icone, rota]) => (
-              <button
-                key={nome}
-                onClick={() => {
-                  if (rota !== "/financeiro") window.location.href = rota;
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  nome === "Financeiro"
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">{icone}</span>
-                {nome}
-              </button>
-            ))}
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-          </div>
-        </aside>
-
-        <section className="min-w-0 flex-1 p-5 sm:p-7 lg:p-8">
+      <section className="min-w-0 p-5 sm:p-7 lg:ml-[220px] lg:p-8">
           <div className="mb-6 md:hidden">
             <div className="grid grid-cols-2 gap-2">
               {MENU.map(([nome, icone, rota]) => (
@@ -2135,7 +2068,6 @@ export default function FinanceiroPage() {
             </>
           )}
         </section>
-      </div>
 
       {mostrarContaModal && (
         <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
