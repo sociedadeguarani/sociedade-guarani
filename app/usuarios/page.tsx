@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
@@ -40,21 +39,6 @@ function nomePerfil(nome: string) { return PERFIL_VISUAL[nome]?.label || nome; }
 function defaultsParaPerfil(nome: string) { return DEFAULTS[nome] || []; }
 
 export default function UsuariosPage() {
-  async function headersComSessao() {
-    let { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      const refreshed = await supabase.auth.refreshSession();
-      session = refreshed.data.session;
-    }
-    if (!session?.access_token) {
-      throw new Error("Sessão não encontrada. Faça login novamente.");
-    }
-    return {
-      Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-    };
-  }
-
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -70,8 +54,7 @@ export default function UsuariosPage() {
   async function carregar() {
     setCarregando(true); setErro("");
     try {
-      const headers = await headersComSessao();
-      const response = await fetch("/api/usuarios", { headers, cache: "no-store" });
+      const response = await fetch("/api/usuarios", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
@@ -116,8 +99,7 @@ export default function UsuariosPage() {
       if (!perfil) throw new Error("Selecione um perfil.");
       if (perfil.nome === "associado" && !form.socio_id) throw new Error("Usuário associado precisa estar vinculado a um sócio.");
 
-      const headers = await headersComSessao();
-      const response = await fetch("/api/usuarios", { method: "POST", headers, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
+      const response = await fetch("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível criar o usuário.");
       setMensagem("Usuário criado com sucesso."); setModal(false); await carregar();
@@ -127,8 +109,7 @@ export default function UsuariosPage() {
 
   async function alternarAtivo(u: Usuario) {
     setErro("");
-    const headers = await headersComSessao();
-    const response = await fetch("/api/usuarios", { method: "PATCH", headers, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
+    const response = await fetch("/api/usuarios", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
     const data = await response.json();
     if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
   }
@@ -141,10 +122,9 @@ export default function UsuariosPage() {
     if (!confirm(`Excluir definitivamente o usuário ${u.nome_exibicao || u.email || "selecionado"}? Esta ação remove o acesso do Supabase Auth.`)) return;
     setErro("");
     try {
-      const headers = await headersComSessao();
       const response = await fetch("/api/usuarios", {
         method: "DELETE",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: u.id }),
       });
       const data = await response.json();
@@ -183,7 +163,7 @@ export default function UsuariosPage() {
 
       {modal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"><form onSubmit={salvar} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between"><div><h2 className="text-2xl font-extrabold text-[#005a3c]">Novo usuário</h2><p className="text-sm text-gray-500">Escolha o perfil e exatamente o que esta pessoa poderá acessar.</p></div><button type="button" onClick={() => setModal(false)} className="rounded-lg bg-gray-100 p-2"><X /></button></div>
-        <div className="mt-5 grid gap-4 md:grid-cols-2"><label className="block"><span className="text-xs font-bold uppercase text-gray-500">Nome</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="Nome completo" /></label>{perfilAtual === "associado" ? <div className="md:col-span-2 rounded-xl bg-[#fff8df] p-4 text-sm font-semibold text-[#765d00]">Para associado, o sistema gera automaticamente o acesso: <b>matrícula</b> para entrar e <b>os 6 últimos números do CPF</b> como senha inicial. Não é necessário informar e-mail ou senha.</div> : <><label className="block"><span className="text-xs font-bold uppercase text-gray-500">E-mail</span><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="email@exemplo.com" /></label><label className="block"><span className="text-xs font-bold uppercase text-gray-500">Senha inicial</span><input required minLength={6} type="password" value={form.senha} onChange={(e) => setForm({ ...form, senha: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="Mínimo 6 caracteres" /></label></>}<div><span className="text-xs font-bold uppercase text-gray-500">Perfil de acesso</span><div className="mt-1 grid grid-cols-3 gap-2">{perfis.map((p) => { const pv = PERFIL_VISUAL[p.nome]; const Icon = pv?.icon || UserRound; const selected = form.perfil_id === p.id; return <button type="button" key={p.id} onClick={() => mudarPerfil(p.id)} className={`rounded-xl border-2 p-3 text-left ${selected ? "border-[#005a3c] bg-[#e8f3ee]" : "border-gray-200"}`}><Icon className="h-5 w-5" style={{ color: pv?.color || "#005a3c" }} /><b className="mt-1 block text-sm">{nomePerfil(p.nome)}</b>{selected && <span className="text-[10px] font-bold text-[#005a3c]">✓ SELECIONADO</span>}</button>; })}</div></div></div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2"><label className="block"><span className="text-xs font-bold uppercase text-gray-500">Nome</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="Nome completo" /></label>{perfilAtual === "associado" ? <div className="md:col-span-2 rounded-xl bg-[#fff8df] p-4 text-sm font-semibold text-[#765d00]">Para associado, o sistema gera automaticamente o acesso: <b>matrícula</b> para entrar e <b>os 6 primeiros números do CPF</b> como senha inicial. Não é necessário informar e-mail ou senha.</div> : <><label className="block"><span className="text-xs font-bold uppercase text-gray-500">E-mail</span><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="email@exemplo.com" /></label><label className="block"><span className="text-xs font-bold uppercase text-gray-500">Senha inicial</span><input required minLength={6} type="password" value={form.senha} onChange={(e) => setForm({ ...form, senha: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="Mínimo 6 caracteres" /></label></>}<div><span className="text-xs font-bold uppercase text-gray-500">Perfil de acesso</span><div className="mt-1 grid grid-cols-3 gap-2">{perfis.map((p) => { const pv = PERFIL_VISUAL[p.nome]; const Icon = pv?.icon || UserRound; const selected = form.perfil_id === p.id; return <button type="button" key={p.id} onClick={() => mudarPerfil(p.id)} className={`rounded-xl border-2 p-3 text-left ${selected ? "border-[#005a3c] bg-[#e8f3ee]" : "border-gray-200"}`}><Icon className="h-5 w-5" style={{ color: pv?.color || "#005a3c" }} /><b className="mt-1 block text-sm">{nomePerfil(p.nome)}</b>{selected && <span className="text-[10px] font-bold text-[#005a3c]">✓ SELECIONADO</span>}</button>; })}</div></div></div>
         {perfilAtual === "associado" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Associado vinculado</span><select required value={form.socio_id} onChange={(e) => setForm({ ...form, socio_id: e.target.value })} className="mt-1 w-full rounded-xl border bg-white px-3 py-3"><option value="">Selecione o sócio</option>{socios.map((s) => <option key={s.id} value={s.id}>{s.matricula ? `${s.matricula} · ` : ""}{s.nome}</option>)}</select></label>}
 
         <section className="mt-5 rounded-2xl border bg-[#f8faf9] p-4"><div className="flex items-center justify-between"><div><h3 className="font-extrabold text-[#003d2b]">Permissões deste usuário</h3><p className="text-xs text-gray-500">Você pode manter o padrão do perfil ou personalizar.</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold">{form.permissoes.length} selecionadas</span></div>
