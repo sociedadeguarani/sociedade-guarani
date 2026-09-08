@@ -5,7 +5,7 @@ import { CalendarDays, LogIn, ShieldCheck, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [identificador, setIdentificador] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
@@ -16,13 +16,16 @@ export default function LoginPage() {
     setCarregando(true);
 
     try {
-      const identificador = email.trim().toLowerCase();
-      const emailLimpo = /^\d+$/.test(identificador) ? `${identificador}@guarani.local` : identificador;
+      const identificadorLimpo = identificador.trim();
+      let emailLimpo = identificadorLimpo.toLowerCase();
+      if (/^\d+$/.test(identificadorLimpo)) {
+        const r = await fetch("/api/login/associado", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ matricula: identificadorLimpo }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.email) { setErro(j.error || "Matrícula não encontrada."); return; }
+        emailLimpo = j.email;
+      }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailLimpo,
-        password: senha,
-      });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: emailLimpo, password: senha });
 
       if (error || !data.user || !data.session) {
         setErro("E-mail ou senha incorretos.");
@@ -61,7 +64,7 @@ export default function LoginPage() {
 
       localStorage.setItem("guarani_usuario_email", emailLimpo);
       localStorage.setItem("guarani_usuario_id", data.user.id);
-      localStorage.setItem("guarani_usuario_perfil", perfil);
+      localStorage.setItem("guarani_usuario_perfil", perfil.trim().toLowerCase());
       localStorage.setItem(
         "guarani_usuario_socio_id",
         usuario.socio_id || ""
@@ -141,16 +144,16 @@ export default function LoginPage() {
             <form onSubmit={entrar} className="space-y-4">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-bold">
-                  E-mail ou matrícula
+                  Matrícula ou e-mail
                 </span>
 
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com ou sua matrícula"
+                  type="text"
+                  value={identificador}
+                  onChange={(e) => setIdentificador(e.target.value)}
+                  placeholder="Matrícula ou seu@email.com"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
                   className="w-full rounded-xl border border-[#d6e1dc] px-4 py-3 outline-none focus:border-[#005a3c]"
                 />
               </label>
@@ -213,7 +216,7 @@ export default function LoginPage() {
             <div className="mt-6 rounded-xl bg-[#f4f8f5] p-4 text-center text-xs leading-5 text-gray-500">
               <Users className="mx-auto mb-1 h-4 w-4 text-[#005a3c]" />
 
-              Usuários cadastrados entram conforme seu perfil.
+              Associados entram com a matrícula. Na criação do acesso, a senha inicial é formada pelos 6 últimos números do CPF. Funcionários e administradores usam e-mail e senha.
               Não sócios podem fazer reserva sem entrar na área
               administrativa.
             </div>
