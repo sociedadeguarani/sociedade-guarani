@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Conta = {
   id: string;
@@ -276,77 +273,11 @@ export default function RelatoriosPage() {
     window.location.href = "/painel";
   }
 
-  function navegar(path: string) {
-    window.location.href = path;
-  }
-
-  const menu = [
-    ["Início", "🏠", "/painel"],
-    ["Sócios", "👤", "/socios"],
-    ["Dependentes", "👥", "/dependentes"],
-    ["Reservas", "📅", "/reservas"],
-    ["Eventos", "🎉", "/eventos"],
-    ["Financeiro", "💰", "/financeiro"],
-    ["Espaços", "🏛️", "/espacos"],
-    ["Relatórios", "📊", "/relatorios"],
-    ["Usuários", "🔐", "/usuarios"],
-  ] as const;
-
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#18362b]">
-      <div className="flex min-h-screen">
-        <aside className="nao-imprimir hidden w-[235px] shrink-0 border-r border-[#dfe7e2] bg-white lg:flex lg:flex-col">
-          <div className="border-b border-[#e7eee9] p-5">
-            <button
-              onClick={() => navegar("/painel")}
-              className="flex w-full items-center gap-3 text-left"
-            >
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005a3c] text-xl">
-                🏛️
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-[#005a3c]">
-                  SOCIEDADE GUARANI
-                </div>
-                <div className="text-[11px] leading-4 text-gray-500">
-                  Sociedade Recreativa Guarani — S.R.G.
-                </div>
-              </div>
-            </button>
-          </div>
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-          <nav className="flex-1 space-y-1 p-3">
-            {menu.map(([nome, icone, caminho]) => {
-              const ativo = caminho === "/relatorios";
-
-              return (
-                <button
-                  key={caminho}
-                  onClick={() => navegar(caminho)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
-                    ativo
-                      ? "bg-[#005a3c] text-white shadow-sm"
-                      : "text-[#355247] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                  }`}
-                >
-                  <span className="w-6 text-center text-base">{icone}</span>
-                  <span>{nome}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="m-3 rounded-2xl bg-[#fff4c7] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-[#716000]">
-              SOCIEDADE GUARANI
-            </p>
-            <p className="mt-1 text-xs text-[#6b5b16]">
-              Sistema integrado de gestão
-            </p>
-          </div>
-        </aside>
-
-        <div className="min-w-0 flex-1">
       <style jsx global>{`
         @media print {
           @page {
@@ -386,32 +317,7 @@ export default function RelatoriosPage() {
         }
       `}</style>
 
-      <header className="sticky top-0 z-20 border-b border-[#dfe7e2] bg-white">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-6 py-4">
-          <button
-            onClick={voltar}
-            className="flex items-center gap-3 text-left"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005a3c] text-xl">
-              🏛️
-            </div>
-            <div>
-              <div className="text-lg font-extrabold text-[#005a3c]">
-                SOCIEDADE GUARANI
-              </div>
-              <div className="text-xs text-gray-500">
-                Sociedade Recreativa Guarani — S.R.G.
-              </div>
-            </div>
-          </button>
-
-          <div className="text-sm font-medium text-gray-400">
-            Área Administrativa
-          </div>
-        </div>
-      </header>
-
-      <main className="relatorio-impressao mx-auto max-w-[1500px] px-6 py-8">
+      <main className="relatorio-impressao mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
         <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
             <button
@@ -883,8 +789,6 @@ export default function RelatoriosPage() {
           </>
         )}
       </main>
-        </div>
-      </div>
     </div>
   );
 }
