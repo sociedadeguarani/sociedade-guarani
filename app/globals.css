@@ -24,3 +24,7 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.label { display:block; margin-bottom:0.375rem; font-size:0.875rem; font-weight:700; color:#334155; }
+.input { width:100%; border:1px solid #d6e1dc; border-radius:0.75rem; background:white; padding:0.75rem 1rem; outline:none; }
+.input:focus { border-color:#005a3c; box-shadow:0 0 0 2px rgba(0,90,60,.08); }
