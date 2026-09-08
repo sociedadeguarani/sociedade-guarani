@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -279,32 +281,10 @@ export default function InadimplenciaPage() {
         }
       `}</style>
 
-      <header className="sticky top-0 z-20 border-b border-[#dfe7e2] bg-white">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-6 py-4">
-          <button
-            onClick={() => (window.location.href = "/painel")}
-            className="flex items-center gap-3 text-left"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005a3c] text-xl">
-              🏛️
-            </div>
-            <div>
-              <div className="text-lg font-extrabold text-[#005a3c]">
-                SOCIEDADE GUARANI
-              </div>
-              <div className="text-xs text-gray-500">
-                Sociedade Recreativa Guarani — S.R.G.
-              </div>
-            </div>
-          </button>
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-          <div className="text-sm font-medium text-gray-400">
-            Área Administrativa
-          </div>
-        </div>
-      </header>
-
-      <main className="area-impressao mx-auto max-w-[1500px] px-6 py-8">
+      <main className="area-impressao mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
         <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
             <button
