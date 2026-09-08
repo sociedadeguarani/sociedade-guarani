@@ -1,31 +1,51 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-export function getServiceClient() {
+export function normalizarPerfil(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+export function getServiceClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Configuração do Supabase incompleta.");
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-export async function getUsuarioAutenticado(request: Request) {
-  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!token || !url || !key) return null;
-  const auth = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: { user } } = await auth.auth.getUser(token);
-  if (!user) return null;
-  const admin = getServiceClient();
-  const { data: usuario } = await admin.from("usuarios_sistema").select("id,nome_exibicao,socio_id,perfil_id,ativo").eq("id", user.id).maybeSingle();
-  if (!usuario?.ativo) return null;
-  const { data: perfil } = await admin.from("perfis").select("nome").eq("id", usuario.perfil_id).maybeSingle();
-  return { ...usuario, perfil: perfil?.nome || "" };
+export async function usuarioAutenticado(request: Request) {
+  const authorization = request.headers.get("authorization") || "";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return { error: "Sessão não encontrada.", status: 401 as const };
+
+  const supabase = getServiceClient();
+  const { data: authData, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !authData.user) return { error: "Sessão inválida ou expirada.", status: 401 as const };
+
+  const { data: usuario, error: usuarioError } = await supabase
+    .from("usuarios_sistema")
+    .select("id,nome_exibicao,perfil_id,socio_id,funcionario_id,ativo,perfis:perfil_id(id,nome)")
+    .eq("id", authData.user.id)
+    .maybeSingle();
+
+  if (usuarioError) return { error: `Não foi possível consultar seu acesso: ${usuarioError.message}`, status: 500 as const };
+  if (!usuario) return { error: "Seu usuário não está cadastrado no sistema.", status: 403 as const };
+  if (!usuario.ativo) return { error: "Seu acesso está inativo.", status: 403 as const };
+
+  const perfilRaw = Array.isArray(usuario.perfis) ? usuario.perfis[0] : usuario.perfis;
+  return {
+    supabase,
+    authUser: authData.user,
+    usuario,
+    perfil: normalizarPerfil(perfilRaw?.nome),
+  };
 }
 
-export async function requireRoles(request: Request, roles: string[]) {
-  const usuario = await getUsuarioAutenticado(request);
-  if (!usuario) return { response: new Response(JSON.stringify({ error: "Não autorizado." }), { status: 401, headers: { "Content-Type": "application/json" } }) };
-  if (!roles.includes(usuario.perfil)) return { response: new Response(JSON.stringify({ error: "Sem permissão para esta operação." }), { status: 403, headers: { "Content-Type": "application/json" } }) };
-  return { usuario };
+export async function exigirAdministrador(request: Request) {
+  const resultado = await usuarioAutenticado(request);
+  if ("error" in resultado) return resultado;
+  if (resultado.perfil !== "administrador") return { error: "Somente administradores podem realizar esta operação.", status: 403 as const };
+  return resultado;
 }
-
