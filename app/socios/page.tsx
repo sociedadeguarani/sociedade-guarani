@@ -163,6 +163,7 @@ export default function Home() {
 
   const [form, setForm] = useState<Partial<Socio>>(socioInicial);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoAcesso, setGerandoAcesso] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
@@ -250,10 +251,24 @@ export default function Home() {
       return;
     }
 
+    const matricula = String(form.matricula ?? "").replace(/\D/g, "");
+    const cpfLimpo = String(form.cpf ?? "").replace(/\D/g, "");
+
+    if (!matricula) {
+      setMensagem("Informe a matrícula do associado. Ela será usada para o login.");
+      return;
+    }
+
+    if (cpfLimpo.length < 6) {
+      setMensagem("Informe um CPF válido com pelo menos 6 números. Os 6 primeiros serão a senha inicial.");
+      return;
+    }
+
     setSalvando(true);
     setMensagem("");
 
     const dadosBase = {
+      matricula: Number(matricula),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -334,11 +349,38 @@ export default function Home() {
         if (atualizacaoFoto.error) throw atualizacaoFoto.error;
       }
 
-      setMensagem(
-        socioEditando
-          ? "Sócio atualizado com sucesso!"
-          : "Sócio cadastrado com sucesso!"
-      );
+      // Cria/atualiza automaticamente o acesso do associado.
+      // Login: matrícula | Senha inicial: 6 primeiros números do CPF.
+      setGerandoAcesso(true);
+      try {
+        const sessao = await supabase.auth.getSession();
+        const token = sessao.data.session?.access_token;
+        if (!token) throw new Error("Sessão administrativa não encontrada.");
+
+        const acesso = await fetch("/api/socios/acesso", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ socio_id: socioId }),
+        });
+        const acessoJson = await acesso.json().catch(() => ({}));
+        if (!acesso.ok) throw new Error(acessoJson.error || "Não foi possível criar o acesso.");
+
+        setMensagem(
+          socioEditando
+            ? "Sócio atualizado e acesso de login sincronizado!"
+            : "Sócio cadastrado e acesso criado! Login: matrícula | Senha: 6 primeiros números do CPF."
+        );
+      } catch (error) {
+        console.error(error);
+        setMensagem(
+          `Sócio salvo, mas o acesso não foi criado: ${error instanceof Error ? error.message : "erro desconhecido"}`
+        );
+      } finally {
+        setGerandoAcesso(false);
+      }
 
       setFotoArquivo(null);
       await carregarSocios();
@@ -1160,6 +1202,21 @@ function ModalSocio({
           <FormularioSecao titulo="🏛️ Dados da associação">
 
             <Campo
+              label="Matrícula"
+              value={form.matricula}
+              onChange={(v) => alterarCampo("matricula", v.replace(/\D/g, ""))}
+              placeholder="Ex.: 40"
+              obrigatorio
+            />
+
+            <div className="md:col-span-3 rounded-xl border border-[#dfe9e3] bg-[#f7faf8] px-4 py-3 text-sm text-[#315247]">
+              <b>🔐 Acesso do associado</b>
+              <div className="mt-1 text-xs text-gray-500">
+                Login: <b>matrícula</b> · Senha inicial: <b>6 primeiros números do CPF</b>. O acesso é criado/sincronizado automaticamente ao salvar.
+              </div>
+            </div>
+
+            <Campo
               label="Data de associação"
               type="date"
               value={form.data_associacao}
@@ -1349,8 +1406,8 @@ function ModalSocio({
             disabled={salvando}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvando
-              ? "Salvando..."
+            {salvando || gerandoAcesso
+              ? gerandoAcesso ? "🔐 Criando acesso..." : "Salvando..."
               : socioEditando
                 ? "💾 Salvar alterações"
                 : "💾 Cadastrar Sócio"}
