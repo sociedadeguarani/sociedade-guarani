@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -114,25 +115,30 @@ export default function DependentesPage() {
     setCarregando(true);
     setErro("");
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      window.location.href = "/login";
-      return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const [sociosResult, dependentesResult] = await Promise.all([
+        supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
+        supabase.from("dependentes")
+          .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+          .order("nome"),
+      ]);
+
+      if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+      if (dependentesResult.error) setErro((atual) => atual || `Erro ao carregar dependentes: ${dependentesResult.error.message}`);
+
+      setSocios(sociosResult.data || []);
+      setDependentes(dependentesResult.data || []);
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Erro inesperado ao carregar os dados.");
+    } finally {
+      setCarregando(false);
     }
-
-    const [sociosResult, dependentesResult] = await Promise.all([
-      supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
-      supabase.from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
-        .order("nome"),
-    ]);
-
-    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
-    if (dependentesResult.error) setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
-
-    setSocios(sociosResult.data || []);
-    setDependentes(dependentesResult.data || []);
-    setCarregando(false);
   }
 
   useEffect(() => { carregarDados(); }, []);
@@ -258,62 +264,12 @@ export default function DependentesPage() {
     await carregarDados();
   }
 
-  function sair() {
-    supabase.auth.signOut().then(() => { window.location.href = "/login"; });
-  }
-
   return (
     <main className="min-h-screen bg-[#F8FAF9] text-slate-800">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
-        <div className="flex min-h-[76px] items-center justify-between px-6 lg:px-10">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005A3C] text-xl">🏛️</div>
-            <div>
-              <div className="text-lg font-extrabold tracking-tight text-[#003D2B]">SOCIEDADE GUARANI</div>
-              <div className="text-xs text-slate-500">Sociedade Recreativa Guarani — S.R.G.</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden text-right sm:block">
-              <div className="text-xs text-slate-500">Área Administrativa</div>
-              <div className="font-bold text-[#005A3C]">Gestão</div>
-            </div>
-            <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">Sair</button>
-          </div>
-        </div>
-      </header>
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-      <div className="flex min-h-[calc(100vh-76px)]">
-        <aside className="hidden w-[220px] shrink-0 border-r border-slate-200 bg-white p-4 lg:block">
-          <div className="mb-4 px-2 text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Menu principal</div>
-          <nav className="space-y-1">
-            {[
-              ["🏠", "Início", "/painel"],
-              ["👥", "Sócios", "/socios"],
-              ["👨‍👩‍👧", "Dependentes", "/dependentes"],
-              ["🗓️", "Reservas", "/reservas"],
-              ["🎉", "Eventos", "/eventos"],
-              ["💰", "Financeiro", "/financeiro"],
-              ["🏛️", "Espaços", "/espacos"],
-              ["📊", "Relatórios", "/relatorios"],
-            ].map(([icone, nome, href]) => (
-              <Link key={nome} href={href}
-                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
-                  nome === "Dependentes"
-                    ? "bg-[#005A3C] text-white shadow-sm"
-                    : "text-slate-600 hover:bg-[#E8F3EE] hover:text-[#005A3C]"
-                }`}>
-                <span className="text-lg">{icone}</span>{nome}
-              </Link>
-            ))}
-          </nav>
-          <div className="mt-12 rounded-2xl bg-[#FFF1B8] p-4">
-            <div className="text-xs font-black uppercase text-[#806400]">Sociedade Guarani</div>
-            <div className="mt-1 text-xs text-[#806400]">Sistema integrado de gestão</div>
-          </div>
-        </aside>
-
-        <section className="min-w-0 flex-1 p-5 lg:p-8">
+      <section className="min-w-0 p-5 lg:ml-[220px] lg:p-8">
           <div className="mx-auto max-w-[1400px]">
             <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div>
@@ -393,7 +349,6 @@ export default function DependentesPage() {
             <div className="mt-5 text-sm text-slate-400">Exibindo {dependentesFiltrados.length} de {dependentes.length} dependentes.</div>
           </div>
         </section>
-      </div>
 
       {modalAberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
