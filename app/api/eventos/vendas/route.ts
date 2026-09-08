@@ -111,4 +111,3 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao processar venda." }, { status: 500 });
   }
 }
-
