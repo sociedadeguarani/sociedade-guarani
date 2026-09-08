@@ -104,11 +104,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const perfilNormalizado = String(perfil.nome || "").trim().toLowerCase();
+
     return NextResponse.json({
       usuario: {
         id: usuario.id,
         perfil_id: usuario.perfil_id,
-        perfil: perfil.nome,
+        perfil: perfilNormalizado,
         socio_id: usuario.socio_id,
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
