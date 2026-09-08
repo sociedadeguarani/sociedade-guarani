@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
@@ -39,6 +40,21 @@ function nomePerfil(nome: string) { return PERFIL_VISUAL[nome]?.label || nome; }
 function defaultsParaPerfil(nome: string) { return DEFAULTS[nome] || []; }
 
 export default function UsuariosPage() {
+  async function headersComSessao() {
+    let { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      const refreshed = await supabase.auth.refreshSession();
+      session = refreshed.data.session;
+    }
+    if (!session?.access_token) {
+      throw new Error("Sessão não encontrada. Faça login novamente.");
+    }
+    return {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    };
+  }
+
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -54,7 +70,8 @@ export default function UsuariosPage() {
   async function carregar() {
     setCarregando(true); setErro("");
     try {
-      const response = await fetch("/api/usuarios", { cache: "no-store" });
+      const headers = await headersComSessao();
+      const response = await fetch("/api/usuarios", { headers, cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
@@ -99,7 +116,8 @@ export default function UsuariosPage() {
       if (!perfil) throw new Error("Selecione um perfil.");
       if (perfil.nome === "associado" && !form.socio_id) throw new Error("Usuário associado precisa estar vinculado a um sócio.");
 
-      const response = await fetch("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
+      const headers = await headersComSessao();
+      const response = await fetch("/api/usuarios", { method: "POST", headers, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível criar o usuário.");
       setMensagem("Usuário criado com sucesso."); setModal(false); await carregar();
@@ -109,7 +127,8 @@ export default function UsuariosPage() {
 
   async function alternarAtivo(u: Usuario) {
     setErro("");
-    const response = await fetch("/api/usuarios", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
+    const headers = await headersComSessao();
+    const response = await fetch("/api/usuarios", { method: "PATCH", headers, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
     const data = await response.json();
     if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
   }
@@ -122,9 +141,10 @@ export default function UsuariosPage() {
     if (!confirm(`Excluir definitivamente o usuário ${u.nome_exibicao || u.email || "selecionado"}? Esta ação remove o acesso do Supabase Auth.`)) return;
     setErro("");
     try {
+      const headers = await headersComSessao();
       const response = await fetch("/api/usuarios", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ id: u.id }),
       });
       const data = await response.json();
