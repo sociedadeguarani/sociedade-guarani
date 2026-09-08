@@ -216,7 +216,7 @@ export default function LoginPage() {
             <div className="mt-6 rounded-xl bg-[#f4f8f5] p-4 text-center text-xs leading-5 text-gray-500">
               <Users className="mx-auto mb-1 h-4 w-4 text-[#005a3c]" />
 
-              Associados entram com a matrícula. Na criação do acesso, a senha inicial é formada pelos 6 últimos números do CPF. Funcionários e administradores usam e-mail e senha.
+              Associados entram com a matrícula. Na criação do acesso, a senha inicial é formada pelos 6 primeiros números do CPF. Funcionários e administradores usam e-mail e senha.
               Não sócios podem fazer reserva sem entrar na área
               administrativa.
             </div>
