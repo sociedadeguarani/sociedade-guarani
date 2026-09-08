@@ -22,7 +22,7 @@ async function exigirAdministrador(request: Request) {
     .single();
   if (usuarioError || !usuario?.ativo) throw new Error("Usuário sem acesso.");
   const perfil = Array.isArray(usuario.perfis) ? usuario.perfis[0] : usuario.perfis;
-  if (perfil?.nome !== "administrador") throw new Error("Somente administradores podem alterar o PIX.");
+  if (String(perfil?.nome || "").trim().toLowerCase() !== "administrador") throw new Error("Somente administradores podem alterar o PIX.");
   return supabase;
 }
 
