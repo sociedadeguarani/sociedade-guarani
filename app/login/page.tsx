@@ -16,7 +16,8 @@ export default function LoginPage() {
     setCarregando(true);
 
     try {
-      const emailLimpo = email.trim().toLowerCase();
+      const identificador = email.trim().toLowerCase();
+      const emailLimpo = /^\d+$/.test(identificador) ? `${identificador}@guarani.local` : identificador;
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: emailLimpo,
@@ -140,14 +141,14 @@ export default function LoginPage() {
             <form onSubmit={entrar} className="space-y-4">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-bold">
-                  E-mail
+                  E-mail ou matrícula
                 </span>
 
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
+                  placeholder="seu@email.com ou sua matrícula"
                   required
                   autoComplete="email"
                   className="w-full rounded-xl border border-[#d6e1dc] px-4 py-3 outline-none focus:border-[#005a3c]"
