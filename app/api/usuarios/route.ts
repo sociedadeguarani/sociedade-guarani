@@ -1,3 +1,4 @@
+import { usuarioAutenticado, normalizarPerfil } from "@/lib/guaraniAuth";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -64,8 +65,11 @@ async function carregarDados(supabase: ReturnType<typeof getAdminClient>) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const acesso = await usuarioAutenticado(request);
+    if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
     return NextResponse.json(await carregarDados(getAdminClient()));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar usuários." }, { status: 500 });
@@ -74,17 +78,35 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const acesso = await usuarioAutenticado(request);
+    if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const { nome, email, senha, perfil_id, socio_id, ativo, permissoes } = body;
-    if (!nome || !email || !senha || !perfil_id) return NextResponse.json({ error: "Nome, e-mail, senha e perfil são obrigatórios." }, { status: 400 });
+    if (!nome || !perfil_id) return NextResponse.json({ error: "Nome e perfil são obrigatórios." }, { status: 400 });
 
     const supabase = getAdminClient();
     const { data: perfil, error: perfilError } = await supabase.from("perfis").select("id,nome,ativo").eq("id", perfil_id).eq("ativo", true).single();
     if (perfilError || !perfil) return NextResponse.json({ error: "Perfil não encontrado ou inativo." }, { status: 400 });
-    if (perfil.nome === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
+
+    let emailFinal = String(email || "").trim().toLowerCase();
+    let senhaFinal = String(senha || "");
+    if (normalizarPerfil(perfil.nome) === "associado") {
+      if (!socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
+      const { data: socio, error: socioError } = await supabase.from("socios").select("id,matricula,cpf").eq("id", socio_id).single();
+      if (socioError || !socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 400 });
+      const matricula = String(socio.matricula || "").replace(/\D/g, "");
+      const cpf = String(socio.cpf || "").replace(/\D/g, "");
+      if (!matricula || cpf.length < 6) return NextResponse.json({ error: "O associado precisa ter matrícula e CPF com pelo menos 6 números para gerar o acesso." }, { status: 400 });
+      emailFinal = `${matricula}@guarani.local`;
+      senhaFinal = cpf.slice(-6);
+    } else {
+      if (!emailFinal || !senhaFinal) return NextResponse.json({ error: "E-mail e senha são obrigatórios para funcionário/administrador." }, { status: 400 });
+    }
+    if (senhaFinal.length < 6) return NextResponse.json({ error: "A senha precisa ter pelo menos 6 caracteres." }, { status: 400 });
 
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: String(email).trim().toLowerCase(), password: String(senha), email_confirm: true,
+      email: emailFinal, password: senhaFinal, email_confirm: true,
       user_metadata: { nome_exibicao: String(nome).trim(), perfil: perfil.nome },
     });
     if (authError || !authData.user) return NextResponse.json({ error: authError?.message || "Erro ao criar acesso." }, { status: 400 });
@@ -97,7 +119,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Usuário Auth criado, mas o cadastro do sistema falhou: ${usuarioError.message}` }, { status: 500 });
     }
 
-    const escolhidas = perfil.nome === "administrador" ? TODAS_PERMISSOES : Array.isArray(permissoes) ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x)) : (DEFAULTS[perfil.nome] || []);
+    const escolhidas = normalizarPerfil(perfil.nome) === "administrador" ? TODAS_PERMISSOES : Array.isArray(permissoes) ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x)) : (DEFAULTS[normalizarPerfil(perfil.nome)] || []);
     if (escolhidas.length) {
       const { error: permError } = await supabase.from("permissoes_usuario").insert(escolhidas.map((chave: string) => ({ usuario_id: authData.user.id, chave, permitido: true })));
       if (permError) {
@@ -115,6 +137,9 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    const acesso = await usuarioAutenticado(request);
+    if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const { id, ativo, permissoes } = body;
     if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
@@ -143,6 +168,9 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const acesso = await usuarioAutenticado(request);
+    if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const id = String(body?.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
