@@ -46,6 +46,7 @@ export async function POST(request: Request) {
         nome: body.nome.trim(), categoria: body.categoria || "Geral", quantidade_total: quantidade,
         unidade: body.unidade || "unidade", estado_conservacao: body.estado_conservacao || "Bom", localizacao: body.localizacao || null,
         numero_patrimonio: body.numero_patrimonio || null, emprestimo_permitido: body.emprestimo_permitido !== false,
+        foto_url: body.foto_url || null,
         acesso_funcionario: body.acesso_funcionario === true, observacoes: body.observacoes || null,
       };
       if (body.acao === "editar_item") {
