@@ -60,15 +60,19 @@ export default function InventarioPage() {
 
       if (fotoItem) {
         setEnviandoFoto(true);
-        const extensao = fotoItem.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `inventario/${Date.now()}.${extensao}`;
-        const upload = await supabase.storage
-          .from("fotos-inventario")
-          .upload(caminho, fotoItem, { upsert: true, contentType: fotoItem.type || "image/jpeg" });
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Sessão expirada. Entre novamente no sistema.");
+        const formData = new FormData();
+        formData.append("file", fotoItem);
+        const uploadResponse = await fetch("/api/inventario/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: formData,
+        });
+        const uploadData = await uploadResponse.json();
         setEnviandoFoto(false);
-        if (upload.error) throw new Error(`Não foi possível enviar a foto: ${upload.error.message}`);
-        const { data: urlData } = supabase.storage.from("fotos-inventario").getPublicUrl(caminho);
-        foto_url = urlData.publicUrl;
+        if (!uploadResponse.ok) throw new Error(uploadData?.error || "Não foi possível enviar a foto.");
+        foto_url = uploadData.url || null;
       }
 
       const r = await fetch("/api/inventario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao: "criar_item", ...itemForm, quantidade_disponivel: itemForm.quantidade_total, foto_url }) });
