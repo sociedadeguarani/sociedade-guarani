@@ -37,6 +37,7 @@ export async function POST(request: Request) {
         nome: body.nome.trim(), categoria: body.categoria || "Geral", quantidade_total: quantidade, quantidade_disponivel: quantidade,
         unidade: body.unidade || "unidade", estado_conservacao: body.estado_conservacao || "Bom", localizacao: body.localizacao || null,
         numero_patrimonio: body.numero_patrimonio || null, emprestimo_permitido: body.emprestimo_permitido !== false, observacoes: body.observacoes || null,
+        foto_url: body.foto_url || null,
       }).select("id").single();
       if (error) throw new Error(error.message);
       return NextResponse.json({ ok: true, id: data?.id });
