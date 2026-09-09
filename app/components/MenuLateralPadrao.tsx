@@ -112,7 +112,7 @@ export default function MenuLateralPadrao() {
       </button>
 
       {/* Menu fixo em telas grandes */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] overflow-y-auto border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 lg:block">
+      <aside className="fixed left-0 top-[76px] bottom-0 z-30 hidden w-[220px] overflow-y-auto border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 lg:block">
         {conteudoMenu}
       </aside>
 
