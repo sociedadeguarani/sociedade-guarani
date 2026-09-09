@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { supabase } from "@/lib/supabaseClient";
 
 type Perfil = { id: string; nome: string; ativo: boolean };
 type Socio = { id: string; matricula: string | null; nome: string; cpf: string | null; email: string | null };
@@ -51,10 +52,32 @@ export default function UsuariosPage() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ nome: "", email: "", senha: "", perfil_id: "", socio_id: "", ativo: true, permissoes: [] as string[] });
 
+  async function headersComSessao() {
+    let { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      const refreshed = await supabase.auth.refreshSession();
+      session = refreshed.data.session;
+    }
+
+    if (!session?.access_token) {
+      throw new Error("Sessão não encontrada. Faça login novamente.");
+    }
+
+    return {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    };
+  }
+
   async function carregar() {
     setCarregando(true); setErro("");
     try {
-      const response = await fetch("/api/usuarios", { cache: "no-store" });
+      const headers = await headersComSessao();
+      const response = await fetch("/api/usuarios", {
+        cache: "no-store",
+        headers,
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
@@ -99,7 +122,8 @@ export default function UsuariosPage() {
       if (!perfil) throw new Error("Selecione um perfil.");
       if (perfil.nome === "associado" && !form.socio_id) throw new Error("Usuário associado precisa estar vinculado a um sócio.");
 
-      const response = await fetch("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
+      const headers = await headersComSessao();
+      const response = await fetch("/api/usuarios", { method: "POST", headers, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível criar o usuário.");
       setMensagem("Usuário criado com sucesso."); setModal(false); await carregar();
@@ -109,9 +133,15 @@ export default function UsuariosPage() {
 
   async function alternarAtivo(u: Usuario) {
     setErro("");
-    const response = await fetch("/api/usuarios", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
-    const data = await response.json();
-    if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
+    try {
+      const headers = await headersComSessao();
+      const response = await fetch("/api/usuarios", { method: "PATCH", headers, body: JSON.stringify({ id: u.id, ativo: !u.ativo }) });
+      const data = await response.json();
+      if (!response.ok) setErro(data?.error || "Não foi possível atualizar."); else await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao atualizar.");
+    }
+    return;
   }
 
   async function excluirUsuario(u: Usuario) {
@@ -122,9 +152,10 @@ export default function UsuariosPage() {
     if (!confirm(`Excluir definitivamente o usuário ${u.nome_exibicao || u.email || "selecionado"}? Esta ação remove o acesso do Supabase Auth.`)) return;
     setErro("");
     try {
+      const headers = await headersComSessao();
       const response = await fetch("/api/usuarios", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ id: u.id }),
       });
       const data = await response.json();
@@ -150,7 +181,15 @@ export default function UsuariosPage() {
             <button onClick={abrirNovo} className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white hover:bg-[#003d2b]">+ Novo usuário</button>
           </div>
           {mensagem && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 font-semibold text-green-700">{mensagem}</div>}
-          {erro && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-700">{erro}</div>}
+          {erro && (
+            <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-700 sm:flex-row sm:items-center sm:justify-between">
+              <span>{erro}</span>
+              <div className="flex shrink-0 gap-2">
+                <button type="button" onClick={() => void carregar()} className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-bold text-red-700">Tentar novamente</button>
+                <button type="button" onClick={() => { void supabase.auth.signOut(); window.location.href = "/login"; }} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-bold text-white">Entrar novamente</button>
+              </div>
+            </div>
+          )}
 
           <section className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row"><div className="flex flex-1 items-center gap-2 rounded-xl border border-gray-300 px-3"><Search className="h-4 w-4 text-gray-400" /><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou e-mail..." className="w-full py-3 outline-none" /></div><select value={filtroPerfil} onChange={(e) => setFiltroPerfil(e.target.value)} className="rounded-xl border border-gray-300 bg-white px-4 py-3 md:w-64"><option value="todos">Todos os perfis</option>{perfis.map((p) => <option key={p.id} value={p.id}>{nomePerfil(p.nome)}</option>)}</select></div>
