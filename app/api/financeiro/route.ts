@@ -31,4 +31,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível carregar o financeiro." }, { status: 500 });
   }
 }
-
