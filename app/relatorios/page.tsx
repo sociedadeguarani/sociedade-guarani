@@ -34,6 +34,12 @@ type Movimento = {
   observacoes: string | null;
 };
 
+type MensalidadeRelatorio = {
+  id: string; socio_id: string | null; referencia: string; competencia: string | null; valor: number;
+  data_vencimento: string | null; situacao: string | null; data_pagamento: string | null;
+  tipo_pagamento: string | null; numero_recibo: string | null;
+};
+
 type LinhaBanco = {
   conta: Conta;
   saldo: number;
@@ -72,6 +78,7 @@ function normalizarCategoria(valor: string | null) {
 export default function RelatoriosPage() {
   const [contas, setContas] = useState<Conta[]>([]);
   const [movimentos, setMovimentos] = useState<Movimento[]>([]);
+  const [mensalidades, setMensalidades] = useState<MensalidadeRelatorio[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
@@ -84,7 +91,7 @@ export default function RelatoriosPage() {
     setCarregando(true);
     setErro("");
 
-    const [contasResult, movimentosResult] = await Promise.all([
+    const [contasResult, movimentosResult, mensalidadesResult] = await Promise.all([
       supabase
         .from("contas_bancarias")
         .select(
@@ -98,6 +105,10 @@ export default function RelatoriosPage() {
           "id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes"
         )
         .order("data_movimentacao", { ascending: false }),
+      supabase
+        .from("mensalidades")
+        .select("id,socio_id,referencia,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
+        .order("data_vencimento", { ascending: false }),
     ]);
 
     if (contasResult.error) {
@@ -114,6 +125,8 @@ export default function RelatoriosPage() {
 
     setContas((contasResult.data || []) as Conta[]);
     setMovimentos((movimentosResult.data || []) as Movimento[]);
+    if (!mensalidadesResult.error) setMensalidades((mensalidadesResult.data || []) as MensalidadeRelatorio[]);
+    else setMensalidades([]);
     setCarregando(false);
   }
 
@@ -143,6 +156,14 @@ export default function RelatoriosPage() {
       return dentroData && dentroConta && dentroTipo;
     });
   }, [movimentos, dataInicial, dataFinal, contaFiltro, tipoFiltro]);
+
+  const mensalidadesPeriodo = useMemo(() => mensalidades.filter((m) => {
+    const d = (m.data_pagamento || m.data_vencimento || m.competencia || "").slice(0, 10);
+    return (!dataInicial || d >= dataInicial) && (!dataFinal || d <= dataFinal);
+  }), [mensalidades, dataInicial, dataFinal]);
+
+  const totalMensalidadesLancadas = useMemo(() => mensalidadesPeriodo.reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
+  const totalMensalidadesPagas = useMemo(() => mensalidadesPeriodo.filter((m) => String(m.situacao || "").toLowerCase() === "pago").reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
 
   const entradas = useMemo(
     () =>
@@ -337,12 +358,14 @@ export default function RelatoriosPage() {
             </p>
           </div>
 
-          <button
-            onClick={imprimir}
-            className="rounded-xl bg-[#005a3c] px-5 py-3 text-sm font-bold text-white shadow-sm"
-          >
-            🖨️ Imprimir / Salvar PDF
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => void carregar()} disabled={carregando} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60">
+              {carregando ? "Atualizando..." : "↻ Gerar / Atualizar relatório"}
+            </button>
+            <button onClick={imprimir} className="rounded-xl bg-[#005a3c] px-5 py-3 text-sm font-bold text-white shadow-sm">
+              🖨️ Imprimir / Salvar PDF
+            </button>
+          </div>
         </div>
 
         <div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm nao-imprimir">
@@ -627,6 +650,17 @@ export default function RelatoriosPage() {
                   ))
                 )}
               </div>
+            </section>
+
+            <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
+              <div className="border-b border-[#e3ebe6] p-5">
+                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+                  <div><h2 className="text-lg font-extrabold text-[#003d2b]">Mensalidades lançadas</h2><p className="mt-1 text-sm text-gray-500">As cobranças geradas no Financeiro aparecem aqui mesmo quando ainda não foram pagas.</p></div>
+                  <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">{mensalidadesPeriodo.length} lançamento(s)</span><span className="rounded-full bg-green-50 px-3 py-2 text-green-700">Pagas: {moeda(totalMensalidadesPagas)}</span><span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-800">Lançado: {moeda(totalMensalidadesLancadas)}</span></div>
+                </div>
+              </div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Referência</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th><th className="px-5 py-3">Recibo</th></tr></thead>
+                <tbody className="divide-y divide-[#e6ede9]">{mensalidadesPeriodo.length === 0 ? <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-500">Nenhuma mensalidade encontrada para o período.</td></tr> : mensalidadesPeriodo.map((m) => <tr key={m.id}><td className="px-5 py-4 text-sm font-semibold">{m.referencia || m.competencia || "—"}</td><td className="px-5 py-4 text-sm">{dataBR(m.data_vencimento)}</td><td className="px-5 py-4 text-sm font-bold">{moeda(m.valor)}</td><td className="px-5 py-4 text-sm">{m.situacao || "—"}</td><td className="px-5 py-4 text-sm">{m.data_pagamento ? `${dataBR(m.data_pagamento)}${m.tipo_pagamento ? ` · ${m.tipo_pagamento}` : ""}` : "—"}</td><td className="px-5 py-4 text-sm">{m.numero_recibo || "—"}</td></tr>)}</tbody></table></div>
             </section>
 
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
