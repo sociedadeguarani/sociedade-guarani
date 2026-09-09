@@ -19,7 +19,7 @@ async function exame(supabase: ReturnType<typeof getServiceClient>, socioId: str
 }
 
 async function inserir(supabase: ReturnType<typeof getServiceClient>, socioId: string, usuarioId: string, resultado: string) {
-  const tentativas = [
+  const tentativas: Record<string, unknown>[] = [
     { socio_id: socioId, usuario_id: usuarioId, resultado, local: "Portaria - QR Code" },
     { socio_id: socioId, usuario_id: usuarioId, resultado },
     { socio_id: socioId, usuario_id: usuarioId, local: "Portaria - QR Code" },
@@ -29,7 +29,7 @@ async function inserir(supabase: ReturnType<typeof getServiceClient>, socioId: s
   ];
   let erro = "Não foi possível registrar o acesso.";
   for (const payload of tentativas) {
-    const r = await supabase.from("acessos_sociedade").insert(payload);
+    const r = await supabase.from("acessos_sociedade").insert(payload as any);
     if (!r.error) return { socio_id: socioId, usuario_id: usuarioId, resultado, local: "Portaria - QR Code", entrada_em: new Date().toISOString() };
     erro = r.error.message;
   }
