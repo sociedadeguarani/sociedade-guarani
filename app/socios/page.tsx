@@ -521,6 +521,7 @@ export default function Home() {
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
+          gerandoAcesso={gerandoAcesso}
           mensagem={mensagem}
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
@@ -996,6 +997,7 @@ function ModalSocio({
   form,
   socioEditando,
   salvando,
+  gerandoAcesso,
   mensagem,
   fechar,
   alterarCampo,
@@ -1007,6 +1009,7 @@ function ModalSocio({
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
+  gerandoAcesso: boolean;
   mensagem: string;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
@@ -1395,7 +1398,7 @@ function ModalSocio({
 
           <button
             onClick={fechar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
@@ -1403,7 +1406,7 @@ function ModalSocio({
 
           <button
             onClick={salvar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
             {salvando || gerandoAcesso
