@@ -1,118 +1,12 @@
 "use client";
-
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, ShieldAlert, UserRound, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
-function corExame(cor: string) {
-  if (cor === "verde") return "bg-green-50 border-green-200 text-green-800";
-  if (cor === "amarelo") return "bg-yellow-50 border-yellow-200 text-yellow-900";
-  if (cor === "vermelho") return "bg-red-50 border-red-200 text-red-800";
-  return "bg-gray-50 border-gray-200 text-gray-700";
-}
-
-export default function ValidarCarteiraPage() {
-  const [carregando, setCarregando] = useState(true);
-  const [erro, setErro] = useState("");
-  const [resultado, setResultado] = useState<any>(null);
-
-  useEffect(() => {
-    let cancelado = false;
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const params = new URLSearchParams(window.location.search);
-        const id = params.get("id") || "";
-        if (!id) throw new Error("QR Code sem identificação do associado.");
-        if (!session) {
-          const destino = `/acessos/validar?id=${encodeURIComponent(id)}`;
-          window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
-          return;
-        }
-
-        const r = await fetch("/api/acessos/qr", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ id }),
-          cache: "no-store",
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "Não foi possível validar a carteirinha.");
-        if (!cancelado) setResultado(d);
-      } catch (e) {
-        if (!cancelado) setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
-      } finally {
-        if (!cancelado) setCarregando(false);
-      }
-    })();
-    return () => { cancelado = true; };
-  }, []);
-
-  const exame = resultado?.exame;
-  const liberado = Boolean(resultado?.liberado);
-
-  return (
-    <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
-      <div className="mx-auto max-w-md">
-        <div className="overflow-hidden rounded-[28px] bg-white shadow-xl ring-1 ring-black/5">
-          <div className="bg-[#005a3c] px-6 py-5 text-white">
-            <div className="flex items-center gap-3">
-              <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
-              <div>
-                <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
-                <h1 className="text-xl font-black">Validação de acesso</h1>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-6">
-            {carregando && <div className="py-12 text-center"><Clock3 className="mx-auto h-10 w-10 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
-
-            {!carregando && erro && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
-                <XCircle className="h-10 w-10" />
-                <h2 className="mt-3 text-xl font-black">Não foi possível validar</h2>
-                <p className="mt-1 text-sm font-medium">{erro}</p>
-              </div>
-            )}
-
-            {!carregando && !erro && resultado && (
-              <div className="space-y-4">
-                <div className={`rounded-2xl p-5 ${liberado ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
-                  {liberado ? <CheckCircle2 className="h-12 w-12" /> : <ShieldAlert className="h-12 w-12" />}
-                  <div className="mt-3 text-2xl font-black">{liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div>
-                  <div className="mt-1 text-sm font-semibold">A entrada foi registrada na portaria.</div>
-                </div>
-
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="flex gap-4">
-                    <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                      {resultado.socio?.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="text-xl font-black leading-tight">{resultado.socio?.nome}</h2>
-                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{resultado.socio?.matricula || "—"}</b></p>
-                      <p className="text-sm text-gray-500">Situação: <b>{resultado.socio?.situacao || "Não informada"}</b></p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className={`rounded-2xl border p-4 ${corExame(exame?.status?.cor)}`}>
-                  <div className="text-xs font-black uppercase tracking-wide">Exame</div>
-                  <div className="mt-1 text-lg font-black">{exame?.status?.texto || "Exame não informado"}</div>
-                  <div className="mt-1 text-sm font-medium">Validade: {exame?.validade ? new Date(exame.validade).toLocaleDateString("pt-BR") : "—"}</div>
-                  <div className="mt-1 text-xs font-semibold">Verificado: {exame?.verificado ? "Sim" : "Não informado"}</div>
-                </div>
-
-                <div className="rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">
-                  Registro efetuado em {resultado.acesso?.entrada_em ? new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR") : "agora"}.
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </main>
-  );
-}
-
+type D={socio:{nome:string;matricula:string|number|null;situacao?:string|null;foto_url?:string|null};exame:{label:string;cor:string;validade:string|null};liberado:boolean;acesso?:{entrada_em:string}};
+export default function Page(){const[d,setD]=useState<D|null>(null);const[e,setE]=useState("");const[c,setC]=useState(true);
+useEffect(()=>{let ok=true;(async()=>{try{const id=new URLSearchParams(location.search).get("id");if(!id)throw new Error("QR Code inválido ou incompleto.");let{data:{session}}=await supabase.auth.getSession();if(!session){session=(await supabase.auth.refreshSession()).data.session}if(!session?.access_token){location.replace(`/login?redirect=${encodeURIComponent(`/acessos/validar?id=${id}`)}`);return}const r=await fetch("/api/acessos/qr",{method:"POST",headers:{Authorization:`Bearer ${session.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({id})});const x=await r.json();if(!r.ok)throw new Error(x?.error||"Não foi possível validar a carteirinha.");if(ok)setD(x)}catch(x){if(ok)setE(x instanceof Error?x.message:"Não foi possível validar o QR Code.")}finally{if(ok)setC(false)}})();return()=>{ok=false}},[]);
+if(c)return <main className="grid min-h-screen place-items-center bg-[#f8faf9] p-6"><div className="rounded-3xl bg-white p-8 text-center shadow-lg"><Clock3 className="mx-auto h-10 w-10 animate-pulse text-[#005a3c]"/><h1 className="mt-4 text-xl font-black text-[#005a3c]">Validando carteirinha...</h1></div></main>;
+if(e)return <main className="grid min-h-screen place-items-center bg-[#f8faf9] p-6"><div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-lg"><XCircle className="mx-auto h-14 w-14 text-red-500"/><h1 className="mt-4 text-2xl font-black text-red-700">Não foi possível validar</h1><p className="mt-2 text-gray-600">{e}</p><p className="mt-5 text-xs text-gray-400">O funcionário deve estar logado no sistema para validar o QR Code.</p></div></main>;
+if(!d)return null;const ex=d.exame.cor==="verde"?"bg-green-50 text-green-700 border-green-200":d.exame.cor==="amarelo"?"bg-yellow-50 text-yellow-800 border-yellow-200":d.exame.cor==="vermelho"?"bg-red-50 text-red-700 border-red-200":"bg-gray-50 text-gray-600 border-gray-200";
+return <main className="min-h-screen bg-[#f8faf9] p-4 sm:p-8"><div className="mx-auto max-w-md space-y-4"><div className="rounded-3xl bg-[#005a3c] p-6 text-white shadow-xl"><div className="flex items-center gap-3"><ShieldCheck className="h-8 w-8"/><div><div className="text-xs font-bold uppercase tracking-widest text-white/70">Portaria · Sociedade Guarani</div><h1 className="text-2xl font-black">Validação de acesso</h1></div></div></div><section className={`rounded-3xl border p-6 shadow-lg ${d.liberado?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>{d.liberado?<CheckCircle2 className="h-14 w-14 text-green-600"/>:<XCircle className="h-14 w-14 text-red-600"/>}<h2 className={`mt-3 text-3xl font-black ${d.liberado?"text-green-700":"text-red-700"}`}>{d.liberado?"ENTRADA LIBERADA":"ACESSO BLOQUEADO"}</h2><div className="mt-5 flex items-center gap-4 rounded-2xl bg-white/80 p-4">{d.socio.foto_url?<img src={d.socio.foto_url} alt="Foto do associado" className="h-20 w-20 rounded-2xl object-cover"/>:<div className="grid h-20 w-20 place-items-center rounded-2xl bg-gray-100"><UserRound className="h-9 w-9 text-gray-400"/></div>}<div><div className="text-xl font-black text-[#17382c]">{d.socio.nome}</div><div className="text-sm text-gray-600">Matrícula: <b>{d.socio.matricula||"—"}</b></div><div className="text-sm text-gray-600">Situação: <b>{d.socio.situacao||"Não informada"}</b></div></div></div><div className={`mt-4 rounded-2xl border p-4 ${ex}`}><div className="font-black">Exame médico: {d.exame.label}</div><div className="mt-1 text-sm">Validade: {d.exame.validade?new Date(`${d.exame.validade}T12:00:00`).toLocaleDateString("pt-BR"):"Não informada"}</div></div><div className="mt-4 text-xs text-gray-500">Entrada registrada automaticamente em {d.acesso?.entrada_em?new Date(d.acesso.entrada_em).toLocaleString("pt-BR"):"agora"}.</div></section></div></main>}
