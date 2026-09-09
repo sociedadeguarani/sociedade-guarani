@@ -47,6 +47,7 @@ const menus = [
   { nome: "Reservas", icone: "📅", rota: "/reservas" },
   { nome: "Eventos", icone: "🎉", rota: "/eventos" },
   { nome: "Financeiro", icone: "💰", rota: "/financeiro" },
+  { nome: "Espaços", icone: "🏛️", rota: "/espacos" },
   { nome: "Relatórios", icone: "📊", rota: "/relatorios" },
   { nome: "Usuários", icone: "🔐", rota: "/usuarios" },
 ];
@@ -162,6 +163,7 @@ export default function Home() {
 
   const [form, setForm] = useState<Partial<Socio>>(socioInicial);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoAcesso, setGerandoAcesso] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
@@ -188,30 +190,28 @@ export default function Home() {
   async function headersComSessao() {
     let { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      const renovada = await supabase.auth.refreshSession();
-      session = renovada.data.session;
+      const refreshed = await supabase.auth.refreshSession();
+      session = refreshed.data.session;
     }
-    if (!session?.access_token) throw new Error("Sessão não encontrada. Faça login novamente.");
+    if (!session?.access_token) throw new Error("Sessão administrativa não encontrada. Faça login novamente.");
     return {
-      "Content-Type": "application/json",
       Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
     };
   }
 
   async function carregarSocios() {
     setCarregando(true);
     try {
-      const resposta = await fetch("/api/socios", {
-        headers: await headersComSessao(),
-        cache: "no-store",
-      });
+      const headers = await headersComSessao();
+      const resposta = await fetch("/api/socios", { headers, cache: "no-store" });
       const json = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(json.error || "Erro ao carregar os sócios.");
       setSocios(json.socios || []);
+      setMensagem("");
     } catch (error) {
       console.error(error);
       setMensagem(error instanceof Error ? error.message : "Erro ao carregar os sócios.");
-      setSocios([]);
     } finally {
       setCarregando(false);
     }
@@ -312,59 +312,69 @@ export default function Home() {
     };
 
     try {
-      const headers = await headersComSessao();
       let socioId = socioEditando?.id || "";
+      const headers = await headersComSessao();
+      const payload = { ...dadosBase, id: socioEditando?.id || undefined, foto_url: form.foto_url || null };
 
-      if (socioEditando) {
-        const resposta = await fetch("/api/socios", {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify({ id: socioEditando.id, dados: { ...dadosBase, foto_url: form.foto_url || null } }),
-        });
-        const json = await resposta.json().catch(() => ({}));
-        if (!resposta.ok) throw new Error(json.error || "Não foi possível atualizar o sócio.");
-        socioId = json.socio?.id || socioEditando.id;
-      } else {
-        const resposta = await fetch("/api/socios", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(dadosBase),
-        });
-        const json = await resposta.json().catch(() => ({}));
-        if (!resposta.ok) throw new Error(json.error || "Não foi possível cadastrar o sócio.");
-        socioId = json.socio?.id || "";
-      }
+      const resposta = await fetch("/api/socios", {
+        method: socioEditando ? "PUT" : "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const json = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(json.error || "Não foi possível cadastrar o sócio.");
+      socioId = json.socio?.id || socioId;
 
       if (fotoArquivo && socioId) {
+        try {
+          const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+          const caminho = `socios/${socioId}.${extensao}`;
+          const upload = await supabase.storage.from("fotos-associados").upload(caminho, fotoArquivo, {
+            upsert: true, contentType: fotoArquivo.type || "image/jpeg",
+          });
+          if (upload.error) throw upload.error;
+          const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+          const h = await headersComSessao();
+          await fetch("/api/socios", {
+            method: "PUT", headers: h, body: JSON.stringify({ id: socioId, ...dadosBase, foto_url: urlData.publicUrl }),
+          });
+        } catch (fotoError) {
+          console.warn("Foto não foi salva, mas o sócio foi cadastrado:", fotoError);
+        }
+      }
+
+      // Cria/atualiza automaticamente o acesso do associado.
+      // Login: matrícula | Senha inicial: 6 primeiros números do CPF.
+      setGerandoAcesso(true);
+      try {
         const sessao = await supabase.auth.getSession();
         const token = sessao.data.session?.access_token;
         if (!token) throw new Error("Sessão administrativa não encontrada.");
-        const formData = new FormData();
-        formData.append("socio_id", socioId);
-        formData.append("file", fotoArquivo);
-        const upload = await fetch("/api/socios/upload", {
+
+        const acesso = await fetch("/api/socios/acesso", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ socio_id: socioId }),
         });
-        const uploadJson = await upload.json().catch(() => ({}));
-        if (!upload.ok) throw new Error(uploadJson.error || "Não foi possível enviar a foto.");
+        const acessoJson = await acesso.json().catch(() => ({}));
+        if (!acesso.ok) throw new Error(acessoJson.error || "Não foi possível criar o acesso.");
+
+        setMensagem(
+          socioEditando
+            ? "Sócio atualizado e acesso de login sincronizado!"
+            : "Sócio cadastrado e acesso criado! Login: matrícula | Senha: 6 primeiros números do CPF."
+        );
+      } catch (error) {
+        console.error(error);
+        setMensagem(
+          `Sócio salvo, mas o acesso não foi criado: ${error instanceof Error ? error.message : "erro desconhecido"}`
+        );
+      } finally {
+        setGerandoAcesso(false);
       }
-
-      // Sincroniza automaticamente o login do associado.
-      const acesso = await fetch("/api/socios/acesso", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ socio_id: socioId }),
-      });
-      const acessoJson = await acesso.json().catch(() => ({}));
-      if (!acesso.ok) throw new Error(acessoJson.error || "Sócio salvo, mas não foi possível criar o acesso.");
-
-      setMensagem(
-        socioEditando
-          ? "Sócio atualizado e acesso sincronizado!"
-          : `Sócio cadastrado! Login: ${acessoJson.login || matricula} · Senha inicial: 6 primeiros números do CPF.`
-      );
 
       setFotoArquivo(null);
       await carregarSocios();
@@ -387,30 +397,20 @@ export default function Home() {
   }
 
   async function excluirSocio(socio: Socio) {
-    const confirmar = window.confirm(
-      `Deseja realmente excluir o sócio "${socio.nome}"?`
-    );
-
+    const confirmar = window.confirm(`Deseja realmente excluir o sócio "${socio.nome}"?`);
     if (!confirmar) return;
-
     try {
-      const resposta = await fetch("/api/socios", {
-        method: "DELETE",
-        headers: await headersComSessao(),
-        body: JSON.stringify({ id: socio.id }),
-      });
+      const headers = await headersComSessao();
+      const resposta = await fetch("/api/socios", { method: "DELETE", headers, body: JSON.stringify({ id: socio.id }) });
       const json = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(json.error || "Não foi possível excluir o sócio.");
+      setMensagem("Sócio excluído.");
+      await carregarSocios();
+      setTimeout(() => setMensagem(""), 1500);
     } catch (error) {
       console.error(error);
       setMensagem(error instanceof Error ? error.message : "Não foi possível excluir o sócio.");
-      return;
     }
-
-    setMensagem("Sócio excluído.");
-    await carregarSocios();
-
-    setTimeout(() => setMensagem(""), 1500);
   }
 
   const sociosFiltrados = useMemo(() => {
@@ -510,6 +510,7 @@ export default function Home() {
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
+          gerandoAcesso={gerandoAcesso}
           mensagem={mensagem}
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
@@ -985,6 +986,7 @@ function ModalSocio({
   form,
   socioEditando,
   salvando,
+  gerandoAcesso,
   mensagem,
   fechar,
   alterarCampo,
@@ -996,6 +998,7 @@ function ModalSocio({
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
+  gerandoAcesso: boolean;
   mensagem: string;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
@@ -1384,7 +1387,7 @@ function ModalSocio({
 
           <button
             onClick={fechar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
@@ -1392,11 +1395,11 @@ function ModalSocio({
 
           <button
             onClick={salvar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvando
-              ? "Salvando..."
+            {salvando || gerandoAcesso
+              ? gerandoAcesso ? "🔐 Criando acesso..." : "Salvando..."
               : socioEditando
                 ? "💾 Salvar alterações"
                 : "💾 Cadastrar Sócio"}
