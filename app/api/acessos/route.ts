@@ -71,6 +71,55 @@ export async function GET(request: Request) {
   }
 }
 
+async function verificarInadimplencia(supabase: ReturnType<typeof getServiceClient>, socioId: string) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("mensalidades")
+    .select("id,competencia,valor,situacao,data_vencimento")
+    .eq("socio_id", socioId)
+    .in("situacao", ["em_atraso"])
+    .order("competencia", { ascending: true });
+
+  if (error || !data) return { atrasado: false, quantidade: 0, valorTotal: 0 };
+
+  // Também considera "em aberto" e já vencida como atraso, caso o job que
+  // marca "em_atraso" ainda não tenha rodado para essa competência.
+  const { data: emAberto } = await supabase
+    .from("mensalidades")
+    .select("id,competencia,valor,situacao,data_vencimento")
+    .eq("socio_id", socioId)
+    .eq("situacao", "em_aberto")
+    .lt("data_vencimento", hoje);
+
+  const todasAtrasadas = [...data, ...(emAberto || [])];
+  const valorTotal = todasAtrasadas.reduce((soma, m) => soma + Number(m.valor || 0), 0);
+
+  return { atrasado: todasAtrasadas.length > 0, quantidade: todasAtrasadas.length, valorTotal };
+}
+
+async function avisarAdministradoresInadimplencia(
+  supabase: ReturnType<typeof getServiceClient>,
+  socio: { nome: string; matricula: number | string | null },
+  quantidade: number,
+  valorTotal: number,
+  criadoPor: string
+) {
+  try {
+    await supabase.from("avisos").insert({
+      titulo: `⚠️ Sócio inadimplente acessou a sociedade`,
+      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso, totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      tipo: "urgente",
+      prioridade: "alta",
+      fixado: false,
+      ativo: true,
+      publico: "administradores",
+      criado_por: criadoPor,
+    });
+  } catch {
+    // Não deixamos a falha ao gerar o aviso interromper o registro do acesso.
+  }
+}
+
 export async function POST(request: Request) {
   const auth = await requireRoles(request, ["administrador", "funcionario"]);
   if ("response" in auth) return auth.response;
@@ -94,6 +143,7 @@ export async function POST(request: Request) {
     const liberado = ["ativo", "ativa", "em_dia", "emdia"].includes(situacao) || !situacao;
     const resultado = liberado ? "liberado" : "bloqueado";
     const exame = await buscarExame(supabase, socio.id);
+    const inadimplencia = await verificarInadimplencia(supabase, socio.id);
 
     const { data: acesso, error } = await supabase
       .from("acessos_sociedade")
@@ -102,7 +152,11 @@ export async function POST(request: Request) {
       .single();
     if (error) throw error;
 
-    return NextResponse.json({ acesso, socio, liberado, exame });
+    if (inadimplencia.atrasado) {
+      await avisarAdministradoresInadimplencia(supabase, socio, inadimplencia.quantidade, inadimplencia.valorTotal, auth.usuario.id);
+    }
+
+    return NextResponse.json({ acesso, socio, liberado, exame, inadimplencia });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao registrar acesso." }, { status: 500 });
   }
