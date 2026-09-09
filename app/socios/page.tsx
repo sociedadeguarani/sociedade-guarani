@@ -393,7 +393,9 @@ export default function Home() {
     } catch (error) {
       console.error(error);
       setMensagem(
-        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
+        `Não foi possível salvar. ${
+          error instanceof Error ? error.message : "Verifique o Supabase e o bucket fotos-associados."
+        }`
       );
     } finally {
       setSalvando(false);
