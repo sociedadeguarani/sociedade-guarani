@@ -1,33 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
-
-export const runtime = "nodejs";
-
-export async function POST(request: Request) {
-  const auth = await requireRoles(request, ["administrador"]);
-  if ("response" in auth) return auth.response;
-  try {
-    const form = await request.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ error: "Arquivo não enviado." }, { status: 400 });
-    if (file.size > 5 * 1024 * 1024) return NextResponse.json({ error: "A foto deve ter no máximo 5 MB." }, { status: 400 });
-    const tipos = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-    if (!tipos.includes(file.type)) return NextResponse.json({ error: "Formato não permitido. Use JPG, PNG, WEBP ou GIF." }, { status: 400 });
-    const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : file.type === "image/gif" ? "gif" : "jpg";
-    const caminho = `inventario/${crypto.randomUUID()}.${ext}`;
-    const supabase = getServiceClient();
-    const bucket = "fotos-inventario";
-    const { data: buckets } = await supabase.storage.listBuckets();
-    if (!buckets?.some((b) => b.name === bucket)) {
-      const { error: bucketError } = await supabase.storage.createBucket(bucket, { public: true });
-      if (bucketError && !bucketError.message.toLowerCase().includes("already exists")) throw bucketError;
-    }
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(caminho, file, { upsert: true, contentType: file.type });
-    if (uploadError) throw uploadError;
-    const { data } = supabase.storage.from(bucket).getPublicUrl(caminho);
-    return NextResponse.json({ ok: true, path: caminho, url: data.publicUrl });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Não foi possível enviar a foto." }, { status: 500 });
-  }
-}
-
+import { createClient } from "@supabase/supabase-js";
+import { exigirAdministrador } from "@/lib/guaraniAuth";
+function admin(){const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.SUPABASE_SERVICE_ROLE_KEY;if(!url||!key)throw new Error("Configuração do Supabase incompleta.");return createClient(url,key,{auth:{autoRefreshToken:false,persistSession:false}})}
+export async function POST(request:Request){try{const auth=await exigirAdministrador(request);if("error" in auth)return NextResponse.json({error:auth.error},{status:auth.status});const form=await request.formData();const file=form.get("file");const itemId=String(form.get("item_id")||"");if(!(file instanceof File))return NextResponse.json({error:"Selecione uma imagem."},{status:400});if(!itemId)return NextResponse.json({error:"Item não informado."},{status:400});if(file.size>5*1024*1024)return NextResponse.json({error:"A imagem deve ter no máximo 5 MB."},{status:400});if(!/^image\/(jpeg|png|webp|gif)$/.test(file.type))return NextResponse.json({error:"Formato permitido: JPG, PNG, WEBP ou GIF."},{status:400});const s=admin(),bucket="fotos-inventario";await s.storage.createBucket(bucket,{public:true}).catch(()=>undefined);const ext=file.type==="image/png"?"png":file.type==="image/webp"?"webp":file.type==="image/gif"?"gif":"jpg";const path=`itens/${itemId}-${Date.now()}.${ext}`;const up=await s.storage.from(bucket).upload(path,new Uint8Array(await file.arrayBuffer()),{contentType:file.type,upsert:true});if(up.error)throw up.error;const {data}=s.storage.from(bucket).getPublicUrl(path);const {error}=await s.from("inventario_itens").update({foto_url:data.publicUrl}).eq("id",itemId);if(error)throw error;return NextResponse.json({ok:true,url:data.publicUrl})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Não foi possível enviar a foto."},{status:500})}}
