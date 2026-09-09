@@ -30,10 +30,10 @@ export default function ValidarCarteiraPage() {
           return;
         }
 
-        const r = await fetch("/api/acessos", {
+        const r = await fetch("/api/acessos/qr", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ socio_id: id, local: "Portaria" }),
+          body: JSON.stringify({ id }),
           cache: "no-store",
         });
         const d = await r.json();
