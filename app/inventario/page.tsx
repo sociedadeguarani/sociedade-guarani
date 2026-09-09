@@ -27,7 +27,7 @@ export default function InventarioPage() {
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
-  const [itemForm, setItemForm] = useState({ nome: "", categoria: "Esporte", quantidade_total: 1, unidade: "unidade", estado_conservacao: "Bom", localizacao: "", numero_patrimonio: "", emprestimo_permitido: true, acesso_funcionario: false, observacoes: "" });
+  const [itemForm, setItemForm] = useState({ nome: "", categoria: "Esporte", quantidade_total: 1, unidade: "unidade", estado_conservacao: "Bom", localizacao: "", numero_patrimonio: "", emprestimo_permitido: true, acesso_funcionario: false, observacoes: "", foto_url: "" });
   const [empForm, setEmpForm] = useState({ item_id: "", socio_id: "", quantidade: 1, data_prevista_devolucao: "", observacoes: "" });
 
   async function authHeaders(json = true) {
