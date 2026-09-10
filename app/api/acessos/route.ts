@@ -27,9 +27,17 @@ export async function POST(request: Request) {
     const body = await request.json();
     const qr = String(body?.qr || "").trim();
     const socioId = String(body?.socio_id || "").trim();
+    let dependenteId = String(body?.dependente_id || "").trim();
     const supabase = getServiceClient();
     let id = socioId;
     if (!id && qr.startsWith("guarani:socio:")) id = qr.replace("guarani:socio:", "");
+    if (!dependenteId && qr.startsWith("guarani:dependente:")) dependenteId = qr.replace("guarani:dependente:", "");
+    if (dependenteId) {
+      const { data: dep, error: depError } = await supabase.from("dependentes").select("id,socio_id,nome,cpf,parentesco,ativo").eq("id", dependenteId).maybeSingle();
+      if (depError) throw depError;
+      if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
+      id = String(dep.socio_id);
+    }
     if (!id) return NextResponse.json({ error: "QR Code inválido." }, { status: 400 });
     const { data: socio, error: socioError } = await supabase.from("socios").select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira").eq("id", id).maybeSingle();
     if (socioError) throw socioError;
@@ -37,9 +45,14 @@ export async function POST(request: Request) {
     const situacao = String(socio.situacao || "").toLowerCase();
     const liberado = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
     const resultado = liberado ? "liberado" : "bloqueado";
-    const { data: acesso, error } = await supabase.from("acessos_sociedade").insert({ socio_id: socio.id, usuario_id: auth.usuario.id, resultado }).select("id,socio_id,usuario_id,entrada_em,resultado,observacao").single();
+    const { data: acesso, error } = await supabase.from("acessos_sociedade").insert({ socio_id: socio.id, usuario_id: auth.usuario.id, resultado, observacao: dependenteId ? `Dependente consultado: ${dependenteId}` : null }).select("id,socio_id,usuario_id,entrada_em,resultado,observacao").single();
     if (error) throw error;
-    return NextResponse.json({ acesso, socio, liberado });
+    let dependente = null;
+    if (dependenteId) {
+      const { data } = await supabase.from("dependentes").select("id,socio_id,nome,cpf,parentesco,ativo").eq("id", dependenteId).maybeSingle();
+      dependente = data || null;
+    }
+    return NextResponse.json({ acesso, socio, dependente, liberado });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao registrar acesso." }, { status: 500 });
   }
