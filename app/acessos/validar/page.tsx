@@ -23,7 +23,8 @@ export default function ValidarCarteiraPage() {
         const { data: { session } } = await supabase.auth.getSession();
         const params = new URLSearchParams(window.location.search);
         const id = params.get("id") || "";
-        if (!id) throw new Error("QR Code sem identificação do associado.");
+        const dependenteId = params.get("dependente_id") || "";
+        if (!id && !dependenteId) throw new Error("QR Code sem identificação do associado.");
         if (!session) {
           const destino = `/acessos/validar?id=${encodeURIComponent(id)}`;
           window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
@@ -33,7 +34,7 @@ export default function ValidarCarteiraPage() {
         const r = await fetch("/api/acessos", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ socio_id: id, local: "Portaria" }),
+          body: JSON.stringify({ socio_id: id || undefined, dependente_id: dependenteId || undefined, local: "Portaria" }),
           cache: "no-store",
         });
         const d = await r.json();
@@ -90,8 +91,9 @@ export default function ValidarCarteiraPage() {
                       {resultado.socio?.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="text-xl font-black leading-tight">{resultado.socio?.nome}</h2>
-                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{resultado.socio?.matricula || "—"}</b></p>
+                      <h2 className="text-xl font-black leading-tight">{resultado.dependente?.nome || resultado.socio?.nome}</h2>
+                      {resultado.dependente && <p className="mt-1 text-xs font-bold text-[#005a3c]">DEPENDENTE · {resultado.dependente.parentesco || "Família"}</p>}
+                      <p className="mt-1 text-sm text-gray-500">Titular / matrícula: <b>{resultado.socio?.nome} · {resultado.socio?.matricula || "—"}</b></p>
                       <p className="text-sm text-gray-500">Situação: <b>{resultado.socio?.situacao || "Não informada"}</b></p>
                     </div>
                   </div>
