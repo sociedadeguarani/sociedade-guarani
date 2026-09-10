@@ -99,6 +99,17 @@ export default function ValidarCarteiraPage() {
                   </div>
                 </div>
 
+                <div className={`rounded-2xl border p-4 ${corExame(resultado.mensalidade?.cor)}`}>
+                  <div className="text-xs font-black uppercase tracking-wide">Mensalidade</div>
+                  <div className="mt-1 text-lg font-black">{resultado.mensalidade?.texto || "Não informado"}</div>
+                  {resultado.inadimplencia?.atrasado && (
+                    <div className="mt-1 text-xs font-semibold">
+                      {resultado.inadimplencia.quantidade} mensalidade(s) em atraso ·{" "}
+                      {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </div>
+                  )}
+                </div>
+
                 <div className={`rounded-2xl border p-4 ${corExame(exame?.status?.cor)}`}>
                   <div className="text-xs font-black uppercase tracking-wide">Exame</div>
                   <div className="mt-1 text-lg font-black">{exame?.status?.texto || "Exame não informado"}</div>
