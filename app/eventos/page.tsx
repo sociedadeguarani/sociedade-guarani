@@ -111,10 +111,13 @@ export default function EventosPage() {
         const uj = await ur.json(); if (!ur.ok) throw new Error(uj.error || "Não foi possível enviar o comprovante.");
         url = uj.url || "";
       }
-      if (url) {
-        const r = await api("/api/eventos/vendas/comprovante", { method: "PATCH", body: JSON.stringify({ id: v.id, comprovante_url: url }) });
-        const j = await r.json(); if (!r.ok) throw new Error(j.error);
-        setDetalhe(j.venda || v);
+      if (url && !arquivoComprovante) {
+        throw new Error("Para enviar o comprovante, selecione o arquivo. O sistema grava o comprovante diretamente no armazenamento seguro.");
+      }
+      if (arquivoComprovante) {
+        await carregar();
+        const atualizada = (await (async () => { const rr = await api("/api/eventos/vendas"); const jj = await rr.json(); return (jj.vendas || []).find((x: Venda) => x.id === v.id); })()) as Venda | undefined;
+        if (atualizada) setDetalhe(atualizada);
       }
       setComprovante(""); setArquivoComprovante(null); await carregar();
     } catch(e) { setErro(e instanceof Error ? e.message : "Erro ao enviar comprovante."); } finally { setEnviandoComprovante(false); setProcessando(false); }
