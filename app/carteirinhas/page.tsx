@@ -18,6 +18,8 @@ type Socio = {
   foto_url: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
+  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
+  dias_atraso?: number;
 };
 
 function visual(tipo: string | null) {
@@ -50,6 +52,7 @@ export default function CarteirinhasPage() {
   const [selecionado, setSelecionado] = useState<Socio | null>(null);
   const [erro, setErro] = useState("");
   const [digitalAberta, setDigitalAberta] = useState(false);
+  const [modoQr, setModoQr] = useState(false);
 
   useEffect(() => {
     let ativo = true;
@@ -80,7 +83,7 @@ export default function CarteirinhasPage() {
       if (ativo) {
         setSocios(listaSocios);
         const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
-        if (socioQr) setSelecionado(socioQr);
+        if (socioQr) { setSelecionado(socioQr); setModoQr(true); }
         else if (listaSocios.length === 1) setSelecionado(listaSocios[0]);
       }
 
@@ -94,7 +97,7 @@ export default function CarteirinhasPage() {
               Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ socio_id: idQr, local: "Portaria" }),
+            body: JSON.stringify({ socio_id: idQr }),
             cache: "no-store",
           });
           const dAcesso = await rAcesso.json();
@@ -119,6 +122,10 @@ export default function CarteirinhasPage() {
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
+  const statusFinanceiro = selecionado?.financeiro_status || "em_dia";
+  const statusFinanceiroLabel = statusFinanceiro === "em_dia" ? "EM DIA" : statusFinanceiro === "atrasado" ? "ATRASADO" : "MUITO ATRASADO";
+  const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
+  const statusFinanceiroText = statusFinanceiro === "atrasado" ? "Atrasada há 2 semanas ou mais" : statusFinanceiro === "muito_atrasado" ? "Atrasada há mais de 2 meses" : "Mensalidades em dia";
   const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/carteirinhas?id=${encodeURIComponent(selecionado.id)}&registrar=1` : "";
 
   function imprimirCarteirinha() {
@@ -224,18 +231,18 @@ export default function CarteirinhasPage() {
 
       <div className="print-hide"><CabecalhoPadrao /><MenuLateralPadrao /></div>
 
-      <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
-        <div className="mx-auto max-w-7xl space-y-6">
-          <div>
+      <main className={`${modoQr ? "min-h-screen px-3 py-4" : "min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8"}`}>
+        <div className={`${modoQr ? "mx-auto max-w-md" : "mx-auto max-w-7xl space-y-6"}`}>
+          {!modoQr && <div>
             <p className="text-sm text-gray-500">Identificação</p>
             <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
             <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
-          </div>
+          </div>}
 
-          {erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
+          {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_430px]">
-            <section className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className={`${modoQr ? "" : "grid gap-6 lg:grid-cols-[1fr_430px]"}`}>
+            {!modoQr && <section className="rounded-2xl border bg-white p-5 shadow-sm">
               <div className="flex items-center gap-2 rounded-xl border px-3">
                 <Search className="h-4 w-4 text-gray-400" />
                 <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou matrícula..." className="w-full py-3 outline-none" />
@@ -248,11 +255,11 @@ export default function CarteirinhasPage() {
                   </button>
                 ))}
               </div>
-            </section>
+            </section>}
 
             {selecionado && (
-              <section className="space-y-4">
-                <div className="print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl">
+              <section className={modoQr ? "space-y-3" : "space-y-4"}>
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl">
                   <div className="card-top p-5" style={{ background: v.bg, color: v.text }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -283,25 +290,49 @@ export default function CarteirinhasPage() {
                       <div className="space-y-2 text-sm">
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div></div>
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{validade ? formatarData(validade) : "Conforme cadastro"}</div></div>
+                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>
                       </div>
                       <QRCodeSVG className="card-qr" value={qrValue} size={112} includeMargin />
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-2 gap-2"}`}>
                   <button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white hover:bg-[#003d2b]"><Printer className="h-4 w-4" /> Imprimir</button>
                   <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button>
                 </div>
 
-                <div className="rounded-xl bg-[#e8f3ee] p-4 text-sm"><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
+                <div className={`${modoQr ? "hidden" : "rounded-xl bg-[#e8f3ee] p-4 text-sm"}`}><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
+
+                {modoQr && (
+                  <div className="overflow-hidden rounded-[26px] border-4 border-[#17382c] bg-white shadow-2xl">
+                    <div className="p-5" style={{ background: v.bg, color: v.text }}>
+                      <div className="flex items-center gap-3">
+                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+                        <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <img src={selecionado.foto_url} alt={selecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                        <div className="min-w-0"><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
+                      </div>
+                      <div className="mt-5 rounded-2xl bg-[#f4f7f5] p-4">
+                        <div className="flex items-center gap-3"><span className={`h-5 w-5 rounded-full ${statusFinanceiroClass} ring-4 ring-white shadow`} /><div><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black">{statusFinanceiroLabel}</div><div className="text-xs text-gray-500">{statusFinanceiroText}</div></div></div>
+                      </div>
+                      <div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><b>{selecionado.situacao || "Não informada"}</b></div><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><b>{validade ? formatarData(validade) : "Conforme cadastro"}</b></div></div>
+                      {erro && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{erro}</div>}
+                      <div className="mt-5 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Acesso contabilizado automaticamente na leitura do QR Code.</div>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
           </div>
         </div>
       </main>
 
-      {digitalAberta && selecionado && (
+      {digitalAberta && selecionado && !modoQr && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
           <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
             <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
