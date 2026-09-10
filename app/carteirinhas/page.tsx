@@ -20,10 +20,6 @@ type Socio = {
   fim_temporada: string | null;
   financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
   dias_atraso?: number;
-  meses_atraso?: number;
-  dependente?: boolean;
-  titular_id?: string;
-  parentesco?: string | null;
 };
 
 function visual(tipo: string | null) {
@@ -55,7 +51,6 @@ export default function CarteirinhasPage() {
   const [busca, setBusca] = useState("");
   const [selecionado, setSelecionado] = useState<Socio | null>(null);
   const [erro, setErro] = useState("");
-  const [perfil, setPerfil] = useState("");
   const [digitalAberta, setDigitalAberta] = useState(false);
   const [modoQr, setModoQr] = useState(false);
 
@@ -66,10 +61,9 @@ export default function CarteirinhasPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const params = new URLSearchParams(window.location.search);
       const idQr = params.get("id") || "";
-      const registrar = params.get("registrar") === "1";
 
       if (!session) {
-        const destino = `/carteirinhas?id=${encodeURIComponent(idQr)}${registrar ? "&registrar=1" : ""}`;
+        const destino = `/carteirinhas?id=${encodeURIComponent(idQr)}`;
         location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
         return;
       }
@@ -87,36 +81,11 @@ export default function CarteirinhasPage() {
       const listaSocios: Socio[] = d.socios || [];
       if (ativo) {
         setSocios(listaSocios);
-        setPerfil(d.perfil || "");
         const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
         if (socioQr) { setSelecionado(socioQr); setModoQr(true); }
         else if (listaSocios.length === 1) setSelecionado(listaSocios[0]);
       }
 
-      // O QR da carteirinha registra o acesso e, em seguida, permanece na própria carteirinha.
-      // O parâmetro "registrar=1" é removido da URL após a tentativa para evitar duplicação em F5.
-      if (registrar && idQr) {
-        try {
-          const rAcesso = await fetch("/api/acessos", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ socio_id: idQr }),
-            cache: "no-store",
-          });
-          const dAcesso = await rAcesso.json();
-          if (!rAcesso.ok) throw new Error(dAcesso.error || "Não foi possível registrar o acesso.");
-          if (ativo) setErro("");
-        } catch (e) {
-          if (ativo) setErro(e instanceof Error ? `Carteirinha carregada, mas o acesso não foi registrado: ${e.message}` : "Carteirinha carregada, mas o acesso não foi registrado.");
-        } finally {
-          const url = new URL(window.location.href);
-          url.searchParams.delete("registrar");
-          window.history.replaceState({}, "", url.toString());
-        }
-      }
     })();
     return () => { ativo = false; };
   }, []);
@@ -131,10 +100,8 @@ export default function CarteirinhasPage() {
   const statusFinanceiro = selecionado?.financeiro_status || "em_dia";
   const statusFinanceiroLabel = statusFinanceiro === "em_dia" ? "EM DIA" : statusFinanceiro === "atrasado" ? "ATRASADO" : "MUITO ATRASADO";
   const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
-  const statusFinanceiroText = statusFinanceiro === "atrasado" ? `${selecionado?.meses_atraso || 1} mês(es) em atraso` : statusFinanceiro === "muito_atrasado" ? `${selecionado?.meses_atraso || 3}+ meses em atraso` : "Mensalidades em dia";
-  const qrValue = selecionado
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?${selecionado.dependente ? `dependente_id=${encodeURIComponent(selecionado.id)}` : `id=${encodeURIComponent(selecionado.id)}`}`
-    : "";
+  const statusFinanceiroText = statusFinanceiro === "atrasado" ? "Atrasada há 2 semanas ou mais" : statusFinanceiro === "muito_atrasado" ? "Atrasada há mais de 2 meses" : "Mensalidades em dia";
+  const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
 
   function imprimirCarteirinha() {
     if (!selecionado) return;
@@ -244,7 +211,7 @@ export default function CarteirinhasPage() {
           {!modoQr && <div>
             <p className="text-sm text-gray-500">Identificação</p>
             <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
-            <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Para associado, são exibidas apenas as carteirinhas da própria família. Funcionários e administradores podem consultar por nome ou matrícula.</p>
+            <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
           </div>}
 
           {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
@@ -253,7 +220,7 @@ export default function CarteirinhasPage() {
             {!modoQr && <section className="rounded-2xl border bg-white p-5 shadow-sm">
               <div className="flex items-center gap-2 rounded-xl border px-3">
                 <Search className="h-4 w-4 text-gray-400" />
-                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={perfil === "associado" ? "Buscar na sua família..." : "Buscar por nome ou matrícula..."} className="w-full py-3 outline-none" />
+                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou matrícula..." className="w-full py-3 outline-none" />
               </div>
               <div className="mt-4 space-y-2">
                 {lista.map((s) => (
