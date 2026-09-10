@@ -9,51 +9,191 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const de = searchParams.get("de");
     const ate = searchParams.get("ate");
-    let query = supabase.from("acessos_sociedade").select("id,socio_id,usuario_id,entrada_em,resultado,observacao").order("entrada_em", { ascending: false }).limit(500);
+    let query = supabase
+      .from("acessos_sociedade")
+      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao")
+      .order("entrada_em", { ascending: false })
+      .limit(500);
     if (de) query = query.gte("entrada_em", `${de}T00:00:00`);
     if (ate) query = query.lte("entrada_em", `${ate}T23:59:59`);
     const { data, error } = await query;
     if (error) throw error;
     return NextResponse.json({ acessos: data || [] });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar acessos." }, { status: 500 });
+    return NextResponse.json(
+      { error: `Erro ao carregar acessos: ${error instanceof Error ? error.message : String(error)}` },
+      { status: 500 }
+    );
+  }
+}
+
+function situacaoMensalidade(situacaoFinanceira: string | null | undefined) {
+  const v = String(situacaoFinanceira || "").toLowerCase();
+  if (v === "em_atraso") return { texto: "Em atraso", cor: "vermelho" };
+  if (v === "em_dia") return { texto: "Em dia", cor: "verde" };
+  if (v === "isento") return { texto: "Isento", cor: "cinza" };
+  return { texto: "Não informado", cor: "cinza" };
+}
+
+async function verificarMensalidadesAtrasadas(
+  supabase: ReturnType<typeof getServiceClient>,
+  socioId: string
+) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const [emAtraso, emAbertoVencida] = await Promise.all([
+    supabase.from("mensalidades").select("id,valor").eq("socio_id", socioId).eq("situacao", "em_atraso"),
+    supabase.from("mensalidades").select("id,valor").eq("socio_id", socioId).eq("situacao", "em_aberto").lt("data_vencimento", hoje),
+  ]);
+  const itens = [...(emAtraso.data || []), ...(emAbertoVencida.data || [])];
+  const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
+  return { atrasado: itens.length > 0, quantidade: itens.length, valorTotal };
+}
+
+async function avisarAdministradoresInadimplencia(
+  supabase: ReturnType<typeof getServiceClient>,
+  socio: { nome: string; matricula: number | string | null },
+  quantidade: number,
+  valorTotal: number,
+  criadoPor: string
+) {
+  try {
+    await supabase.from("avisos").insert({
+      titulo: "⚠️ Sócio inadimplente acessou a sociedade",
+      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso, totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      tipo: "urgente",
+      prioridade: "alta",
+      fixado: false,
+      ativo: true,
+      publico: "administradores",
+      criado_por: criadoPor,
+    });
+  } catch (e) {
+    // Um aviso que falha não pode derrubar o registro do acesso — só logamos.
+    console.error("Falha ao gerar aviso de inadimplência:", e);
   }
 }
 
 export async function POST(request: Request) {
   const auth = await requireRoles(request, ["administrador", "funcionario"]);
   if ("response" in auth) return auth.response;
+
+  let etapa = "iniciando";
+
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const qr = String(body?.qr || "").trim();
     const socioId = String(body?.socio_id || "").trim();
+    const matricula = String(body?.matricula || "").trim();
     let dependenteId = String(body?.dependente_id || "").trim();
+    const local = String(body?.local || "Portaria").trim();
     const supabase = getServiceClient();
+
     let id = socioId;
     if (!id && qr.startsWith("guarani:socio:")) id = qr.replace("guarani:socio:", "");
     if (!dependenteId && qr.startsWith("guarani:dependente:")) dependenteId = qr.replace("guarani:dependente:", "");
+
+    if (!id && !dependenteId && matricula) {
+      etapa = "buscando sócio pela matrícula";
+      const { data: socioPorMatricula, error: matriculaError } = await supabase
+        .from("socios")
+        .select("id")
+        .eq("matricula", matricula)
+        .maybeSingle();
+      if (matriculaError) throw new Error(`Falha ao buscar pela matrícula: ${matriculaError.message}`);
+      if (!socioPorMatricula) return NextResponse.json({ error: `Nenhum associado encontrado com a matrícula ${matricula}.` }, { status: 404 });
+      id = socioPorMatricula.id;
+    }
+
+    let dependente: { id: string; socio_id: string; nome: string; cpf: string | null; parentesco: string | null; ativo: boolean | null } | null = null;
+
     if (dependenteId) {
-      const { data: dep, error: depError } = await supabase.from("dependentes").select("id,socio_id,nome,cpf,parentesco,ativo").eq("id", dependenteId).maybeSingle();
-      if (depError) throw depError;
-      if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
+      etapa = "buscando dependente";
+      const { data: dep, error: depError } = await supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,cpf,parentesco,ativo")
+        .eq("id", dependenteId)
+        .maybeSingle();
+      if (depError) throw new Error(`Falha ao buscar dependente: ${depError.message}`);
+      if (!dep || dep.ativo === false) {
+        return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
+      }
+      dependente = dep;
       id = String(dep.socio_id);
     }
-    if (!id) return NextResponse.json({ error: "QR Code inválido." }, { status: 400 });
-    const { data: socio, error: socioError } = await supabase.from("socios").select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira").eq("id", id).maybeSingle();
-    if (socioError) throw socioError;
+
+    if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
+
+    etapa = "buscando sócio";
+    const { data: socio, error: socioError } = await supabase
+      .from("socios")
+      .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url")
+      .eq("id", id)
+      .maybeSingle();
+    if (socioError) throw new Error(`Falha ao buscar associado: ${socioError.message}`);
     if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
+
     const situacao = String(socio.situacao || "").toLowerCase();
     const liberado = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
     const resultado = liberado ? "liberado" : "bloqueado";
-    const { data: acesso, error } = await supabase.from("acessos_sociedade").insert({ socio_id: socio.id, usuario_id: auth.usuario.id, resultado, observacao: dependenteId ? `Dependente consultado: ${dependenteId}` : null }).select("id,socio_id,usuario_id,entrada_em,resultado,observacao").single();
-    if (error) throw error;
-    let dependente = null;
-    if (dependenteId) {
-      const { data } = await supabase.from("dependentes").select("id,socio_id,nome,cpf,parentesco,ativo").eq("id", dependenteId).maybeSingle();
-      dependente = data || null;
+
+    etapa = "registrando acesso";
+    const { data: acesso, error: acessoError } = await supabase
+      .from("acessos_sociedade")
+      .insert({
+        socio_id: socio.id,
+        usuario_id: auth.usuario.id,
+        resultado,
+        local,
+        observacao: dependenteId ? `Dependente: ${dependente?.nome || dependenteId}` : null,
+      })
+      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao,local")
+      .single();
+    if (acessoError) throw new Error(`Falha ao registrar a entrada: ${acessoError.message}`);
+
+    // Status de mensalidade — usa o campo já mantido no cadastro para exibição
+    // rápida, e confere as mensalidades reais para decidir se avisa a administração.
+    etapa = "verificando mensalidades";
+    const statusMensalidadeSocio = situacaoMensalidade(socio.situacao_financeira);
+    const statusMensalidadeDependente = dependente
+      ? situacaoMensalidade((dependente as any).situacao_financeira)
+      : null;
+
+    const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
+    if (inadimplenciaSocio.atrasado) {
+      etapa = "gerando aviso de inadimplência";
+      await avisarAdministradoresInadimplencia(
+        supabase,
+        socio,
+        inadimplenciaSocio.quantidade,
+        inadimplenciaSocio.valorTotal,
+        auth.usuario.id
+      );
     }
-    return NextResponse.json({ acesso, socio, dependente, liberado });
+
+    // "Exame médico" ainda não tem uma tabela própria no banco — devolvemos
+    // um status neutro para a tela não quebrar, até essa parte ser construída.
+    const exame = {
+      status: { texto: "Controle de exame médico ainda não configurado", cor: "cinza" },
+      validade: null,
+      verificado: false,
+    };
+
+    return NextResponse.json({
+      acesso,
+      socio,
+      dependente,
+      liberado,
+      exame,
+      mensalidade: dependente ? statusMensalidadeDependente : statusMensalidadeSocio,
+      inadimplencia: inadimplenciaSocio,
+    });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao registrar acesso." }, { status: 500 });
+    console.error(`Erro ao registrar acesso (etapa: ${etapa}):`, error);
+    return NextResponse.json(
+      {
+        error: `Erro ao registrar acesso (${etapa}): ${error instanceof Error ? error.message : String(error)}`,
+      },
+      { status: 500 }
+    );
   }
 }
