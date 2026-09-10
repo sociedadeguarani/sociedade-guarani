@@ -15,9 +15,13 @@ export async function GET(request: Request) {
 
     if (resultado.perfil === "associado") query = query.eq("publicado", true);
 
-    const { data, error } = await query;
+    const [{ data, error }, { data: contas, error: contasError }] = await Promise.all([
+      query,
+      resultado.supabase.from("contas_bancarias").select(resultado.perfil === "administrador" ? "id,nome,banco,agencia,conta,ativo" : "id,nome,banco,ativo").eq("ativo", true).order("nome", { ascending: true }),
+    ]);
     if (error) throw new Error(error.message);
-    return NextResponse.json({ eventos: data || [], perfil: resultado.perfil, socio_id: resultado.usuario.socio_id });
+    if (contasError) throw new Error(contasError.message);
+    return NextResponse.json({ eventos: data || [], contasBancarias: contas || [], perfil: resultado.perfil, socio_id: resultado.usuario.socio_id });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar eventos." }, { status: 500 });
   }
@@ -41,13 +45,16 @@ export async function POST(request: Request) {
     const destaque = body.destaque === true;
     const valor_ingresso = body.valor_ingresso === "" || body.valor_ingresso == null ? null : Number(body.valor_ingresso);
     const quantidade_disponivel = body.quantidade_disponivel === "" || body.quantidade_disponivel == null ? null : Math.max(0, Math.floor(Number(body.quantidade_disponivel)));
+    const conta_bancaria_id = String(body.conta_bancaria_id || "").trim() || null;
+    const pix_copia_e_cola = String(body.pix_copia_e_cola || "").trim() || null;
 
     if (!titulo || !data_inicio) return NextResponse.json({ error: "Título e data do evento são obrigatórios." }, { status: 400 });
+    if (valor_ingresso !== null && valor_ingresso > 0 && !conta_bancaria_id) return NextResponse.json({ error: "Selecione a conta bancária de recebimento do evento." }, { status: 400 });
     if (valor_ingresso !== null && (!Number.isFinite(valor_ingresso) || valor_ingresso < 0)) return NextResponse.json({ error: "Valor do ingresso inválido." }, { status: 400 });
 
     const { data, error } = await resultado.supabase
       .from("eventos")
-      .insert({ titulo, descricao, tipo, local, data_inicio, data_fim, imagem_url, link_externo, publicado, destaque, valor_ingresso, quantidade_disponivel, criado_por: resultado.usuario.id })
+      .insert({ titulo, descricao, tipo, local, data_inicio, data_fim, imagem_url, link_externo, publicado, destaque, valor_ingresso, quantidade_disponivel, conta_bancaria_id, pix_copia_e_cola, criado_por: resultado.usuario.id })
       .select("*")
       .single();
 
@@ -67,7 +74,7 @@ export async function PATCH(request: Request) {
     if (!id) return NextResponse.json({ error: "Informe o evento." }, { status: 400 });
 
     const permitido: Record<string, unknown> = {};
-    for (const campo of ["titulo", "descricao", "tipo", "local", "data_inicio", "data_fim", "imagem_url", "link_externo", "publicado", "destaque", "valor_ingresso", "quantidade_disponivel"]) {
+    for (const campo of ["titulo", "descricao", "tipo", "local", "data_inicio", "data_fim", "imagem_url", "link_externo", "publicado", "destaque", "valor_ingresso", "quantidade_disponivel", "conta_bancaria_id", "pix_copia_e_cola"]) {
       if (Object.prototype.hasOwnProperty.call(body, campo)) permitido[campo] = body[campo] === "" ? null : body[campo];
     }
     permitido.updated_at = new Date().toISOString();
