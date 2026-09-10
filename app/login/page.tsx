@@ -9,6 +9,12 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [redirect, setRedirect] = useState("/painel");
+
+  useEffect(() => {
+    const destino = new URLSearchParams(window.location.search).get("redirect");
+    if (destino && destino.startsWith("/")) setRedirect(destino);
+  }, []);
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -74,7 +80,7 @@ export default function LoginPage() {
         usuario.nome_exibicao || ""
       );
 
-      window.location.replace("/painel");
+      window.location.replace(redirect || "/painel");
     } catch (err) {
       console.error(err);
       setErro("Erro de comunicação com o servidor. Tente novamente.");
