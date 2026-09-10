@@ -10,6 +10,9 @@ type Resultado = {
   socio?: { id: string; matricula: number | string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
   liberado?: boolean;
   acesso?: { entrada_em?: string; resultado?: string };
+  mensalidade?: { texto: string; cor: string } | null;
+  exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
+  inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
 };
 
 export default function AcessosPage() {
@@ -18,9 +21,14 @@ export default function AcessosPage() {
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [cameraAberta, setCameraAberta] = useState(false);
+  const [suportaLeituraQr, setSuportaLeituraQr] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setSuportaLeituraQr("BarcodeDetector" in window);
+  }, []);
 
   async function validar(dados: { matricula?: string; qr?: string; socio_id?: string }) {
     setErro("");
@@ -126,7 +134,13 @@ export default function AcessosPage() {
                 <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
                 <div><h2 className="text-xl font-black">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
               </div>
-              {!cameraAberta ? (
+              {!suportaLeituraQr ? (
+                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                  Este navegador (comum em iPhone) não permite ler QR Code direto no site.
+                  Abra o <b>app de Câmera do celular</b> e aponte para o QR Code da carteirinha —
+                  ele vai abrir esta página automaticamente e já registrar o acesso.
+                </div>
+              ) : !cameraAberta ? (
                 <button onClick={iniciarCamera} className="mt-5 w-full rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c]">📷 Abrir câmera e ler QR Code</button>
               ) : (
                 <div className="mt-5">
@@ -156,6 +170,23 @@ export default function AcessosPage() {
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-white p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Mensalidade</p>
+                  <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
+                  {resultado.inadimplencia?.atrasado && (
+                    <p className="mt-1 text-xs font-semibold text-red-700">
+                      {resultado.inadimplencia.quantidade} em atraso ·{" "}
+                      {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl bg-white p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Exame médico</p>
+                  <p className="mt-1 font-black">{resultado.exame?.status?.texto || "Não informado"}</p>
+                </div>
+              </div>
             </section>
           )}
         </div>
