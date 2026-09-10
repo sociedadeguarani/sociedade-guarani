@@ -1,117 +1,165 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, ShieldAlert, UserRound, XCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, Clock3, Search, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
-function corExame(cor: string) {
-  if (cor === "verde") return "bg-green-50 border-green-200 text-green-800";
-  if (cor === "amarelo") return "bg-yellow-50 border-yellow-200 text-yellow-900";
-  if (cor === "vermelho") return "bg-red-50 border-red-200 text-red-800";
-  return "bg-gray-50 border-gray-200 text-gray-700";
-}
+type Resultado = {
+  socio?: { id: string; matricula: number | string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  liberado?: boolean;
+  acesso?: { entrada_em?: string; resultado?: string };
+};
 
-export default function ValidarCarteiraPage() {
-  const [carregando, setCarregando] = useState(true);
+export default function AcessosPage() {
+  const [matricula, setMatricula] = useState("");
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const [erro, setErro] = useState("");
-  const [resultado, setResultado] = useState<any>(null);
+  const [carregando, setCarregando] = useState(false);
+  const [cameraAberta, setCameraAberta] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const animationRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    let cancelado = false;
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const params = new URLSearchParams(window.location.search);
-        const id = params.get("id") || "";
-        if (!id) throw new Error("QR Code sem identificação do associado.");
-        if (!session) {
-          const destino = `/acessos/validar?id=${encodeURIComponent(id)}`;
-          window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
-          return;
-        }
-
-        const r = await fetch("/api/acessos", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ socio_id: id, local: "Portaria" }),
-          cache: "no-store",
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "Não foi possível registrar o acesso. Confira se o usuário do celular é Administrador ou Funcionário e tente novamente.");
-        if (!cancelado) setResultado(d);
-      } catch (e) {
-        if (!cancelado) setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
-      } finally {
-        if (!cancelado) setCarregando(false);
+  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string }) {
+    setErro("");
+    setResultado(null);
+    setCarregando(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        window.location.href = "/login?redirect=/acessos";
+        return;
       }
-    })();
-    return () => { cancelado = true; };
-  }, []);
+      const r = await fetch("/api/acessos", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(dados),
+        cache: "no-store",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Não foi possível registrar o acesso.");
+      setResultado(d);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
+    } finally {
+      setCarregando(false);
+    }
+  }
 
-  const exame = resultado?.exame;
-  const liberado = Boolean(resultado?.liberado);
+  function pararCamera() {
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setCameraAberta(false);
+  }
+
+  async function iniciarCamera() {
+    setErro("");
+    setResultado(null);
+    if (!("BarcodeDetector" in window)) {
+      setErro("Seu navegador não oferece leitura automática de QR Code. Use a matrícula ou abra a câmera do celular e leia o QR Code da carteirinha.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      streamRef.current = stream;
+      setCameraAberta(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      });
+
+      // BarcodeDetector é suportado nos navegadores modernos. O QR retorna a URL
+      // /acessos/validar?id=... e a API também aceita diretamente essa URL.
+      const Detector = (window as any).BarcodeDetector;
+      const detector = new Detector({ formats: ["qr_code"] });
+      const ler = async () => {
+        if (!videoRef.current || !streamRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          const valor = codes?.[0]?.rawValue;
+          if (valor) {
+            pararCamera();
+            await validar({ qr: valor });
+            return;
+          }
+        } catch {}
+        animationRef.current = requestAnimationFrame(ler);
+      };
+      animationRef.current = requestAnimationFrame(ler);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível acessar a câmera.");
+      pararCamera();
+    }
+  }
+
+  useEffect(() => () => pararCamera(), []);
 
   return (
-    <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
-      <div className="mx-auto max-w-md">
-        <div className="overflow-hidden rounded-[28px] bg-white shadow-xl ring-1 ring-black/5">
-          <div className="bg-[#005a3c] px-6 py-5 text-white">
-            <div className="flex items-center gap-3">
-              <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
-              <div>
-                <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
-                <h1 className="text-xl font-black">Validação de acesso</h1>
+    <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
+      <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <div>
+            <p className="text-sm text-gray-500">Portaria</p>
+            <h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1>
+            <p className="mt-1 text-sm text-gray-500">Consulte a carteirinha por matrícula ou leia o QR Code para validar e registrar a entrada.</p>
+          </div>
+
+          <section className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
+                <div><h2 className="text-xl font-black">Consultar por matrícula</h2><p className="text-sm text-gray-500">Digite o número da carteirinha.</p></div>
               </div>
+              <form onSubmit={(e) => { e.preventDefault(); if (matricula.trim()) validar({ matricula }); }} className="mt-5 flex gap-2">
+                <input value={matricula} onChange={(e) => setMatricula(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Ex.: 00125" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
+                <button disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+              </form>
             </div>
-          </div>
 
-          <div className="p-6">
-            {carregando && <div className="py-12 text-center"><Clock3 className="mx-auto h-10 w-10 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
-
-            {!carregando && erro && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
-                <XCircle className="h-10 w-10" />
-                <h2 className="mt-3 text-xl font-black">Não foi possível validar</h2>
-                <p className="mt-1 text-sm font-medium">{erro}</p>
+            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
+                <div><h2 className="text-xl font-black">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
               </div>
-            )}
-
-            {!carregando && !erro && resultado && (
-              <div className="space-y-4">
-                <div className={`rounded-2xl p-5 ${liberado ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
-                  {liberado ? <CheckCircle2 className="h-12 w-12" /> : <ShieldAlert className="h-12 w-12" />}
-                  <div className="mt-3 text-2xl font-black">{liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div>
-                  <div className="mt-1 text-sm font-semibold">A entrada foi registrada na portaria.</div>
+              {!cameraAberta ? (
+                <button onClick={iniciarCamera} className="mt-5 w-full rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c]">📷 Abrir câmera e ler QR Code</button>
+              ) : (
+                <div className="mt-5">
+                  <div className="overflow-hidden rounded-2xl bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div>
+                  <p className="mt-2 text-center text-xs font-semibold text-gray-500">Aponte para o QR Code da carteirinha.</p>
+                  <button onClick={pararCamera} className="mt-3 w-full rounded-xl border px-4 py-3 font-bold">Fechar câmera</button>
                 </div>
+              )}
+            </div>
+          </section>
 
-                <div className="rounded-2xl border bg-white p-4">
-                  <div className="flex gap-4">
-                    <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                      {resultado.socio?.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="text-xl font-black leading-tight">{resultado.socio?.nome}</h2>
-                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{resultado.socio?.matricula || "—"}</b></p>
-                      <p className="text-sm text-gray-500">Situação: <b>{resultado.socio?.situacao || "Não informada"}</b></p>
-                    </div>
+          {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
+
+          {resultado?.socio && (
+            <section className={`rounded-2xl border p-6 shadow-sm ${resultado.liberado ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="h-20 w-16 overflow-hidden rounded-xl bg-white">
+                    {resultado.socio.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
                   </div>
+                  <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.socio.situacao || "Não informada"}</b></p></div>
                 </div>
-
-                <div className={`rounded-2xl border p-4 ${corExame(exame?.status?.cor)}`}>
-                  <div className="text-xs font-black uppercase tracking-wide">Exame</div>
-                  <div className="mt-1 text-lg font-black">{exame?.status?.texto || "Exame não informado"}</div>
-                  <div className="mt-1 text-sm font-medium">Validade: {exame?.validade ? new Date(exame.validade).toLocaleDateString("pt-BR") : "—"}</div>
-                  <div className="mt-1 text-xs font-semibold">Verificado: {exame?.verificado ? "Sim" : "Não informado"}</div>
-                </div>
-
-                <div className="rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">
-                  Registro efetuado em {resultado.acesso?.entrada_em ? new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR") : "agora"}.
+                <div className="flex items-center gap-3">
+                  {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
+                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.entrada_em ? `Registrado em ${new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
-            )}
-          </div>
+              <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
+            </section>
+          )}
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
