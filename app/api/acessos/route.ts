@@ -11,9 +11,9 @@ export async function GET(request: Request) {
     const ate = searchParams.get("ate");
     let query = supabase
       .from("acessos_sociedade")
-      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao")
+      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao,socio:socios(nome,matricula,foto_url),usuario:usuarios_sistema(nome_exibicao)")
       .order("entrada_em", { ascending: false })
-      .limit(500);
+      .limit(1000);
     if (de) query = query.gte("entrada_em", `${de}T00:00:00`);
     if (ate) query = query.lte("entrada_em", `${ate}T23:59:59`);
     const { data, error } = await query;
@@ -46,7 +46,7 @@ async function verificarMensalidadesAtrasadas(
   ]);
   const itens = [...(emAtraso.data || []), ...(emAbertoVencida.data || [])];
   const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
-  return { atrasado: itens.length > 0, quantidade: itens.length, valorTotal };
+  return { atrasado: itens.length > 0, criticoTresMesesOuMais: itens.length >= 3, quantidade: itens.length, valorTotal };
 }
 
 async function avisarAdministradoresInadimplencia(
@@ -58,8 +58,8 @@ async function avisarAdministradoresInadimplencia(
 ) {
   try {
     await supabase.from("avisos").insert({
-      titulo: "⚠️ Sócio inadimplente acessou a sociedade",
-      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso, totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      titulo: "🔴 Sócio com 3+ meses de atraso acessou a sociedade",
+      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (3 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
       tipo: "urgente",
       prioridade: "alta",
       fixado: false,
@@ -85,7 +85,6 @@ export async function POST(request: Request) {
     const socioId = String(body?.socio_id || "").trim();
     const matricula = String(body?.matricula || "").trim();
     let dependenteId = String(body?.dependente_id || "").trim();
-    const local = String(body?.local || "Portaria").trim();
     const supabase = getServiceClient();
 
     let id = socioId;
@@ -143,10 +142,9 @@ export async function POST(request: Request) {
         socio_id: socio.id,
         usuario_id: auth.usuario.id,
         resultado,
-        local,
         observacao: dependenteId ? `Dependente: ${dependente?.nome || dependenteId}` : null,
       })
-      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao,local")
+      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao")
       .single();
     if (acessoError) throw new Error(`Falha ao registrar a entrada: ${acessoError.message}`);
 
@@ -159,7 +157,7 @@ export async function POST(request: Request) {
       : null;
 
     const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
-    if (inadimplenciaSocio.atrasado) {
+    if (inadimplenciaSocio.criticoTresMesesOuMais) {
       etapa = "gerando aviso de inadimplência";
       await avisarAdministradoresInadimplencia(
         supabase,
