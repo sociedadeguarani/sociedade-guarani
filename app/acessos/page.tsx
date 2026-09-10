@@ -111,10 +111,15 @@ export default function AcessosPage() {
       <MenuLateralPadrao />
       <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
         <div className="mx-auto max-w-5xl space-y-6">
-          <div>
-            <p className="text-sm text-gray-500">Portaria</p>
-            <h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1>
-            <p className="mt-1 text-sm text-gray-500">Consulte a carteirinha por matrícula ou leia o QR Code para validar e registrar a entrada.</p>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+            <div>
+              <p className="text-sm text-gray-500">Portaria</p>
+              <h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1>
+              <p className="mt-1 text-sm text-gray-500">Consulte a carteirinha por matrícula ou leia o QR Code para validar e registrar a entrada.</p>
+            </div>
+            <a href="/acessos/relatorio" className="inline-flex shrink-0 items-center gap-2 rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c] hover:bg-[#e8f3ee]">
+              📊 Relatório de acessos
+            </a>
           </div>
 
           <section className="grid gap-6 lg:grid-cols-2">
