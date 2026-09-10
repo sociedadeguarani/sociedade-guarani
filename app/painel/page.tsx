@@ -5,13 +5,31 @@ import { supabase } from "@/lib/supabaseClient";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
-const atalhos = [
+const atalhosAdmin = [
   ["👥", "Sócios", "/socios", "Cadastre, edite e consulte associados."],
   ["💰", "Financeiro", "/financeiro", "Mensalidades, recebimentos e despesas."],
   ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
   ["🎉", "Eventos", "/eventos", "Eventos, ingressos e fichas."],
   ["🎫", "Carteirinhas", "/carteirinhas", "Carteirinha digital e QR Code."],
   ["📢", "Avisos", "/avisos", "Comunicados para os associados."],
+  ["📦", "Inventário", "/inventario", "Patrimônio e controle de itens."],
+  ["🚪", "Acessos", "/acessos", "Controle e consulta de entradas."],
+];
+
+const atalhosFuncionario = [
+  ["🎫", "Carteirinhas", "/carteirinhas", "Consulte por matrícula ou QR Code."],
+  ["📦", "Inventário", "/inventario", "Patrimônio e controle de itens."],
+  ["🚪", "Acessos", "/acessos", "Controle e consulta de entradas."],
+  ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
+  ["🎉", "Eventos", "/eventos", "Eventos e informações."],
+  ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
+];
+
+const atalhosAssociado = [
+  ["🎫", "Carteirinhas", "/carteirinhas", "Sua carteirinha e a da sua família."],
+  ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
+  ["🎉", "Eventos", "/eventos", "Eventos e ingressos."],
+  ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
 ];
 
 function MiniIcon({ type }: { type: "users" | "shield" | "building" | "lock" }) {
@@ -42,7 +60,10 @@ export default function PainelPage() {
     })();
   }, []);
 
-  const admin = perfil.toLowerCase() === "administrador";
+  const perfilNormalizado = perfil.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const admin = perfilNormalizado === "administrador";
+  const funcionario = perfilNormalizado === "funcionario";
+  const atalhos = funcionario ? atalhosFuncionario : admin ? atalhosAdmin : atalhosAssociado;
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
