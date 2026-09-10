@@ -52,24 +52,64 @@ export default function CarteirinhasPage() {
   const [digitalAberta, setDigitalAberta] = useState(false);
 
   useEffect(() => {
+    let ativo = true;
     (async () => {
-      const { data: { session } } = await import("@/lib/supabaseClient").then((m) => m.supabase.auth.getSession());
+      const { supabase } = await import("@/lib/supabaseClient");
+      const { data: { session } } = await supabase.auth.getSession();
+      const params = new URLSearchParams(window.location.search);
+      const idQr = params.get("id") || "";
+      const registrar = params.get("registrar") === "1";
+
       if (!session) {
-        location.replace("/login");
+        const destino = `/carteirinhas?id=${encodeURIComponent(idQr)}${registrar ? "&registrar=1" : ""}`;
+        location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
         return;
       }
+
       const r = await fetch("/api/carteirinhas", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
       const d = await r.json();
       if (!r.ok) {
-        setErro(d.error || "Erro ao carregar carteirinhas.");
+        if (ativo) setErro(d.error || "Erro ao carregar carteirinhas.");
         return;
       }
-      setSocios(d.socios || []);
-      if (d.socios?.length === 1) setSelecionado(d.socios[0]);
+
+      const listaSocios: Socio[] = d.socios || [];
+      if (ativo) {
+        setSocios(listaSocios);
+        const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
+        if (socioQr) setSelecionado(socioQr);
+        else if (listaSocios.length === 1) setSelecionado(listaSocios[0]);
+      }
+
+      // O QR da carteirinha registra o acesso e, em seguida, permanece na própria carteirinha.
+      // O parâmetro "registrar=1" é removido da URL após a tentativa para evitar duplicação em F5.
+      if (registrar && idQr) {
+        try {
+          const rAcesso = await fetch("/api/acessos", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ socio_id: idQr, local: "Portaria" }),
+            cache: "no-store",
+          });
+          const dAcesso = await rAcesso.json();
+          if (!rAcesso.ok) throw new Error(dAcesso.error || "Não foi possível registrar o acesso.");
+          if (ativo) setErro("");
+        } catch (e) {
+          if (ativo) setErro(e instanceof Error ? `Carteirinha carregada, mas o acesso não foi registrado: ${e.message}` : "Carteirinha carregada, mas o acesso não foi registrado.");
+        } finally {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("registrar");
+          window.history.replaceState({}, "", url.toString());
+        }
+      }
     })();
+    return () => { ativo = false; };
   }, []);
 
   const lista = useMemo(() => socios.filter((s) => {
@@ -79,7 +119,7 @@ export default function CarteirinhasPage() {
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
-  const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
+  const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/carteirinhas?id=${encodeURIComponent(selecionado.id)}&registrar=1` : "";
 
   function imprimirCarteirinha() {
     if (!selecionado) return;
@@ -189,10 +229,10 @@ export default function CarteirinhasPage() {
           <div>
             <p className="text-sm text-gray-500">Identificação</p>
             <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
-            <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso.</p>
+            <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
           </div>
 
-          {erro && <div className="rounded-xl bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
+          {erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
 
           <div className="grid gap-6 lg:grid-cols-[1fr_430px]">
             <section className="rounded-2xl border bg-white p-5 shadow-sm">
