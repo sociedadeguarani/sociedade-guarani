@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
     let query = resultado.supabase
       .from("eventos_vendas")
-      .select("*, eventos:evento_id(id,titulo,data_inicio,local,imagem_url), socios:socio_id(id,nome,matricula)")
+      .select("*, eventos:evento_id(id,titulo,data_inicio,local,imagem_url,conta_bancaria_id,pix_copia_e_cola), socios:socio_id(id,nome,matricula)")
       .order("data_compra", { ascending: false });
 
     if (resultado.perfil === "associado") query = query.eq("socio_id", resultado.usuario.socio_id || "00000000-0000-0000-0000-000000000000");
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
     if (!evento_id) return NextResponse.json({ error: "Informe o evento." }, { status: 400 });
 
-    const { data: evento, error: eventoError } = await resultado.supabase.from("eventos").select("id,titulo,publicado,valor_ingresso,quantidade_disponivel").eq("id", evento_id).single();
+    const { data: evento, error: eventoError } = await resultado.supabase.from("eventos").select("id,titulo,publicado,valor_ingresso,quantidade_disponivel,conta_bancaria_id,pix_copia_e_cola").eq("id", evento_id).single();
     if (eventoError || !evento?.publicado) return NextResponse.json({ error: "Evento não disponível para compra." }, { status: 404 });
     const valorUnitario = Number(evento.valor_ingresso ?? valorUnitarioBody ?? 0);
     if (!Number.isFinite(valorUnitario) || valorUnitario < 0) return NextResponse.json({ error: "Este evento ainda não possui um valor válido para compra." }, { status: 400 });
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       comprovante_url: null,
       comprovante_enviado_em: null,
       observacoes: null,
-    }).select("*, eventos:evento_id(id,titulo,data_inicio,local,imagem_url)").single();
+    }).select("*, eventos:evento_id(id,titulo,data_inicio,local,imagem_url,conta_bancaria_id,pix_copia_e_cola)").single();
 
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true, venda: data });
@@ -102,11 +102,58 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true, venda: data });
     }
 
+    const { data: evento, error: eventoError } = await resultado.supabase
+      .from("eventos")
+      .select("id,titulo,valor_ingresso,conta_bancaria_id,pix_copia_e_cola")
+      .eq("id", venda.evento_id)
+      .single();
+    if (eventoError || !evento) return NextResponse.json({ error: "Evento da venda não encontrado." }, { status: 404 });
+    if (!evento.conta_bancaria_id) return NextResponse.json({ error: "Este evento não possui conta bancária de recebimento. Edite o evento e selecione a conta antes de aprovar." }, { status: 409 });
+
+    const { data: conta, error: contaError } = await resultado.supabase
+      .from("contas_bancarias")
+      .select("id,nome,banco")
+      .eq("id", evento.conta_bancaria_id)
+      .eq("ativo", true)
+      .single();
+    if (contaError || !conta) return NextResponse.json({ error: "A conta bancária do evento não está disponível." }, { status: 409 });
+
+    const { data: movimentoExistente, error: movimentoBuscaError } = await resultado.supabase
+      .from("movimentacoes_financeiras")
+      .select("id")
+      .eq("origem_tipo", "evento_venda")
+      .eq("origem_id", venda.id)
+      .maybeSingle();
+    if (movimentoBuscaError) throw new Error(movimentoBuscaError.message);
+
+    if (!movimentoExistente) {
+      const { error: movimentoError } = await resultado.supabase.from("movimentacoes_financeiras").insert({
+        conta_bancaria_id: evento.conta_bancaria_id,
+        conta_destino_id: null,
+        grupo_transferencia: null,
+        tipo: "entrada",
+        categoria: "Evento",
+        descricao: `${evento.titulo} - ${venda.codigo || "Venda de ingresso"} - ${venda.id.slice(0, 8)}`,
+        valor: Number(venda.valor_total || 0),
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        forma_pagamento: venda.forma_pagamento || "pix",
+        origem_tipo: "evento_venda",
+        origem_id: venda.id,
+        socio_id: venda.socio_id || null,
+        dependente_id: null,
+        comprovante_url: venda.comprovante_url || null,
+        conciliado: false,
+        data_conciliacao: null,
+        observacoes: `Recebimento do evento na conta ${conta.nome}${conta.banco ? ` (${conta.banco})` : ""}.`,
+      });
+      if (movimentoError) throw new Error(`Pagamento aprovado, mas não foi possível lançar no financeiro: ${movimentoError.message}`);
+    }
+
     const { numero, prefixo } = await gerarNumero(resultado.supabase, venda.evento_id, venda.prefixo || "ON");
     const codigo = `${prefixo}${String(numero).padStart(4, "0")}`;
     const { data, error } = await resultado.supabase.from("eventos_vendas").update({ status: "aprovado", prefixo, numero, codigo, codigo_qr: codigo, aprovado_por: resultado.usuario.id, aprovado_em: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", id).select("*").single();
     if (error) throw new Error(error.message);
-    return NextResponse.json({ ok: true, venda: data, financeiro_pendente: true });
+    return NextResponse.json({ ok: true, venda: data, financeiro_pendente: false, conta_bancaria: conta });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao processar venda." }, { status: 500 });
   }
