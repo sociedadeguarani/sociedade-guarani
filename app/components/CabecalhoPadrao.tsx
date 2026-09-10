@@ -24,19 +24,32 @@ function WhatsAppIcon() {
   );
 }
 
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current" strokeWidth="1.8">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10 21h4" />
+    </svg>
+  );
+}
+
+function UserCircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="9" r="2.6" />
+      <path d="M7.5 18c.9-2.2 2.4-3.3 4.5-3.3s3.6 1.1 4.5 3.3" />
+    </svg>
+  );
+}
+
 export default function CabecalhoPadrao() {
   const [nome, setNome] = useState("");
   const [perfil, setPerfil] = useState("");
 
   useEffect(() => {
-    setNome(
-      localStorage.getItem("guarani_usuario_nome") ||
-        localStorage.getItem("guarani_usuario_email") ||
-        "Usuário"
-    );
-    setPerfil(
-      (localStorage.getItem("guarani_usuario_perfil") || "").toLowerCase()
-    );
+    setNome(localStorage.getItem("guarani_usuario_nome") || localStorage.getItem("guarani_usuario_email") || "Usuário");
+    setPerfil((localStorage.getItem("guarani_usuario_perfil") || "").toLowerCase());
   }, []);
 
   async function sair() {
@@ -49,73 +62,36 @@ export default function CabecalhoPadrao() {
     window.location.replace("/login");
   }
 
-  const titulo =
-    perfil === "administrador"
-      ? "Administrador"
-      : perfil === "associado"
-        ? "Área do Associado"
-        : perfil === "funcionario"
-          ? "Área do Funcionário"
-          : "Sistema de Gestão";
+  const titulo = perfil === "administrador" ? "Administrador" : perfil === "associado" ? "Área do Associado" : perfil === "funcionario" ? "Área do Funcionário" : "Sistema de Gestão";
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#dfe7e2] bg-white/95 shadow-sm backdrop-blur">
-      <div className="flex min-h-[76px] items-center justify-between px-5 lg:px-6 lg:pl-[245px]">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-[#005a3c] p-1 lg:hidden">
-            <img
-              src="/logo-guarani.png"
-              alt="Sociedade Guarani"
-              className="h-full w-full object-contain"
-            />
+      <div className="flex min-h-[76px] items-center justify-between px-4 sm:px-5 lg:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1 shadow-sm ring-1 ring-[#e4ebe7]">
+            <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-full w-full object-contain" />
           </div>
-
-          <div>
-            <div className="text-lg font-extrabold text-[#005a3c]">
-              SOCIEDADE GUARANI
-            </div>
-            <div className="text-xs text-gray-500">
-              Sociedade Recreativa Guarani — S.R.G.
-            </div>
-
-            <div className="mt-1.5 flex items-center gap-2">
-              <a
-                href={INSTAGRAM_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Instagram da Sociedade Recreativa Guarani"
-                title="Instagram"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#005a3c] transition hover:bg-[#e8f3ee] hover:text-[#003d2b]"
-              >
-                <InstagramIcon />
-              </a>
-
-              <a
-                href={WHATSAPP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Conversar com a Sociedade Recreativa Guarani pelo WhatsApp"
-                title="WhatsApp"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#005a3c] transition hover:bg-[#e8f3ee] hover:text-[#003d2b]"
-              >
-                <WhatsAppIcon />
-              </a>
+          <div className="min-w-0">
+            <div className="text-base font-extrabold tracking-tight text-[#005a3c] sm:text-lg">SOCIEDADE GUARANI</div>
+            <div className="hidden text-xs text-gray-500 sm:block">Sociedade Recreativa Guarani — S.R.G.</div>
+            <div className="mt-1 flex items-center gap-1">
+              <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Instagram da Sociedade Recreativa Guarani" title="Instagram" className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#005a3c] transition hover:bg-[#e8f3ee]"><InstagramIcon /></a>
+              <a href={WHATSAPP_URL} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp da Sociedade Recreativa Guarani" title="WhatsApp" className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#005a3c] transition hover:bg-[#e8f3ee]"><WhatsAppIcon /></a>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <button type="button" aria-label="Notificações" title="Notificações" className="relative hidden h-10 w-10 items-center justify-center rounded-full text-[#005a3c] hover:bg-[#e8f3ee] sm:flex">
+            <BellIcon />
+            <span className="absolute right-2 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+          </button>
+          <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-[#005a3c] text-white sm:flex"><UserCircleIcon /></div>
           <div className="hidden text-right sm:block">
             <div className="text-sm font-bold text-[#17382c]">{nome}</div>
             <div className="text-xs text-[#005a3c]">{titulo}</div>
           </div>
-          <button
-            type="button"
-            onClick={sair}
-            className="rounded-xl border border-[#d5e0da] bg-white px-4 py-2 text-sm font-bold text-[#174133] hover:bg-[#f2f7f4]"
-          >
-            Sair
-          </button>
+          <button type="button" onClick={sair} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-2 text-sm font-bold text-[#174133] hover:bg-[#f2f7f4]">Sair</button>
         </div>
       </div>
     </header>
