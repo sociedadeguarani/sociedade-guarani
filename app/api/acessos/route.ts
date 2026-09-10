@@ -1,7 +1,46 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
-function extrairSocioId(qr:string){const valor=String(qr||"").trim();if(!valor)return "";if(valor.startsWith("guarani:socio:"))return valor.replace("guarani:socio:","").trim();try{const url=new URL(valor);return(url.searchParams.get("id")||url.searchParams.get("socio_id")||"").trim();}catch{return valor;}}
-function statusExame(v:string|null|undefined){if(!v)return{codigo:"nao_informado",texto:"Exame não informado",cor:"cinza"};const d=new Date(v);if(Number.isNaN(d.getTime()))return{codigo:"nao_informado",texto:"Exame não informado",cor:"cinza"};const agora=new Date();const fim=new Date(agora.getFullYear(),agora.getMonth(),agora.getDate(),23,59,59,999);if(d>=fim)return{codigo:"em_dia",texto:"Exame em dia",cor:"verde"};const dois=new Date(agora);dois.setMonth(dois.getMonth()-2);if(d>=dois)return{codigo:"atrasado_ate_2_meses",texto:"Exame atrasado até 2 meses",cor:"amarelo"};return{codigo:"muito_atrasado",texto:"Exame muito atrasado",cor:"vermelho"};}
-async function buscarExame(supabase:ReturnType<typeof getServiceClient>,socioId:string){try{const{data,error}=await supabase.from("acessos_piscina").select("exame_validade,exame_verificado,data_hora_entrada").eq("socio_id",socioId).order("data_hora_entrada",{ascending:false}).limit(1).maybeSingle();if(error||!data)return{validade:null,verificado:false,status:statusExame(null)};return{validade:data.exame_validade||null,verificado:Boolean(data.exame_verificado),status:statusExame(data.exame_validade)};}catch{return{validade:null,verificado:false,status:statusExame(null)};}}
-export async function GET(request:Request){const auth=await requireRoles(request,["administrador","funcionario"]);if("response"in auth)return auth.response;try{const supabase=getServiceClient();const{searchParams}=new URL(request.url);const de=searchParams.get("de"),ate=searchParams.get("ate");let query=supabase.from("acessos_sociedade").select("id,socio_id,usuario_id,entrada_em,local,resultado,observacao").order("entrada_em",{ascending:false}).limit(500);if(de)query=query.gte("entrada_em",`${de}T00:00:00`);if(ate)query=query.lte("entrada_em",`${ate}T23:59:59`);const{data:acessos,error}=await query;if(error)throw error;const socioIds=[...new Set((acessos||[]).map((a:any)=>a.socio_id).filter(Boolean))];const usuarioIds=[...new Set((acessos||[]).map((a:any)=>a.usuario_id).filter(Boolean))];const[{data:socios},{data:usuarios}]=await Promise.all([socioIds.length?supabase.from("socios").select("id,matricula,nome,tipo_socio,categoria,situacao").in("id",socioIds):Promise.resolve({data:[]as any[]}),usuarioIds.length?supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id",usuarioIds):Promise.resolve({data:[]as any[]})]);const sm=new Map((socios||[]).map((s:any)=>[s.id,s])),um=new Map((usuarios||[]).map((u:any)=>[u.id,u]));return NextResponse.json({acessos:(acessos||[]).map((a:any)=>({...a,socio:sm.get(a.socio_id)||null,usuario:um.get(a.usuario_id)||null}))});}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Erro ao carregar acessos."},{status:500});}}
-export async function POST(request:Request){const auth=await requireRoles(request,["administrador","funcionario"]);if("response"in auth)return auth.response;try{const body=await request.json();const id=String(body?.socio_id||extrairSocioId(body?.qr||"")).trim();if(!id)return NextResponse.json({error:"QR Code inválido ou sem identificação do associado."},{status:400});const supabase=getServiceClient();const{data:socio,error:socioError}=await supabase.from("socios").select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url").eq("id",id).maybeSingle();if(socioError)throw socioError;if(!socio)return NextResponse.json({error:"Associado não encontrado."},{status:404});const situacao=String(socio.situacao||"").toLowerCase();const liberado=["ativo","ativa","em_dia"].includes(situacao)||!situacao;const resultado=liberado?"liberado":"bloqueado";const{data:acesso,error:acessoError}=await supabase.from("acessos_sociedade").insert({socio_id:socio.id,usuario_id:auth.usuario.id,resultado,local:String(body?.local||"Portaria")}).select("id,socio_id,usuario_id,entrada_em,local,resultado,observacao").single();if(acessoError)return NextResponse.json({error:`O associado foi encontrado, mas não foi possível registrar a entrada: ${acessoError.message}`},{status:500});const exame=await buscarExame(supabase,socio.id);return NextResponse.json({acesso,socio,exame,liberado});}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Erro ao registrar acesso."},{status:500});}}
+
+export async function GET(request: Request) {
+  const auth = await requireRoles(request, ["administrador", "funcionario"]);
+  if ("response" in auth) return auth.response;
+  try {
+    const supabase = getServiceClient();
+    const { searchParams } = new URL(request.url);
+    const de = searchParams.get("de");
+    const ate = searchParams.get("ate");
+    let query = supabase.from("acessos_sociedade").select("id,socio_id,usuario_id,entrada_em,resultado,observacao").order("entrada_em", { ascending: false }).limit(500);
+    if (de) query = query.gte("entrada_em", `${de}T00:00:00`);
+    if (ate) query = query.lte("entrada_em", `${ate}T23:59:59`);
+    const { data, error } = await query;
+    if (error) throw error;
+    return NextResponse.json({ acessos: data || [] });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar acessos." }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await requireRoles(request, ["administrador", "funcionario"]);
+  if ("response" in auth) return auth.response;
+  try {
+    const body = await request.json();
+    const qr = String(body?.qr || "").trim();
+    const socioId = String(body?.socio_id || "").trim();
+    const supabase = getServiceClient();
+    let id = socioId;
+    if (!id && qr.startsWith("guarani:socio:")) id = qr.replace("guarani:socio:", "");
+    if (!id) return NextResponse.json({ error: "QR Code inválido." }, { status: 400 });
+    const { data: socio, error: socioError } = await supabase.from("socios").select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira").eq("id", id).maybeSingle();
+    if (socioError) throw socioError;
+    if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
+    const situacao = String(socio.situacao || "").toLowerCase();
+    const liberado = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
+    const resultado = liberado ? "liberado" : "bloqueado";
+    const { data: acesso, error } = await supabase.from("acessos_sociedade").insert({ socio_id: socio.id, usuario_id: auth.usuario.id, resultado }).select("id,socio_id,usuario_id,entrada_em,resultado,observacao").single();
+    if (error) throw error;
+    return NextResponse.json({ acesso, socio, liberado });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao registrar acesso." }, { status: 500 });
+  }
+}
