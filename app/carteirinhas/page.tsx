@@ -259,7 +259,7 @@ export default function CarteirinhasPage() {
 
             {selecionado && (
               <section className={modoQr ? "space-y-3" : "space-y-4"}>
-                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl">
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl`}>
                   <div className="card-top p-5" style={{ background: v.bg, color: v.text }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
