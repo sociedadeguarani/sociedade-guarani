@@ -1,15 +1,117 @@
 "use client";
+
 import { useEffect, useState } from "react";
-import { Camera, CheckCircle2, History, Search, XCircle } from "lucide-react";
-import MenuLateralPadrao from "../components/MenuLateralPadrao"; import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { CheckCircle2, Clock3, ShieldAlert, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
-type Acesso={id:string;entrada_em:string;local:string;resultado:string;socio?:{matricula:number|string|null;nome:string}|null;usuario?:{nome_exibicao:string|null}|null};
-export default function AcessosPage(){const [acessos,setAcessos]=useState<Acesso[]>([]);const [qr,setQr]=useState("");const [resultado,setResultado]=useState<any>(null);const [erro,setErro]=useState("");const [camera,setCamera]=useState(false);const [filtro,setFiltro]=useState("");
-async function token(){const {data:{session}}=await supabase.auth.getSession(); if(!session){location.replace('/login');throw new Error('Sessão expirada.')} return session.access_token;}
-async function carregar(){try{const t=await token();const r=await fetch('/api/acessos',{headers:{Authorization:`Bearer ${t}`},cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.error);setAcessos(d.acessos||[]);}catch(e){setErro(e instanceof Error?e.message:'Erro ao carregar acessos.')}}
-async function registrar(valor:string){setErro("");try{const t=await token();const r=await fetch('/api/acessos',{method:'POST',headers:{Authorization:`Bearer ${t}`,'Content-Type':'application/json'},body:JSON.stringify({qr:valor})});const d=await r.json();if(!r.ok)throw new Error(d.error);setResultado(d);setQr('');await carregar();}catch(e){setErro(e instanceof Error?e.message:'Erro ao registrar entrada.')}}
-useEffect(()=>{void carregar()},[]);
-useEffect(()=>{if(!camera)return;let stream:MediaStream|null=null;let timer:number|undefined;const start=async()=>{try{const video=document.getElementById('guarani-camera') as HTMLVideoElement|null;if(!video||!(window as any).BarcodeDetector) return;stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;await video.play();const Detector=(window as any).BarcodeDetector;const detector=new Detector({formats:['qr_code']});timer=window.setInterval(async()=>{try{const codes=await detector.detect(video);if(codes[0]?.rawValue) {setCamera(false);await registrar(codes[0].rawValue);}}catch{}},700);}catch(e){setErro('Não foi possível abrir a câmera. Use o campo de código abaixo.')}};void start();return()=>{if(timer)clearInterval(timer);stream?.getTracks().forEach(t=>t.stop())}},[camera]);
-const lista=acessos.filter(a=>!filtro||`${a.socio?.nome||''} ${a.socio?.matricula||''}`.toLowerCase().includes(filtro.toLowerCase()));
-return <div className="min-h-screen bg-[#f8faf9] text-[#17382c]"><CabecalhoPadrao/><MenuLateralPadrao/><main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8"><div className="mx-auto max-w-7xl space-y-6"><div><p className="text-sm text-gray-500">Portaria</p><h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1><p className="mt-1 text-sm text-gray-500">Leitura do QR Code e histórico de entradas na Sociedade.</p></div><section className="grid gap-5 lg:grid-cols-[1fr_1fr]"><div className="rounded-2xl border bg-white p-5 shadow-sm"><h2 className="text-xl font-black">Registrar entrada</h2><p className="mt-1 text-sm text-gray-500">Leia a carteira digital ou digite o código.</p><button onClick={()=>setCamera(true)} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-4 py-4 font-black text-white"><Camera/> Ler QR Code pela câmera</button><div className="my-4 text-center text-xs font-bold uppercase text-gray-400">ou</div><div className="flex gap-2"><input value={qr} onChange={e=>setQr(e.target.value)} placeholder="guarani:socio:..." className="min-w-0 flex-1 rounded-xl border px-4 py-3"/><button onClick={()=>registrar(qr)} className="rounded-xl border px-4 py-3 font-bold">Registrar</button></div>{erro&&<div className="mt-4 rounded-xl bg-red-50 p-3 font-semibold text-red-700">{erro}</div>}{resultado&&<div className={`mt-4 rounded-2xl p-5 ${resultado.liberado?'bg-green-50':'bg-red-50'}`}>{resultado.liberado?<CheckCircle2 className="h-8 w-8 text-green-600"/>:<XCircle className="h-8 w-8 text-red-600"/>}<div className="mt-2 text-xl font-black">{resultado.liberado?'ENTRADA LIBERADA':'ACESSO BLOQUEADO'}</div><div className="font-bold">{resultado.socio?.nome}</div><div className="text-sm">Matrícula: {resultado.socio?.matricula||'—'}</div></div>}</div><div className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><History className="text-[#005a3c]"/><h2 className="text-xl font-black">Últimos acessos</h2></div><div className="mt-4 flex items-center gap-2 rounded-xl border px-3"><Search className="h-4 w-4 text-gray-400"/><input value={filtro} onChange={e=>setFiltro(e.target.value)} placeholder="Filtrar sócio..." className="w-full py-3 outline-none"/></div><div className="mt-4 max-h-[360px] overflow-auto">{lista.map(a=><div key={a.id} className="border-b py-3"><div className="flex justify-between gap-3"><b>{a.socio?.nome||'—'}</b><span className={a.resultado==='liberado'?'text-green-700':'text-red-700'}>{a.resultado}</span></div><div className="text-xs text-gray-500">{new Date(a.entrada_em).toLocaleString('pt-BR')} · {a.usuario?.nome_exibicao||'Funcionário'}</div></div>)}</div></div></section>{camera&&<div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-4"><div className="flex items-center justify-between"><b>Leia o QR Code</b><button onClick={()=>setCamera(false)}>Fechar</button></div><video id="guarani-camera" className="mt-4 aspect-square w-full rounded-xl bg-black object-cover" playsInline muted/><p className="mt-3 text-center text-sm text-gray-500">A câmera usa o leitor de QR do navegador. Se não houver suporte, use o campo de código.</p></div></div>}</div></main></div>}
+function corExame(cor: string) {
+  if (cor === "verde") return "bg-green-50 border-green-200 text-green-800";
+  if (cor === "amarelo") return "bg-yellow-50 border-yellow-200 text-yellow-900";
+  if (cor === "vermelho") return "bg-red-50 border-red-200 text-red-800";
+  return "bg-gray-50 border-gray-200 text-gray-700";
+}
+
+export default function ValidarCarteiraPage() {
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [resultado, setResultado] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get("id") || "";
+        if (!id) throw new Error("QR Code sem identificação do associado.");
+        if (!session) {
+          const destino = `/acessos/validar?id=${encodeURIComponent(id)}`;
+          window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
+          return;
+        }
+
+        const r = await fetch("/api/acessos", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ socio_id: id, local: "Portaria" }),
+          cache: "no-store",
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Não foi possível registrar o acesso. Confira se o usuário do celular é Administrador ou Funcionário e tente novamente.");
+        if (!cancelado) setResultado(d);
+      } catch (e) {
+        if (!cancelado) setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
+      } finally {
+        if (!cancelado) setCarregando(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, []);
+
+  const exame = resultado?.exame;
+  const liberado = Boolean(resultado?.liberado);
+
+  return (
+    <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
+      <div className="mx-auto max-w-md">
+        <div className="overflow-hidden rounded-[28px] bg-white shadow-xl ring-1 ring-black/5">
+          <div className="bg-[#005a3c] px-6 py-5 text-white">
+            <div className="flex items-center gap-3">
+              <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+              <div>
+                <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                <h1 className="text-xl font-black">Validação de acesso</h1>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {carregando && <div className="py-12 text-center"><Clock3 className="mx-auto h-10 w-10 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
+
+            {!carregando && erro && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
+                <XCircle className="h-10 w-10" />
+                <h2 className="mt-3 text-xl font-black">Não foi possível validar</h2>
+                <p className="mt-1 text-sm font-medium">{erro}</p>
+              </div>
+            )}
+
+            {!carregando && !erro && resultado && (
+              <div className="space-y-4">
+                <div className={`rounded-2xl p-5 ${liberado ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+                  {liberado ? <CheckCircle2 className="h-12 w-12" /> : <ShieldAlert className="h-12 w-12" />}
+                  <div className="mt-3 text-2xl font-black">{liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div>
+                  <div className="mt-1 text-sm font-semibold">A entrada foi registrada na portaria.</div>
+                </div>
+
+                <div className="rounded-2xl border bg-white p-4">
+                  <div className="flex gap-4">
+                    <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                      {resultado.socio?.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="text-xl font-black leading-tight">{resultado.socio?.nome}</h2>
+                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{resultado.socio?.matricula || "—"}</b></p>
+                      <p className="text-sm text-gray-500">Situação: <b>{resultado.socio?.situacao || "Não informada"}</b></p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`rounded-2xl border p-4 ${corExame(exame?.status?.cor)}`}>
+                  <div className="text-xs font-black uppercase tracking-wide">Exame</div>
+                  <div className="mt-1 text-lg font-black">{exame?.status?.texto || "Exame não informado"}</div>
+                  <div className="mt-1 text-sm font-medium">Validade: {exame?.validade ? new Date(exame.validade).toLocaleDateString("pt-BR") : "—"}</div>
+                  <div className="mt-1 text-xs font-semibold">Verificado: {exame?.verificado ? "Sim" : "Não informado"}</div>
+                </div>
+
+                <div className="rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">
+                  Registro efetuado em {resultado.acesso?.entrada_em ? new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR") : "agora"}.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
