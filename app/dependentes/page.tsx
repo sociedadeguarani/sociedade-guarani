@@ -10,6 +10,7 @@ type Socio = {
   matricula: string | null;
   nome: string;
   situacao: string | null;
+  situacao_financeira: string | null;
 };
 
 type Dependente = {
@@ -123,7 +124,7 @@ export default function DependentesPage() {
       }
 
       const [sociosResult, dependentesResult] = await Promise.all([
-        supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
+        supabase.from("socios").select("id, matricula, nome, situacao, situacao_financeira").order("nome"),
         supabase.from("dependentes")
           .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
           .order("nome"),
@@ -331,11 +332,11 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Sem mensalidade"}</td>
                             <td className="px-5 py-4"><span className={`rounded-full px-3 py-1 text-xs font-black ${
-                              !d.possui_mensalidade || d.situacao_financeira === "isento" ? "bg-slate-100 text-slate-500" :
-                              d.situacao_financeira === "em_atraso" ? "bg-red-100 text-red-700" :
-                              d.situacao_financeira === "em_dia" ? "bg-emerald-100 text-emerald-700" :
+                              !socio || socio.situacao_financeira === "isento" || !socio.situacao_financeira ? "bg-slate-100 text-slate-500" :
+                              socio.situacao_financeira === "em_atraso" ? "bg-red-100 text-red-700" :
+                              socio.situacao_financeira === "em_dia" ? "bg-emerald-100 text-emerald-700" :
                               "bg-amber-100 text-amber-700"
-                            }`}>{!d.possui_mensalidade || d.situacao_financeira === "isento" ? "Isento" : d.situacao_financeira === "em_atraso" ? "Em atraso" : d.situacao_financeira === "em_dia" ? "Em dia" : "Pendente"}</span></td>
+                            }`} title="Segue sempre a situação financeira do sócio titular">{!socio || !socio.situacao_financeira || socio.situacao_financeira === "isento" ? "Isento" : socio.situacao_financeira === "em_atraso" ? "Em atraso" : socio.situacao_financeira === "em_dia" ? "Em dia" : "Pendente"}</span></td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button><button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button></div></td>
                           </tr>
