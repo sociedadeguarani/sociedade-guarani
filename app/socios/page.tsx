@@ -35,6 +35,7 @@ type Socio = {
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
+  conta_bancaria_id: string | null;
   modalidade_temporada: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
@@ -79,6 +80,7 @@ const socioInicial: Partial<Socio> = {
   valor_mensalidade: 0,
   dia_vencimento: 10,
   tipo_pagamento: "pix",
+  conta_bancaria_id: null,
   modalidade_temporada: null,
   inicio_temporada: "",
   fim_temporada: "",
@@ -168,6 +170,7 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
+  const [contasBancarias, setContasBancarias] = useState<{ id: string; nome: string; banco: string | null; agencia: string | null; conta: string | null }[]>([]);
 
   function selecionarFoto(file: File | null) {
     setFotoArquivo(file);
@@ -208,6 +211,7 @@ export default function Home() {
       const json = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(json.error || "Erro ao carregar os sócios.");
       setSocios(json.socios || []);
+      setContasBancarias(json.contasBancarias || []);
       setMensagem("");
     } catch (error) {
       console.error(error);
@@ -306,6 +310,7 @@ export default function Home() {
       valor_mensalidade: Number(form.valor_mensalidade || 0),
       dia_vencimento: Number(form.dia_vencimento || 10),
       tipo_pagamento: form.tipo_pagamento || "pix",
+      conta_bancaria_id: form.conta_bancaria_id || null,
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
@@ -1316,6 +1321,29 @@ function ModalSocio({
                         dinheiro: "Dinheiro",
                       }}
                     />
+
+                    {form.tipo_pagamento === "debito_em_conta" ? (
+                      <div className="md:col-span-4 rounded-xl border border-[#b8d9c9] bg-white p-4">
+                        <p className="mb-2 text-sm font-extrabold text-[#003d2b]">🏦 Conta bancária para receber a mensalidade</p>
+                        <select
+                          value={form.conta_bancaria_id || ""}
+                          onChange={(e) => alterarCampo("conta_bancaria_id", e.target.value)}
+                          className="input"
+                          required
+                        >
+                          <option value="">Selecione uma conta cadastrada no Financeiro</option>
+                          {contasBancarias.map((conta) => (
+                            <option key={conta.id} value={conta.id}>
+                              {conta.nome}{conta.banco ? ` · ${conta.banco}` : ""}{conta.agencia ? ` · Ag. ${conta.agencia}` : ""}{conta.conta ? ` · Conta ${conta.conta}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-2 text-xs text-gray-500">Ao registrar a mensalidade como paga, o valor será lançado automaticamente como entrada nessa conta e somado ao saldo.</p>
+                        {contasBancarias.length === 0 ? (
+                          <p className="mt-2 text-xs font-bold text-red-600">Nenhuma conta bancária ativa foi cadastrada no Financeiro.</p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
               </div>
