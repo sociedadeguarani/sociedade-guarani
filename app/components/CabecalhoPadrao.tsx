@@ -82,7 +82,13 @@ export default function CabecalhoPadrao() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <button type="button" aria-label="Notificações" title="Notificações" className="relative hidden h-10 w-10 items-center justify-center rounded-full text-[#005a3c] hover:bg-[#e8f3ee] sm:flex">
+          <button
+            type="button"
+            onClick={() => { window.location.href = "/avisos"; }}
+            aria-label="Notificações"
+            title="Ver avisos"
+            className="relative hidden h-10 w-10 items-center justify-center rounded-full text-[#005a3c] hover:bg-[#e8f3ee] sm:flex"
+          >
             <BellIcon />
             <span className="absolute right-2 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           </button>
