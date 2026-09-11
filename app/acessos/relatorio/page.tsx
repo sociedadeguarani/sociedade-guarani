@@ -9,9 +9,9 @@ import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 type Acesso = {
   id: string;
   socio_id: string;
-  usuario_id: string;
-  entrada_em: string;
-  resultado: string | null;
+  registrado_por: string;
+  data_hora_entrada: string;
+  autorizado: boolean | null;
   observacao: string | null;
   socio?: { nome: string; matricula: number | string | null; foto_url?: string | null } | null;
   usuario?: { nome_exibicao: string | null } | null;
@@ -66,8 +66,8 @@ export default function RelatorioAcessosPage() {
     );
   });
 
-  const totalLiberados = filtrados.filter((a) => a.resultado === "liberado").length;
-  const totalBloqueados = filtrados.filter((a) => a.resultado === "bloqueado").length;
+  const totalLiberados = filtrados.filter((a) => a.autorizado === true).length;
+  const totalBloqueados = filtrados.filter((a) => a.autorizado === false).length;
 
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
@@ -145,7 +145,7 @@ export default function RelatorioAcessosPage() {
                   )}
                   {!carregando && filtrados.map((a) => (
                     <tr key={a.id}>
-                      <td className="p-3 font-bold">{new Date(a.entrada_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
+                      <td className="p-3 font-bold">{new Date(a.data_hora_entrada).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-100">
@@ -156,7 +156,7 @@ export default function RelatorioAcessosPage() {
                       </td>
                       <td className="p-3">{a.socio?.matricula || "—"}</td>
                       <td className="p-3">
-                        {a.resultado === "liberado" ? (
+                        {a.autorizado === true ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700"><CheckCircle2 className="h-3.5 w-3.5" />Liberado</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700"><ShieldAlert className="h-3.5 w-3.5" />Bloqueado</span>
