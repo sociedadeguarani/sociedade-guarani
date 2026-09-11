@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const ate = searchParams.get("ate");
     let query = supabase
       .from("acessos_sociedade")
-      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao,socio:socios(nome,matricula,foto_url),usuario:usuarios_sistema(nome_exibicao)")
+      .select("id,socio_id,usuario_id,entrada_em,resultado,socio:socios(nome,matricula,foto_url),usuario:usuarios_sistema(nome_exibicao)")
       .order("entrada_em", { ascending: false })
       .limit(1000);
     if (de) query = query.gte("entrada_em", `${de}T00:00:00`);
@@ -142,9 +142,8 @@ export async function POST(request: Request) {
         socio_id: socio.id,
         usuario_id: auth.usuario.id,
         resultado,
-        observacao: dependenteId ? `Dependente: ${dependente?.nome || dependenteId}` : null,
       })
-      .select("id,socio_id,usuario_id,entrada_em,resultado,observacao")
+      .select("id,socio_id,usuario_id,entrada_em,resultado")
       .single();
     if (acessoError) throw new Error(`Falha ao registrar a entrada: ${acessoError.message}`);
 
