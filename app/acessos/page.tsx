@@ -9,7 +9,7 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 type Resultado = {
   socio?: { id: string; matricula: number | string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
   liberado?: boolean;
-  acesso?: { entrada_em?: string; resultado?: string };
+  acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean };
   mensalidade?: { texto: string; cor: string } | null;
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
   inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
@@ -171,7 +171,7 @@ export default function AcessosPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
-                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.entrada_em ? `Registrado em ${new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR")}` : ""}</p></div>
+                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
