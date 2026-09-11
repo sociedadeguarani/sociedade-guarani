@@ -170,7 +170,7 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
-  const [contasBancarias, setContasBancarias] = useState<{ id: string; nome: string; banco: string | null; agencia: string | null; conta: string | null }[]>([]);
+  const [contasBancarias, setContasBancarias] = useState<{id:string; nome:string; banco:string|null; ativo:boolean}[]>([]);
 
   function selecionarFoto(file: File | null) {
     setFotoArquivo(file);
@@ -211,7 +211,8 @@ export default function Home() {
       const json = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(json.error || "Erro ao carregar os sócios.");
       setSocios(json.socios || []);
-      setContasBancarias(json.contasBancarias || []);
+      const { data: contas } = await supabase.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome", { ascending: true });
+      setContasBancarias(contas || []);
       setMensagem("");
     } catch (error) {
       console.error(error);
@@ -1323,26 +1324,16 @@ function ModalSocio({
                     />
 
                     {form.tipo_pagamento === "debito_em_conta" ? (
-                      <div className="md:col-span-4 rounded-xl border border-[#b8d9c9] bg-white p-4">
-                        <p className="mb-2 text-sm font-extrabold text-[#003d2b]">🏦 Conta bancária para receber a mensalidade</p>
-                        <select
-                          value={form.conta_bancaria_id || ""}
-                          onChange={(e) => alterarCampo("conta_bancaria_id", e.target.value)}
-                          className="input"
-                          required
-                        >
-                          <option value="">Selecione uma conta cadastrada no Financeiro</option>
-                          {contasBancarias.map((conta) => (
-                            <option key={conta.id} value={conta.id}>
-                              {conta.nome}{conta.banco ? ` · ${conta.banco}` : ""}{conta.agencia ? ` · Ag. ${conta.agencia}` : ""}{conta.conta ? ` · Conta ${conta.conta}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="mt-2 text-xs text-gray-500">Ao registrar a mensalidade como paga, o valor será lançado automaticamente como entrada nessa conta e somado ao saldo.</p>
-                        {contasBancarias.length === 0 ? (
-                          <p className="mt-2 text-xs font-bold text-red-600">Nenhuma conta bancária ativa foi cadastrada no Financeiro.</p>
-                        ) : null}
-                      </div>
+                      <SelectCampo
+                        label="Banco para débito"
+                        value={form.conta_bancaria_id || ""}
+                        onChange={(v) => alterarCampo("conta_bancaria_id", v)}
+                        opcoes={["", ...contasBancarias.filter((c) => c.ativo !== false).map((c) => c.id)]}
+                        labels={{
+                          "": "Selecione o banco",
+                          ...Object.fromEntries(contasBancarias.filter((c) => c.ativo !== false).map((c) => [c.id, `${c.nome}${c.banco ? ` — ${c.banco}` : ""}`])),
+                        }}
+                      />
                     ) : null}
                   </>
                 ) : null}
