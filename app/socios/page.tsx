@@ -41,6 +41,15 @@ type Socio = {
   fim_temporada: string | null;
 };
 
+type ContaBancaria = {
+  id: string;
+  nome: string;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  ativo: boolean;
+};
+
 const menus = [
   { nome: "Início", icone: "🏠", rota: "/painel" },
   { nome: "Sócios", icone: "👥", rota: "/socios" },
@@ -170,7 +179,7 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
-  const [contasBancarias, setContasBancarias] = useState<{id:string; nome:string; banco:string|null; ativo:boolean}[]>([]);
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
 
   function selecionarFoto(file: File | null) {
     setFotoArquivo(file);
@@ -211,8 +220,6 @@ export default function Home() {
       const json = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(json.error || "Erro ao carregar os sócios.");
       setSocios(json.socios || []);
-      const { data: contas } = await supabase.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome", { ascending: true });
-      setContasBancarias(contas || []);
       setMensagem("");
     } catch (error) {
       console.error(error);
@@ -224,7 +231,25 @@ export default function Home() {
 
   useEffect(() => {
     carregarSocios();
+    carregarContasBancarias();
   }, []);
+
+  async function carregarContasBancarias() {
+    try {
+      const { data, error } = await supabase
+        .from("contas_bancarias")
+        .select("id,nome,banco,agencia,conta,ativo")
+        .eq("ativo", true)
+        .order("nome", { ascending: true });
+      if (error) {
+        console.warn("Não foi possível carregar as contas bancárias:", error);
+        return;
+      }
+      setContasBancarias((data || []) as ContaBancaria[]);
+    } catch (error) {
+      console.warn("Não foi possível carregar as contas bancárias:", error);
+    }
+  }
 
   function novoSocio() {
     setSocioEditando(null);
@@ -311,7 +336,7 @@ export default function Home() {
       valor_mensalidade: Number(form.valor_mensalidade || 0),
       dia_vencimento: Number(form.dia_vencimento || 10),
       tipo_pagamento: form.tipo_pagamento || "pix",
-      conta_bancaria_id: form.conta_bancaria_id || null,
+      conta_bancaria_id: form.tipo_pagamento === "debito_em_conta" ? (form.conta_bancaria_id || null) : null,
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
@@ -1324,16 +1349,25 @@ function ModalSocio({
                     />
 
                     {form.tipo_pagamento === "debito_em_conta" ? (
-                      <SelectCampo
-                        label="Banco para débito"
-                        value={form.conta_bancaria_id || ""}
-                        onChange={(v) => alterarCampo("conta_bancaria_id", v)}
-                        opcoes={["", ...contasBancarias.filter((c) => c.ativo !== false).map((c) => c.id)]}
-                        labels={{
-                          "": "Selecione o banco",
-                          ...Object.fromEntries(contasBancarias.filter((c) => c.ativo !== false).map((c) => [c.id, `${c.nome}${c.banco ? ` — ${c.banco}` : ""}`])),
-                        }}
-                      />
+                      <div className="md:col-span-4 rounded-2xl border border-[#cfe3d8] bg-[#f7faf8] p-4">
+                        <p className="mb-3 text-sm font-extrabold text-[#005a3c]">🏦 Conta bancária para receber a mensalidade</p>
+                        <label className="mb-2 block text-sm font-semibold text-gray-700">Banco / conta</label>
+                        <select
+                          value={form.conta_bancaria_id || ""}
+                          onChange={(e) => alterarCampo("conta_bancaria_id", e.target.value)}
+                          className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c]"
+                        >
+                          <option value="">Selecione a conta cadastrada no Financeiro</option>
+                          {contasBancarias.map((conta) => (
+                            <option key={conta.id} value={conta.id}>
+                              {conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {contasBancarias.length === 0 ? (
+                          <p className="mt-2 text-xs font-semibold text-amber-700">Nenhuma conta bancária ativa foi cadastrada no Financeiro.</p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </>
                 ) : null}
