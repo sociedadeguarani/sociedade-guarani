@@ -370,6 +370,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
+        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -389,6 +390,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
+        conta_bancaria_id: responsavel?.conta_bancaria_id || d.conta_bancaria_id || null,
       });
     }
 
