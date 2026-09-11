@@ -17,7 +17,6 @@ type Socio = {
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
-  conta_bancaria_id: string | null;
 };
 
 type Dependente = {
@@ -62,7 +61,6 @@ type PessoaFinanceira = {
   valor_mensalidade: number;
   dia_vencimento: number;
   tipo_pagamento: string;
-  conta_bancaria_id: string | null;
 };
 
 type ContaBancaria = {
@@ -99,14 +97,19 @@ type MovimentoFinanceiro = {
 };
 
 const MENU = [
-  ["Início", "🏠", "/painel"],
-  ["Sócios", "👥", "/socios"],
-  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
-  ["Reservas", "📅", "/reservas"],
-  ["Eventos", "🎉", "/eventos"],
-  ["Financeiro", "💰", "/financeiro"],
-  ["Espaços", "🏛️", "/espacos"],
-  ["Relatórios", "📊", "/relatorios"],
+  ["Início", "⌂", "/painel"],
+  ["Sócios", "♟", "/socios"],
+  ["Dependentes", "♟", "/dependentes"],
+  ["Reservas", "▣", "/reservas"],
+  ["Eventos", "✣", "/eventos"],
+  ["Convites", "▧", "/convites"],
+  ["Avisos", "⚑", "/avisos"],
+  ["Carteirinhas", "▤", "/carteirinhas"],
+  ["Acessos", "⇥", "/acessos"],
+  ["Financeiro", "▣", "/financeiro"],
+  ["Relatórios", "▥", "/relatorios"],
+  ["Inventário", "▱", "/inventario"],
+  ["Usuários", "♙", "/usuarios"],
 ] as const;
 
 const FORMAS = [
@@ -263,13 +266,6 @@ export default function FinanceiroPage() {
   const [transObservacoes, setTransObservacoes] = useState("");
   const [contaPagamentoId, setContaPagamentoId] = useState("");
 
-  // Baixa em lote por banco/competência
-  const [loteBancoId, setLoteBancoId] = useState("");
-  const [loteFormaPagamento, setLoteFormaPagamento] = useState("debito_em_conta");
-  const [loteSelecionados, setLoteSelecionados] = useState<string[]>([]);
-  const [loteDataPagamento, setLoteDataPagamento] = useState(new Date().toISOString().slice(0, 10));
-  const [baixandoLote, setBaixandoLote] = useState(false);
-
   // Filtros do fluxo de caixa
   const [fluxoInicio, setFluxoInicio] = useState("");
   const [fluxoFim, setFluxoFim] = useState("");
@@ -299,7 +295,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
-        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -334,7 +329,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
-        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
       });
     }
 
@@ -369,7 +363,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
-        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -389,7 +382,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
-        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
       });
     }
 
@@ -550,126 +542,6 @@ export default function FinanceiroPage() {
     pessoas,
   ]);
 
-  const mensalidadesLote = useMemo(() => {
-    return mensalidadesCompetencia.filter((item) => {
-      if (item.situacao === "pago" || item.situacao === "isento") return false;
-      if (loteFormaPagamento && (item.tipo_pagamento || "pix") !== loteFormaPagamento) return false;
-      if (!loteBancoId) return true;
-      const pessoa = pessoaDoLancamento(item);
-      return pessoa?.conta_bancaria_id === loteBancoId;
-    });
-  }, [mensalidadesCompetencia, loteFormaPagamento, loteBancoId, mapaPessoa]);
-
-  const loteSelecionadasItens = useMemo(
-    () => mensalidadesLote.filter((m) => loteSelecionados.includes(m.id)),
-    [mensalidadesLote, loteSelecionados]
-  );
-  const loteTotal = loteSelecionadasItens.reduce((s, m) => s + Number(m.valor || 0), 0);
-
-  function alternarLote(id: string) {
-    setLoteSelecionados((atual) =>
-      atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]
-    );
-  }
-
-  function selecionarTodosLote() {
-    setLoteSelecionados(
-      loteSelecionadasItens.length === mensalidadesLote.length && mensalidadesLote.length > 0
-        ? []
-        : mensalidadesLote.map((m) => m.id)
-    );
-  }
-
-  async function baixarMensalidadesEmLote() {
-    if (loteSelecionadasItens.length === 0) {
-      setMensagem("Selecione pelo menos uma mensalidade para lançar em lote.");
-      return;
-    }
-    if (!loteBancoId) {
-      setMensagem("Selecione a conta bancária que receberá o lote.");
-      return;
-    }
-
-    setBaixandoLote(true);
-    setMensagem("");
-    try {
-      const ids = loteSelecionadasItens.map((m) => m.id);
-      const { error: updateError } = await supabase
-        .from("mensalidades")
-        .update({
-          situacao: "pago",
-          data_pagamento: loteDataPagamento || new Date().toISOString().slice(0, 10),
-          tipo_pagamento: loteFormaPagamento,
-        })
-        .in("id", ids)
-        .neq("situacao", "pago");
-      if (updateError) throw updateError;
-
-      const socioIds = [...new Set(loteSelecionadasItens.map((m) => m.socio_id))];
-      const atualizadas = new Set(ids);
-      const { data: restantes, error: restantesError } = await supabase
-        .from("mensalidades")
-        .select("id,socio_id,situacao,data_vencimento")
-        .in("socio_id", socioIds);
-      if (restantesError) throw restantesError;
-
-      for (const socioId of socioIds) {
-        const temAtraso = (restantes || []).some((m) =>
-          m.socio_id === socioId &&
-          !atualizadas.has(m.id) &&
-          m.situacao !== "pago" &&
-          m.situacao !== "isento" &&
-          (m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < new Date().toISOString().slice(0, 10)))
-        );
-        await supabase.from("socios").update({
-          situacao_financeira: temAtraso ? "em_atraso" : "em_dia",
-          data_ultimo_pagamento: loteDataPagamento || null,
-        }).eq("id", socioId);
-      }
-
-      const { data: movimento, error: movimentoError } = await supabase
-        .from("movimentacoes_financeiras")
-        .insert({
-          conta_bancaria_id: loteBancoId,
-          conta_destino_id: null,
-          grupo_transferencia: null,
-          tipo: "entrada",
-          categoria: "Mensalidade",
-          descricao: `Baixa em lote de mensalidades — ${formatarCompetencia(competencia)} (${loteSelecionadasItens.length} associados)`,
-          valor: loteTotal,
-          data_movimentacao: loteDataPagamento || new Date().toISOString().slice(0, 10),
-          forma_pagamento: loteFormaPagamento,
-          origem_tipo: "mensalidade_lote",
-          origem_id: null,
-          socio_id: null,
-          dependente_id: null,
-          comprovante_url: null,
-          conciliado: false,
-          data_conciliacao: null,
-          observacoes: `Competência ${competencia}; ${ids.length} mensalidade(s).`,
-        })
-        .select("*")
-        .single();
-      if (movimentoError) throw movimentoError;
-
-      setMensalidades((lista) =>
-        lista.map((m) =>
-          ids.includes(m.id)
-            ? { ...m, situacao: "pago", data_pagamento: loteDataPagamento, tipo_pagamento: loteFormaPagamento }
-            : m
-        )
-      );
-      setMovimentosFinanceiros((lista) => [movimento as MovimentoFinanceiro, ...lista]);
-      setLoteSelecionados([]);
-      setMensagem(`${ids.length} mensalidade(s) lançada(s) como pagas. Total ${formatarMoeda(loteTotal)} contabilizado em ${contasBancarias.find((c) => c.id === loteBancoId)?.nome || "conta bancária"}.`);
-    } catch (error) {
-      console.error(error);
-      setMensagem(`Não foi possível baixar o lote. ${error instanceof Error ? error.message : ""}`);
-    } finally {
-      setBaixandoLote(false);
-    }
-  }
-
   const totalLancado = mensalidadesCompetencia.reduce(
     (s, m) => s + Number(m.valor || 0),
     0
@@ -692,7 +564,7 @@ export default function FinanceiroPage() {
         supabase
           .from("socios")
           .select(
-            "id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id"
+            "id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento"
           )
           .order("matricula", { ascending: true }),
         supabase
@@ -2049,66 +1921,6 @@ export default function FinanceiroPage() {
                 {mensalidadesCompetencia.length} lançamento(s)
               </span>
             </div>
-          </div>
-
-          <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">Baixa em lote</p>
-                <h3 className="mt-1 text-xl font-extrabold text-[#173d2e]">Lançar mensalidades por banco</h3>
-                <p className="mt-1 text-sm text-gray-500">Selecione a conta, a competência e marque vários sócios de uma vez.</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-gray-500">Conta bancária</label>
-                  <select value={loteBancoId} onChange={(e) => { setLoteBancoId(e.target.value); setLoteSelecionados([]); }} className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm font-semibold">
-                    <option value="">Selecione a conta</option>
-                    {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-gray-500">Forma de pagamento</label>
-                  <select value={loteFormaPagamento} onChange={(e) => { setLoteFormaPagamento(e.target.value); setLoteSelecionados([]); }} className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm font-semibold">
-                    {FORMAS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-gray-500">Data do pagamento</label>
-                  <input type="date" value={loteDataPagamento} onChange={(e) => setLoteDataPagamento(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm font-semibold" />
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3 rounded-xl bg-[#f6faf8] p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <button onClick={selecionarTodosLote} disabled={mensalidadesLote.length === 0} className="rounded-lg border border-[#b9d7ca] bg-white px-3 py-2 font-bold text-[#005a3c] disabled:opacity-50">☑ {loteSelecionadasItens.length === mensalidadesLote.length && mensalidadesLote.length > 0 ? "Desmarcar todos" : "Selecionar todos"}</button>
-                <span className="font-semibold text-gray-600">{mensalidadesLote.length} pendente(s)</span>
-                <span className="font-bold text-[#005a3c]">{loteSelecionadasItens.length} selecionada(s) · {formatarMoeda(loteTotal)}</span>
-              </div>
-              <button onClick={() => void baixarMensalidadesEmLote()} disabled={baixandoLote || loteSelecionadasItens.length === 0 || !loteBancoId} className="rounded-xl bg-[#005a3c] px-5 py-3 text-sm font-extrabold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50">{baixandoLote ? "Lançando..." : "💰 Lançar mensalidades selecionadas"}</button>
-            </div>
-
-            {mensalidadesLote.length > 0 && (
-              <div className="mt-4 max-h-72 overflow-auto rounded-xl border border-[#e2ebe6]">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead className="sticky top-0 bg-[#e8f3ee] text-left text-xs uppercase tracking-wide text-gray-500">
-                    <tr><th className="px-4 py-3">✓</th><th className="px-4 py-3">Matrícula</th><th className="px-4 py-3">Sócio</th><th className="px-4 py-3">Vencimento</th><th className="px-4 py-3">Valor</th><th className="px-4 py-3">Situação</th></tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {mensalidadesLote.map((item) => { const pessoa = pessoaDoLancamento(item); const marcado = loteSelecionados.includes(item.id); return (
-                      <tr key={item.id} className={marcado ? "bg-[#f0f8f4]" : "hover:bg-[#fafcfb]"}>
-                        <td className="px-4 py-3"><input type="checkbox" checked={marcado} onChange={() => alternarLote(item.id)} className="h-4 w-4 accent-[#005a3c]" /></td>
-                        <td className="px-4 py-3 font-semibold">{pessoa?.matricula || "—"}</td>
-                        <td className="px-4 py-3 font-bold text-[#173d2e]">{pessoa?.nome || "Cadastro não localizado"}{pessoa?.dependente_id ? <span className="ml-2 text-xs font-semibold text-gray-400">Dependente</span> : ""}</td>
-                        <td className="px-4 py-3">{formatarData(item.data_vencimento)}</td>
-                        <td className="px-4 py-3 font-bold text-[#005a3c]">{formatarMoeda(item.valor)}</td>
-                        <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${situacaoClasse(item.situacao)}`}>{situacaoRotulo(item.situacao)}</span></td>
-                      </tr>
-                    ); })}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
 
           <div className="mb-6 overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
