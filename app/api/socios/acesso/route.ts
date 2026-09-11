@@ -1,99 +1,99 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
-async function autorizar(request: Request, permitirEscrita = false) {
-  const acesso = await usuarioAutenticado(request);
-  if ("error" in acesso) return { response: NextResponse.json({ error: acesso.error }, { status: acesso.status }) };
-
-  const podeLer = ["administrador", "funcionario"].includes(acesso.perfil);
-  const podeEscrever = ["administrador", "funcionario"].includes(acesso.perfil);
-  if (!podeLer || (permitirEscrita && !podeEscrever)) {
-    return { response: NextResponse.json({ error: "Sem permissão para acessar os sócios." }, { status: 403 }) };
-  }
-  return { supabase: acesso.supabase, usuario: acesso.usuario };
-}
-
-export async function GET(request: Request) {
-  try {
-    const acesso = await autorizar(request);
-    if ("response" in acesso) return acesso.response;
-
-    const { data, error } = await acesso.supabase
-      .from("socios")
-      .select("*")
-      .order("matricula", { ascending: true });
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ socios: data || [] });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
-  }
-}
-
+// Cria (ou sincroniza) o acesso de login de um associado.
+// Login: matrícula do sócio. Senha inicial: 6 primeiros números do CPF.
+// O associado pode trocar a senha depois, então NUNCA resetamos a senha
+// de um acesso que já existe — só criamos na primeira vez.
 export async function POST(request: Request) {
+  const auth = await requireRoles(request, ["administrador", "funcionario"]);
+  if ("response" in auth) return auth.response;
+
+  let etapa = "iniciando";
   try {
-    const acesso = await autorizar(request, true);
-    if ("response" in acesso) return acesso.response;
+    const body = await request.json().catch(() => ({}));
+    const socioId = String(body?.socio_id || "").trim();
+    if (!socioId) return NextResponse.json({ error: "Informe o sócio." }, { status: 400 });
 
-    const body = await request.json();
-    const dados = { ...body };
-    delete dados.id;
-    delete dados.created_at;
-    delete dados.updated_at;
+    const supabase = getServiceClient();
 
-    const matricula = String(dados.matricula ?? "").replace(/\D/g, "");
-    if (!matricula) return NextResponse.json({ error: "Informe a matrícula do associado." }, { status: 400 });
-    dados.matricula = Number(matricula);
+    etapa = "buscando sócio";
+    const { data: socio, error: socioError } = await supabase
+      .from("socios")
+      .select("id,matricula,nome,cpf")
+      .eq("id", socioId)
+      .maybeSingle();
+    if (socioError) throw new Error(socioError.message);
+    if (!socio) return NextResponse.json({ error: "Sócio não encontrado." }, { status: 404 });
+    if (!socio.matricula) return NextResponse.json({ error: "O sócio precisa ter uma matrícula cadastrada." }, { status: 400 });
 
-    const { data, error } = await acesso.supabase.from("socios").insert(dados).select("*").single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ socio: data });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
-  }
-}
+    const cpfDigitos = String(socio.cpf || "").replace(/\D/g, "");
+    if (cpfDigitos.length < 6) {
+      return NextResponse.json({ error: "O sócio precisa ter um CPF com pelo menos 6 dígitos cadastrado para criar o acesso." }, { status: 400 });
+    }
+    const senhaInicial = cpfDigitos.slice(0, 6);
+    const emailAcesso = `matricula${socio.matricula}@guarani.socios`;
 
-export async function PATCH(request: Request) {
-  try {
-    const acesso = await autorizar(request, true);
-    if ("response" in acesso) return acesso.response;
+    etapa = "buscando perfil de associado";
+    const { data: perfilAssociado, error: perfilError } = await supabase
+      .from("perfis")
+      .select("id")
+      .eq("nome", "associado")
+      .maybeSingle();
+    if (perfilError) throw new Error(perfilError.message);
+    if (!perfilAssociado) return NextResponse.json({ error: "Perfil 'associado' não está cadastrado em perfis." }, { status: 500 });
 
-    const body = await request.json();
-    const id = String(body?.id || "").trim();
-    if (!id) return NextResponse.json({ error: "Informe o sócio." }, { status: 400 });
+    etapa = "verificando acesso existente";
+    const { data: usuarioExistente, error: usuarioError } = await supabase
+      .from("usuarios_sistema")
+      .select("id,ativo")
+      .eq("socio_id", socio.id)
+      .maybeSingle();
+    if (usuarioError) throw new Error(usuarioError.message);
 
-    const dados = { ...(body?.dados || {}) };
-    delete dados.id;
-    delete dados.created_at;
-    delete dados.updated_at;
+    if (usuarioExistente) {
+      etapa = "sincronizando acesso existente";
+      // Já existe: só garante que está ativo e com o perfil certo.
+      // Não mexe na senha para não sobrescrever uma senha que o associado já trocou.
+      const { error: updateError } = await supabase
+        .from("usuarios_sistema")
+        .update({ ativo: true, perfil_id: perfilAssociado.id, nome_exibicao: socio.nome })
+        .eq("id", usuarioExistente.id);
+      if (updateError) throw new Error(updateError.message);
 
-    if (dados.matricula !== undefined) {
-      const matricula = String(dados.matricula ?? "").replace(/\D/g, "");
-      if (!matricula) return NextResponse.json({ error: "A matrícula não pode ficar vazia." }, { status: 400 });
-      dados.matricula = Number(matricula);
+      return NextResponse.json({ ok: true, criado: false, matricula: socio.matricula });
     }
 
-    const { data, error } = await acesso.supabase.from("socios").update(dados).eq("id", id).select("*").single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ socio: data });
+    etapa = "criando usuário de autenticação";
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: emailAcesso,
+      password: senhaInicial,
+      email_confirm: true,
+      user_metadata: { nome_exibicao: socio.nome, perfil: "associado", socio_id: socio.id },
+    });
+    if (authError || !authData.user) throw new Error(authError?.message || "Não foi possível criar o acesso de autenticação.");
+
+    etapa = "cadastrando usuário do sistema";
+    const { error: insertError } = await supabase.from("usuarios_sistema").insert({
+      id: authData.user.id,
+      perfil_id: perfilAssociado.id,
+      socio_id: socio.id,
+      funcionario_id: null,
+      ativo: true,
+      nome_exibicao: socio.nome,
+    });
+    if (insertError) {
+      // Se o cadastro do sistema falhar, desfaz o usuário de autenticação criado.
+      await supabase.auth.admin.deleteUser(authData.user.id);
+      throw new Error(insertError.message);
+    }
+
+    return NextResponse.json({ ok: true, criado: true, matricula: socio.matricula, senhaInicial });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar sócio." }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const acesso = await autorizar(request, true);
-    if ("response" in acesso) return acesso.response;
-
-    const body = await request.json();
-    const id = String(body?.id || "").trim();
-    if (!id) return NextResponse.json({ error: "Informe o sócio." }, { status: 400 });
-
-    const { error } = await acesso.supabase.from("socios").delete().eq("id", id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir sócio." }, { status: 500 });
+    console.error(`Erro ao criar/sincronizar acesso (etapa: ${etapa}):`, error);
+    return NextResponse.json(
+      { error: `Erro ao criar acesso (${etapa}): ${error instanceof Error ? error.message : String(error)}` },
+      { status: 500 }
+    );
   }
 }
