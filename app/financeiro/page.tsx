@@ -19,6 +19,7 @@ type Socio = {
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
+  conta_bancaria_id: string | null;
 };
 
 type Dependente = {
@@ -63,6 +64,7 @@ type PessoaFinanceira = {
   valor_mensalidade: number;
   dia_vencimento: number;
   tipo_pagamento: string;
+  conta_bancaria_id: string | null;
 };
 
 type ContaBancaria = {
@@ -293,6 +295,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
+        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -327,6 +330,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
+        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
       });
     }
 
@@ -361,6 +365,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
+        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -380,6 +385,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
+        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
       });
     }
 
@@ -584,7 +590,7 @@ export default function FinanceiroPage() {
       }
 
       const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
+        supabase.from("socios").select("id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,telefone,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
         supabase.from("mensalidades").select("*").order("competencia", { ascending: false }).order("data_vencimento", { ascending: true }),
         supabase.from("contas_bancarias").select("*").eq("ativo", true).order("nome", { ascending: true }),
@@ -731,7 +737,8 @@ export default function FinanceiroPage() {
   }
 
   async function abrirPagamento(item: Mensalidade) {
-    setContaPagamentoId("");
+    const pessoa = pessoaDoLancamento(item);
+    setContaPagamentoId(pessoa?.conta_bancaria_id || "");
     setPagamento(item);
     setValorPagamento(String(Number(item.valor || 0)));
     setDataPagamento(new Date().toISOString().slice(0, 10));
@@ -841,6 +848,10 @@ export default function FinanceiroPage() {
         throw new Error(
           `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total das competências selecionadas (${formatarMoeda(totalSelecionado)}).`
         );
+      }
+
+      if (tipoPagamento === "debito_em_conta" && !contaPagamentoId) {
+        throw new Error("Selecione a conta bancária cadastrada no Financeiro para receber esta mensalidade por débito em conta.");
       }
 
       const { error } = await supabase
