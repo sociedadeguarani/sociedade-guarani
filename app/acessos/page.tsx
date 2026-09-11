@@ -1,72 +1,109 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CalendarDays, CheckCircle2, Search, ShieldAlert, UserRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, Clock3, Search, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../../components/CabecalhoPadrao";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
-type Acesso = {
-  id: string;
-  socio_id: string;
-  usuario_id: string;
-  entrada_em: string;
-  resultado: string | null;
-  socio?: { nome: string; matricula: number | string | null; foto_url?: string | null } | null;
-  usuario?: { nome_exibicao: string | null } | null;
+type Resultado = {
+  socio?: { id: string; matricula: number | string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  liberado?: boolean;
+  acesso?: { entrada_em?: string; resultado?: string };
+  mensalidade?: { texto: string; cor: string } | null;
+  exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
+  inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
 };
 
-function hojeISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-export default function RelatorioAcessosPage() {
-  const [data, setData] = useState(hojeISO());
-  const [acessos, setAcessos] = useState<Acesso[]>([]);
-  const [busca, setBusca] = useState("");
-  const [carregando, setCarregando] = useState(true);
+export default function AcessosPage() {
+  const [matricula, setMatricula] = useState("");
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const [erro, setErro] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [cameraAberta, setCameraAberta] = useState(false);
+  const [suportaLeituraQr, setSuportaLeituraQr] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const animationRef = useRef<number | null>(null);
 
-  async function carregar(dataEscolhida: string) {
-    setCarregando(true);
+  useEffect(() => {
+    setSuportaLeituraQr("BarcodeDetector" in window);
+  }, []);
+
+  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string }) {
     setErro("");
+    setResultado(null);
+    setCarregando(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        window.location.href = "/login?redirect=/acessos/relatorio";
+        window.location.href = "/login?redirect=/acessos";
         return;
       }
-      const r = await fetch(`/api/acessos?de=${dataEscolhida}&ate=${dataEscolhida}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      const r = await fetch("/api/acessos", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(dados),
         cache: "no-store",
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Não foi possível carregar os acessos.");
-      setAcessos(d.acessos || []);
+      if (!r.ok) throw new Error(d.error || "Não foi possível registrar o acesso.");
+      setResultado(d);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar os acessos.");
-      setAcessos([]);
+      setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
     } finally {
       setCarregando(false);
     }
   }
 
-  useEffect(() => {
-    carregar(data);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  function pararCamera() {
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setCameraAberta(false);
+  }
 
-  const termo = busca.trim().toLowerCase();
-  const filtrados = acessos.filter((a) => {
-    if (!termo) return true;
-    return (
-      a.socio?.nome?.toLowerCase().includes(termo) ||
-      String(a.socio?.matricula || "").includes(termo)
-    );
-  });
+  async function iniciarCamera() {
+    setErro("");
+    setResultado(null);
+    if (!("BarcodeDetector" in window)) {
+      setErro("Seu navegador não oferece leitura automática de QR Code. Use a matrícula ou abra a câmera do celular e leia o QR Code da carteirinha.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      streamRef.current = stream;
+      setCameraAberta(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      });
 
-  const totalLiberados = filtrados.filter((a) => a.resultado === "liberado").length;
-  const totalBloqueados = filtrados.filter((a) => a.resultado === "bloqueado").length;
+      // BarcodeDetector é suportado nos navegadores modernos. O QR retorna a URL
+      // /acessos/validar?id=... e a API também aceita diretamente essa URL.
+      const Detector = (window as any).BarcodeDetector;
+      const detector = new Detector({ formats: ["qr_code"] });
+      const ler = async () => {
+        if (!videoRef.current || !streamRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          const valor = codes?.[0]?.rawValue;
+          if (valor) {
+            pararCamera();
+            await validar({ qr: valor });
+            return;
+          }
+        } catch {}
+        animationRef.current = requestAnimationFrame(ler);
+      };
+      animationRef.current = requestAnimationFrame(ler);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível acessar a câmera.");
+      pararCamera();
+    }
+  }
+
+  useEffect(() => () => pararCamera(), []);
 
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
@@ -74,100 +111,89 @@ export default function RelatorioAcessosPage() {
       <MenuLateralPadrao />
       <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
         <div className="mx-auto max-w-5xl space-y-6">
-          <div>
-            <p className="text-sm text-gray-500">Portaria</p>
-            <h1 className="text-3xl font-extrabold text-[#005a3c]">Relatório de acessos</h1>
-            <p className="mt-1 text-sm text-gray-500">Consulte quantas pessoas entraram e em que horário, por dia.</p>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+            <div>
+              <p className="text-sm text-gray-500">Portaria</p>
+              <h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1>
+              <p className="mt-1 text-sm text-gray-500">Consulte a carteirinha por matrícula ou leia o QR Code para validar e registrar a entrada.</p>
+            </div>
+            <a href="/acessos/relatorio" className="inline-flex shrink-0 items-center gap-2 rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c] hover:bg-[#e8f3ee]">
+              📊 Relatório de acessos
+            </a>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-2xl border bg-white p-5 shadow-sm sm:flex-row sm:items-end sm:justify-between">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-black uppercase tracking-wide text-gray-500">
-                <CalendarDays className="mr-1 inline h-4 w-4" />Data
-              </span>
-              <input
-                type="date"
-                value={data}
-                onChange={(e) => setData(e.target.value)}
-                className="rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]"
-              />
-            </label>
-
-            <label className="block flex-1 sm:max-w-xs">
-              <span className="mb-1.5 block text-xs font-black uppercase tracking-wide text-gray-500">
-                <Search className="mr-1 inline h-4 w-4" />Buscar nome ou matrícula
-              </span>
-              <input
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                placeholder="Ex.: João ou 00125"
-                className="w-full rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]"
-              />
-            </label>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-sm text-gray-500">Total de acessos no dia</p>
-              <p className="mt-1 text-3xl font-black text-[#005a3c]">{filtrados.length}</p>
+          <section className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
+                <div><h2 className="text-xl font-black">Consultar por matrícula</h2><p className="text-sm text-gray-500">Digite o número da carteirinha.</p></div>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); if (matricula.trim()) validar({ matricula }); }} className="mt-5 flex gap-2">
+                <input value={matricula} onChange={(e) => setMatricula(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Ex.: 00125" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
+                <button disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+              </form>
             </div>
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-sm text-gray-500">Liberados</p>
-              <p className="mt-1 text-3xl font-black text-green-700">{totalLiberados}</p>
-            </div>
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-sm text-gray-500">Bloqueados</p>
-              <p className="mt-1 text-3xl font-black text-red-700">{totalBloqueados}</p>
-            </div>
-          </div>
 
-          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-800">{erro}</div>}
+            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
+                <div><h2 className="text-xl font-black">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
+              </div>
+              {!suportaLeituraQr ? (
+                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                  Este navegador (comum em iPhone) não permite ler QR Code direto no site.
+                  Abra o <b>app de Câmera do celular</b> e aponte para o QR Code da carteirinha —
+                  ele vai abrir esta página automaticamente e já registrar o acesso.
+                </div>
+              ) : !cameraAberta ? (
+                <button onClick={iniciarCamera} className="mt-5 w-full rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c]">📷 Abrir câmera e ler QR Code</button>
+              ) : (
+                <div className="mt-5">
+                  <div className="overflow-hidden rounded-2xl bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div>
+                  <p className="mt-2 text-center text-xs font-semibold text-gray-500">Aponte para o QR Code da carteirinha.</p>
+                  <button onClick={pararCamera} className="mt-3 w-full rounded-xl border px-4 py-3 font-bold">Fechar câmera</button>
+                </div>
+              )}
+            </div>
+          </section>
 
-          <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
-                <thead className="bg-[#e8f3ee] text-xs font-black uppercase text-gray-500">
-                  <tr>
-                    <th className="p-3 text-left">Horário</th>
-                    <th className="p-3 text-left">Associado</th>
-                    <th className="p-3 text-left">Matrícula</th>
-                    <th className="p-3 text-left">Resultado</th>
-                    <th className="p-3 text-left">Registrado por</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {carregando && (
-                    <tr><td colSpan={5} className="p-10 text-center text-gray-500">Carregando acessos...</td></tr>
+          {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
+
+          {resultado?.socio && (
+            <section className={`rounded-2xl border p-6 shadow-sm ${resultado.liberado ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="h-20 w-16 overflow-hidden rounded-xl bg-white">
+                    {resultado.socio.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
+                  </div>
+                  <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.socio.situacao || "Não informada"}</b></p></div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
+                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.entrada_em ? `Registrado em ${new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR")}` : ""}</p></div>
+                </div>
+              </div>
+              <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-white p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Mensalidade</p>
+                  <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
+                  {resultado.inadimplencia?.atrasado && (
+                    <p className="mt-1 text-xs font-semibold text-red-700">
+                      {resultado.inadimplencia.quantidade} em atraso ·{" "}
+                      {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </p>
                   )}
-                  {!carregando && filtrados.length === 0 && (
-                    <tr><td colSpan={5} className="p-10 text-center text-gray-500">Nenhum acesso registrado nesse dia.</td></tr>
-                  )}
-                  {!carregando && filtrados.map((a) => (
-                    <tr key={a.id}>
-                      <td className="p-3 font-bold">{new Date(a.entrada_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-100">
-                            {a.socio?.foto_url ? <img src={a.socio.foto_url} alt={a.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
-                          </div>
-                          <span className="font-semibold">{a.socio?.nome || "—"}</span>
-                        </div>
-                      </td>
-                      <td className="p-3">{a.socio?.matricula || "—"}</td>
-                      <td className="p-3">
-                        {a.resultado === "liberado" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700"><CheckCircle2 className="h-3.5 w-3.5" />Liberado</span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700"><ShieldAlert className="h-3.5 w-3.5" />Bloqueado</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-sm text-gray-600">{a.usuario?.nome_exibicao || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </div>
+                <div className="rounded-xl bg-white p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Exame médico</p>
+                  <p className="mt-1 font-black">{resultado.exame?.status?.texto || "Não informado"}</p>
+                </div>
+              </div>
+            </section>
+          )}
         </div>
       </main>
     </div>
