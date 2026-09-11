@@ -33,6 +33,7 @@ type Dependente = {
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
+  conta_bancaria_id: string | null;
 };
 
 type Mensalidade = {
@@ -205,6 +206,10 @@ export default function FinanceiroPage() {
   const [gerando, setGerando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
+  const [filtroBancoId, setFiltroBancoId] = useState("todos");
+  const [selecionadosLote, setSelecionadosLote] = useState<string[]>([]);
+  const [processandoLote, setProcessandoLote] = useState(false);
+
   const [filtroAtraso, setFiltroAtraso] = useState<
     "todos" | "atrasados" | "verde" | "amarelo" | "vermelho"
   >("todos");
@@ -330,7 +335,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
-        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
+        conta_bancaria_id: responsavel?.conta_bancaria_id || d.conta_bancaria_id || null,
       });
     }
 
@@ -365,7 +370,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
-        conta_bancaria_id: s.conta_bancaria_id || null,
       });
     }
 
@@ -385,7 +389,6 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
-        conta_bancaria_id: responsavel?.conta_bancaria_id || null,
       });
     }
 
@@ -524,6 +527,10 @@ export default function FinanceiroPage() {
 
       if (!correspondeBusca) return false;
 
+      if (filtroBancoId !== "todos") {
+        if (!pessoa || pessoa.conta_bancaria_id !== filtroBancoId) return false;
+      }
+
       if (filtroAtraso === "todos") return true;
 
       // O filtro pode chegar aqui mesmo quando o lançamento não encontrou
@@ -542,9 +549,24 @@ export default function FinanceiroPage() {
     mensalidadesCompetencia,
     busca,
     filtroAtraso,
+    filtroBancoId,
     historicoPorPessoa,
     pessoas,
   ]);
+
+  useEffect(() => {
+    setSelecionadosLote([]);
+  }, [competencia, filtroBancoId]);
+
+  const mensalidadesLote = useMemo(() => mensalidadesCompetencia.filter((m) => {
+    if (m.situacao === "pago" || m.situacao === "isento") return false;
+    const pessoa = pessoaDoLancamento(m);
+    if (!pessoa) return false;
+    return filtroBancoId !== "todos" && pessoa.conta_bancaria_id === filtroBancoId;
+  }), [mensalidadesCompetencia, filtroBancoId, pessoas]);
+
+  const todosLoteSelecionados = mensalidadesLote.length > 0 && mensalidadesLote.every((m) => selecionadosLote.includes(m.id));
+  const totalLote = mensalidadesLote.filter((m) => selecionadosLote.includes(m.id)).reduce((s,m)=>s+Number(m.valor||0),0);
 
   const totalLancado = mensalidadesCompetencia.reduce(
     (s, m) => s + Number(m.valor || 0),
@@ -590,7 +612,7 @@ export default function FinanceiroPage() {
       }
 
       const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id").order("matricula", { ascending: true }),
+        supabase.from("socios").select("id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,telefone,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
         supabase.from("mensalidades").select("*").order("competencia", { ascending: false }).order("data_vencimento", { ascending: true }),
         supabase.from("contas_bancarias").select("*").eq("ativo", true).order("nome", { ascending: true }),
@@ -736,9 +758,51 @@ export default function FinanceiroPage() {
     }
   }
 
+  async function confirmarPagamentoLote() {
+    if (filtroBancoId === "todos") {
+      setMensagem("Selecione um banco para fazer a baixa em lote.");
+      return;
+    }
+    const selecionadas = mensalidadesLote.filter((m) => selecionadosLote.includes(m.id));
+    if (!selecionadas.length) {
+      setMensagem("Selecione pelo menos uma mensalidade.");
+      return;
+    }
+    const conta = contasBancarias.find((c) => c.id === filtroBancoId);
+    if (!conta) { setMensagem("Conta bancária não encontrada."); return; }
+    if (!window.confirm(`Confirmar baixa de ${selecionadas.length} mensalidade(s) da competência ${formatarCompetencia(competencia)} no banco ${conta.nome}?\n\nTotal: ${formatarMoeda(totalLote)}`)) return;
+
+    setProcessandoLote(true); setMensagem("");
+    try {
+      const ids = selecionadas.map(m=>m.id);
+      const hoje = new Date().toISOString().slice(0,10);
+      const { data: atuais, error: checkError } = await supabase.from("mensalidades").select("id,situacao").in("id", ids);
+      if (checkError) throw checkError;
+      const invalidas = (atuais||[]).filter(m=>m.situacao === "pago" || m.situacao === "isento");
+      if (invalidas.length) throw new Error("Uma ou mais mensalidades já foram pagas ou estão isentas. Atualize a tela e tente novamente.");
+
+      const { error } = await supabase.from("mensalidades").update({ situacao:"pago", data_pagamento:hoje, tipo_pagamento:"debito_em_conta" }).in("id", ids);
+      if (error) throw error;
+
+      const { data: movimento, error: movimentoError } = await supabase.from("movimentacoes_financeiras").insert({
+        conta_bancaria_id: conta.id, conta_destino_id:null, grupo_transferencia:null, tipo:"entrada", categoria:"Mensalidade",
+        descricao:`Mensalidades ${formatarCompetencia(competencia)} — ${selecionadas.length} associados — ${conta.nome}`, valor:totalLote,
+        data_movimentacao:hoje, forma_pagamento:"debito_em_conta", origem_tipo:"mensalidade_lote", origem_id:competencia, socio_id:null, dependente_id:null, comprovante_url:null, conciliado:false, data_conciliacao:null, observacoes:`Baixa em lote de ${selecionadas.length} mensalidade(s).`,
+      }).select("*").single();
+      if (movimentoError) throw movimentoError;
+
+      setMensalidades(lista=>lista.map(m=>ids.includes(m.id)?{...m,situacao:"pago",data_pagamento:hoje,tipo_pagamento:"debito_em_conta"}:m));
+      if (movimento) setMovimentosFinanceiros(lista=>[movimento as MovimentoFinanceiro,...lista]);
+      setSelecionadosLote([]);
+      setMensagem(`${selecionadas.length} mensalidade(s) baixada(s) no ${conta.nome}. Total: ${formatarMoeda(totalLote)}.`);
+    } catch(error) {
+      console.error(error);
+      setMensagem(`Não foi possível fazer a baixa em lote. ${error instanceof Error ? error.message : ""}`);
+    } finally { setProcessandoLote(false); }
+  }
+
   async function abrirPagamento(item: Mensalidade) {
-    const pessoa = pessoaDoLancamento(item);
-    setContaPagamentoId(pessoa?.conta_bancaria_id || "");
+    setContaPagamentoId("");
     setPagamento(item);
     setValorPagamento(String(Number(item.valor || 0)));
     setDataPagamento(new Date().toISOString().slice(0, 10));
@@ -848,10 +912,6 @@ export default function FinanceiroPage() {
         throw new Error(
           `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total das competências selecionadas (${formatarMoeda(totalSelecionado)}).`
         );
-      }
-
-      if (tipoPagamento === "debito_em_conta" && !contaPagamentoId) {
-        throw new Error("Selecione a conta bancária cadastrada no Financeiro para receber esta mensalidade por débito em conta.");
       }
 
       const { error } = await supabase
@@ -1862,11 +1922,39 @@ export default function FinanceiroPage() {
             </div>
           </div>
 
+          <div className="mb-4 rounded-2xl border border-[#dfe9e3] bg-white p-4 shadow-sm">
+            <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <div>
+                <label className="mb-2 block text-sm font-bold text-[#173d2e]">🏦 Banco / conta do débito</label>
+                <select value={filtroBancoId} onChange={(e)=>setFiltroBancoId(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
+                  <option value="todos">Selecione um banco para baixa em lote</option>
+                  {contasBancarias.map((c)=><option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
+                </select>
+              </div>
+              <div className="rounded-xl bg-[#f7faf8] px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Pendentes neste banco</p>
+                <p className="mt-1 text-xl font-extrabold text-[#005a3c]">{mensalidadesLote.length} <span className="text-sm font-semibold text-gray-500">· {formatarMoeda(mensalidadesLote.reduce((a,m)=>a+Number(m.valor||0),0))}</span></p>
+              </div>
+              <button disabled={processandoLote || !mensalidadesLote.length || !selecionadosLote.length} onClick={()=>void confirmarPagamentoLote()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{processandoLote ? "Baixando..." : `💳 Baixar ${selecionadosLote.length || "selecionadas"} em lote`}</button>
+            </div>
+            {filtroBancoId !== "todos" && mensalidadesLote.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#e8efeb] pt-4">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-[#173d2e]">
+                  <input type="checkbox" checked={todosLoteSelecionados} onChange={(e)=>setSelecionadosLote(e.target.checked ? mensalidadesLote.map(m=>m.id) : [])} className="h-5 w-5 accent-[#005a3c]" />
+                  Selecionar todos os pendentes deste banco
+                </label>
+                <span className="text-sm font-bold text-[#005a3c]">Selecionados: {selecionadosLote.length} · Total: {formatarMoeda(totalLote)}</span>
+              </div>
+            )}
+            {filtroBancoId === "todos" && <p className="mt-3 text-xs text-gray-500">Escolha a conta bancária para listar somente os associados vinculados a ela. A baixa em lote usa automaticamente a competência selecionada acima.</p>}
+          </div>
+
           <div className="mb-6 overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1050px]">
                 <thead className="bg-[#e8f3ee]">
                   <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-4">{filtroBancoId !== "todos" ? "✓" : ""}</th>
                     <th className="px-5 py-4">Associado</th>
                     <th className="px-5 py-4">Competência</th>
                     <th className="px-5 py-4">Vencimento</th>
@@ -1880,7 +1968,7 @@ export default function FinanceiroPage() {
                 <tbody className="divide-y">
                   {carregando && (
                     <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center text-gray-500">
+                      <td colSpan={8} className="px-5 py-14 text-center text-gray-500">
                         Carregando financeiro...
                       </td>
                     </tr>
@@ -1888,7 +1976,7 @@ export default function FinanceiroPage() {
 
                   {!carregando && mensalidadesCompetencia.length > 0 && filtradas.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center">
+                      <td colSpan={8} className="px-5 py-14 text-center">
                         <div className="text-4xl">🔎</div>
                         <p className="mt-3 font-bold text-gray-700">
                           Nenhum lançamento corresponde aos filtros
@@ -1902,7 +1990,7 @@ export default function FinanceiroPage() {
 
                   {!carregando && mensalidadesCompetencia.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center">
+                      <td colSpan={8} className="px-5 py-14 text-center">
                         <div className="text-4xl">💰</div>
                         <p className="mt-3 font-bold text-gray-700">
                           Nenhum lançamento nesta competência
@@ -1927,6 +2015,11 @@ export default function FinanceiroPage() {
                           key={item.id}
                           className="transition hover:bg-[#fafcfb]"
                         >
+                          <td className="px-5 py-4">
+                            {filtroBancoId !== "todos" && mensalidadesLote.some((m)=>m.id===item.id) ? (
+                              <input type="checkbox" checked={selecionadosLote.includes(item.id)} onChange={()=>setSelecionadosLote((atual)=>atual.includes(item.id)?atual.filter(id=>id!==item.id):[...atual,item.id])} className="h-5 w-5 accent-[#005a3c]" />
+                            ) : null}
+                          </td>
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-3">
                               {pessoa?.foto_url ? (
