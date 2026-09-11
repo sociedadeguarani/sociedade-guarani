@@ -11,8 +11,8 @@ const COLUNAS_BASE = [
 
 const COLUNAS_EXTRAS = [
   "foto_url", "tipo_socio", "responsavel_id", "parentesco", "possui_mensalidade", "valor_mensalidade",
-  "dia_vencimento", "tipo_pagamento", "modalidade_temporada", "inicio_temporada", "fim_temporada",
-  "situacao_financeira", "data_ultimo_pagamento", "conta_bancaria_id",
+  "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "modalidade_temporada", "inicio_temporada", "fim_temporada",
+  "situacao_financeira", "data_ultimo_pagamento",
 ];
 
 function limparObjeto(body: Record<string, unknown>, colunas: string[]) {
@@ -35,13 +35,9 @@ export async function GET(request: Request) {
     const auth = await autenticarAdmin(request);
     if ("response" in auth) return auth.response;
 
-    const [sociosResult, contasResult] = await Promise.all([
-      auth.supabase.from("socios").select("*").order("matricula", { ascending: true }),
-      auth.supabase.from("contas_bancarias").select("id,nome,banco,agencia,conta").eq("ativo", true).order("nome", { ascending: true }),
-    ]);
-    const { data, error } = sociosResult;
+    const { data, error } = await auth.supabase.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-    return NextResponse.json({ socios: data || [], contasBancarias: contasResult.data || [] });
+    return NextResponse.json({ socios: data || [] });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
