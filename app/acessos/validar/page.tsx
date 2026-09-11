@@ -26,7 +26,7 @@ export default function ValidarCarteiraPage() {
         const dependenteId = params.get("dependente_id") || "";
         if (!id && !dependenteId) throw new Error("QR Code sem identificação do associado.");
         if (!session) {
-          const destino = `/acessos/validar?id=${encodeURIComponent(id)}`;
+          const destino = `/acessos/validar?${id ? `id=${encodeURIComponent(id)}` : ""}${id && dependenteId ? "&" : ""}${dependenteId ? `dependente_id=${encodeURIComponent(dependenteId)}` : ""}`;
           window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
           return;
         }
@@ -34,7 +34,7 @@ export default function ValidarCarteiraPage() {
         const r = await fetch("/api/acessos", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ socio_id: id || undefined, dependente_id: dependenteId || undefined, local: "Portaria" }),
+          body: JSON.stringify({ socio_id: id || undefined, dependente_id: dependenteId || undefined }),
           cache: "no-store",
         });
         const d = await r.json();
@@ -118,7 +118,7 @@ export default function ValidarCarteiraPage() {
                 </div>
 
                 <div className="rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">
-                  Registro efetuado em {resultado.acesso?.entrada_em ? new Date(resultado.acesso.entrada_em).toLocaleString("pt-BR") : "agora"}.
+                  Registro efetuado em {resultado.acesso?.data_hora_entrada ? new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR") : "agora"}.
                 </div>
               </div>
             )}
