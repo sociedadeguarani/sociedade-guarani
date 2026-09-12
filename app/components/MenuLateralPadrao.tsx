@@ -9,7 +9,7 @@ import {
   PartyPopper,
   Ticket,
   Megaphone,
-  ContactRound,
+  CreditCard,
   DoorOpen,
   Wallet,
   BarChart3,
@@ -17,8 +17,6 @@ import {
   UserCog,
 } from "lucide-react";
 
-// Menu lateral ÚNICO do sistema.
-// Todas as páginas administrativas devem reutilizar este componente.
 const ITENS_MENU = [
   { nome: "Início", rota: "/painel", icone: Home },
   { nome: "Sócios", rota: "/socios", icone: Users },
@@ -27,19 +25,19 @@ const ITENS_MENU = [
   { nome: "Eventos", rota: "/eventos", icone: PartyPopper },
   { nome: "Convites", rota: "/convites", icone: Ticket },
   { nome: "Avisos", rota: "/avisos", icone: Megaphone },
-  { nome: "Carteirinhas", rota: "/carteirinhas", icone: ContactRound },
+  { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard },
   { nome: "Acessos", rota: "/acessos", icone: DoorOpen },
   { nome: "Financeiro", rota: "/financeiro", icone: Wallet },
   { nome: "Relatórios", rota: "/relatorios", icone: BarChart3 },
   { nome: "Inventário", rota: "/inventario", icone: Boxes },
   { nome: "Usuários", rota: "/usuarios", icone: UserCog },
-] as const;
+];
 
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] shrink-0 overflow-y-auto border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 lg:block">
+    <aside className="fixed left-0 top-[76px] z-30 hidden h-[calc(100vh-76px)] w-[220px] overflow-y-auto border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-4 lg:block">
       <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
         Menu principal
       </p>
@@ -55,9 +53,9 @@ export default function MenuLateralPadrao() {
               key={item.rota}
               type="button"
               onClick={() => {
-                window.location.href = item.rota;
+                if (pathname !== item.rota) window.location.href = item.rota;
               }}
-              className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+              className={`flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm font-semibold transition ${
                 ativo
                   ? "bg-[#005a3c] text-white shadow-sm"
                   : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
@@ -70,9 +68,15 @@ export default function MenuLateralPadrao() {
         })}
       </nav>
 
-      <div className="mt-8 border-t border-[#dfe9e3] px-3 pt-4">
-        <p className="text-xs text-[#91a099]">Sociedade Guarani</p>
-        <p className="mt-1 text-xs text-[#91a099]">Tradição que une pessoas!</p>
+      <div className="mt-6 border-t border-[#dfe9e3] pt-4">
+        <div className="rounded-2xl bg-[#f7edbd] px-4 py-3">
+          <p className="text-[11px] font-bold text-[#705c00]">
+            SOCIEDADE GUARANI
+          </p>
+          <p className="mt-1 text-xs text-[#574900]">
+            Tradição que une pessoas!
+          </p>
+        </div>
       </div>
     </aside>
   );
