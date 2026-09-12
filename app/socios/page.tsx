@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -234,7 +231,7 @@ function tipoSocioClasse(tipo?: string | null) {
 }
 
 export default function Home() {
-  const [menu, setMenu] = useState("Início");
+  const [menu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
 
@@ -246,6 +243,7 @@ export default function Home() {
 
   const [form, setForm] = useState<Partial<Socio>>(socioInicial);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoAcesso, setGerandoAcesso] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
@@ -436,7 +434,6 @@ export default function Home() {
   }
 
   async function abrirFinanceiro() {
-    setMenu("Financeiro");
     await carregarMensalidades(competenciaFinanceiro);
   }
 
@@ -649,7 +646,6 @@ export default function Home() {
   }
 
   function abrirRelatorios() {
-    setMenu("Relatórios");
     void carregarRelatorioFinanceiro(relatorioCompetencia);
   }
 
@@ -657,9 +653,15 @@ export default function Home() {
     try {
       // As contas bancárias são protegidas por RLS no Supabase.
       // A tela de Sócios usa a API administrativa do Financeiro, que já
-      // valida o perfil e consulta com o service client.
+      // valida o perfil e consulta com o service client — por isso
+      // precisa do token de sessão aqui, senão a API sempre nega o acesso
+      // e a lista fica vazia mesmo com contas cadastradas.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setContasBancarias([]); return; }
+
       const resposta = await fetch("/api/financeiro", {
         method: "GET",
+        headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
 
@@ -890,6 +892,39 @@ export default function Home() {
           : "Sócio cadastrado com sucesso!"
       );
 
+      // Cria (ou mantém sincronizado) o acesso de login do associado:
+      // usuário = matrícula, senha inicial = 6 primeiros dígitos do CPF.
+      if (socioId) {
+        setGerandoAcesso(true);
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const respostaAcesso = await fetch("/api/socios/acesso", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ socio_id: socioId }),
+            });
+            const resultadoAcesso = await respostaAcesso.json().catch(() => ({}));
+            if (!respostaAcesso.ok) {
+              setMensagem(
+                `Sócio salvo, mas o acesso não foi criado: ${resultadoAcesso?.error || "erro desconhecido"}`
+              );
+            } else if (resultadoAcesso?.criado) {
+              setMensagem(
+                `Sócio salvo! Login: matrícula ${resultadoAcesso.matricula} · Senha inicial: ${resultadoAcesso.senhaInicial}`
+              );
+            }
+          }
+        } catch (erroAcesso) {
+          console.error("Erro ao criar acesso do sócio:", erroAcesso);
+        } finally {
+          setGerandoAcesso(false);
+        }
+      }
+
       setFotoArquivo(null);
       await carregarSocios();
 
@@ -897,11 +932,11 @@ export default function Home() {
         setAbrirCadastro(false);
         setSocioEditando(null);
         setMensagem("");
-      }, 900);
+      }, 2500);
     } catch (error) {
       console.error(error);
       setMensagem(
-        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
+        `Não foi possível salvar. ${error instanceof Error ? error.message : "Verifique o Supabase e o bucket fotos-associados."}`
       );
     } finally {
       setSalvando(false);
@@ -967,141 +1002,12 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
-      {/* CABEÇALHO */}
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-          <div className="flex items-center gap-4">
-
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
-                SOCIEDADE GUARANI
-              </h1>
-
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-
-          </div>
-
-          <div className="hidden items-center gap-4 sm:flex">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">
-                {usuarioEmail || "Usuário autenticado"}
-              </p>
-
-              <p className="font-bold text-[#005a3c]">
-                Área Administrativa
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={sair}
-              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
-            >
-              Sair
-            </button>
-          </div>
-
-        </div>
-      </header>
-
-      <div className="flex min-h-[calc(100vh-80px)]">
-
-        {/* MENU LATERAL */}
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
-
-          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
-
-          <nav className="space-y-2">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  menu === item.nome
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">
-                  {item.icone}
-                </span>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-
-          </div>
-
-        </aside>
-
+      <div className="lg:ml-[220px]">
         {/* CONTEÚDO */}
         <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
-
-          {/* MENU MOBILE */}
-          <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
-                className={`rounded-xl p-3 text-xs font-semibold ${
-                  menu === item.nome
-                    ? "bg-[#005a3c] text-white"
-                    : "bg-white text-gray-700 shadow-sm"
-                }`}
-              >
-                <div className="mb-1 text-xl">
-                  {item.icone}
-                </div>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </div>
 
           {/* INÍCIO */}
           {menu === "Início" && (
@@ -1235,6 +1141,7 @@ export default function Home() {
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
+          gerandoAcesso={gerandoAcesso}
           mensagem={mensagem}
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
@@ -2743,6 +2650,7 @@ function ModalSocio({
   form,
   socioEditando,
   salvando,
+  gerandoAcesso,
   mensagem,
   fechar,
   alterarCampo,
@@ -2755,6 +2663,7 @@ function ModalSocio({
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
+  gerandoAcesso: boolean;
   mensagem: string;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
@@ -3163,7 +3072,7 @@ function ModalSocio({
 
           <button
             onClick={fechar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
@@ -3171,11 +3080,11 @@ function ModalSocio({
 
           <button
             onClick={salvar}
-            disabled={salvando}
+            disabled={salvando || gerandoAcesso}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvando
-              ? "Salvando..."
+            {salvando || gerandoAcesso
+              ? gerandoAcesso ? "🔐 Criando acesso..." : "Salvando..."
               : socioEditando
                 ? "💾 Salvar alterações"
                 : "💾 Cadastrar Sócio"}
