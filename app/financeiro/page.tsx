@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -102,6 +102,17 @@ type MovimentoFinanceiro = {
   data_conciliacao: string | null;
   observacoes: string | null;
 };
+
+const MENU = [
+  ["Início", "🏠", "/painel"],
+  ["Sócios", "👥", "/socios"],
+  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
+  ["Reservas", "📅", "/reservas"],
+  ["Eventos", "🎉", "/eventos"],
+  ["Financeiro", "💰", "/financeiro"],
+  ["Espaços", "🏛️", "/espacos"],
+  ["Relatórios", "📊", "/relatorios"],
+] as const;
 
 const FORMAS = [
   ["pix", "PIX"],
@@ -1284,7 +1295,8 @@ export default function FinanceiroPage() {
       <CabecalhoPadrao />
       <MenuLateralPadrao />
 
-      <section className="min-w-0 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+      <section className="min-w-0 p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+
           <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
             <div>
               <p className="text-sm font-medium text-gray-500">Administração</p>
@@ -1992,7 +2004,8 @@ export default function FinanceiroPage() {
           </div>
             </>
           )}
-      </section>
+        </section>
+      </div>
 
       {mostrarContaModal && (
         <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
