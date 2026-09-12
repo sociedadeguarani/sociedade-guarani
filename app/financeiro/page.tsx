@@ -103,17 +103,6 @@ type MovimentoFinanceiro = {
   observacoes: string | null;
 };
 
-const MENU = [
-  ["Início", "🏠", "/painel"],
-  ["Sócios", "👥", "/socios"],
-  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
-  ["Reservas", "📅", "/reservas"],
-  ["Eventos", "🎉", "/eventos"],
-  ["Financeiro", "💰", "/financeiro"],
-  ["Espaços", "🏛️", "/espacos"],
-  ["Relatórios", "📊", "/relatorios"],
-] as const;
-
 const FORMAS = [
   ["pix", "PIX"],
   ["debito_em_conta", "Débito em conta"],
