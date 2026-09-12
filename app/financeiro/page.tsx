@@ -2005,7 +2005,6 @@ export default function FinanceiroPage() {
             </>
           )}
         </section>
-      </div>
 
       {mostrarContaModal && (
         <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
