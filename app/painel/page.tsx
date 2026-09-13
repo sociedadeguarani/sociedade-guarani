@@ -27,6 +27,7 @@ const atalhosFuncionario = [
 
 const atalhosAssociado = [
   ["🎫", "Carteirinhas", "/carteirinhas", "Sua carteirinha e a da sua família."],
+  ["💰", "Minhas mensalidades", "/mensalidades", "Veja suas mensalidades e pague pendências."],
   ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
   ["🎉", "Eventos", "/eventos", "Eventos e ingressos."],
   ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
