@@ -163,6 +163,13 @@ type ContaBancaria = {
   ativo: boolean;
 };
 
+type ConfiguracaoMensalidades = {
+  patrimonial_familiar: number;
+  contribuinte_familiar: number;
+  patrimonial_individual: number;
+  contribuinte_individual: number;
+};
+
 function podeTerDependentes(tipo?: string | null) {
   return [
     "patrimonial_familiar",
@@ -234,6 +241,12 @@ export default function Home() {
   const [menu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
+  const [configuracaoMensalidades, setConfiguracaoMensalidades] = useState<ConfiguracaoMensalidades>({
+    patrimonial_familiar: 60,
+    contribuinte_familiar: 70,
+    patrimonial_individual: 30,
+    contribuinte_individual: 35,
+  });
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
@@ -314,6 +327,38 @@ export default function Home() {
   async function sair() {
     await supabase.auth.signOut();
     window.location.replace("/login");
+  }
+
+  function valorPadraoMensalidade(tipo?: string | null) {
+    switch (tipo) {
+      case "patrimonial_familiar":
+        return configuracaoMensalidades.patrimonial_familiar;
+      case "contribuinte_familiar":
+        return configuracaoMensalidades.contribuinte_familiar;
+      case "patrimonial_individual":
+        return configuracaoMensalidades.patrimonial_individual;
+      case "contribuinte_individual":
+        return configuracaoMensalidades.contribuinte_individual;
+      default:
+        return 0;
+    }
+  }
+
+  async function carregarConfiguracaoMensalidades() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const resposta = await fetch("/api/configuracao-mensalidades", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!resposta.ok) return;
+      const dados = await resposta.json();
+      if (dados.config) {
+        setConfiguracaoMensalidades(dados.config);
+      }
+    } catch {
+      // Mantém os valores padrão se a configuração ainda não estiver disponível.
+    }
   }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
@@ -698,6 +743,7 @@ export default function Home() {
 
   useEffect(() => {
     carregarSocios();
+    void carregarConfiguracaoMensalidades();
     void carregarContasBancarias();
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
@@ -706,6 +752,8 @@ export default function Home() {
     setSocioEditando(null);
     setForm({
       ...socioInicial,
+      valor_mensalidade: valorPadraoMensalidade(socioInicial.tipo_socio),
+      possui_mensalidade: true,
       data_associacao: new Date().toISOString().split("T")[0],
     });
     setFotoArquivo(null);
@@ -773,6 +821,12 @@ export default function Home() {
           proximo.valor_mensalidade = 0;
         } else if (mensalidadeObrigatoria) {
           proximo.possui_mensalidade = true;
+        } else if (!socioEditando) {
+          const valorPadrao = valorPadraoMensalidade(tipo);
+          if (valorPadrao > 0) {
+            proximo.possui_mensalidade = true;
+            proximo.valor_mensalidade = valorPadrao;
+          }
         }
 
         if (!tipo.startsWith("dependente_")) {
