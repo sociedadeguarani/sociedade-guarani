@@ -800,6 +800,7 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
+      matricula: form.matricula === "" || form.matricula == null ? null : Number(form.matricula),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -2712,6 +2713,15 @@ function ModalSocio({
               value={form.nome}
               onChange={(v) => alterarCampo("nome", v)}
               className="md:col-span-2"
+            />
+
+            <Campo
+              label="Matrícula"
+              obrigatorio
+              type="number"
+              value={form.matricula ?? ""}
+              onChange={(v) => alterarCampo("matricula", v)}
+              placeholder="Ex.: 184"
             />
 
             <Campo
