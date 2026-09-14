@@ -800,7 +800,7 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
-      matricula: form.matricula === "" || form.matricula == null ? null : Number(form.matricula),
+      matricula: form.matricula == null || String(form.matricula).trim() === "" ? null : Number(form.matricula),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
