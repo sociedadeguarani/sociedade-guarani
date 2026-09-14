@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const [mensalidadesResult, dependentesResult, socioResult] = await Promise.all([
       supabase
         .from("mensalidades")
-        .select("id,socio_id,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
+        .select("id,socio_id,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa")
         .eq("socio_id", socioId)
         .order("competencia", { ascending: false })
         .limit(24),
