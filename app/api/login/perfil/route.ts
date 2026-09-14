@@ -83,6 +83,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    let socio: { id: string; nome: string; matricula: string | number | null } | null = null;
+    if (usuario.socio_id) {
+      const { data: socioData } = await supabaseAdmin
+        .from("socios")
+        .select("id,nome,matricula")
+        .eq("id", usuario.socio_id)
+        .maybeSingle();
+      socio = socioData || null;
+    }
+
     const { data: perfil, error: perfilError } = await supabaseAdmin
       .from("perfis")
       .select("id, nome")
@@ -115,6 +125,7 @@ export async function GET(request: NextRequest) {
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
         email: user.email,
+        socio,
       },
     });
   } catch (error) {
