@@ -199,12 +199,12 @@ export default function MinhasMensalidadesPage() {
             </div>
           )}
 
-          {selecionadas.length > 0 && (
+          {!carregando && pendentes.length > 0 && (
             <div className="rounded-2xl border-2 border-[#005a3c] bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-gray-500">Pagamento selecionado</p>
-                  <p className="text-xl font-extrabold text-[#005a3c]">{selecionadas.length} mensalidade(s) · {formatarMoeda(totalSelecionado)}</p>
+                  <p className="text-xl font-extrabold text-[#005a3c]">{selecionadas.length > 0 ? `${selecionadas.length} mensalidade(s) · ${formatarMoeda(totalSelecionado)}` : "Nenhuma mensalidade selecionada"}</p>
                 </div>
                 <button type="button" onClick={limparSelecao} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Limpar</button>
               </div>
@@ -224,7 +224,7 @@ export default function MinhasMensalidadesPage() {
                     </div>
                   </div>
                 )}
-                <p className="mt-3 text-xs text-gray-500">Faça o PIX exatamente no valor de <strong>{formatarMoeda(totalSelecionado)}</strong>. Depois, envie um único comprovante abaixo.</p>
+                <p className="mt-3 text-xs text-gray-500">{selecionadas.length > 0 ? <>Faça o PIX exatamente no valor de <strong>{formatarMoeda(totalSelecionado)}</strong>. Depois, envie um único comprovante abaixo.</> : <>Marque uma ou mais mensalidades na tabela acima para definir o valor do PIX e enviar o comprovante.</>}</p>
               </div>
 
               <div className="mt-4 rounded-xl border border-[#b9d8c8] bg-[#f7fbf9] p-4">
@@ -235,7 +235,7 @@ export default function MinhasMensalidadesPage() {
                     <Upload className="h-4 w-4" /> {arquivoLote ? arquivoLote.name : "Selecionar comprovante"}
                     <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviando} onChange={(e) => setArquivoLote(e.target.files?.[0] || null)} />
                   </label>
-                  <button type="button" disabled={!arquivoLote || enviando} onClick={() => void enviarComprovante()} className="rounded-lg bg-[#005a3c] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  <button type="button" disabled={!arquivoLote || selecionadas.length === 0 || enviando} onClick={() => void enviarComprovante()} className="rounded-lg bg-[#005a3c] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
                     {enviando ? "Enviando..." : "Enviar comprovante"}
                   </button>
                 </div>
