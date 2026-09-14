@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula) return NextResponse.json({ error: "Informe a matrícula do associado." }, { status: 400 });
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
-    if (cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
+    if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
 
     const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
@@ -94,7 +94,7 @@ export async function PUT(request: Request) {
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula) return NextResponse.json({ error: "Informe a matrícula do associado." }, { status: 400 });
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
-    if (cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
+    if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
 
     const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
