@@ -27,16 +27,19 @@ export async function GET(request: Request) {
     if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const supabase = auth.supabase;
 
-    const [mens, conv] = await Promise.all([
+    const [mens, conv, res] = await Promise.all([
       supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,tipo_pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,socios:socio_id(id,nome,matricula)").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
       supabase.from("convites").select("id,socio_id,nome_convidado,cidade_convidado,data_inicio,data_fim,valor,status,forma_pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,socios:socio_id(id,nome,matricula)").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
+      supabase.from("reservas").select("id,socio_id,nome,espaco_id,data,horario,valor,status,pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
     ]);
     if (mens.error) throw new Error(mens.error.message);
     if (conv.error) throw new Error(conv.error.message);
+    if (res.error && !/does not exist|relation/i.test(res.error.message)) throw new Error(res.error.message);
     return NextResponse.json({
       comprovantes: [
         ...(mens.data || []).map((x: any) => ({ ...x, origem_tipo: "mensalidade", origem_id: x.id, pessoa: x.socios })),
         ...(conv.data || []).map((x: any) => ({ ...x, origem_tipo: "convite", origem_id: x.id, pessoa: x.socios })),
+        ...(res.data || []).map((x: any) => ({ ...x, origem_tipo: "reserva", origem_id: x.id, pessoa: null })),
       ].sort((a: any, b: any) => String(b.comprovante_enviado_em || "").localeCompare(String(a.comprovante_enviado_em || ""))),
     });
   } catch (error) {
@@ -101,9 +104,9 @@ export async function PATCH(request: Request) {
     const origemId = String(body.origem_id || "").trim();
     const acao = String(body.acao || "").trim().toLowerCase();
     const contaId = String(body.conta_bancaria_id || "").trim();
-    if (!origemId || !["mensalidade", "convite"].includes(origemTipo) || !["aprovar", "recusar"].includes(acao)) return NextResponse.json({ error: "Informe lançamento, origem e ação." }, { status: 400 });
+    if (!origemId || !["mensalidade", "convite", "reserva"].includes(origemTipo) || !["aprovar", "recusar"].includes(acao)) return NextResponse.json({ error: "Informe lançamento, origem e ação." }, { status: 400 });
 
-    const tabela = origemTipo === "mensalidade" ? "mensalidades" : "convites";
+    const tabela = origemTipo === "mensalidade" ? "mensalidades" : origemTipo === "convite" ? "convites" : "reservas";
     const { data: registro, error: registroError } = await auth.supabase.from(tabela).select("*").eq("id", origemId).single();
     if (registroError || !registro) return NextResponse.json({ error: "Lançamento não encontrado." }, { status: 404 });
     if (registro.comprovante_status !== "pendente") return NextResponse.json({ error: "Este comprovante não está aguardando aprovação." }, { status: 409 });
@@ -124,10 +127,12 @@ export async function PATCH(request: Request) {
     if (!movimentoBusca.data) {
       const descricao = origemTipo === "mensalidade"
         ? `Mensalidade ${String(registro.competencia || "").slice(0, 7)} - pagamento via PIX`
-        : `Convite - ${registro.nome_convidado || "Convidado"}`;
+        : origemTipo === "convite"
+          ? `Convite - ${registro.nome_convidado || "Convidado"}`
+          : `Reserva - ${registro.nome || "Responsável"}`;
       const { error } = await auth.supabase.from("movimentacoes_financeiras").insert({
         conta_bancaria_id: contaId, conta_destino_id: null, grupo_transferencia: null,
-        tipo: "entrada", categoria: origemTipo === "mensalidade" ? "Mensalidade" : "Convite",
+        tipo: "entrada", categoria: origemTipo === "mensalidade" ? "Mensalidade" : origemTipo === "convite" ? "Convite" : "Reserva",
         descricao, valor: Number(registro.valor || 0), data_movimentacao: new Date().toISOString().slice(0, 10),
         forma_pagamento: registro.forma_pagamento || "pix", origem_tipo: origemTipo, origem_id: origemId,
         socio_id: registro.socio_id || null, dependente_id: registro.dependente_id || null,
@@ -140,7 +145,9 @@ export async function PATCH(request: Request) {
     const agora = new Date().toISOString();
     const update = origemTipo === "mensalidade"
       ? { situacao: "pago", data_pagamento: new Date().toISOString().slice(0, 10), tipo_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null }
-      : { status: "pago", forma_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null };
+      : origemTipo === "convite"
+        ? { status: "pago", forma_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null }
+        : { status: "confirmada", pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null };
     const { data, error } = await auth.supabase.from(tabela).update(update).eq("id", origemId).select("*").single();
     if (error) throw new Error(error.message);
 
