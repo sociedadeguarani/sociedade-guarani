@@ -45,7 +45,6 @@ export async function POST(request: Request) {
     const nome_recebedor = String(body.nome_recebedor || "SOCIEDADE GUARANI").trim();
     const cidade = String(body.cidade || "AUGUSTO PESTANA").trim();
     const copia_e_cola = String(body.copia_e_cola || "").trim();
-    if (!copia_e_cola) return NextResponse.json({ error: "Informe o PIX copia e cola para gerar o QR Code." }, { status: 400 });
     await supabase.from("configuracao_pix").update({ ativo: false }).eq("ativo", true);
     const { data, error } = await supabase.from("configuracao_pix").insert({ chave_pix, nome_recebedor, cidade, copia_e_cola, ativo: true }).select().single();
     if (error) throw new Error(error.message);
