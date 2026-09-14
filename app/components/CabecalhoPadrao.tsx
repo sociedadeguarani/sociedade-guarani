@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, Instagram, MessageCircle, UserCircle2 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 
 const ROTULO_PERFIL: Record<string, string> = {
   administrador: "Administrador",
@@ -13,6 +14,7 @@ export default function CabecalhoPadrao() {
   const [email, setEmail] = useState("");
   const [nome, setNome] = useState("");
   const [perfil, setPerfil] = useState("");
+  const [naoLidas, setNaoLidas] = useState(0);
 
   useEffect(() => {
     try {
@@ -22,6 +24,21 @@ export default function CabecalhoPadrao() {
     } catch {
       // Ignora bloqueio do localStorage.
     }
+
+    async function carregarNotificacoes() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token || "";
+        if (!token) return;
+        const r = await fetch("/api/notificacoes/admin", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        setNaoLidas(Number(d.nao_lidas || 0));
+      } catch {
+        // Notificações não devem impedir o cabeçalho de funcionar.
+      }
+    }
+    if ((window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase() === "administrador") void carregarNotificacoes();
   }, []);
 
   function sair() {
@@ -74,7 +91,7 @@ export default function CabecalhoPadrao() {
             className="relative hidden rounded-full p-2 text-[#005a3c] hover:bg-[#eef5f1] sm:block"
           >
             <Bell className="h-5 w-5" />
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+            {naoLidas > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-red-500 px-1 text-center text-[9px] font-black leading-4 text-white">{naoLidas > 99 ? "99+" : naoLidas}</span>}
           </button>
 
           <div className="hidden items-center gap-2 sm:flex">
