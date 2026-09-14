@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, QrCode, Wallet, Upload, Copy } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Clock, QrCode, Wallet, Upload } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -58,7 +58,9 @@ export default function MinhasMensalidadesPage() {
   const [copiado, setCopiado] = useState(false);
   const [enviandoId, setEnviandoId] = useState<string | null>(null);
   const [mensagemPagamento, setMensagemPagamento] = useState("");
-  const [comprovanteAlvo, setComprovanteAlvo] = useState<string | null>(null);
+  const [selecionadas, setSelecionadas] = useState<string[]>([]);
+  const [arquivoLote, setArquivoLote] = useState<File | null>(null);
+  const [abrindoUploadLote, setAbrindoUploadLote] = useState(false);
 
   useEffect(() => {
     async function carregar() {
@@ -96,22 +98,25 @@ export default function MinhasMensalidadesPage() {
   const pendentes = mensalidades.filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso");
   const totalPendente = pendentes.reduce((soma, m) => soma + Number(m.valor || 0), 0);
 
-  async function enviarComprovante(id: string, arquivo: File | null) {
-    if (!arquivo) return;
-    setEnviandoId(id);
+  async function enviarComprovanteLote(arquivo: File | null) {
+    if (!arquivo || selecionadas.length === 0) return;
+    setEnviandoId("lote");
     setMensagemPagamento("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Entre novamente.");
       const form = new FormData();
       form.append("origem_tipo", "mensalidade");
-      form.append("origem_id", id);
+      form.append("origem_ids", JSON.stringify(selecionadas));
       form.append("arquivo", arquivo);
       const r = await fetch("/api/comprovantes/pagamentos", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` }, body: form, cache: "no-store" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Não foi possível enviar o comprovante.");
-      setMensagemPagamento("Comprovante enviado. A administração irá analisar o pagamento.");
-      setMensalidades((lista) => lista.map((m) => m.id === id ? { ...m, comprovante_url: d.url, comprovante_status: "pendente" } : m));
+      setMensagemPagamento(`Comprovante enviado para ${selecionadas.length} mensalidade(s). A administração irá analisar o pagamento.`);
+      setMensalidades((lista) => lista.map((m) => selecionadas.includes(m.id) ? { ...m, comprovante_url: d.url, comprovante_status: "pendente" } : m));
+      setSelecionadas([]);
+      setArquivoLote(null);
+      setAbrindoUploadLote(false);
     } catch (e) {
       setMensagemPagamento(e instanceof Error ? e.message : "Erro ao enviar comprovante.");
     } finally {
@@ -119,17 +124,30 @@ export default function MinhasMensalidadesPage() {
     }
   }
 
+  const pendentesSemComprovante = useMemo(
+    () => pendentes.filter((m) => m.comprovante_status !== "pendente"),
+    [pendentes]
+  );
+
+  const totalSelecionado = useMemo(
+    () => pendentes.filter((m) => selecionadas.includes(m.id)).reduce((soma, m) => soma + Number(m.valor || 0), 0),
+    [pendentes, selecionadas]
+  );
+
+  function alternarSelecionada(id: string) {
+    setSelecionadas((lista) => lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]);
+  }
+
+  function selecionarTodasPendentes() {
+    setSelecionadas(pendentesSemComprovante.map((m) => m.id));
+  }
+
   function copiarPix() {
-    const chave = pix?.chave_pix || "89.649.164/0001-58";
-    navigator.clipboard.writeText(chave).then(() => {
+    if (!pix?.copia_e_cola) return;
+    navigator.clipboard.writeText(pix.copia_e_cola).then(() => {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
     });
-  }
-
-  function abrirSeletorComprovante(id: string) {
-    setComprovanteAlvo(id);
-    setTimeout(() => document.getElementById(`comprovante-${id}`)?.click(), 0);
   }
 
   return (
@@ -154,25 +172,57 @@ export default function MinhasMensalidadesPage() {
                 Você tem {pendentes.length} mensalidade(s) pendente(s) — total de {formatarMoeda(totalPendente)}
               </div>
 
-              <div className="mt-4 rounded-xl bg-white p-4">
-                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-[#005a3c]"><QrCode className="h-4 w-4" /> Pagar via PIX</p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input readOnly value={pix?.chave_pix || "89.649.164/0001-58"} className="w-full rounded-lg border px-3 py-2 text-sm font-semibold" onFocus={(e) => e.target.select()} />
-                  <button onClick={copiarPix} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white">
-                    <Copy className="h-4 w-4" /> {copiado ? "Chave copiada!" : "Copiar chave"}
-                  </button>
-                </div>
-                {pix?.copia_e_cola && <p className="mt-2 break-all text-xs text-gray-500">PIX copia e cola: {pix.copia_e_cola}</p>}
-                <p className="mt-2 text-xs text-gray-500">Depois de pagar, envie o comprovante abaixo. A administração será avisada automaticamente para conferir.</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {pendentes.map((m) => (
-                    <button key={m.id} type="button" onClick={() => abrirSeletorComprovante(m.id)} className="inline-flex items-center gap-2 rounded-lg border border-[#005a3c] px-3 py-2 text-xs font-bold text-[#005a3c]">
-                      <Upload className="h-4 w-4" /> Enviar comprovante {formatarCompetencia(m.competencia)}
+              {pix?.copia_e_cola && (
+                <div className="mt-4 rounded-xl bg-white p-4">
+                  <p className="mb-2 flex items-center gap-2 text-sm font-bold text-[#005a3c]"><QrCode className="h-4 w-4" /> Pagar via PIX (copia e cola)</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input readOnly value={pix.copia_e_cola} className="w-full rounded-lg border px-3 py-2 text-xs" onFocus={(e) => e.target.select()} />
+                    <button onClick={copiarPix} className="shrink-0 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white">
+                      {copiado ? "Copiado!" : "Copiar"}
                     </button>
-                  ))}
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">Marque as mensalidades que deseja quitar juntas. Faça <strong>um único PIX</strong> com o valor total e depois envie <strong>um único comprovante</strong>.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={selecionarTodasPendentes} disabled={pendentesSemComprovante.length === 0} className="rounded-lg border border-[#005a3c] px-3 py-2 text-xs font-bold text-[#005a3c] disabled:cursor-not-allowed disabled:opacity-40">Selecionar todas</button>
+                    <button type="button" onClick={() => setSelecionadas([])} disabled={selecionadas.length === 0} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600 disabled:cursor-not-allowed disabled:opacity-40">Limpar seleção</button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {pendentes.map((m) => (
+                      <label key={m.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm ${m.comprovante_status === "pendente" ? "cursor-default border-gray-200 bg-gray-50 opacity-60" : selecionadas.includes(m.id) ? "cursor-pointer border-[#005a3c] bg-[#eef7f2]" : "cursor-pointer border-gray-200 bg-white"}`}>
+                        <span className="flex items-center gap-3">
+                          <input type="checkbox" checked={selecionadas.includes(m.id)} disabled={m.comprovante_status === "pendente"} onChange={() => alternarSelecionada(m.id)} className="h-4 w-4 accent-[#005a3c]" />
+                          <span><strong>{formatarCompetencia(m.competencia)}</strong> · venc. {formatarData(m.data_vencimento)}</span>
+                        </span>
+                        <span className="font-extrabold text-[#005a3c]">{formatarMoeda(m.valor)}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {selecionadas.length > 0 && (
+                    <div className="mt-3 rounded-lg bg-[#e8f3ee] p-3 text-sm font-bold text-[#005a3c]">
+                      {selecionadas.length} mensalidade(s) selecionada(s) · total do PIX: {formatarMoeda(totalSelecionado)}
+                    </div>
+                  )}
+                  {selecionadas.length > 0 && !abrindoUploadLote && (
+                    <button type="button" onClick={() => setAbrindoUploadLote(true)} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white">
+                      <Upload className="h-4 w-4" /> Pagar total e enviar 1 comprovante
+                    </button>
+                  )}
+                  {selecionadas.length > 0 && abrindoUploadLote && (
+                    <div className="mt-3 rounded-xl border border-[#b9d8c8] bg-[#f7fbf9] p-3">
+                      <p className="text-sm font-bold text-[#005a3c]">Valor do PIX: {formatarMoeda(totalSelecionado)}</p>
+                      <p className="mt-1 text-xs text-gray-500">Após realizar o PIX nesse valor, selecione o comprovante. Ele será vinculado a todas as mensalidades selecionadas.</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#005a3c] px-3 py-2 text-xs font-bold text-[#005a3c]">
+                          <Upload className="h-4 w-4" /> {arquivoLote ? arquivoLote.name : "Selecionar comprovante"}
+                          <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoId !== null} onChange={(e) => setArquivoLote(e.target.files?.[0] || null)} />
+                        </label>
+                        <button type="button" disabled={!arquivoLote || enviandoId !== null} onClick={() => void enviarComprovanteLote(arquivoLote)} className="rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{enviandoId === "lote" ? "Enviando..." : "Enviar comprovante"}</button>
+                        <button type="button" onClick={() => { setAbrindoUploadLote(false); setArquivoLote(null); }} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Cancelar</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {comprovanteAlvo && <p className="mt-2 text-xs font-semibold text-[#005a3c]">Selecione o arquivo do comprovante da mensalidade {formatarCompetencia(mensalidades.find((m) => m.id === comprovanteAlvo)?.competencia || "")}.</p>}
-              </div>
+              )}
             </div>
           )}
 
@@ -210,12 +260,10 @@ export default function MinhasMensalidadesPage() {
                             <span className="font-bold text-amber-700">Comprovante enviado — aguardando aprovação</span>
                           ) : m.comprovante_status === "recusado" ? (
                             <span className="font-bold text-red-700">Comprovante recusado{m.motivo_recusa ? ` — ${m.motivo_recusa}` : ""}</span>
+                          ) : selecionadas.includes(m.id) ? (
+                            <span className="font-semibold text-[#005a3c]">Selecionada para pagamento em conjunto</span>
                           ) : (
-                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white">
-                              <Upload className="h-4 w-4" />
-                              {enviandoId === m.id ? "Enviando..." : "Enviar comprovante"}
-                              <input id={`comprovante-${m.id}`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoId !== null} onChange={(e) => { const f = e.target.files?.[0] || null; if (f) { setComprovanteAlvo(m.id); void enviarComprovante(m.id, f); } e.currentTarget.value = ""; }} />
-                            </label>
+                            <button type="button" onClick={() => alternarSelecionada(m.id)} className="rounded-lg border border-[#005a3c] px-3 py-2 text-xs font-bold text-[#005a3c]">Selecionar para PIX</button>
                           )}
                         </td>
                       </tr>
