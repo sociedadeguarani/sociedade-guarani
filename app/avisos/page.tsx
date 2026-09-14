@@ -284,6 +284,7 @@ export default function AvisosPage(){
               </div>
             )}
           </div>}
+      </div>}
 
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {avisos.map(a=>
