@@ -40,13 +40,40 @@ export async function GET(request: Request) {
 
     const ids = socios.map((s) => s.id).filter(Boolean);
     let mensalidades: any[] = [];
+    let dependentes: any[] = [];
+
     if (ids.length) {
-      const { data, error } = await supabase.from("mensalidades").select("socio_id,data_vencimento,situacao").in("socio_id", ids);
+      const { data, error } = await supabase
+        .from("mensalidades")
+        .select("socio_id,data_vencimento,situacao")
+        .in("socio_id", ids);
       if (error) throw error;
       mensalidades = data || [];
+
+      const dependentesQuery = supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,cpf,parentesco,ativo")
+        .in("socio_id", ids)
+        .order("nome", { ascending: true });
+      const { data: dependentesData, error: dependentesError } = await dependentesQuery;
+      if (dependentesError) throw dependentesError;
+      dependentes = (dependentesData || []).filter((d) => d.ativo !== false);
     }
+
     const resultado = socios.map((s) => ({ ...s, ...calcularStatus(mensalidades, s.id) }));
-    return NextResponse.json({ socios: resultado });
+    const dependentesResultado = dependentes.map((d) => {
+      const titular = resultado.find((s) => String(s.id) === String(d.socio_id));
+      return {
+        ...d,
+        titular_nome: titular?.nome || null,
+        titular_matricula: titular?.matricula || null,
+        financeiro_status: titular?.financeiro_status || "em_dia",
+        dias_atraso: titular?.dias_atraso || 0,
+        situacao: titular?.situacao || null,
+      };
+    });
+
+    return NextResponse.json({ socios: resultado, dependentes: dependentesResultado });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar carteirinhas." }, { status: 500 });
   }
