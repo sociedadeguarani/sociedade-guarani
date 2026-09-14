@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, QrCode, Wallet } from "lucide-react";
+import { CheckCircle2, Clock, QrCode, Wallet, Upload } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -15,6 +15,9 @@ type Mensalidade = {
   data_pagamento: string | null;
   tipo_pagamento: string | null;
   numero_recibo: string | null;
+  comprovante_url?: string | null;
+  comprovante_status?: string | null;
+  motivo_recusa?: string | null;
 };
 
 type ConfigPix = {
@@ -53,6 +56,8 @@ export default function MinhasMensalidadesPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [copiado, setCopiado] = useState(false);
+  const [enviandoId, setEnviandoId] = useState<string | null>(null);
+  const [mensagemPagamento, setMensagemPagamento] = useState("");
 
   useEffect(() => {
     async function carregar() {
@@ -90,6 +95,29 @@ export default function MinhasMensalidadesPage() {
   const pendentes = mensalidades.filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso");
   const totalPendente = pendentes.reduce((soma, m) => soma + Number(m.valor || 0), 0);
 
+  async function enviarComprovante(id: string, arquivo: File | null) {
+    if (!arquivo) return;
+    setEnviandoId(id);
+    setMensagemPagamento("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Sessão expirada. Entre novamente.");
+      const form = new FormData();
+      form.append("origem_tipo", "mensalidade");
+      form.append("origem_id", id);
+      form.append("arquivo", arquivo);
+      const r = await fetch("/api/comprovantes/pagamentos", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` }, body: form, cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Não foi possível enviar o comprovante.");
+      setMensagemPagamento("Comprovante enviado. A administração irá analisar o pagamento.");
+      setMensalidades((lista) => lista.map((m) => m.id === id ? { ...m, comprovante_url: d.url, comprovante_status: "pendente" } : m));
+    } catch (e) {
+      setMensagemPagamento(e instanceof Error ? e.message : "Erro ao enviar comprovante.");
+    } finally {
+      setEnviandoId(null);
+    }
+  }
+
   function copiarPix() {
     if (!pix?.copia_e_cola) return;
     navigator.clipboard.writeText(pix.copia_e_cola).then(() => {
@@ -111,6 +139,7 @@ export default function MinhasMensalidadesPage() {
           </div>
 
           {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-800">{erro}</div>}
+          {mensagemPagamento && <div className="rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4 text-sm font-semibold text-[#005a3c]">{mensagemPagamento}</div>}
 
           {!carregando && pendentes.length > 0 && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
@@ -163,8 +192,18 @@ export default function MinhasMensalidadesPage() {
                         <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${info.cor}`}>{info.texto}</span></td>
                         <td className="p-3 text-sm text-gray-600">
                           {m.situacao === "pago" ? (
-                            <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-4 w-4" />{formatarData(m.data_pagamento)}</span>
-                          ) : "—"}
+                            <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-4 w-4" />{formatarData(m.data_pagamento)} · {m.tipo_pagamento || "Pagamento"}</span>
+                          ) : m.comprovante_status === "pendente" ? (
+                            <span className="font-bold text-amber-700">Comprovante enviado — aguardando aprovação</span>
+                          ) : m.comprovante_status === "recusado" ? (
+                            <span className="font-bold text-red-700">Comprovante recusado{m.motivo_recusa ? ` — ${m.motivo_recusa}` : ""}</span>
+                          ) : (
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white">
+                              <Upload className="h-4 w-4" />
+                              {enviandoId === m.id ? "Enviando..." : "Enviar comprovante"}
+                              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoId !== null} onChange={(e) => { const f = e.target.files?.[0] || null; if (f) void enviarComprovante(m.id, f); e.currentTarget.value = ""; }} />
+                            </label>
+                          )}
                         </td>
                       </tr>
                     );
