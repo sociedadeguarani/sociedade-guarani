@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exigirAdministrador } from "@/lib/guaraniAuth";
+import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +29,12 @@ export async function GET(request: Request) {
     // Algumas notificações antigas podem usar "mensalidade_lote" e guardar
     // vários IDs separados por vírgula. Nesse caso buscamos todos os registros
     // e usamos o comprovante comum do lote.
+    // A leitura dos lançamentos usa o service client porque a tela administrativa
+    // precisa enxergar o comprovante mesmo quando a política RLS da tabela bloqueia
+    // a leitura pelo cliente autenticado. A autenticação do administrador continua
+    // sendo exigida acima.
+    const serviceDb = getServiceClient();
+
     for (const n of lista) {
       if (!n.origem_tipo || !n.origem_id) continue;
 
@@ -41,14 +47,14 @@ export async function GET(request: Request) {
       } else if (n.origem_tipo === "convite") {
         tabela = "convites";
         ids = [String(n.origem_id).trim()];
-      } else if (n.origem_tipo === "reserva") {
+      } else if (["reserva", "reserva_pagamento", "pagamento_reserva"].includes(n.origem_tipo)) {
         tabela = "reservas";
         ids = [String(n.origem_id).trim()];
       }
 
       if (!tabela || !ids.length) continue;
 
-      const { data: registros, error: registroError } = await auth.supabase
+      const { data: registros, error: registroError } = await serviceDb
         .from(tabela)
         .select("id,valor,comprovante_url,comprovante_status,forma_pagamento,tipo_pagamento")
         .in("id", ids);
