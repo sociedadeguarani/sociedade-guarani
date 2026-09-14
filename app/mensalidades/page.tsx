@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, QrCode, Wallet } from "lucide-react";
+import { CheckCircle2, Clock, QrCode, Wallet, Upload } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -15,6 +15,9 @@ type Mensalidade = {
   data_pagamento: string | null;
   tipo_pagamento: string | null;
   numero_recibo: string | null;
+  comprovante_url?: string | null;
+  comprovante_status?: string | null;
+  motivo_recusa?: string | null;
 };
 
 type ConfigPix = {
@@ -53,7 +56,9 @@ export default function MinhasMensalidadesPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [copiado, setCopiado] = useState(false);
-  const [chaveCopiada, setChaveCopiada] = useState(false);
+  const [enviandoId, setEnviandoId] = useState<string | null>(null);
+  const [mensagemPagamento, setMensagemPagamento] = useState("");
+  const [comprovanteAlvo, setComprovanteAlvo] = useState<string | null>(null);
 
   useEffect(() => {
     async function carregar() {
@@ -91,21 +96,40 @@ export default function MinhasMensalidadesPage() {
   const pendentes = mensalidades.filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso");
   const totalPendente = pendentes.reduce((soma, m) => soma + Number(m.valor || 0), 0);
 
-  const chavePix = pix?.chave_pix || "89.649.164/0001-58";
+  async function enviarComprovante(id: string, arquivo: File | null) {
+    if (!arquivo) return;
+    setEnviandoId(id);
+    setMensagemPagamento("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Sessão expirada. Entre novamente.");
+      const form = new FormData();
+      form.append("origem_tipo", "mensalidade");
+      form.append("origem_id", id);
+      form.append("arquivo", arquivo);
+      const r = await fetch("/api/comprovantes/pagamentos", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` }, body: form, cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Não foi possível enviar o comprovante.");
+      setMensagemPagamento("Comprovante enviado. A administração irá analisar o pagamento.");
+      setMensalidades((lista) => lista.map((m) => m.id === id ? { ...m, comprovante_url: d.url, comprovante_status: "pendente" } : m));
+    } catch (e) {
+      setMensagemPagamento(e instanceof Error ? e.message : "Erro ao enviar comprovante.");
+    } finally {
+      setEnviandoId(null);
+    }
+  }
 
   function copiarPix() {
-    if (!pix?.copia_e_cola) return;
-    navigator.clipboard.writeText(pix.copia_e_cola).then(() => {
+    const chave = pix?.chave_pix || "89.649.164/0001-58";
+    navigator.clipboard.writeText(chave).then(() => {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
     });
   }
 
-  function copiarChavePix() {
-    navigator.clipboard.writeText(chavePix).then(() => {
-      setChaveCopiada(true);
-      setTimeout(() => setChaveCopiada(false), 2000);
-    });
+  function abrirSeletorComprovante(id: string) {
+    setComprovanteAlvo(id);
+    setTimeout(() => document.getElementById(`comprovante-${id}`)?.click(), 0);
   }
 
   return (
@@ -121,6 +145,7 @@ export default function MinhasMensalidadesPage() {
           </div>
 
           {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-800">{erro}</div>}
+          {mensagemPagamento && <div className="rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4 text-sm font-semibold text-[#005a3c]">{mensagemPagamento}</div>}
 
           {!carregando && pendentes.length > 0 && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
@@ -131,27 +156,22 @@ export default function MinhasMensalidadesPage() {
 
               <div className="mt-4 rounded-xl bg-white p-4">
                 <p className="mb-2 flex items-center gap-2 text-sm font-bold text-[#005a3c]"><QrCode className="h-4 w-4" /> Pagar via PIX</p>
-                <div className="rounded-lg border border-[#dfe9e3] bg-[#f8faf9] p-3">
-                  <p className="text-xs font-semibold text-gray-500">Chave PIX (CNPJ)</p>
-                  <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <input readOnly value={chavePix} className="w-full rounded-lg border bg-white px-3 py-2 text-sm font-bold text-[#17382c]" onFocus={(e) => e.target.select()} />
-                    <button onClick={copiarChavePix} className="shrink-0 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white">
-                      {chaveCopiada ? "Copiado!" : "Copiar chave"}
-                    </button>
-                  </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input readOnly value={pix?.chave_pix || "89.649.164/0001-58"} className="w-full rounded-lg border px-3 py-2 text-sm font-semibold" onFocus={(e) => e.target.select()} />
+                  <button onClick={copiarPix} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white">
+                    <Copy className="h-4 w-4" /> {copiado ? "Chave copiada!" : "Copiar chave"}
+                  </button>
                 </div>
-                {pix?.copia_e_cola && (
-                  <div className="mt-3">
-                    <p className="mb-2 text-xs font-semibold text-gray-500">PIX copia e cola</p>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <input readOnly value={pix.copia_e_cola} className="w-full rounded-lg border px-3 py-2 text-xs" onFocus={(e) => e.target.select()} />
-                      <button onClick={copiarPix} className="shrink-0 rounded-lg border border-[#005a3c] px-4 py-2 text-sm font-bold text-[#005a3c]">
-                        {copiado ? "Copiado!" : "Copiar"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <p className="mt-3 text-xs text-gray-500">Depois de pagar, envie o comprovante para a administração para confirmarem o pagamento.</p>
+                {pix?.copia_e_cola && <p className="mt-2 break-all text-xs text-gray-500">PIX copia e cola: {pix.copia_e_cola}</p>}
+                <p className="mt-2 text-xs text-gray-500">Depois de pagar, envie o comprovante abaixo. A administração será avisada automaticamente para conferir.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {pendentes.map((m) => (
+                    <button key={m.id} type="button" onClick={() => abrirSeletorComprovante(m.id)} className="inline-flex items-center gap-2 rounded-lg border border-[#005a3c] px-3 py-2 text-xs font-bold text-[#005a3c]">
+                      <Upload className="h-4 w-4" /> Enviar comprovante {formatarCompetencia(m.competencia)}
+                    </button>
+                  ))}
+                </div>
+                {comprovanteAlvo && <p className="mt-2 text-xs font-semibold text-[#005a3c]">Selecione o arquivo do comprovante da mensalidade {formatarCompetencia(mensalidades.find((m) => m.id === comprovanteAlvo)?.competencia || "")}.</p>}
               </div>
             </div>
           )}
@@ -185,8 +205,18 @@ export default function MinhasMensalidadesPage() {
                         <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${info.cor}`}>{info.texto}</span></td>
                         <td className="p-3 text-sm text-gray-600">
                           {m.situacao === "pago" ? (
-                            <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-4 w-4" />{formatarData(m.data_pagamento)}</span>
-                          ) : "—"}
+                            <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-4 w-4" />{formatarData(m.data_pagamento)} · {m.tipo_pagamento || "Pagamento"}</span>
+                          ) : m.comprovante_status === "pendente" ? (
+                            <span className="font-bold text-amber-700">Comprovante enviado — aguardando aprovação</span>
+                          ) : m.comprovante_status === "recusado" ? (
+                            <span className="font-bold text-red-700">Comprovante recusado{m.motivo_recusa ? ` — ${m.motivo_recusa}` : ""}</span>
+                          ) : (
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white">
+                              <Upload className="h-4 w-4" />
+                              {enviandoId === m.id ? "Enviando..." : "Enviar comprovante"}
+                              <input id={`comprovante-${m.id}`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoId !== null} onChange={(e) => { const f = e.target.files?.[0] || null; if (f) { setComprovanteAlvo(m.id); void enviarComprovante(m.id, f); } e.currentTarget.value = ""; }} />
+                            </label>
+                          )}
                         </td>
                       </tr>
                     );
