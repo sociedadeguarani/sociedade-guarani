@@ -26,26 +26,55 @@ export async function GET(request: Request) {
     const lista = (data || []) as any[];
 
     // Inclui o link do comprovante e o valor original na notificação.
+    // Algumas notificações antigas podem usar "mensalidade_lote" e guardar
+    // vários IDs separados por vírgula. Nesse caso buscamos todos os registros
+    // e usamos o comprovante comum do lote.
     for (const n of lista) {
       if (!n.origem_tipo || !n.origem_id) continue;
-      const tabela =
-        n.origem_tipo === "mensalidade" ? "mensalidades" :
-        n.origem_tipo === "convite" ? "convites" :
-        n.origem_tipo === "reserva" ? "reservas" : null;
-      if (!tabela) continue;
 
-      const { data: registro } = await auth.supabase
+      let tabela: string | null = null;
+      let ids: string[] = [];
+
+      if (n.origem_tipo === "mensalidade" || n.origem_tipo === "mensalidade_lote") {
+        tabela = "mensalidades";
+        ids = String(n.origem_id).split(",").map((x) => x.trim()).filter(Boolean);
+      } else if (n.origem_tipo === "convite") {
+        tabela = "convites";
+        ids = [String(n.origem_id).trim()];
+      } else if (n.origem_tipo === "reserva") {
+        tabela = "reservas";
+        ids = [String(n.origem_id).trim()];
+      }
+
+      if (!tabela || !ids.length) continue;
+
+      const { data: registros, error: registroError } = await auth.supabase
         .from(tabela)
         .select("id,valor,comprovante_url,comprovante_status,forma_pagamento,tipo_pagamento")
-        .eq("id", n.origem_id)
-        .maybeSingle();
+        .in("id", ids);
 
-      if (registro) {
-        n.valor = Number(registro.valor || 0);
-        n.comprovante_url = registro.comprovante_url || null;
-        n.comprovante_status = registro.comprovante_status || null;
-        n.forma_pagamento = registro.forma_pagamento || registro.tipo_pagamento || null;
-      }
+      if (registroError || !registros?.length) continue;
+
+      const registrosOrdenados = ids
+        .map((id) => registros.find((r: any) => String(r.id) === id))
+        .filter(Boolean) as any[];
+
+      const total = registrosOrdenados.reduce(
+        (soma, r) => soma + Number(r.valor || 0),
+        0
+      );
+      const comprovante =
+        registrosOrdenados.find((r) => r.comprovante_url)?.comprovante_url || null;
+      const status =
+        registrosOrdenados.find((r) => r.comprovante_status)?.comprovante_status || null;
+      const forma =
+        registrosOrdenados.find((r) => r.forma_pagamento || r.tipo_pagamento);
+
+      n.valor = total;
+      n.comprovante_url = comprovante;
+      n.comprovante_status = status;
+      n.forma_pagamento = forma?.forma_pagamento || forma?.tipo_pagamento || null;
+      n.origem_ids = registrosOrdenados.map((r) => r.id);
     }
 
     const { data: contas_bancarias, error: contasError } = await auth.supabase
