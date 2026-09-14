@@ -27,16 +27,30 @@ export async function GET(request: Request) {
     if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const supabase = auth.supabase;
 
-    const [mens, conv] = await Promise.all([
+    const [mens, conv, reservas] = await Promise.all([
       supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,tipo_pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,socios:socio_id(id,nome,matricula)").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
       supabase.from("convites").select("id,socio_id,nome_convidado,cidade_convidado,data_inicio,data_fim,valor,status,forma_pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,socios:socio_id(id,nome,matricula)").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
+      supabase.from("reservas").select("id,espaco_id,socio_id,dependente_id,responsavel_nome,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,espacos:espaco_id(id,nome),socios:socio_id(id,nome,matricula)").eq("comprovante_status", "pendente").order("comprovante_enviado_em", { ascending: false }),
     ]);
     if (mens.error) throw new Error(mens.error.message);
     if (conv.error) throw new Error(conv.error.message);
+    if (reservas.error) throw new Error(reservas.error.message);
+
     return NextResponse.json({
       comprovantes: [
         ...(mens.data || []).map((x: any) => ({ ...x, origem_tipo: "mensalidade", origem_id: x.id, pessoa: x.socios })),
         ...(conv.data || []).map((x: any) => ({ ...x, origem_tipo: "convite", origem_id: x.id, pessoa: x.socios })),
+        ...(reservas.data || []).map((x: any) => ({
+          ...x,
+          origem_tipo: "reserva",
+          origem_id: x.id,
+          pessoa: x.socios,
+          nome_responsavel: x.responsavel_nome,
+          espaco_nome: Array.isArray(x.espacos) ? x.espacos[0]?.nome : x.espacos?.nome,
+          data_reserva: x.data_reserva,
+          hora_inicio: x.hora_inicio,
+          hora_fim: x.hora_fim,
+        })),
       ].sort((a: any, b: any) => String(b.comprovante_enviado_em || "").localeCompare(String(a.comprovante_enviado_em || ""))),
     });
   } catch (error) {
@@ -49,7 +63,6 @@ export async function POST(request: Request) {
     const auth = await usuarioAutenticado(request);
     if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
     if (auth.perfil !== "associado" || !auth.usuario.socio_id) return NextResponse.json({ error: "Somente o associado pode enviar comprovantes." }, { status: 403 });
-
     const form = await request.formData();
     const origemTipo = String(form.get("origem_tipo") || "").trim().toLowerCase();
     const origemId = String(form.get("origem_id") || "").trim();
@@ -70,19 +83,16 @@ export async function POST(request: Request) {
     }
     if (!TIPOS.includes(arquivo.type)) return NextResponse.json({ error: "Use JPG, PNG, WEBP ou PDF." }, { status: 400 });
     if (arquivo.size > 8 * 1024 * 1024) return NextResponse.json({ error: "O comprovante deve ter no máximo 8 MB." }, { status: 400 });
-
     const tabela = origemTipo === "mensalidade" ? "mensalidades" : "convites";
     const { data: registros, error: buscaError } = await auth.supabase.from(tabela).select("*").in("id", origemIds);
     if (buscaError) return NextResponse.json({ error: buscaError.message }, { status: 500 });
     if (!registros || registros.length !== origemIds.length) return NextResponse.json({ error: "Uma ou mais mensalidades não foram encontradas." }, { status: 404 });
-
     for (const registro of registros) {
       if (origemTipo === "mensalidade" && registro.socio_id !== auth.usuario.socio_id) return NextResponse.json({ error: "Você não pode alterar uma destas mensalidades." }, { status: 403 });
       if (origemTipo === "convite" && registro.socio_id && registro.socio_id !== auth.usuario.socio_id) return NextResponse.json({ error: "Você não pode alterar este convite." }, { status: 403 });
       if (registro.situacao === "pago" || registro.status === "pago") return NextResponse.json({ error: "Uma das cobranças selecionadas já foi confirmada." }, { status: 409 });
       if (registro.comprovante_status === "pendente") return NextResponse.json({ error: "Uma das cobranças selecionadas já possui comprovante aguardando aprovação." }, { status: 409 });
     }
-
     await prepararBucket(auth.supabase);
     const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
     const loteId = origemIds.length > 1 ? `lote-${Date.now()}` : origemIds[0];
@@ -92,29 +102,12 @@ export async function POST(request: Request) {
     if (upload.error) return NextResponse.json({ error: `Erro ao enviar comprovante: ${upload.error.message}` }, { status: 500 });
     const { data: publicUrl } = auth.supabase.storage.from(BUCKET).getPublicUrl(caminho);
     const agora = new Date().toISOString();
-
-    const { data, error } = await auth.supabase.from(tabela).update({
-      comprovante_url: publicUrl.publicUrl,
-      comprovante_enviado_em: agora,
-      comprovante_status: "pendente",
-      motivo_recusa: null,
-    }).in("id", origemIds).select("*");
+    const { data, error } = await auth.supabase.from(tabela).update({ comprovante_url: publicUrl.publicUrl, comprovante_enviado_em: agora, comprovante_status: "pendente", motivo_recusa: null }).in("id", origemIds).select("*");
     if (error) throw new Error(error.message);
-
-    const descricoes = registros.map((registro: any) => origemTipo === "mensalidade"
-      ? String(registro.competencia || "").slice(0, 7)
-      : (registro.nome_convidado || "Convidado"));
+    const descricoes = registros.map((registro: any) => origemTipo === "mensalidade" ? String(registro.competencia || "").slice(0, 7) : (registro.nome_convidado || "Convidado"));
     const total = registros.reduce((soma: number, registro: any) => soma + Number(registro.valor || 0), 0);
-    await notificar(
-      auth.supabase,
-      "comprovante_pagamento",
-      origemIds.length > 1 ? "Novo comprovante para várias mensalidades" : "Novo comprovante aguardando aprovação",
-      `${origemTipo === "mensalidade" ? "Mensalidades" : "Convite"} ${descricoes.join(", ")} no valor total de R$ ${total.toFixed(2).replace(".", ",")} foi enviado por um associado.`,
-      origemIds.length > 1 ? "mensalidade_lote" : origemTipo,
-      origemIds.join(",")
-    );
+    await notificar(auth.supabase, "comprovante_pagamento", origemIds.length > 1 ? "Novo comprovante para várias mensalidades" : "Novo comprovante aguardando aprovação", `${origemTipo === "mensalidade" ? "Mensalidades" : "Convite"} ${descricoes.join(", ")} no valor total de R$ ${total.toFixed(2).replace(".", ",")} foi enviado por um associado.`, origemIds.length > 1 ? "mensalidade_lote" : origemTipo, origemIds.join(","));
     return NextResponse.json({ ok: true, registros: data, url: publicUrl.publicUrl, quantidade: origemIds.length, total });
-
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao enviar comprovante." }, { status: 500 });
   }
@@ -130,10 +123,10 @@ export async function PATCH(request: Request) {
     const origemIds = Array.from(new Set((Array.isArray(body.origem_ids) ? body.origem_ids : [origemId]).map((x: unknown) => String(x).trim()).filter(Boolean)));
     const acao = String(body.acao || "").trim().toLowerCase();
     const contaId = String(body.conta_bancaria_id || "").trim();
-    if (origemIds.length === 0 || !["mensalidade", "convite"].includes(origemTipo) || !["aprovar", "recusar"].includes(acao)) return NextResponse.json({ error: "Informe lançamento, origem e ação." }, { status: 400 });
-
+    if (origemIds.length === 0 || !["mensalidade", "convite", "reserva"].includes(origemTipo) || !["aprovar", "recusar"].includes(acao)) return NextResponse.json({ error: "Informe lançamento, origem e ação." }, { status: 400 });
     if (origemIds.length > 1) return NextResponse.json({ error: "A aprovação em lote será liberada na tela administrativa. Por enquanto, aprove cada comprovante individualmente." }, { status: 400 });
-    const tabela = origemTipo === "mensalidade" ? "mensalidades" : "convites";
+
+    const tabela = origemTipo === "mensalidade" ? "mensalidades" : origemTipo === "convite" ? "convites" : "reservas";
     const { data: registro, error: registroError } = await auth.supabase.from(tabela).select("*").eq("id", origemIds[0]).single();
     if (registroError || !registro) return NextResponse.json({ error: "Lançamento não encontrado." }, { status: 404 });
     if (registro.comprovante_status !== "pendente") return NextResponse.json({ error: "Este comprovante não está aguardando aprovação." }, { status: 409 });
@@ -154,14 +147,26 @@ export async function PATCH(request: Request) {
     if (!movimentoBusca.data) {
       const descricao = origemTipo === "mensalidade"
         ? `Mensalidade ${String(registro.competencia || "").slice(0, 7)} - pagamento via PIX`
-        : `Convite - ${registro.nome_convidado || "Convidado"}`;
+        : origemTipo === "convite"
+          ? `Convite - ${registro.nome_convidado || "Convidado"}`
+          : `Reserva - ${registro.responsavel_nome || "Responsável"}${registro.data_reserva ? ` - ${registro.data_reserva}` : ""}`;
       const { error } = await auth.supabase.from("movimentacoes_financeiras").insert({
-        conta_bancaria_id: contaId, conta_destino_id: null, grupo_transferencia: null,
-        tipo: "entrada", categoria: origemTipo === "mensalidade" ? "Mensalidade" : "Convite",
-        descricao, valor: Number(registro.valor || 0), data_movimentacao: new Date().toISOString().slice(0, 10),
-        forma_pagamento: registro.forma_pagamento || "pix", origem_tipo: origemTipo, origem_id: origemId,
-        socio_id: registro.socio_id || null, dependente_id: registro.dependente_id || null,
-        comprovante_url: registro.comprovante_url || null, conciliado: false, data_conciliacao: null,
+        conta_bancaria_id: contaId,
+        conta_destino_id: null,
+        grupo_transferencia: null,
+        tipo: "entrada",
+        categoria: origemTipo === "mensalidade" ? "Mensalidade" : origemTipo === "convite" ? "Convite" : "Reserva",
+        descricao,
+        valor: Number(registro.valor || 0),
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        forma_pagamento: registro.forma_pagamento || registro.tipo_pagamento || "pix",
+        origem_tipo: origemTipo,
+        origem_id: origemId,
+        socio_id: registro.socio_id || null,
+        dependente_id: registro.dependente_id || null,
+        comprovante_url: registro.comprovante_url || null,
+        conciliado: false,
+        data_conciliacao: null,
         observacoes: `Comprovante aprovado pela administração. Conta: ${conta.nome}${conta.banco ? ` (${conta.banco})` : ""}.`,
       });
       if (error) throw new Error(`Não foi possível lançar no financeiro: ${error.message}`);
@@ -170,10 +175,12 @@ export async function PATCH(request: Request) {
     const agora = new Date().toISOString();
     const update = origemTipo === "mensalidade"
       ? { situacao: "pago", data_pagamento: new Date().toISOString().slice(0, 10), tipo_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null }
-      : { status: "pago", forma_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null };
+      : origemTipo === "convite"
+        ? { status: "pago", forma_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null }
+        : { situacao: "confirmada", data_pagamento: new Date().toISOString().slice(0, 10), tipo_pagamento: "pix", comprovante_status: "aprovado", comprovante_aprovado_por: auth.usuario.id, comprovante_aprovado_em: agora, motivo_recusa: null };
+
     const { data, error } = await auth.supabase.from(tabela).update(update).eq("id", origemId).select("*").single();
     if (error) throw new Error(error.message);
-
     if (origemTipo === "mensalidade" && registro.socio_id && !registro.dependente_id) {
       await auth.supabase.from("socios").update({ situacao_financeira: "em_dia", data_ultimo_pagamento: new Date().toISOString().slice(0, 10) }).eq("id", registro.socio_id);
     }
