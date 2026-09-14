@@ -256,9 +256,10 @@ export default function FinanceiroPage() {
   const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
   const [transObservacoes, setTransObservacoes] = useState("");
   const [contaPagamentoId, setContaPagamentoId] = useState("");
-  const [mensalidadesSelecionadasDebito, setMensalidadesSelecionadasDebito] = useState<string[]>([]);
-  const [contaDebitoId, setContaDebitoId] = useState("");
-  const [processandoDebitoLote, setProcessandoDebitoLote] = useState(false);
+  const [comprovantesPendentes, setComprovantesPendentes] = useState<any[]>([]);
+  const [comprovanteSelecionado, setComprovanteSelecionado] = useState<any | null>(null);
+  const [contaComprovanteId, setContaComprovanteId] = useState("");
+  const [processandoComprovante, setProcessandoComprovante] = useState(false);
 
   // Filtros do fluxo de caixa
   const [fluxoInicio, setFluxoInicio] = useState("");
@@ -598,6 +599,18 @@ export default function FinanceiroPage() {
     if (contasResult.error) console.error(contasResult.error);
     if (movimentosResult.error) console.error(movimentosResult.error);
 
+    try {
+      const sessao = await supabase.auth.getSession();
+      const token = sessao.data.session?.access_token || "";
+      if (token) {
+        const r = await fetch("/api/comprovantes/pagamentos", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) setComprovantesPendentes(j.comprovantes || []);
+      }
+    } catch (error) {
+      console.error("Comprovantes pendentes:", error);
+    }
+
     if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
     if (dependentesResult.data)
       setDependentes(dependentesResult.data as Dependente[]);
@@ -736,108 +749,6 @@ export default function FinanceiroPage() {
       );
     } finally {
       setGerando(false);
-    }
-  }
-
-  function alternarMensalidadeDebito(id: string) {
-    setMensalidadesSelecionadasDebito((atual) =>
-      atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]
-    );
-  }
-
-  function selecionarTodasMensalidadesDebito() {
-    const disponiveis = filtradas
-      .filter((m) => m.situacao !== "pago" && m.situacao !== "isento")
-      .map((m) => m.id);
-    setMensalidadesSelecionadasDebito((atual) =>
-      atual.length === disponiveis.length && disponiveis.every((id) => atual.includes(id))
-        ? []
-        : disponiveis
-    );
-  }
-
-  async function marcarDebitoBancoEmLote() {
-    if (!contaDebitoId) {
-      setMensagem("Selecione a conta bancária que recebeu os débitos.");
-      return;
-    }
-    const selecionadas = mensalidadesCompetencia.filter(
-      (m) => mensalidadesSelecionadasDebito.includes(m.id) && m.situacao !== "pago" && m.situacao !== "isento"
-    );
-    if (!selecionadas.length) {
-      setMensagem("Selecione pelo menos uma mensalidade em aberto.");
-      return;
-    }
-
-    if (!window.confirm(`Marcar ${selecionadas.length} mensalidade(s) como pagas por débito automático e lançar as entradas no banco selecionado?`)) return;
-
-    setProcessandoDebitoLote(true);
-    setMensagem("");
-    try {
-      const dataBaixa = new Date().toISOString().slice(0, 10);
-      const conta = contasBancarias.find((c) => c.id === contaDebitoId);
-      const total = selecionadas.reduce((soma, m) => soma + Number(m.valor || 0), 0);
-
-      const { error: mensalidadesError } = await supabase
-        .from("mensalidades")
-        .update({
-          situacao: "pago",
-          data_pagamento: dataBaixa,
-          tipo_pagamento: "debito_em_conta",
-          observacoes: `Baixa em lote por débito automático - ${conta?.nome || "conta bancária"}.`,
-        })
-        .in("id", selecionadas.map((m) => m.id))
-        .neq("situacao", "pago");
-      if (mensalidadesError) throw mensalidadesError;
-
-      const movimentos = selecionadas.map((m) => {
-        const pessoa = pessoaDoLancamento(m);
-        return {
-          conta_bancaria_id: contaDebitoId,
-          conta_destino_id: null,
-          grupo_transferencia: null,
-          tipo: "entrada",
-          categoria: "Mensalidade",
-          descricao: `Mensalidade ${formatarCompetencia(m.competencia)} - ${pessoa?.nome || "Cadastro não localizado"} - Débito automático`,
-          valor: Number(m.valor || 0),
-          data_movimentacao: dataBaixa,
-          forma_pagamento: "debito_em_conta",
-          origem_tipo: "mensalidade",
-          origem_id: m.id,
-          socio_id: pessoa?.socio_id || m.socio_id || null,
-          dependente_id: pessoa?.dependente_id || m.dependente_id || null,
-          comprovante_url: null,
-          conciliado: false,
-          data_conciliacao: null,
-          observacoes: `Baixa em lote por débito automático. Conta: ${conta?.nome || contaDebitoId}.`,
-        };
-      });
-
-      const { data: movimentosData, error: movimentosError } = await supabase
-        .from("movimentacoes_financeiras")
-        .insert(movimentos)
-        .select("*");
-      if (movimentosError) throw movimentosError;
-
-      const titulares = Array.from(new Set(selecionadas.map((m) => m.socio_id).filter(Boolean)));
-      if (titulares.length) {
-        const { error: sociosError } = await supabase
-          .from("socios")
-          .update({ situacao_financeira: "em_dia", data_ultimo_pagamento: dataBaixa })
-          .in("id", titulares);
-        if (sociosError) throw sociosError;
-      }
-
-      const ids = new Set(selecionadas.map((m) => m.id));
-      setMensalidades((lista) => lista.map((m) => ids.has(m.id) ? { ...m, situacao: "pago", data_pagamento: dataBaixa, tipo_pagamento: "debito_em_conta", observacoes: `Baixa em lote por débito automático - ${conta?.nome || "conta bancária"}.` } : m));
-      if (movimentosData) setMovimentosFinanceiros((lista) => [...(movimentosData as MovimentoFinanceiro[]), ...lista]);
-      setMensalidadesSelecionadasDebito([]);
-      setMensagem(`${selecionadas.length} mensalidade(s) baixada(s) por débito automático. Entrada de ${formatarMoeda(total)} lançada em ${conta?.nome || "banco selecionado"}.`);
-    } catch (error) {
-      console.error(error);
-      setMensagem(`Não foi possível concluir a baixa em lote. ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setProcessandoDebitoLote(false);
     }
   }
 
@@ -1382,6 +1293,28 @@ export default function FinanceiroPage() {
     setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
   }
 
+  async function processarComprovante(acao: "aprovar" | "recusar") {
+    if (!comprovanteSelecionado) return;
+    if (acao === "aprovar" && !contaComprovanteId) { setMensagem("Selecione a conta bancária que recebeu o PIX."); return; }
+    const motivo = acao === "recusar" ? (window.prompt("Motivo da recusa:", "Comprovante não confirmado.") || "Comprovante recusado pela administração.") : "";
+    setProcessandoComprovante(true);
+    try {
+      const sessao = await supabase.auth.getSession();
+      const token = sessao.data.session?.access_token || "";
+      const r = await fetch("/api/comprovantes/pagamentos", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ origem_tipo: comprovanteSelecionado.origem_tipo, origem_id: comprovanteSelecionado.origem_id, acao, conta_bancaria_id: contaComprovanteId || null, motivo_recusa: motivo }), cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Não foi possível processar o comprovante.");
+      setComprovanteSelecionado(null);
+      setContaComprovanteId("");
+      setMensagem(acao === "aprovar" ? "Comprovante aprovado e pagamento lançado no financeiro." : "Comprovante recusado.");
+      await carregarTudo();
+    } catch (error) {
+      setMensagem(error instanceof Error ? error.message : "Erro ao processar comprovante.");
+    } finally {
+      setProcessandoComprovante(false);
+    }
+  }
+
   async function abrirPagamentoComConta(item: Mensalidade) { setContaPagamentoId(""); await abrirPagamento(item); }
 
   return (
@@ -1865,6 +1798,27 @@ export default function FinanceiroPage() {
 
           {abaFinanceira === "mensalidades" && (
             <>
+          {comprovantesPendentes.length > 0 && (
+            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div><p className="font-black text-amber-900">Comprovantes aguardando aprovação</p><p className="text-sm text-amber-800">O pagamento só entra no financeiro depois da conferência da administração.</p></div>
+                <span className="rounded-full bg-amber-200 px-3 py-1 text-xs font-black text-amber-900">{comprovantesPendentes.length}</span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {comprovantesPendentes.map((c) => (
+                  <div key={`${c.origem_tipo}-${c.origem_id}`} className="rounded-xl bg-white p-4 shadow-sm">
+                    <div className="text-[10px] font-black uppercase text-gray-400">{c.origem_tipo === "mensalidade" ? "Mensalidade" : "Convite"}</div>
+                    <div className="mt-1 font-black text-[#173d2e]">{c.origem_tipo === "mensalidade" ? (c.pessoa?.nome || "Associado") : (c.nome_convidado || "Convidado")}</div>
+                    <div className="mt-1 text-sm text-gray-600">Valor: <b className="text-[#005a3c]">{formatarMoeda(c.valor)}</b></div>
+                    {c.origem_tipo === "mensalidade" && <div className="text-xs text-gray-500">Competência {formatarCompetencia(c.competencia)}</div>}
+                    {c.comprovante_url && <a href={c.comprovante_url} target="_blank" rel="noreferrer" className="mt-3 block rounded-lg bg-[#eef7f2] px-3 py-2 text-center text-xs font-black text-[#005a3c]">📎 Abrir comprovante</a>}
+                    <button onClick={() => { setComprovanteSelecionado(c); setContaComprovanteId(contasBancarias[0]?.id || ""); }} className="mt-2 w-full rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Analisar</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
@@ -1882,35 +1836,11 @@ export default function FinanceiroPage() {
             </div>
           </div>
 
-          <div className="mb-4 rounded-2xl border border-[#cfe3d8] bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="font-bold text-[#003d2b]">Baixa em lote — débito automático</p>
-                <p className="mt-1 text-sm text-gray-500">Selecione os associados que efetivamente debitaram e lance as entradas na conta bancária.</p>
-              </div>
-              <div className="flex flex-wrap items-end gap-3">
-                <div>
-                  <label className="mb-2 block text-xs font-bold text-gray-600">Banco/conta que recebeu</label>
-                  <select value={contaDebitoId} onChange={(e) => setContaDebitoId(e.target.value)} className="min-w-[240px] rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm">
-                    <option value="">Selecione a conta</option>
-                    {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
-                  </select>
-                </div>
-                <button onClick={selecionarTodasMensalidadesDebito} className="rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-bold text-[#005a3c]">{mensalidadesSelecionadasDebito.length ? "Limpar seleção" : "Selecionar em aberto"}</button>
-                <button disabled={processandoDebitoLote} onClick={() => void marcarDebitoBancoEmLote()} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{processandoDebitoLote ? "Processando..." : `✓ Marcar como pago (${mensalidadesSelecionadasDebito.length})`}</button>
-              </div>
-            </div>
-            {mensalidadesSelecionadasDebito.length > 0 && (
-              <p className="mt-3 rounded-xl bg-[#f7faf8] px-3 py-2 text-sm font-semibold text-[#005a3c]">Total selecionado: {formatarMoeda(mensalidadesCompetencia.filter((m) => mensalidadesSelecionadasDebito.includes(m.id)).reduce((s, m) => s + Number(m.valor || 0), 0))}</p>
-            )}
-          </div>
-
           <div className="mb-6 overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1050px]">
                 <thead className="bg-[#e8f3ee]">
                   <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                    <th className="w-12 px-5 py-4"><input type="checkbox" checked={filtradas.filter((m) => m.situacao !== "pago" && m.situacao !== "isento").length > 0 && filtradas.filter((m) => m.situacao !== "pago" && m.situacao !== "isento").every((m) => mensalidadesSelecionadasDebito.includes(m.id))} onChange={selecionarTodasMensalidadesDebito} /></th>
                     <th className="px-5 py-4">Associado</th>
                     <th className="px-5 py-4">Competência</th>
                     <th className="px-5 py-4">Vencimento</th>
@@ -1924,7 +1854,7 @@ export default function FinanceiroPage() {
                 <tbody className="divide-y">
                   {carregando && (
                     <tr>
-                      <td colSpan={8} className="px-5 py-14 text-center text-gray-500">
+                      <td colSpan={7} className="px-5 py-14 text-center text-gray-500">
                         Carregando financeiro...
                       </td>
                     </tr>
@@ -1932,7 +1862,7 @@ export default function FinanceiroPage() {
 
                   {!carregando && mensalidadesCompetencia.length > 0 && filtradas.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-5 py-14 text-center">
+                      <td colSpan={7} className="px-5 py-14 text-center">
                         <div className="text-4xl">🔎</div>
                         <p className="mt-3 font-bold text-gray-700">
                           Nenhum lançamento corresponde aos filtros
@@ -1946,7 +1876,7 @@ export default function FinanceiroPage() {
 
                   {!carregando && mensalidadesCompetencia.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-5 py-14 text-center">
+                      <td colSpan={7} className="px-5 py-14 text-center">
                         <div className="text-4xl">💰</div>
                         <p className="mt-3 font-bold text-gray-700">
                           Nenhum lançamento nesta competência
@@ -1971,9 +1901,6 @@ export default function FinanceiroPage() {
                           key={item.id}
                           className="transition hover:bg-[#fafcfb]"
                         >
-                          <td className="px-5 py-4">
-                            <input type="checkbox" disabled={item.situacao === "pago" || item.situacao === "isento"} checked={mensalidadesSelecionadasDebito.includes(item.id)} onChange={() => alternarMensalidadeDebito(item.id)} />
-                          </td>
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-3">
                               {pessoa?.foto_url ? (
@@ -2511,6 +2438,18 @@ export default function FinanceiroPage() {
           }
         }
       `}</style>
+          {comprovanteSelecionado && (
+            <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4">
+              <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-[#005a3c]">{comprovanteSelecionado.origem_tipo === "mensalidade" ? "Mensalidade" : "Convite"}</p><h3 className="mt-1 text-xl font-black text-[#003d2b]">Conferir comprovante</h3></div><button onClick={() => setComprovanteSelecionado(null)} className="rounded-lg bg-gray-100 px-3 py-2">✕</button></div>
+                <div className="mt-4 rounded-xl bg-[#f8faf9] p-4 text-sm"><b>{comprovanteSelecionado.origem_tipo === "mensalidade" ? (comprovanteSelecionado.pessoa?.nome || "Associado") : (comprovanteSelecionado.nome_convidado || "Convidado")}</b><div className="mt-1">Valor: <b className="text-[#005a3c]">{formatarMoeda(comprovanteSelecionado.valor)}</b></div></div>
+                {comprovanteSelecionado.comprovante_url && <a href={comprovanteSelecionado.comprovante_url} target="_blank" rel="noreferrer" className="mt-4 block rounded-xl border p-3 text-center font-black text-[#005a3c]">📎 Abrir comprovante</a>}
+                <label className="mt-4 block text-sm font-bold">Conta que recebeu o PIX<select value={contaComprovanteId} onChange={e => setContaComprovanteId(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3"><option value="">Selecione a conta</option>{contasBancarias.map(c => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}</select></label>
+                <div className="mt-5 flex gap-2"><button disabled={processandoComprovante} onClick={() => void processarComprovante("recusar")} className="flex-1 rounded-xl bg-red-600 px-4 py-3 font-black text-white">Recusar</button><button disabled={processandoComprovante} onClick={() => void processarComprovante("aprovar")} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-black text-white">{processandoComprovante ? "Processando..." : "Aprovar e lançar"}</button></div>
+              </div>
+            </div>
+          )}
+
     </main>
   );
 }
