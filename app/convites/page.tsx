@@ -36,6 +36,7 @@ export default function ConvitesPage() {
   const [abrir, setAbrir] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const [enviandoComprovante, setEnviandoComprovante] = useState<string | null>(null);
   const [form, setForm] = useState({ socio_id: "", nome: "", documento: "", cidade: "", inicio: hoje(), fim: "", tipo: "diario", valor: "30", pagamento: "pix", conta_id: "" });
 
   const ehAugusto = form.cidade.trim().toLowerCase() === "augusto pestana";
@@ -93,6 +94,26 @@ export default function ConvitesPage() {
       setForm({ socio_id: "", nome: "", documento: "", cidade: "", inicio: hoje(), fim: "", tipo: "diario", valor: "30", pagamento: "pix", conta_id: "" });
     } catch (e) { setMensagem(`Não foi possível registrar o convite. ${e instanceof Error ? e.message : ""}`); }
     finally { setSalvando(false); }
+  }
+
+  async function enviarComprovante(convite: Convite, arquivo: File) {
+    setEnviandoComprovante(convite.id);
+    setMensagem("");
+    try {
+      const formData = new FormData();
+      formData.append("origem_tipo", "convite");
+      formData.append("origem_id", convite.id);
+      formData.append("arquivo", arquivo);
+      const r = await fetch("/api/comprovantes/administracao", { method: "POST", body: formData });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Não foi possível enviar o comprovante.");
+      setConvites((lista) => lista.map((c) => c.id === convite.id ? { ...c, comprovante_url: j.url || c.comprovante_url } : c));
+      setMensagem("Comprovante enviado com sucesso.");
+    } catch (e) {
+      setMensagem(`Não foi possível enviar o comprovante. ${e instanceof Error ? e.message : ""}`);
+    } finally {
+      setEnviandoComprovante(null);
+    }
   }
 
   const filtrados = useMemo(() => {
