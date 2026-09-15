@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exigirAdministrador, getServiceClient, usuarioAutenticado, normalizarPerfil } from "@/lib/guaraniAuth";
+import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,32 +21,26 @@ function erroBanco(error: unknown) {
   const e = error as { message?: string; details?: string; hint?: string; code?: string } | null;
   return [e?.message, e?.details, e?.hint, e?.code ? `Código ${e.code}` : ""].filter(Boolean).join(" — ");
 }
-async function autenticarAdmin(request: Request) {
-  const auth = await exigirAdministrador(request);
-  if ("error" in auth) return { response: NextResponse.json({ error: auth.error }, { status: auth.status }) };
-  return { supabase: getServiceClient() };
-}
 
 export async function GET(request: Request) {
   try {
-    const auth = await usuarioAutenticado(request);
-    if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-    const perfil = normalizarPerfil(auth.perfil);
-    if (!["administrador", "funcionario", "associado"].includes(perfil)) {
-      return NextResponse.json({ error: "Sem permissão para consultar sócios." }, { status: 403 });
-    }
-    let query = auth.supabase.from("socios").select("*").order("matricula", { ascending: true });
-    if (perfil === "associado") {
-      if (!auth.usuario.socio_id) return NextResponse.json({ socios: [] });
-      query = query.eq("id", auth.usuario.socio_id);
-    }
-    const { data, error } = await query;
+    const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
+    if ("response" in auth) return auth.response;
+    const db = getServiceClient();
+    const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
     return NextResponse.json({ socios: data || [] });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
 }
+
+async function autenticarAdmin(request: Request) {
+  const auth = await exigirAdministrador(request);
+  if ("error" in auth) return { response: NextResponse.json({ error: auth.error }, { status: auth.status }) };
+  return { supabase: getServiceClient() };
+}
+
 export async function POST(request: Request) {
   try {
     const auth = await autenticarAdmin(request);
@@ -61,9 +55,8 @@ export async function POST(request: Request) {
     const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
     if (error) {
-      const texto = erroBanco(error);
       if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
-      return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${texto}` }, { status: 500 });
+      return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
     }
     const extras = limparObjeto({ ...body, matricula: Number(matricula), cpf: body.cpf || null }, COLUNAS_EXTRAS);
     const avisos: string[] = [];
@@ -78,6 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
   }
 }
+
 export async function PUT(request: Request) {
   try {
     const auth = await autenticarAdmin(request);
@@ -88,27 +82,22 @@ export async function PUT(request: Request) {
     const matricula = String(body.matricula ?? "").replace(/\D/g, "");
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
-    if (!matricula) return NextResponse.json({ error: "Informe a matrícula do associado." }, { status: 400 });
-    if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
-    if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
+    if (!matricula || !nome) return NextResponse.json({ error: "Matrícula e nome são obrigatórios." }, { status: 400 });
     const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
-    if (error) {
-      if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada em outro sócio." }, { status: 409 });
-      return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
-    }
+    if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
     const extras = limparObjeto(body, COLUNAS_EXTRAS);
-    const avisos: string[] = [];
     for (const [campo, valor] of Object.entries(extras)) {
       const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", id);
-      if (extraError) avisos.push(`${campo}: ${erroBanco(extraError)}`);
+      if (extraError) console.error(`Erro no campo ${campo}:`, extraError);
     }
     const { data } = await auth.supabase.from("socios").select("*").eq("id", id).single();
-    return NextResponse.json({ socio: data, avisos });
+    return NextResponse.json({ socio: data });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar sócio." }, { status: 500 });
   }
 }
+
 export async function DELETE(request: Request) {
   try {
     const auth = await autenticarAdmin(request);
