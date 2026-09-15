@@ -156,12 +156,19 @@ export async function exigirAdministrador(request: Request) {
     return resultado;
   }
 
-  if (resultado.perfil !== "administrador") {
+  if (!["administrador", "administrador_normal"].includes(resultado.perfil)) {
     return {
       error: "Somente administradores podem realizar esta operação.",
       status: 403 as const,
     };
   }
 
+  return resultado;
+}
+
+export async function exigirAdministradorMaster(request: Request) {
+  const resultado = await usuarioAutenticado(request);
+  if ("error" in resultado) return resultado;
+  if (resultado.perfil !== "administrador") return { error: "Somente o Administrador Master pode realizar esta operação.", status: 403 as const };
   return resultado;
 }
