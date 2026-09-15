@@ -24,6 +24,7 @@ const TODAS_PERMISSOES = [
 
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
+  administrador_normal: TODAS_PERMISSOES.filter((x) => x !== "administracao.tudo"),
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
 };
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
   try {
     const acesso = await usuarioAutenticado(request);
     if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente o Administrador Master pode gerenciar usuários." }, { status: 403 });
     return NextResponse.json(await carregarDados(getAdminClient()));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar usuários." }, { status: 500 });
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
   try {
     const acesso = await usuarioAutenticado(request);
     if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente o Administrador Master pode gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const { nome, email, senha, perfil_id, socio_id, ativo, permissoes } = body;
     if (!nome || !perfil_id) return NextResponse.json({ error: "Nome e perfil são obrigatórios." }, { status: 400 });
@@ -139,7 +140,7 @@ export async function PATCH(request: Request) {
   try {
     const acesso = await usuarioAutenticado(request);
     if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente o Administrador Master pode gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const { id, ativo, permissoes } = body;
     if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
@@ -170,7 +171,7 @@ export async function DELETE(request: Request) {
   try {
     const acesso = await usuarioAutenticado(request);
     if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente administradores podem gerenciar usuários." }, { status: 403 });
+    if (acesso.perfil !== "administrador") return NextResponse.json({ error: "Somente o Administrador Master pode gerenciar usuários." }, { status: 403 });
     const body = await request.json();
     const id = String(body?.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
