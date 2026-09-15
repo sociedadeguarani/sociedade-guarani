@@ -2958,12 +2958,15 @@ function ModalSocio({
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                {form.responsavel_id ? (
-                  <div className="rounded-xl border border-[#b9ddcc] bg-[#e8f3ee] p-4 md:col-span-4">
-                    <p className="text-sm font-extrabold text-[#005a3c]">👨‍👩‍👧 Mensalidade familiar</p>
-                    <p className="mt-1 text-xs text-[#315b4c]">Este dependente não possui cobrança própria. A situação da mensalidade é sempre a mesma do titular/responsável.</p>
-                  </div>
-                ) : (
+             <SelectCampo
+  label="Possui mensalidade?"
+  value={form.possui_mensalidade ? "sim" : "nao"}
+  onChange={(v) =>
+    alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")
+  }
+  opcoes={["sim", "nao"]}
+  labels={{ sim: "Sim", nao: "Não" }}
+/>
                   <SelectCampo
                     label="Possui mensalidade?"
                     value={form.possui_mensalidade ? "sim" : "nao"}
@@ -2973,7 +2976,7 @@ function ModalSocio({
                   />
                 )}
 
-                {form.possui_mensalidade && !form.responsavel_id ? (
+               {form.possui_mensalidade ? (
                   <>
                     <Campo
                       label="Valor mensal"
