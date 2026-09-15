@@ -25,20 +25,22 @@ import {
 const NIVEL: Record<string, number> = {
   associado: 1,
   funcionario: 2,
-  administrador: 3,
+  administrador_normal: 3,
+  administrador: 4,
 };
 
 const ITENS_MENU = [
   { nome: "Início", rota: "/painel", icone: Home, minimo: "associado" },
   { nome: "Avisos", rota: "/avisos", icone: Megaphone, minimo: "associado" },
-  { nome: "Minhas mensalidades", rota: "/mensalidades", icone: Wallet, minimo: "associado" },
+  { nome: "Minhas mensalidades", rota: "/minhas-mensalidades", icone: Wallet, minimo: "associado" },
   { nome: "Reservas", rota: "/reservas", icone: CalendarDays, minimo: "associado" },
   { nome: "Eventos", rota: "/eventos", icone: PartyPopper, minimo: "associado" },
   { nome: "Convites", rota: "/convites", icone: Ticket, minimo: "associado" },
   { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, minimo: "associado" },
   { nome: "Sócios", rota: "/socios", icone: Users, minimo: "funcionario" },
   { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, minimo: "funcionario" },
-  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, minimo: "funcionario" },
+  { nome: "Mensalidades", rota: "/mensalidades", icone: Wallet, minimo: "administrador_normal" },
+  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, minimo: "administrador_normal" },
   { nome: "Inventário", rota: "/inventario", icone: Boxes, minimo: "funcionario" },
   { nome: "Acessos", rota: "/acessos", icone: DoorOpen, minimo: "funcionario" },
   { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, minimo: "administrador" },
@@ -62,7 +64,7 @@ export default function MenuLateralPadrao() {
     setAbertoMobile(false);
   }, [pathname]);
 
-  const nivelUsuario = NIVEL[perfil] ?? NIVEL.associado;
+  const perfilMenu = perfil === "administrador_master" ? "administrador" : perfil;\n  const nivelUsuario = NIVEL[perfilMenu] ?? NIVEL.associado;
   const itensVisiveis = ITENS_MENU.filter((item) => nivelUsuario >= NIVEL[item.minimo]);
 
   function irPara(rota: string) {
