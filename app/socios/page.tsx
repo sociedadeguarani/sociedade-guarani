@@ -836,9 +836,9 @@ export default function Home() {
       tipo_socio: form.tipo_socio || "patrimonial_individual",
       responsavel_id: form.responsavel_id || null,
       parentesco: form.parentesco || null,
-      possui_mensalidade: responsavel ? false : Boolean(form.possui_mensalidade),
-      valor_mensalidade: responsavel ? 0 : Number(form.valor_mensalidade || 0),
-      dia_vencimento: responsavel ? Number(responsavel.dia_vencimento || 10) : Number(form.dia_vencimento || 10),
+      possui_mensalidade: Boolean(form.possui_mensalidade),
+      valor_mensalidade: Number(form.valor_mensalidade || 0),
+      dia_vencimento: Number(form.dia_vencimento || responsavel?.dia_vencimento || 10),
       tipo_pagamento: responsavel ? (responsavel.tipo_pagamento || "pix") : (form.tipo_pagamento || "pix"),
       conta_bancaria_id:
         responsavel
