@@ -20,32 +20,25 @@ import {
   X,
 } from "lucide-react";
 
-// "minimo" define o nível mínimo de perfil que enxerga o item:
-// associado < funcionario < administrador
-const NIVEL: Record<string, number> = {
-  associado: 1,
-  funcionario: 2,
-  administrador_normal: 3,
-  administrador: 4,
-};
+type Perfil = "associado" | "funcionario" | "administrador_normal" | "administrador_master";
 
 const ITENS_MENU = [
-  { nome: "Início", rota: "/painel", icone: Home, minimo: "associado" },
-  { nome: "Avisos", rota: "/avisos", icone: Megaphone, minimo: "associado" },
-  { nome: "Minhas mensalidades", rota: "/minhas-mensalidades", icone: Wallet, minimo: "associado" },
-  { nome: "Reservas", rota: "/reservas", icone: CalendarDays, minimo: "associado" },
-  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, minimo: "associado" },
-  { nome: "Convites", rota: "/convites", icone: Ticket, minimo: "associado" },
-  { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, minimo: "associado" },
-  { nome: "Sócios", rota: "/socios", icone: Users, minimo: "funcionario" },
-  { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, minimo: "funcionario" },
-  { nome: "Mensalidades", rota: "/mensalidades", icone: Wallet, minimo: "administrador_normal" },
-  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, minimo: "administrador_normal" },
-  { nome: "Inventário", rota: "/inventario", icone: Boxes, minimo: "funcionario" },
-  { nome: "Acessos", rota: "/acessos", icone: DoorOpen, minimo: "funcionario" },
-  { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, minimo: "administrador" },
-  { nome: "Usuários", rota: "/usuarios", icone: UserCog, minimo: "administrador" },
-];
+  { nome: "Início", rota: "/painel", icone: Home, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Minhas mensalidades", rota: "/mensalidades", icone: Wallet, perfis: ["associado"] },
+  { nome: "Reservas", rota: "/reservas", icone: CalendarDays, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Convites", rota: "/convites", icone: Ticket, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Sócios", rota: "/socios", icone: Users, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Mensalidades", rota: "/mensalidades-admin", icone: Wallet, perfis: ["administrador_normal", "administrador_master"] },
+  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, perfis: ["administrador_normal", "administrador_master"] },
+  { nome: "Inventário", rota: "/inventario", icone: Boxes, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Acessos", rota: "/acessos", icone: DoorOpen, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, perfis: ["administrador_normal", "administrador_master"] },
+  { nome: "Usuários", rota: "/usuarios", icone: UserCog, perfis: ["administrador_master"] },
+] as const;
 
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
@@ -64,8 +57,17 @@ export default function MenuLateralPadrao() {
     setAbertoMobile(false);
   }, [pathname]);
 
-  const perfilMenu = perfil === "administrador_master" ? "administrador" : perfil;\n  const nivelUsuario = NIVEL[perfilMenu] ?? NIVEL.associado;
-  const itensVisiveis = ITENS_MENU.filter((item) => nivelUsuario >= NIVEL[item.minimo]);
+  const perfilNormalizado: Perfil =
+    perfil === "administrador" ? "administrador_normal" :
+    perfil === "admin" ? "administrador_normal" :
+    perfil === "master" ? "administrador_master" :
+    perfil === "administrador_master" ? "administrador_master" :
+    perfil === "administrador_normal" ? "administrador_normal" :
+    perfil === "funcionario" ? "funcionario" : "associado";
+
+  const itensVisiveis = ITENS_MENU.filter((item) =>
+    (item.perfis as readonly string[]).includes(perfilNormalizado)
+  );
 
   function irPara(rota: string) {
     if (pathname !== rota) window.location.href = rota;
