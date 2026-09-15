@@ -56,6 +56,34 @@ function escolherConfiguracao(
     )[0];
 }
 
+/*
+ * Define a configuração do dependente com mensalidade.
+ *
+ * Se o dependente não possui pessoas vinculadas a ele,
+ * utiliza a modalidade individual.
+ *
+ * Se possui pessoas vinculadas a ele,
+ * utiliza a modalidade familiar.
+ */
+function codigoDependenteMensalidade(
+  tipoSocio: string,
+  possuiFamilia: boolean
+) {
+  const tipo = String(tipoSocio || "").toLowerCase();
+
+  const patrimonial = tipo.includes("patrimonial");
+
+  if (patrimonial) {
+    return possuiFamilia
+      ? "dependente_patrimonial_familiar_mensalidade"
+      : "dependente_patrimonial_individual_mensalidade";
+  }
+
+  return possuiFamilia
+    ? "dependente_contribuinte_familiar_mensalidade"
+    : "dependente_contribuinte_individual_mensalidade";
+}
+
 export async function GET(request: Request) {
   const auth = await exigirAdministrador(request);
 
@@ -194,10 +222,9 @@ export async function POST(request: Request) {
     );
 
     /*
-     * GERAR MENSALIDADES
-     *
-     * Somente titulares geram cobrança.
-     * Dependentes não recebem mensalidade separada.
+     * =====================================================
+     * GERAR COMPETÊNCIA
+     * =====================================================
      */
     if (
       acao === "gerar" ||
@@ -252,13 +279,22 @@ export async function POST(request: Request) {
         );
       }
 
+      /*
+       * Buscamos TODOS os sócios.
+       *
+       * Isso é importante porque:
+       *
+       * - titular com mensalidade gera cobrança;
+       * - dependente com mensalidade gera cobrança;
+       * - dependente sem mensalidade não gera cobrança.
+       */
       const {
         data: socios,
         error: erroSocios,
       } = await db
         .from("socios")
         .select(
-          "id,tipo_socio,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,responsavel_id"
+          "id,nome,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
         )
         .eq(
           "possui_mensalidade",
@@ -269,16 +305,44 @@ export async function POST(request: Request) {
         throw erroSocios;
       }
 
-      const titulares = (
+      /*
+       * Todos os registros com mensalidade habilitada
+       * podem gerar cobrança.
+       *
+       * Dependentes sem mensalidade já foram filtrados
+       * pelo banco.
+       */
+      const cobraveis = (
         socios || []
       ).filter(
         (s: any) =>
-          !s.responsavel_id &&
           String(
             s.situacao || ""
-          ).toLowerCase() !== "inativo"
+          ).toLowerCase() !== "inativo" &&
+          s.ativo !== false
       );
 
+      /*
+       * Busca todas as pessoas da tabela para descobrir
+       * se um dependente com mensalidade possui uma
+       * família própria.
+       */
+      const {
+        data: todosSocios,
+        error: erroTodosSocios,
+      } = await db
+        .from("socios")
+        .select(
+          "id,responsavel_id,tipo_socio,possui_mensalidade"
+        );
+
+      if (erroTodosSocios) {
+        throw erroTodosSocios;
+      }
+
+      /*
+       * Configurações dos valores.
+       */
       const {
         data: configuracoes,
         error: erroConfiguracoes,
@@ -294,6 +358,11 @@ export async function POST(request: Request) {
         throw erroConfiguracoes;
       }
 
+      /*
+       * Mensalidades que já existem para a competência.
+       *
+       * Isso evita duplicação.
+       */
       const {
         data: existentes,
         error: erroExistentes,
@@ -311,11 +380,15 @@ export async function POST(request: Request) {
 
       const idsExistentes = new Set<string>(
         (existentes || []).map(
-          (x: any) => String(x.socio_id)
+          (x: any) =>
+            String(x.socio_id)
         )
       );
 
-      const novos = titulares
+      /*
+       * Geração.
+       */
+      const novos = cobraveis
         .filter(
           (s: any) =>
             !idsExistentes.has(
@@ -323,18 +396,72 @@ export async function POST(request: Request) {
             )
         )
         .map((s: any) => {
-          const config =
-            escolherConfiguracao(
-              configuracoes || [],
-              s.tipo_socio,
-              competencia
+          const ehDependente =
+            Boolean(
+              s.responsavel_id
             );
 
+          let config: any = null;
+
+          /*
+           * TITULAR
+           *
+           * Usa diretamente o tipo cadastrado.
+           */
+          if (!ehDependente) {
+            config =
+              escolherConfiguracao(
+                configuracoes || [],
+                s.tipo_socio,
+                competencia
+              );
+          }
+
+          /*
+           * DEPENDENTE COM MENSALIDADE
+           *
+           * Descobrimos se ele possui pessoas
+           * vinculadas diretamente a ele.
+           */
+          if (ehDependente) {
+            const possuiFamilia =
+              (todosSocios || []).some(
+                (p: any) =>
+                  String(
+                    p.responsavel_id || ""
+                  ) ===
+                  String(s.id)
+              );
+
+            const codigo =
+              codigoDependenteMensalidade(
+                s.tipo_socio,
+                possuiFamilia
+              );
+
+            config =
+              escolherConfiguracao(
+                configuracoes || [],
+                codigo,
+                competencia
+              );
+          }
+
+          /*
+           * Se houver configuração cadastrada,
+           * ela tem prioridade.
+           *
+           * Caso contrário usamos o valor já
+           * cadastrado no sócio.
+           */
           const valor =
             config?.valor !== undefined
-              ? Number(config.valor || 0)
+              ? Number(
+                  config.valor || 0
+                )
               : Number(
-                  s.valor_mensalidade || 0
+                  s.valor_mensalidade ||
+                    0
                 );
 
           const dia =
@@ -371,13 +498,13 @@ export async function POST(request: Request) {
 
       if (novos.length > 0) {
         const {
-          error,
+          error: erroInsert,
         } = await db
           .from("mensalidades")
           .insert(novos);
 
-        if (error) {
-          throw error;
+        if (erroInsert) {
+          throw erroInsert;
         }
       }
 
@@ -392,13 +519,16 @@ export async function POST(request: Request) {
     }
 
     /*
+     * =====================================================
      * BAIXA EM LOTE
+     * =====================================================
      */
     if (acao === "baixar") {
       const ids: string[] =
         Array.isArray(body.ids)
-          ? body.ids.map((id: unknown) =>
-              String(id)
+          ? body.ids.map(
+              (id: unknown) =>
+                String(id)
             )
           : [];
 
@@ -497,7 +627,9 @@ export async function POST(request: Request) {
     }
 
     /*
+     * =====================================================
      * ATUALIZAR MENSALIDADE
+     * =====================================================
      */
     if (acao === "atualizar") {
       const id = String(
@@ -559,7 +691,9 @@ export async function POST(request: Request) {
     }
 
     /*
+     * =====================================================
      * CRIAR CONFIGURAÇÃO
+     * =====================================================
      */
     if (
       acao === "config_criar"
@@ -630,7 +764,9 @@ export async function POST(request: Request) {
     }
 
     /*
+     * =====================================================
      * EDITAR CONFIGURAÇÃO
+     * =====================================================
      */
     if (
       acao === "config_editar"
