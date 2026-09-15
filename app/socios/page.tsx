@@ -163,13 +163,6 @@ type ContaBancaria = {
   ativo: boolean;
 };
 
-type ConfiguracaoMensalidades = {
-  patrimonial_familiar: number;
-  contribuinte_familiar: number;
-  patrimonial_individual: number;
-  contribuinte_individual: number;
-};
-
 function podeTerDependentes(tipo?: string | null) {
   return [
     "patrimonial_familiar",
@@ -241,12 +234,6 @@ export default function Home() {
   const [menu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
-  const [configuracaoMensalidades, setConfiguracaoMensalidades] = useState<ConfiguracaoMensalidades>({
-    patrimonial_familiar: 60,
-    contribuinte_familiar: 70,
-    patrimonial_individual: 30,
-    contribuinte_individual: 35,
-  });
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
@@ -329,38 +316,6 @@ export default function Home() {
     window.location.replace("/login");
   }
 
-  function valorPadraoMensalidade(tipo?: string | null) {
-    switch (tipo) {
-      case "patrimonial_familiar":
-        return configuracaoMensalidades.patrimonial_familiar;
-      case "contribuinte_familiar":
-        return configuracaoMensalidades.contribuinte_familiar;
-      case "patrimonial_individual":
-        return configuracaoMensalidades.patrimonial_individual;
-      case "contribuinte_individual":
-        return configuracaoMensalidades.contribuinte_individual;
-      default:
-        return 0;
-    }
-  }
-
-  async function carregarConfiguracaoMensalidades() {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const resposta = await fetch("/api/configuracao-mensalidades", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!resposta.ok) return;
-      const dados = await resposta.json();
-      if (dados.config) {
-        setConfiguracaoMensalidades(dados.config);
-      }
-    } catch {
-      // Mantém os valores padrão se a configuração ainda não estiver disponível.
-    }
-  }
-
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
 
@@ -410,8 +365,12 @@ export default function Home() {
     setMensagem("");
 
     try {
+      // A mensalidade é familiar: somente o titular/responsável gera a cobrança.
+      // Dependentes acompanham o status financeiro do titular e nunca geram uma
+      // mensalidade própria.
       const pessoasComMensalidade = socios.filter(
         (s) =>
+          !s.responsavel_id &&
           s.possui_mensalidade === true &&
           Number(s.valor_mensalidade || 0) >= 0 &&
           s.situacao?.toLowerCase() !== "inativo"
@@ -743,7 +702,6 @@ export default function Home() {
 
   useEffect(() => {
     carregarSocios();
-    void carregarConfiguracaoMensalidades();
     void carregarContasBancarias();
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
@@ -752,8 +710,6 @@ export default function Home() {
     setSocioEditando(null);
     setForm({
       ...socioInicial,
-      valor_mensalidade: valorPadraoMensalidade(socioInicial.tipo_socio),
-      possui_mensalidade: true,
       data_associacao: new Date().toISOString().split("T")[0],
     });
     setFotoArquivo(null);
@@ -773,8 +729,14 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      // O dependente não recebe cobrança própria. A família possui uma única
+      // mensalidade, controlada pelo titular/responsável.
+      possui_mensalidade: false,
       valor_mensalidade: 0,
+      dia_vencimento: responsavel.dia_vencimento || 10,
+      tipo_pagamento: responsavel.tipo_pagamento || "pix",
+      situacao_financeira: responsavel.situacao_financeira || "isento",
+      data_ultimo_pagamento: responsavel.data_ultimo_pagamento || "",
       data_associacao: new Date().toISOString().split("T")[0],
     });
     setFotoArquivo(null);
@@ -821,12 +783,6 @@ export default function Home() {
           proximo.valor_mensalidade = 0;
         } else if (mensalidadeObrigatoria) {
           proximo.possui_mensalidade = true;
-        } else if (!socioEditando) {
-          const valorPadrao = valorPadraoMensalidade(tipo);
-          if (valorPadrao > 0) {
-            proximo.possui_mensalidade = true;
-            proximo.valor_mensalidade = valorPadrao;
-          }
         }
 
         if (!tipo.startsWith("dependente_")) {
@@ -853,6 +809,10 @@ export default function Home() {
     setSalvando(true);
     setMensagem("");
 
+    const responsavel = form.responsavel_id
+      ? socios.find((s) => s.id === form.responsavel_id) || null
+      : null;
+
     const dadosBase = {
       matricula: form.matricula == null || String(form.matricula).trim() === "" ? null : Number(form.matricula),
       nome: form.nome?.trim(),
@@ -876,19 +836,25 @@ export default function Home() {
       tipo_socio: form.tipo_socio || "patrimonial_individual",
       responsavel_id: form.responsavel_id || null,
       parentesco: form.parentesco || null,
-      possui_mensalidade: Boolean(form.possui_mensalidade),
-      valor_mensalidade: Number(form.valor_mensalidade || 0),
-      dia_vencimento: Number(form.dia_vencimento || 10),
-      tipo_pagamento: form.tipo_pagamento || "pix",
+      possui_mensalidade: responsavel ? false : Boolean(form.possui_mensalidade),
+      valor_mensalidade: responsavel ? 0 : Number(form.valor_mensalidade || 0),
+      dia_vencimento: responsavel ? Number(responsavel.dia_vencimento || 10) : Number(form.dia_vencimento || 10),
+      tipo_pagamento: responsavel ? (responsavel.tipo_pagamento || "pix") : (form.tipo_pagamento || "pix"),
       conta_bancaria_id:
-        form.tipo_pagamento === "debito_em_conta"
-          ? form.conta_bancaria_id || null
-          : null,
+        responsavel
+          ? null
+          : form.tipo_pagamento === "debito_em_conta"
+            ? form.conta_bancaria_id || null
+            : null,
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
-      situacao_financeira: form.situacao_financeira || "isento",
-      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
+      situacao_financeira: responsavel
+        ? (responsavel.situacao_financeira || "isento")
+        : (form.situacao_financeira || "isento"),
+      data_ultimo_pagamento: responsavel
+        ? (responsavel.data_ultimo_pagamento || null)
+        : (form.data_ultimo_pagamento || null),
     };
 
     try {
@@ -2987,20 +2953,27 @@ function ModalSocio({
                   💰 Mensalidade
                 </p>
                 <p className="mt-1 text-xs text-[#718079]">
-                  Cada associado ou dependente pode ter sua própria mensalidade.
+                  A mensalidade é familiar: o titular/responsável possui uma única cobrança e os dependentes acompanham o mesmo status.
                 </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <SelectCampo
-                  label="Possui mensalidade?"
-                  value={form.possui_mensalidade ? "sim" : "nao"}
-                  onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
-                  opcoes={["sim", "nao"]}
-                  labels={{ sim: "Sim", nao: "Não" }}
-                />
+                {form.responsavel_id ? (
+                  <div className="rounded-xl border border-[#b9ddcc] bg-[#e8f3ee] p-4 md:col-span-4">
+                    <p className="text-sm font-extrabold text-[#005a3c]">👨‍👩‍👧 Mensalidade familiar</p>
+                    <p className="mt-1 text-xs text-[#315b4c]">Este dependente não possui cobrança própria. A situação da mensalidade é sempre a mesma do titular/responsável.</p>
+                  </div>
+                ) : (
+                  <SelectCampo
+                    label="Possui mensalidade?"
+                    value={form.possui_mensalidade ? "sim" : "nao"}
+                    onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
+                    opcoes={["sim", "nao"]}
+                    labels={{ sim: "Sim", nao: "Não" }}
+                  />
+                )}
 
-                {form.possui_mensalidade ? (
+                {form.possui_mensalidade && !form.responsavel_id ? (
                   <>
                     <Campo
                       label="Valor mensal"
