@@ -325,9 +325,8 @@ export async function POST(request: Request) {
         .filter((x: any) => x.situacao === "pago")
         .map((x: any) => String(x.id));
 
-      const idsParaBaixar = ids.filter(
-        (id) => !idsJaPagos.includes(id)
-      );
+     const idsParaBaixar = ids.filter(
+  (id: string) => !idsJaPagos.includes(id)
 
       if (!idsParaBaixar.length) {
         return NextResponse.json({
