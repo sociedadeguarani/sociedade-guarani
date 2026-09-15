@@ -1,7 +1,531 @@
 import { NextResponse } from "next/server";
+
 import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
+
 export const dynamic = "force-dynamic";
-const MOTIVOS=["Não debitou — sem saldo","Não debitou — débito não autorizado","Não debitou — conta encerrada","Pagamento não identificado","Acordo","Isento","Outro"];
-const primeiroDia=(ano:number,mes:number)=>`${ano}-${String(mes).padStart(2,"0")}-01`;
-export async function GET(request:Request){const auth=await exigirAdministrador(request);if("error" in auth)return NextResponse.json({error:auth.error},{status:auth.status});try{const u=new URL(request.url),ano=Number(u.searchParams.get("ano")||new Date().getFullYear()),mes=Number(u.searchParams.get("mes")||0),db=getServiceClient();const {data:socios,error:e1}=await db.from("socios").select("id,matricula,nome,cpf,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira").order("nome");if(e1)throw e1;let q=db.from("mensalidades").select("*").gte("competencia",`${ano}-01-01`).lt("competencia",`${ano+1}-01-01`).order("competencia",{ascending:true});if(mes>=1&&mes<=12)q=q.eq("competencia",primeiroDia(ano,mes));const {data:mensalidades,error:e2}=await q;if(e2)throw e2;return NextResponse.json({socios:socios||[],mensalidades:mensalidades||[],motivos:MOTIVOS});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Erro ao carregar mensalidades."},{status:500});}}
-export async function POST(request:Request){const auth=await exigirAdministrador(request);if("error" in auth)return NextResponse.json({error:auth.error},{status:auth.status});try{const body=await request.json(),db=getServiceClient(),action=String(body.action||"");if(action==="gerar_mes"){const ano=Number(body.ano),mes=Number(body.mes),competencia=primeiroDia(ano,mes),agora=new Date(),alvo=new Date(ano,mes-1,1);if(alvo>new Date(agora.getFullYear(),agora.getMonth(),1))return NextResponse.json({error:"Não é permitido gerar mensalidades de meses futuros."},{status:400});const {data:socios,error:e1}=await db.from("socios").select("id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,responsavel_id").eq("possui_mensalidade",true);if(e1)throw e1;const titulares=(socios||[]).filter((s:any)=>!s.responsavel_id&&String(s.situacao||"").toLowerCase()!=="inativo");const {data:existentes,error:e2}=await db.from("mensalidades").select("socio_id").eq("competencia",competencia);if(e2)throw e2;const ids=new Set((existentes||[]).map((x:any)=>x.socio_id));const novos=titulares.filter((s:any)=>!ids.has(s.id)).map((s:any)=>({socio_id:s.id,competencia,valor:Number(s.valor_mensalidade||0),data_vencimento:`${competencia.slice(0,8)}${String(Math.min(Math.max(Number(s.dia_vencimento||10),1),28)).padStart(2,"0")}`,situacao:Number(s.valor_mensalidade||0)===0?"isento":"em_aberto",tipo_pagamento:s.tipo_pagamento||null}));if(novos.length){const {error}=await db.from("mensalidades").insert(novos);if(error)throw error;}return NextResponse.json({criadas:novos.length});}if(action==="baixar"){const ids=Array.isArray(body.ids)?body.ids.map(String):[];if(!ids.length)return NextResponse.json({error:"Selecione ao menos uma mensalidade."},{status:400});const {error}=await db.from("mensalidades").update({situacao:"pago",data_pagamento:body.data_pagamento||new Date().toISOString().slice(0,10),tipo_pagamento:body.tipo_pagamento||"dinheiro",observacoes:body.observacoes||null}).in("id",ids);if(error)throw error;return NextResponse.json({baixadas:ids.length});}if(action==="atualizar"){const id=String(body.id||"");if(!id)return NextResponse.json({error:"Mensalidade não informada."},{status:400});const patch:Record<string,unknown>={};for(const campo of ["situacao","valor","data_pagamento","tipo_pagamento","observacoes","motivo","data_ocorrencia"]){if(body[campo]!==undefined)patch[campo]=body[campo]||null;}const {error}=await db.from("mensalidades").update(patch).eq("id",id);if(error)throw error;return NextResponse.json({ok:true});}return NextResponse.json({error:"Operação inválida."},{status:400});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Erro ao processar mensalidades."},{status:500});}}
+
+const MOTIVOS = [
+  "Não debitou — sem saldo",
+  "Não debitou — débito não autorizado",
+  "Não debitou — conta encerrada",
+  "Pagamento não identificado",
+  "Acordo",
+  "Isento",
+  "Outro",
+];
+
+const primeiroDia = (ano: number, mes: number) =>
+  `${ano}-${String(mes).padStart(2, "0")}-01`;
+
+function dataVencimento(competencia: string, dia: unknown) {
+  const d = Math.min(Math.max(Number(dia || 10), 1), 28);
+  return `${competencia.slice(0, 8)}${String(d).padStart(2, "0")}`;
+}
+
+function escolherConfiguracao(
+  configuracoes: any[],
+  tipoSocio: string,
+  competencia: string
+) {
+  return (configuracoes || [])
+    .filter(
+      (c: any) =>
+        String(c.tipo_socio || "") === String(tipoSocio || "") &&
+        c.ativo !== false &&
+        String(c.vigencia_inicio || "0000-00-00") <= competencia
+    )
+    .sort((a: any, b: any) =>
+      String(b.vigencia_inicio || "").localeCompare(
+        String(a.vigencia_inicio || "")
+      )
+    )[0];
+}
+
+export async function GET(request: Request) {
+  const auth = await exigirAdministrador(request);
+
+  if ("error" in auth) {
+    return NextResponse.json(
+      { error: auth.error },
+      { status: auth.status }
+    );
+  }
+
+  try {
+    const url = new URL(request.url);
+
+    const ano = Number(
+      url.searchParams.get("ano") || new Date().getFullYear()
+    );
+
+    const mes = Number(url.searchParams.get("mes") || 0);
+
+    const db = getServiceClient();
+
+    const { data: socios, error: erroSocios } = await db
+      .from("socios")
+      .select(
+        "id,matricula,nome,cpf,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
+      )
+      .order("nome");
+
+    if (erroSocios) throw erroSocios;
+
+    let consulta = db
+      .from("mensalidades")
+      .select("*")
+      .gte("competencia", `${ano}-01-01`)
+      .lt("competencia", `${ano + 1}-01-01`)
+      .order("competencia", { ascending: true });
+
+    if (mes >= 1 && mes <= 12) {
+      consulta = consulta.eq(
+        "competencia",
+        primeiroDia(ano, mes)
+      );
+    }
+
+    const { data: mensalidades, error: erroMensalidades } =
+      await consulta;
+
+    if (erroMensalidades) throw erroMensalidades;
+
+    const { data: configuracoes, error: erroConfiguracoes } =
+      await db
+        .from("configuracoes_mensalidades")
+        .select("*")
+        .order("vigencia_inicio", { ascending: false });
+
+    if (erroConfiguracoes) throw erroConfiguracoes;
+
+    const mapaSocios = new Map(
+      (socios || []).map((s: any) => [String(s.id), s])
+    );
+
+    const mensalidadesComSocio = (mensalidades || []).map(
+      (m: any) => ({
+        ...m,
+        socio: mapaSocios.get(String(m.socio_id)) || null,
+      })
+    );
+
+    return NextResponse.json({
+      socios: socios || [],
+      mensalidades: mensalidadesComSocio,
+      configuracoes: configuracoes || [],
+      motivos: MOTIVOS,
+    });
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          e instanceof Error
+            ? e.message
+            : "Erro ao carregar mensalidades.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await exigirAdministrador(request);
+
+  if ("error" in auth) {
+    return NextResponse.json(
+      { error: auth.error },
+      { status: auth.status }
+    );
+  }
+
+  try {
+    const body = await request.json();
+
+    const db = getServiceClient();
+
+    // Aceita tanto "acao" quanto "action"
+    // para manter compatibilidade com versões anteriores.
+    const acao = String(body.acao || body.action || "");
+
+    /*
+     * GERAR COMPETÊNCIA
+     *
+     * Importante:
+     * somente titulares geram mensalidade.
+     * Dependentes não recebem uma cobrança separada.
+     */
+    if (acao === "gerar" || acao === "gerar_mes") {
+      const ano = Number(body.ano);
+      const mes = Number(body.mes);
+
+      if (
+        !Number.isInteger(ano) ||
+        !Number.isInteger(mes) ||
+        mes < 1 ||
+        mes > 12
+      ) {
+        return NextResponse.json(
+          { error: "Ano ou competência inválidos." },
+          { status: 400 }
+        );
+      }
+
+      const competencia = primeiroDia(ano, mes);
+
+      const agora = new Date();
+
+      const inicioMesAtual = new Date(
+        agora.getFullYear(),
+        agora.getMonth(),
+        1
+      );
+
+      const inicioMesAlvo = new Date(
+        ano,
+        mes - 1,
+        1
+      );
+
+      if (inicioMesAlvo > inicioMesAtual) {
+        return NextResponse.json(
+          {
+            error:
+              "Não é permitido gerar mensalidades de meses futuros.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data: socios, error: erroSocios } = await db
+        .from("socios")
+        .select(
+          "id,tipo_socio,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,responsavel_id"
+        )
+        .eq("possui_mensalidade", true);
+
+      if (erroSocios) throw erroSocios;
+
+      // Somente titulares.
+      const titulares = (socios || []).filter(
+        (s: any) =>
+          !s.responsavel_id &&
+          String(s.situacao || "").toLowerCase() !== "inativo"
+      );
+
+      const { data: configuracoes, error: erroConfiguracoes } =
+        await db
+          .from("configuracoes_mensalidades")
+          .select("*")
+          .eq("ativo", true)
+          .order("vigencia_inicio", { ascending: false });
+
+      if (erroConfiguracoes) throw erroConfiguracoes;
+
+      const { data: existentes, error: erroExistentes } =
+        await db
+          .from("mensalidades")
+          .select("socio_id")
+          .eq("competencia", competencia);
+
+      if (erroExistentes) throw erroExistentes;
+
+      const idsExistentes = new Set(
+        (existentes || []).map((x: any) => String(x.socio_id))
+      );
+
+      const novos = titulares
+        .filter((s: any) => !idsExistentes.has(String(s.id)))
+        .map((s: any) => {
+          const config = escolherConfiguracao(
+            configuracoes || [],
+            s.tipo_socio,
+            competencia
+          );
+
+          const valor =
+            config?.valor !== undefined
+              ? Number(config.valor || 0)
+              : Number(s.valor_mensalidade || 0);
+
+          const dia = config?.dia_vencimento
+            ? Number(config.dia_vencimento)
+            : Number(s.dia_vencimento || 10);
+
+          const tipoPagamento =
+            s.tipo_pagamento ||
+            config?.tipo_pagamento ||
+            null;
+
+          return {
+            socio_id: s.id,
+            competencia,
+            valor,
+            data_vencimento: dataVencimento(
+              competencia,
+              dia
+            ),
+            situacao:
+              valor === 0 ? "isento" : "em_aberto",
+            tipo_pagamento: tipoPagamento,
+          };
+        });
+
+      if (novos.length > 0) {
+        const { error } = await db
+          .from("mensalidades")
+          .insert(novos);
+
+        if (error) throw error;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        criadas: novos.length,
+        message:
+          novos.length > 0
+            ? `${novos.length} mensalidade(s) gerada(s).`
+            : "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
+      });
+    }
+
+    /*
+     * BAIXA EM LOTE
+     */
+    if (acao === "baixar") {
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map(String)
+        : [];
+
+      if (!ids.length) {
+        return NextResponse.json(
+          {
+            error:
+              "Selecione ao menos uma mensalidade.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const dataPagamento =
+        body.data_pagamento ||
+        new Date().toISOString().slice(0, 10);
+
+      const tipoPagamento =
+        body.tipo_pagamento || "dinheiro";
+
+      const { data: registros, error: erroBusca } =
+        await db
+          .from("mensalidades")
+          .select("id,socio_id,situacao")
+          .in("id", ids);
+
+      if (erroBusca) throw erroBusca;
+
+      const idsJaPagos = (registros || [])
+        .filter((x: any) => x.situacao === "pago")
+        .map((x: any) => String(x.id));
+
+      const idsParaBaixar = ids.filter(
+        (id) => !idsJaPagos.includes(id)
+      );
+
+      if (!idsParaBaixar.length) {
+        return NextResponse.json({
+          ok: true,
+          baixadas: 0,
+          message:
+            "As mensalidades selecionadas já estão pagas.",
+        });
+      }
+
+      const { error: erroBaixa } = await db
+        .from("mensalidades")
+        .update({
+          situacao: "pago",
+          data_pagamento: dataPagamento,
+          tipo_pagamento: tipoPagamento,
+          observacoes: body.observacoes || null,
+        })
+        .in("id", idsParaBaixar);
+
+      if (erroBaixa) throw erroBaixa;
+
+      return NextResponse.json({
+        ok: true,
+        baixadas: idsParaBaixar.length,
+        ignoradas: idsJaPagos.length,
+        message: `${idsParaBaixar.length} mensalidade(s) baixada(s).`,
+      });
+    }
+
+    /*
+     * ATUALIZAR UMA MENSALIDADE
+     */
+    if (acao === "atualizar") {
+      const id = String(body.id || "");
+
+      if (!id) {
+        return NextResponse.json(
+          {
+            error:
+              "Mensalidade não informada.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const patch: Record<string, unknown> = {};
+
+      for (const campo of [
+        "situacao",
+        "valor",
+        "data_pagamento",
+        "tipo_pagamento",
+        "observacoes",
+        "motivo",
+        "data_ocorrencia",
+      ]) {
+        if (body[campo] !== undefined) {
+          patch[campo] =
+            body[campo] === "" ? null : body[campo];
+        }
+      }
+
+      const { error } = await db
+        .from("mensalidades")
+        .update(patch)
+        .eq("id", id);
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        message: "Mensalidade atualizada.",
+      });
+    }
+
+    /*
+     * CRIAR CONFIGURAÇÃO DE MENSALIDADE
+     */
+    if (acao === "config_criar") {
+      const tipoSocio = String(
+        body.tipo_socio || ""
+      ).trim();
+
+      const nome = String(
+        body.nome || ""
+      ).trim();
+
+      const valor = Number(body.valor || 0);
+
+      const vigenciaInicio =
+        String(
+          body.vigencia_inicio ||
+            new Date().toISOString().slice(0, 10)
+        );
+
+      if (!tipoSocio || !nome) {
+        return NextResponse.json(
+          {
+            error:
+              "Informe o código e o nome do tipo de mensalidade.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data, error } = await db
+        .from("configuracoes_mensalidades")
+        .insert({
+          tipo_socio: tipoSocio,
+          nome,
+          valor,
+          vigencia_inicio: vigenciaInicio,
+          ativo: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        config: data,
+        message:
+          "Configuração criada com sucesso.",
+      });
+    }
+
+    /*
+     * EDITAR CONFIGURAÇÃO
+     */
+    if (acao === "config_editar") {
+      const id = String(body.id || "");
+
+      if (!id) {
+        return NextResponse.json(
+          {
+            error:
+              "Configuração não informada.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const dados: Record<string, unknown> = {};
+
+      if (body.tipo_socio !== undefined) {
+        dados.tipo_socio = body.tipo_socio;
+      }
+
+      if (body.nome !== undefined) {
+        dados.nome = body.nome;
+      }
+
+      if (body.valor !== undefined) {
+        dados.valor = Number(body.valor || 0);
+      }
+
+      if (body.vigencia_inicio !== undefined) {
+        dados.vigencia_inicio =
+          body.vigencia_inicio;
+      }
+
+      dados.updated_at =
+        new Date().toISOString();
+
+      const { data, error } = await db
+        .from("configuracoes_mensalidades")
+        .update(dados)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        config: data,
+        message:
+          "Configuração atualizada com sucesso.",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        error: "Operação inválida.",
+      },
+      { status: 400 }
+    );
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          e instanceof Error
+            ? e.message
+            : "Erro ao processar mensalidades.",
+      },
+      { status: 500 }
+    );
+  }
+}
