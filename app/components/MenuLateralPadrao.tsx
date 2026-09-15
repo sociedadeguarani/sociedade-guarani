@@ -27,7 +27,7 @@ const ITENS_MENU = [
   { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
   { nome: "Minhas mensalidades", rota: "/mensalidades", icone: Wallet, perfis: ["associado"] },
   { nome: "Reservas", rota: "/reservas", icone: CalendarDays, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "administrador_normal", "administrador_master"] },
   { nome: "Convites", rota: "/convites", icone: Ticket, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
   { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
   { nome: "Sócios", rota: "/socios", icone: Users, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
@@ -63,7 +63,7 @@ export default function MenuLateralPadrao() {
     perfil === "master" ? "administrador_master" :
     perfil === "administrador_master" ? "administrador_master" :
     perfil === "administrador_normal" ? "administrador_normal" :
-    perfil === "funcionario" ? "funcionario" : "associado";
+    perfil.normalize("NFD").replace(/[\u0300-\u036f]/g, "") === "funcionario" ? "funcionario" : "associado";
 
   const itensVisiveis = ITENS_MENU.filter((item) =>
     (item.perfis as readonly string[]).includes(perfilNormalizado)
