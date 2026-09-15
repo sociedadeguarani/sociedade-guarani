@@ -2974,7 +2974,7 @@ function ModalSocio({
                     opcoes={["sim", "nao"]}
                     labels={{ sim: "Sim", nao: "Não" }}
                   />
-                )}
+              
 
                {form.possui_mensalidade ? (
                   <>
