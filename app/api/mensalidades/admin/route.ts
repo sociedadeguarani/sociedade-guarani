@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
+import {
+  exigirAdministrador,
+  getServiceClient,
+} from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +20,19 @@ const MOTIVOS = [
 const primeiroDia = (ano: number, mes: number) =>
   `${ano}-${String(mes).padStart(2, "0")}-01`;
 
-function dataVencimento(competencia: string, dia: unknown) {
-  const d = Math.min(Math.max(Number(dia || 10), 1), 28);
-  return `${competencia.slice(0, 8)}${String(d).padStart(2, "0")}`;
+function dataVencimento(
+  competencia: string,
+  dia: unknown
+) {
+  const d = Math.min(
+    Math.max(Number(dia || 10), 1),
+    28
+  );
+
+  return `${competencia.slice(0, 8)}${String(d).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 function escolherConfiguracao(
@@ -30,9 +43,11 @@ function escolherConfiguracao(
   return (configuracoes || [])
     .filter(
       (c: any) =>
-        String(c.tipo_socio || "") === String(tipoSocio || "") &&
+        String(c.tipo_socio || "") ===
+          String(tipoSocio || "") &&
         c.ativo !== false &&
-        String(c.vigencia_inicio || "0000-00-00") <= competencia
+        String(c.vigencia_inicio || "0000-00-00") <=
+          competencia
     )
     .sort((a: any, b: any) =>
       String(b.vigencia_inicio || "").localeCompare(
@@ -55,28 +70,44 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
 
     const ano = Number(
-      url.searchParams.get("ano") || new Date().getFullYear()
+      url.searchParams.get("ano") ||
+        new Date().getFullYear()
     );
 
-    const mes = Number(url.searchParams.get("mes") || 0);
+    const mes = Number(
+      url.searchParams.get("mes") || 0
+    );
 
     const db = getServiceClient();
 
-    const { data: socios, error: erroSocios } = await db
+    const {
+      data: socios,
+      error: erroSocios,
+    } = await db
       .from("socios")
       .select(
         "id,matricula,nome,cpf,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
       )
       .order("nome");
 
-    if (erroSocios) throw erroSocios;
+    if (erroSocios) {
+      throw erroSocios;
+    }
 
     let consulta = db
       .from("mensalidades")
       .select("*")
-      .gte("competencia", `${ano}-01-01`)
-      .lt("competencia", `${ano + 1}-01-01`)
-      .order("competencia", { ascending: true });
+      .gte(
+        "competencia",
+        `${ano}-01-01`
+      )
+      .lt(
+        "competencia",
+        `${ano + 1}-01-01`
+      )
+      .order("competencia", {
+        ascending: true,
+      });
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq(
@@ -85,29 +116,44 @@ export async function GET(request: Request) {
       );
     }
 
-    const { data: mensalidades, error: erroMensalidades } =
-      await consulta;
+    const {
+      data: mensalidades,
+      error: erroMensalidades,
+    } = await consulta;
 
-    if (erroMensalidades) throw erroMensalidades;
+    if (erroMensalidades) {
+      throw erroMensalidades;
+    }
 
-    const { data: configuracoes, error: erroConfiguracoes } =
-      await db
-        .from("configuracoes_mensalidades")
-        .select("*")
-        .order("vigencia_inicio", { ascending: false });
+    const {
+      data: configuracoes,
+      error: erroConfiguracoes,
+    } = await db
+      .from("configuracoes_mensalidades")
+      .select("*")
+      .order("vigencia_inicio", {
+        ascending: false,
+      });
 
-    if (erroConfiguracoes) throw erroConfiguracoes;
+    if (erroConfiguracoes) {
+      throw erroConfiguracoes;
+    }
 
-    const mapaSocios = new Map(
-      (socios || []).map((s: any) => [String(s.id), s])
+    const mapaSocios = new Map<string, any>(
+      (socios || []).map((s: any) => [
+        String(s.id),
+        s,
+      ])
     );
 
-    const mensalidadesComSocio = (mensalidades || []).map(
-      (m: any) => ({
-        ...m,
-        socio: mapaSocios.get(String(m.socio_id)) || null,
-      })
-    );
+    const mensalidadesComSocio = (
+      mensalidades || []
+    ).map((m: any) => ({
+      ...m,
+      socio:
+        mapaSocios.get(String(m.socio_id)) ||
+        null,
+    }));
 
     return NextResponse.json({
       socios: socios || [],
@@ -143,18 +189,20 @@ export async function POST(request: Request) {
 
     const db = getServiceClient();
 
-    // Aceita tanto "acao" quanto "action"
-    // para manter compatibilidade com versões anteriores.
-    const acao = String(body.acao || body.action || "");
+    const acao = String(
+      body.acao || body.action || ""
+    );
 
     /*
-     * GERAR COMPETÊNCIA
+     * GERAR MENSALIDADES
      *
-     * Importante:
-     * somente titulares geram mensalidade.
-     * Dependentes não recebem uma cobrança separada.
+     * Somente titulares geram cobrança.
+     * Dependentes não recebem mensalidade separada.
      */
-    if (acao === "gerar" || acao === "gerar_mes") {
+    if (
+      acao === "gerar" ||
+      acao === "gerar_mes"
+    ) {
       const ano = Number(body.ano);
       const mes = Number(body.mes);
 
@@ -165,12 +213,18 @@ export async function POST(request: Request) {
         mes > 12
       ) {
         return NextResponse.json(
-          { error: "Ano ou competência inválidos." },
+          {
+            error:
+              "Ano ou competência inválidos.",
+          },
           { status: 400 }
         );
       }
 
-      const competencia = primeiroDia(ano, mes);
+      const competencia = primeiroDia(
+        ano,
+        mes
+      );
 
       const agora = new Date();
 
@@ -186,7 +240,9 @@ export async function POST(request: Request) {
         1
       );
 
-      if (inicioMesAlvo > inicioMesAtual) {
+      if (
+        inicioMesAlvo > inicioMesAtual
+      ) {
         return NextResponse.json(
           {
             error:
@@ -196,60 +252,99 @@ export async function POST(request: Request) {
         );
       }
 
-      const { data: socios, error: erroSocios } = await db
+      const {
+        data: socios,
+        error: erroSocios,
+      } = await db
         .from("socios")
         .select(
           "id,tipo_socio,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,responsavel_id"
         )
-        .eq("possui_mensalidade", true);
+        .eq(
+          "possui_mensalidade",
+          true
+        );
 
-      if (erroSocios) throw erroSocios;
+      if (erroSocios) {
+        throw erroSocios;
+      }
 
-      // Somente titulares.
-      const titulares = (socios || []).filter(
+      const titulares = (
+        socios || []
+      ).filter(
         (s: any) =>
           !s.responsavel_id &&
-          String(s.situacao || "").toLowerCase() !== "inativo"
+          String(
+            s.situacao || ""
+          ).toLowerCase() !== "inativo"
       );
 
-      const { data: configuracoes, error: erroConfiguracoes } =
-        await db
-          .from("configuracoes_mensalidades")
-          .select("*")
-          .eq("ativo", true)
-          .order("vigencia_inicio", { ascending: false });
+      const {
+        data: configuracoes,
+        error: erroConfiguracoes,
+      } = await db
+        .from("configuracoes_mensalidades")
+        .select("*")
+        .eq("ativo", true)
+        .order("vigencia_inicio", {
+          ascending: false,
+        });
 
-      if (erroConfiguracoes) throw erroConfiguracoes;
+      if (erroConfiguracoes) {
+        throw erroConfiguracoes;
+      }
 
-      const { data: existentes, error: erroExistentes } =
-        await db
-          .from("mensalidades")
-          .select("socio_id")
-          .eq("competencia", competencia);
+      const {
+        data: existentes,
+        error: erroExistentes,
+      } = await db
+        .from("mensalidades")
+        .select("socio_id")
+        .eq(
+          "competencia",
+          competencia
+        );
 
-      if (erroExistentes) throw erroExistentes;
+      if (erroExistentes) {
+        throw erroExistentes;
+      }
 
-      const idsExistentes = new Set(
-        (existentes || []).map((x: any) => String(x.socio_id))
+      const idsExistentes = new Set<string>(
+        (existentes || []).map(
+          (x: any) => String(x.socio_id)
+        )
       );
 
       const novos = titulares
-        .filter((s: any) => !idsExistentes.has(String(s.id)))
+        .filter(
+          (s: any) =>
+            !idsExistentes.has(
+              String(s.id)
+            )
+        )
         .map((s: any) => {
-          const config = escolherConfiguracao(
-            configuracoes || [],
-            s.tipo_socio,
-            competencia
-          );
+          const config =
+            escolherConfiguracao(
+              configuracoes || [],
+              s.tipo_socio,
+              competencia
+            );
 
           const valor =
             config?.valor !== undefined
               ? Number(config.valor || 0)
-              : Number(s.valor_mensalidade || 0);
+              : Number(
+                  s.valor_mensalidade || 0
+                );
 
-          const dia = config?.dia_vencimento
-            ? Number(config.dia_vencimento)
-            : Number(s.dia_vencimento || 10);
+          const dia =
+            config?.dia_vencimento
+              ? Number(
+                  config.dia_vencimento
+                )
+              : Number(
+                  s.dia_vencimento || 10
+                );
 
           const tipoPagamento =
             s.tipo_pagamento ||
@@ -260,22 +355,30 @@ export async function POST(request: Request) {
             socio_id: s.id,
             competencia,
             valor,
-            data_vencimento: dataVencimento(
-              competencia,
-              dia
-            ),
+            data_vencimento:
+              dataVencimento(
+                competencia,
+                dia
+              ),
             situacao:
-              valor === 0 ? "isento" : "em_aberto",
-            tipo_pagamento: tipoPagamento,
+              valor === 0
+                ? "isento"
+                : "em_aberto",
+            tipo_pagamento:
+              tipoPagamento,
           };
         });
 
       if (novos.length > 0) {
-        const { error } = await db
+        const {
+          error,
+        } = await db
           .from("mensalidades")
           .insert(novos);
 
-        if (error) throw error;
+        if (error) {
+          throw error;
+        }
       }
 
       return NextResponse.json({
@@ -292,11 +395,14 @@ export async function POST(request: Request) {
      * BAIXA EM LOTE
      */
     if (acao === "baixar") {
-      const ids = Array.isArray(body.ids)
-        ? body.ids.map(String)
-        : [];
+      const ids: string[] =
+        Array.isArray(body.ids)
+          ? body.ids.map((id: unknown) =>
+              String(id)
+            )
+          : [];
 
-      if (!ids.length) {
+      if (ids.length === 0) {
         return NextResponse.json(
           {
             error:
@@ -308,27 +414,47 @@ export async function POST(request: Request) {
 
       const dataPagamento =
         body.data_pagamento ||
-        new Date().toISOString().slice(0, 10);
+        new Date()
+          .toISOString()
+          .slice(0, 10);
 
       const tipoPagamento =
-        body.tipo_pagamento || "dinheiro";
+        body.tipo_pagamento ||
+        "dinheiro";
 
-      const { data: registros, error: erroBusca } =
-        await db
-          .from("mensalidades")
-          .select("id,socio_id,situacao")
-          .in("id", ids);
+      const {
+        data: registros,
+        error: erroBusca,
+      } = await db
+        .from("mensalidades")
+        .select(
+          "id,socio_id,situacao"
+        )
+        .in("id", ids);
 
-      if (erroBusca) throw erroBusca;
+      if (erroBusca) {
+        throw erroBusca;
+      }
 
-      const idsJaPagos = (registros || [])
-        .filter((x: any) => x.situacao === "pago")
-        .map((x: any) => String(x.id));
+      const idsJaPagos: string[] =
+        (registros || [])
+          .filter(
+            (x: any) =>
+              x.situacao === "pago"
+          )
+          .map((x: any) =>
+            String(x.id)
+          );
 
-     const idsParaBaixar = ids.filter(
-  (id: string) => !idsJaPagos.includes(id)
+      const idsParaBaixar: string[] =
+        ids.filter(
+          (id: string) =>
+            !idsJaPagos.includes(id)
+        );
 
-      if (!idsParaBaixar.length) {
+      if (
+        idsParaBaixar.length === 0
+      ) {
         return NextResponse.json({
           ok: true,
           baixadas: 0,
@@ -337,31 +463,46 @@ export async function POST(request: Request) {
         });
       }
 
-      const { error: erroBaixa } = await db
+      const {
+        error: erroBaixa,
+      } = await db
         .from("mensalidades")
         .update({
           situacao: "pago",
-          data_pagamento: dataPagamento,
-          tipo_pagamento: tipoPagamento,
-          observacoes: body.observacoes || null,
+          data_pagamento:
+            dataPagamento,
+          tipo_pagamento:
+            tipoPagamento,
+          observacoes:
+            body.observacoes || null,
         })
-        .in("id", idsParaBaixar);
+        .in(
+          "id",
+          idsParaBaixar
+        );
 
-      if (erroBaixa) throw erroBaixa;
+      if (erroBaixa) {
+        throw erroBaixa;
+      }
 
       return NextResponse.json({
         ok: true,
-        baixadas: idsParaBaixar.length,
-        ignoradas: idsJaPagos.length,
-        message: `${idsParaBaixar.length} mensalidade(s) baixada(s).`,
+        baixadas:
+          idsParaBaixar.length,
+        ignoradas:
+          idsJaPagos.length,
+        message:
+          `${idsParaBaixar.length} mensalidade(s) baixada(s).`,
       });
     }
 
     /*
-     * ATUALIZAR UMA MENSALIDADE
+     * ATUALIZAR MENSALIDADE
      */
     if (acao === "atualizar") {
-      const id = String(body.id || "");
+      const id = String(
+        body.id || ""
+      );
 
       if (!id) {
         return NextResponse.json(
@@ -373,9 +514,12 @@ export async function POST(request: Request) {
         );
       }
 
-      const patch: Record<string, unknown> = {};
+      const patch: Record<
+        string,
+        unknown
+      > = {};
 
-      for (const campo of [
+      const campos = [
         "situacao",
         "valor",
         "data_pagamento",
@@ -383,69 +527,99 @@ export async function POST(request: Request) {
         "observacoes",
         "motivo",
         "data_ocorrencia",
-      ]) {
-        if (body[campo] !== undefined) {
+      ];
+
+      for (const campo of campos) {
+        if (
+          body[campo] !== undefined
+        ) {
           patch[campo] =
-            body[campo] === "" ? null : body[campo];
+            body[campo] === ""
+              ? null
+              : body[campo];
         }
       }
 
-      const { error } = await db
+      const {
+        error,
+      } = await db
         .from("mensalidades")
         .update(patch)
         .eq("id", id);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       return NextResponse.json({
         ok: true,
-        message: "Mensalidade atualizada.",
+        message:
+          "Mensalidade atualizada.",
       });
     }
 
     /*
-     * CRIAR CONFIGURAÇÃO DE MENSALIDADE
+     * CRIAR CONFIGURAÇÃO
      */
-    if (acao === "config_criar") {
-      const tipoSocio = String(
-        body.tipo_socio || ""
-      ).trim();
+    if (
+      acao === "config_criar"
+    ) {
+      const tipoSocio =
+        String(
+          body.tipo_socio || ""
+        ).trim();
 
-      const nome = String(
-        body.nome || ""
-      ).trim();
+      const nome =
+        String(
+          body.nome || ""
+        ).trim();
 
-      const valor = Number(body.valor || 0);
+      const valor = Number(
+        body.valor || 0
+      );
 
       const vigenciaInicio =
         String(
           body.vigencia_inicio ||
-            new Date().toISOString().slice(0, 10)
+            new Date()
+              .toISOString()
+              .slice(0, 10)
         );
 
-      if (!tipoSocio || !nome) {
+      if (
+        !tipoSocio ||
+        !nome
+      ) {
         return NextResponse.json(
           {
             error:
-              "Informe o código e o nome do tipo de mensalidade.",
+              "Informe o tipo e o nome da mensalidade.",
           },
           { status: 400 }
         );
       }
 
-      const { data, error } = await db
-        .from("configuracoes_mensalidades")
+      const {
+        data,
+        error,
+      } = await db
+        .from(
+          "configuracoes_mensalidades"
+        )
         .insert({
           tipo_socio: tipoSocio,
           nome,
           valor,
-          vigencia_inicio: vigenciaInicio,
+          vigencia_inicio:
+            vigenciaInicio,
           ativo: true,
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       return NextResponse.json({
         ok: true,
@@ -458,8 +632,12 @@ export async function POST(request: Request) {
     /*
      * EDITAR CONFIGURAÇÃO
      */
-    if (acao === "config_editar") {
-      const id = String(body.id || "");
+    if (
+      acao === "config_editar"
+    ) {
+      const id = String(
+        body.id || ""
+      );
 
       if (!id) {
         return NextResponse.json(
@@ -471,21 +649,38 @@ export async function POST(request: Request) {
         );
       }
 
-      const dados: Record<string, unknown> = {};
+      const dados: Record<
+        string,
+        unknown
+      > = {};
 
-      if (body.tipo_socio !== undefined) {
-        dados.tipo_socio = body.tipo_socio;
+      if (
+        body.tipo_socio !==
+        undefined
+      ) {
+        dados.tipo_socio =
+          body.tipo_socio;
       }
 
-      if (body.nome !== undefined) {
-        dados.nome = body.nome;
+      if (
+        body.nome !== undefined
+      ) {
+        dados.nome =
+          body.nome;
       }
 
-      if (body.valor !== undefined) {
-        dados.valor = Number(body.valor || 0);
+      if (
+        body.valor !== undefined
+      ) {
+        dados.valor = Number(
+          body.valor || 0
+        );
       }
 
-      if (body.vigencia_inicio !== undefined) {
+      if (
+        body.vigencia_inicio !==
+        undefined
+      ) {
         dados.vigencia_inicio =
           body.vigencia_inicio;
       }
@@ -493,14 +688,21 @@ export async function POST(request: Request) {
       dados.updated_at =
         new Date().toISOString();
 
-      const { data, error } = await db
-        .from("configuracoes_mensalidades")
+      const {
+        data,
+        error,
+      } = await db
+        .from(
+          "configuracoes_mensalidades"
+        )
         .update(dados)
         .eq("id", id)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       return NextResponse.json({
         ok: true,
@@ -512,7 +714,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "Operação inválida.",
+        error:
+          "Operação inválida.",
       },
       { status: 400 }
     );
