@@ -682,7 +682,43 @@ export default function Home() {
       setContasBancarias([]);
     }
   }
+async function carregarConfiguracoesMensalidades() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
 
+    if (!session) {
+      setConfiguracoesMensalidades([]);
+      return;
+    }
+
+    const resposta = await fetch("/api/mensalidades/config", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      cache: "no-store",
+    });
+
+    const resultado = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+      throw new Error(
+        resultado?.error ||
+          "Não foi possível carregar as configurações de mensalidade."
+      );
+    }
+
+    setConfiguracoesMensalidades(
+      (resultado?.configuracoes || []) as any[]
+    );
+  } catch (error) {
+    console.error(
+      "Erro ao carregar configurações de mensalidades:",
+      error
+    );
+    setConfiguracoesMensalidades([]);
+  }
+}
   async function carregarSocios() {
     setCarregando(true);
 
