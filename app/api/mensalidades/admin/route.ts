@@ -223,6 +223,130 @@ export async function POST(request: Request) {
 
     /*
      * =====================================================
+     * SINCRONIZAR MENSALIDADES DOS SÓCIOS
+     * =====================================================
+     */
+    if (acao === "sincronizar_socios") {
+      const {
+        data: todosSocios,
+        error: erroSocios,
+      } = await db
+        .from("socios")
+        .select(
+          "id,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade"
+        );
+
+      if (erroSocios) {
+        throw erroSocios;
+      }
+
+      const {
+        data: configuracoes,
+        error: erroConfiguracoes,
+      } = await db
+        .from("configuracoes_mensalidades")
+        .select("*")
+        .eq("ativo", true)
+        .order("vigencia_inicio", {
+          ascending: false,
+        });
+
+      if (erroConfiguracoes) {
+        throw erroConfiguracoes;
+      }
+
+      let atualizados = 0;
+
+      for (const socio of todosSocios || []) {
+        const ehDependente = Boolean(
+          socio.responsavel_id
+        );
+
+        let codigoTipo = String(
+          socio.tipo_socio || ""
+        );
+
+        if (ehDependente) {
+          const possuiFamilia = (
+            todosSocios || []
+          ).some(
+            (p: any) =>
+              String(p.responsavel_id || "") ===
+              String(socio.id)
+          );
+
+          codigoTipo = codigoDependenteMensalidade(
+            socio.tipo_socio,
+            possuiFamilia
+          );
+        }
+
+        const configuracao = escolherConfiguracao(
+          configuracoes || [],
+          codigoTipo,
+          new Date().toISOString().slice(0, 10)
+        );
+
+        /*
+         * Dependentes com mensalidade própria:
+         * passam a ter mensalidade automaticamente.
+         */
+        const ehDependenteComMensalidade =
+          ehDependente &&
+          [
+            "dependente_patrimonial_familiar_mensalidade",
+            "dependente_patrimonial_individual_mensalidade",
+            "dependente_contribuinte_familiar_mensalidade",
+            "dependente_contribuinte_individual_mensalidade",
+          ].includes(codigoTipo);
+
+        /*
+         * Para os demais sócios, somente sincronizamos
+         * quem já possui mensalidade habilitada.
+         */
+        const devePossuirMensalidade =
+          socio.tipo_socio === "remido"
+            ? false
+            : ehDependenteComMensalidade
+              ? true
+              : Boolean(socio.possui_mensalidade);
+
+        const valor =
+          socio.tipo_socio === "remido"
+            ? 0
+            : configuracao
+              ? Number(configuracao.valor || 0)
+              : Number(socio.valor_mensalidade || 0);
+
+        const { error } = await db
+          .from("socios")
+          .update({
+            possui_mensalidade:
+              devePossuirMensalidade,
+            valor_mensalidade:
+              devePossuirMensalidade
+                ? valor
+                : 0,
+          })
+          .eq("id", socio.id);
+
+        if (error) {
+          throw error;
+        }
+
+        atualizados++;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        atualizados,
+        message:
+          `${atualizados} sócio(s) sincronizado(s) com as configurações de mensalidade.`,
+      });
+    }
+
+    /*
+     * =====================================================
      * GERAR COMPETÊNCIA
      * =====================================================
      */
