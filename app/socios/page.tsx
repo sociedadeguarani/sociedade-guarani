@@ -108,6 +108,10 @@ const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
   {
+  value: "dependente_patrimonial",
+  label: "Dependente Sócio Patrimonial",
+},
+  
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
   },
@@ -117,6 +121,10 @@ const TIPOS_SOCIO = [
   },
   { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
   { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
+  {
+  value: "dependente_contribuinte",
+  label: "Dependente Sócio Contribuinte",
+},
   {
     value: "dependente_contribuinte_familiar_mensalidade",
     label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
