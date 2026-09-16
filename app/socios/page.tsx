@@ -808,26 +808,38 @@ async function carregarConfiguracoesMensalidades() {
       };
 
       if (campo === "tipo_socio") {
-        const tipo = valor;
-        const mensalidadeObrigatoria = [
-          "dependente_patrimonial_familiar_mensalidade",
-          "dependente_patrimonial_individual_mensalidade",
-          "dependente_contribuinte_familiar_mensalidade",
-          "dependente_contribuinte_individual_mensalidade",
-        ].includes(tipo);
+  const tipo = valor;
 
-        if (tipo === "remido") {
-          proximo.possui_mensalidade = false;
-          proximo.valor_mensalidade = 0;
-        } else if (mensalidadeObrigatoria) {
-          proximo.possui_mensalidade = true;
-        }
+  const configuracao = configuracoesMensalidades.find(
+    (item: any) =>
+      item.tipo_socio === tipo &&
+      item.ativo !== false
+  );
 
-        if (!tipo.startsWith("dependente_")) {
-          proximo.responsavel_id = null;
-          proximo.parentesco = "";
-        }
-      }
+  const valorConfigurado = Number(configuracao?.valor || 0);
+
+  const mensalidadeObrigatoria = [
+    "dependente_patrimonial_familiar_mensalidade",
+    "dependente_patrimonial_individual_mensalidade",
+    "dependente_contribuinte_familiar_mensalidade",
+    "dependente_contribuinte_individual_mensalidade",
+  ].includes(tipo);
+
+  if (tipo === "remido") {
+    proximo.possui_mensalidade = false;
+    proximo.valor_mensalidade = 0;
+  } else if (mensalidadeObrigatoria) {
+    proximo.possui_mensalidade = true;
+    proximo.valor_mensalidade = valorConfigurado;
+  } else if (configuracao) {
+    proximo.valor_mensalidade = valorConfigurado;
+  }
+
+  if (!tipo.startsWith("dependente_")) {
+    proximo.responsavel_id = null;
+    proximo.parentesco = "";
+  }
+}
 
       return proximo;
     });
@@ -2707,6 +2719,7 @@ function Dependentes({
 function ModalSocio({
   socios,
   contasBancarias,
+  configuracoesMensalidades,
   form,
   socioEditando,
   salvando,
@@ -2720,6 +2733,7 @@ function ModalSocio({
 }: {
   socios: Socio[];
   contasBancarias: ContaBancaria[];
+  configuracoesMensalidades: any[];
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
