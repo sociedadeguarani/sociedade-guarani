@@ -2966,15 +2966,7 @@ function ModalSocio({
   }
   opcoes={["sim", "nao"]}
   labels={{ sim: "Sim", nao: "Não" }}
-/>
-                  <SelectCampo
-                    label="Possui mensalidade?"
-                    value={form.possui_mensalidade ? "sim" : "nao"}
-                    onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
-                    opcoes={["sim", "nao"]}
-                    labels={{ sim: "Sim", nao: "Não" }}
-                  />
-              
+/>             
 
                {form.possui_mensalidade ? (
                   <>
