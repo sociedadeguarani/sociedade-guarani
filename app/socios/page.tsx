@@ -1503,12 +1503,7 @@ sincronizarMensalidades: () => void;
           </p>
         </div>
 
-        <button
-          onClick={novoSocio}
-          className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
-        >
-       <div className="flex flex-wrap gap-3">
- <div className="flex flex-wrap gap-3">
+
   <button
     type="button"
     onClick={sincronizarMensalidades}
