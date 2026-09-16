@@ -783,12 +783,44 @@ async function carregarConfiguracoesMensalidades() {
   }
 
   function editarSocio(socio: Socio) {
-    setSocioEditando(socio);
-    setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
-    setFotoArquivo(null);
-    setAbrirCadastro(true);
-    setMensagem("");
-  }
+  const configuracao = configuracoesMensalidades.find(
+    (item: any) =>
+      item.tipo_socio === socio.tipo_socio &&
+      item.ativo !== false
+  );
+
+  const valorConfigurado = Number(configuracao?.valor || 0);
+
+  const mensalidadeObrigatoria = [
+    "dependente_patrimonial_familiar_mensalidade",
+    "dependente_patrimonial_individual_mensalidade",
+    "dependente_contribuinte_familiar_mensalidade",
+    "dependente_contribuinte_individual_mensalidade",
+  ].includes(socio.tipo_socio || "");
+
+  setSocioEditando(socio);
+
+  setForm({
+    ...socio,
+    situacao: socio.situacao?.toLowerCase() || "ativo",
+    possui_mensalidade:
+      socio.tipo_socio === "remido"
+        ? false
+        : mensalidadeObrigatoria
+          ? true
+          : Boolean(socio.possui_mensalidade),
+    valor_mensalidade:
+      socio.tipo_socio === "remido"
+        ? 0
+        : configuracao
+          ? valorConfigurado
+          : Number(socio.valor_mensalidade || 0),
+  });
+
+  setFotoArquivo(null);
+  setAbrirCadastro(true);
+  setMensagem("");
+}
 
   function fecharCadastro() {
     if (!salvando) {
