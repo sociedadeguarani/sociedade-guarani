@@ -1187,6 +1187,10 @@ async function carregarConfiguracoesMensalidades() {
             <Socios
               socios={sociosFiltrados}
               quantidadeTotal={socios.length}
+              sincronizandoMensalidades={sincronizandoMensalidades}
+sincronizarMensalidades={() =>
+  void sincronizarMensalidadesSocios()
+}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1454,6 +1458,8 @@ function categoriaClasse(categoria?: string | null) {
 function Socios({
   socios,
   quantidadeTotal,
+   sincronizandoMensalidades,
+  sincronizarMensalidades,
   busca,
   setBusca,
   novoSocio,
