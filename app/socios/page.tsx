@@ -740,6 +740,7 @@ async function carregarConfiguracoesMensalidades() {
   useEffect(() => {
     carregarSocios();
     void carregarContasBancarias();
+    void carregarConfiguracoesMensalidades();
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
 
