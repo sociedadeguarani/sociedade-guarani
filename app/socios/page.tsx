@@ -1197,6 +1197,7 @@ async function carregarConfiguracoesMensalidades() {
         <ModalSocio
           socios={socios}
           contasBancarias={contasBancarias}
+          configuracoesMensalidades={configuracoesMensalidades}
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
