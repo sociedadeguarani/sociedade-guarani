@@ -1503,7 +1503,7 @@ sincronizarMensalidades: () => void;
           </p>
         </div>
 
-
+<div className="flex flex-wrap gap-3">
   <button
     type="button"
     onClick={sincronizarMensalidades}
