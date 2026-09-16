@@ -1472,6 +1472,8 @@ function Socios({
 }: {
   socios: Socio[];
   quantidadeTotal: number;
+  sincronizandoMensalidades: boolean;
+sincronizarMensalidades: () => void;
   busca: string;
   setBusca: (valor: string) => void;
   novoSocio: () => void;
@@ -1505,7 +1507,24 @@ function Socios({
           onClick={novoSocio}
           className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
         >
-          + Novo Sócio
+       <div className="flex flex-wrap gap-3">
+  <button
+    onClick={sincronizarMensalidades}
+    disabled={sincronizandoMensalidades}
+    className="rounded-xl border border-[#005a3c] bg-white px-5 py-3 font-bold text-[#005a3c] shadow-sm transition hover:bg-[#e8f3ee] disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {sincronizandoMensalidades
+      ? "⏳ Sincronizando..."
+      : "🔄 Sincronizar mensalidades"}
+  </button>
+
+  <button
+    onClick={novoSocio}
+    className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
+  >
+    + Novo Sócio
+  </button>
+</div>
         </button>
 
       </div>
