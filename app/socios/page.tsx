@@ -237,6 +237,7 @@ export default function Home() {
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
+  const [configuracoesMensalidades, setConfiguracoesMensalidades] = useState<any[]>([]);
   const [busca, setBusca] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
   const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
