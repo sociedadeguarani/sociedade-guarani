@@ -337,152 +337,6 @@ export async function POST(request: Request) {
 
     /*
      * =====================================================
-     * SINCRONIZAR MENSALIDADES DOS SÓCIOS
-     * =====================================================
-     *
-     * Para dependentes, a categoria preservada da migração é a
-     * referência principal.
-     *
-     * Categoria sem "C/ Mensalidade" = não paga e valor 0.
-     * Categoria com "C/ Mensalidade" = paga e usa a configuração
-     * correspondente ao tipo_socio cadastrado.
-     *
-     * Isso evita transformar esposa, filhos e outros dependentes em
-     * pagadores apenas porque o tipo_socio foi normalizado.
-     *
-     * Se a categoria estiver vazia, usamos o tipo_socio como fallback.
-     * Não alteramos titulares automaticamente.
-     */
-    if (acao === "sincronizar_socios") {
-      const { data: todosSocios, error: erroSocios } = await db
-        .from("socios")
-        .select(
-          "id,tipo_socio,categoria,responsavel_id,possui_mensalidade,valor_mensalidade"
-        );
-
-      if (erroSocios) throw erroSocios;
-
-      const { data: configuracoes, error: erroConfiguracoes } =
-        await db
-          .from("configuracoes_mensalidades")
-          .select("*")
-          .eq("ativo", true)
-          .order("vigencia_inicio", { ascending: false });
-
-      if (erroConfiguracoes) throw erroConfiguracoes;
-
-      const competenciaHoje = new Date().toISOString().slice(0, 10);
-      let atualizados = 0;
-
-      for (const socio of todosSocios || []) {
-        const tipoSocio = String(socio.tipo_socio || "");
-        const ehDependente = Boolean(socio.responsavel_id);
-
-        if (tipoSocio === "remido") {
-          const { error } = await db
-            .from("socios")
-            .update({
-              possui_mensalidade: false,
-              valor_mensalidade: 0,
-            })
-            .eq("id", socio.id);
-
-          if (error) throw error;
-          atualizados++;
-          continue;
-        }
-
-        if (ehDependente) {
-          const temMensalidade = dependenteTemMensalidade(socio);
-
-          if (!temMensalidade) {
-            const { error } = await db
-              .from("socios")
-              .update({
-                possui_mensalidade: false,
-                valor_mensalidade: 0,
-              })
-              .eq("id", socio.id);
-
-            if (error) throw error;
-            atualizados++;
-            continue;
-          }
-
-          const configuracao = escolherConfiguracao(
-            configuracoes || [],
-            tipoSocio,
-            competenciaHoje
-          );
-
-          const valor = configuracao
-            ? Number(configuracao.valor || 0)
-            : Number(socio.valor_mensalidade || 0);
-
-          const { error } = await db
-            .from("socios")
-            .update({
-              possui_mensalidade: true,
-              valor_mensalidade: valor,
-            })
-            .eq("id", socio.id);
-
-          if (error) throw error;
-          atualizados++;
-          continue;
-        }
-
-        /*
-         * Titulares: não ativamos cobrança automaticamente.
-         * Se já possuem mensalidade, atualizamos o valor pela
-         * configuração do tipo cadastrado.
-         */
-        if (!Boolean(socio.possui_mensalidade)) {
-          const { error } = await db
-            .from("socios")
-            .update({
-              possui_mensalidade: false,
-              valor_mensalidade: 0,
-            })
-            .eq("id", socio.id);
-
-          if (error) throw error;
-          atualizados++;
-          continue;
-        }
-
-        const configuracao = escolherConfiguracao(
-          configuracoes || [],
-          tipoSocio,
-          competenciaHoje
-        );
-
-        const valor = configuracao
-          ? Number(configuracao.valor || 0)
-          : Number(socio.valor_mensalidade || 0);
-
-        const { error } = await db
-          .from("socios")
-          .update({
-            possui_mensalidade: true,
-            valor_mensalidade: valor,
-          })
-          .eq("id", socio.id);
-
-        if (error) throw error;
-        atualizados++;
-      }
-
-      return NextResponse.json({
-        ok: true,
-        atualizados,
-        message:
-          `${atualizados} sócio(s) sincronizado(s) com as configurações de mensalidade.`,
-      });
-    }
-
-    /*
-     * =====================================================
      * GERAR COMPETÊNCIA
      * =====================================================
      */
@@ -524,17 +378,50 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
-        )
-        .eq("possui_mensalidade", true);
+          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
+        );
 
       if (erroSocios) throw erroSocios;
 
-      const cobraveis = (socios || []).filter(
-        (s: any) =>
-          String(s.situacao || "").toLowerCase() !== "inativo" &&
-          s.ativo !== false
-      );
+      /*
+       * REGRA OFICIAL DO GERADOR
+       *
+       * O gerador NÃO altera cadastro e NÃO usa o botão antigo
+       * de sincronização.
+       *
+       * Titulares:
+       *   possui_mensalidade = true => pode gerar.
+       *
+       * Dependentes:
+       *   usamos a categoria preservada da migração como referência
+       *   principal. Só entram automaticamente quando a categoria
+       *   informa "C/ Mensalidade" ou "Com Mensalidade".
+       *
+       * Isso é importante porque a sincronização anterior alterou
+       * muitos dependentes para possui_mensalidade=true apenas por
+       * causa do tipo_socio. A categoria antiga preserva a regra real
+       * da família e evita cobrar esposa/filhos automaticamente.
+       *
+       * A definição de casos excepcionais (por exemplo, dependente
+       * que passa a pagar individualmente) poderá ser ajustada no
+       * cadastro do associado antes da geração.
+       */
+      const cobraveis = (socios || []).filter((s: any) => {
+        if (
+          String(s.situacao || "").toLowerCase() === "inativo" ||
+          s.ativo === false
+        ) {
+          return false;
+        }
+
+        const ehDependente = Boolean(s.responsavel_id);
+
+        if (!ehDependente) {
+          return Boolean(s.possui_mensalidade);
+        }
+
+        return dependenteTemMensalidade(s);
+      });
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -575,9 +462,9 @@ export async function POST(request: Request) {
       );
 
       /*
-       * O tipo_socio cadastrado é usado diretamente.
-       * Não calculamos modalidade por parentesco, idade ou
-       * existência de outras pessoas vinculadas.
+       * A lista "cobraveis" acima já representa os pagadores desta
+       * competência. O gerador apenas cria o lançamento financeiro;
+       * ele não modifica o cadastro do sócio.
        */
       const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
