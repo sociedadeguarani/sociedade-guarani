@@ -254,8 +254,6 @@ export default function Home() {
   const [salvando, setSalvando] = useState(false);
   const [gerandoAcesso, setGerandoAcesso] = useState(false);
   const [carregando, setCarregando] = useState(false);
-  const [sincronizandoMensalidades, setSincronizandoMensalidades] =
-  useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
@@ -730,65 +728,6 @@ async function carregarConfiguracoesMensalidades() {
       error
     );
     setConfiguracoesMensalidades([]);
-  }
-}
-  async function sincronizarMensalidadesSocios() {
-  if (sincronizandoMensalidades) return;
-
-  const confirmar = window.confirm(
-    "Deseja sincronizar as mensalidades de todos os sócios conforme as configurações atuais?"
-  );
-
-  if (!confirmar) return;
-
-  setSincronizandoMensalidades(true);
-  setMensagem("");
-
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      throw new Error("Sessão expirada. Faça login novamente.");
-    }
-
-    const resposta = await fetch("/api/mensalidades/admin", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        acao: "sincronizar_socios",
-      }),
-    });
-
-    const resultado = await resposta.json().catch(() => ({}));
-
-    if (!resposta.ok) {
-      throw new Error(
-        resultado?.error ||
-          "Não foi possível sincronizar as mensalidades."
-      );
-    }
-
-    await carregarSocios();
-
-    setMensagem(
-      resultado?.message ||
-        `${resultado?.atualizados || 0} sócio(s) sincronizado(s) com sucesso.`
-    );
-  } catch (error) {
-    console.error(error);
-
-    setMensagem(
-      error instanceof Error
-        ? error.message
-        : "Não foi possível sincronizar as mensalidades."
-    );
-  } finally {
-    setSincronizandoMensalidades(false);
   }
 }
   async function carregarSocios() {
@@ -1526,8 +1465,6 @@ function categoriaClasse(categoria?: string | null) {
 function Socios({
   socios,
   quantidadeTotal,
-   sincronizandoMensalidades,
-  sincronizarMensalidades,
   busca,
   setBusca,
   novoSocio,
@@ -1586,17 +1523,6 @@ sincronizarMensalidades: () => void;
         </div>
 
 <div className="flex flex-wrap gap-3">
-  <button
-    type="button"
-    onClick={sincronizarMensalidades}
-    disabled={sincronizandoMensalidades}
-    className="rounded-xl border border-[#005a3c] bg-white px-5 py-3 font-bold text-[#005a3c] shadow-sm transition hover:bg-[#e8f3ee] disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {sincronizandoMensalidades
-      ? "⏳ Sincronizando..."
-      : "🔄 Sincronizar mensalidades"}
-  </button>
-
   <button
     type="button"
     onClick={novoSocio}
