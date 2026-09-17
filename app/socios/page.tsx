@@ -259,6 +259,9 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
+  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<string[]>([]);
+  const [filtroMensalidade, setFiltroMensalidade] = useState("todas");
+  const [filtroSituacao, setFiltroSituacao] = useState("todas");
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
@@ -1139,6 +1142,21 @@ async function carregarConfiguracoesMensalidades() {
     setTimeout(() => setMensagem(""), 1500);
   }
 
+  const categoriasDisponiveis = useMemo(() => {
+    return Array.from(
+      new Set(
+        socios.map((socio) => {
+          const categoria = (socio.categoria || "").trim();
+          return categoria || "__SEM_CATEGORIA__";
+        })
+      )
+    ).sort((a, b) => {
+      const nomeA = a === "__SEM_CATEGORIA__" ? "Sem categoria" : a;
+      const nomeB = b === "__SEM_CATEGORIA__" ? "Sem categoria" : b;
+      return nomeA.localeCompare(nomeB, "pt-BR");
+    });
+  }, [socios]);
+
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
@@ -1154,9 +1172,40 @@ async function carregarConfiguracoesMensalidades() {
         Boolean(socio.responsavel_id) ||
         (socio.tipo_socio || "").startsWith("dependente_");
 
-      return correspondeBusca && correspondeTipo;
+      const categoriaFiltro =
+        (socio.categoria || "").trim() || "__SEM_CATEGORIA__";
+
+      const correspondeCategoria =
+        categoriasSelecionadas.length === 0 ||
+        categoriasSelecionadas.includes(categoriaFiltro);
+
+      const correspondeMensalidade =
+        filtroMensalidade === "todas" ||
+        (filtroMensalidade === "com" && socio.possui_mensalidade === true) ||
+        (filtroMensalidade === "sem" && socio.possui_mensalidade !== true);
+
+      const situacaoSocio = socio.situacao?.toLowerCase() || "";
+
+      const correspondeSituacao =
+        filtroSituacao === "todas" ||
+        situacaoSocio === filtroSituacao;
+
+      return (
+        correspondeBusca &&
+        correspondeTipo &&
+        correspondeCategoria &&
+        correspondeMensalidade &&
+        correspondeSituacao
+      );
     });
-  }, [socios, busca, mostrarSomenteDependentes]);
+  }, [
+    socios,
+    busca,
+    mostrarSomenteDependentes,
+    categoriasSelecionadas,
+    filtroMensalidade,
+    filtroSituacao,
+  ]);
 
   if (verificandoLogin) {
     return (
@@ -1208,6 +1257,13 @@ sincronizarMensalidades={() =>
               carregando={carregando}
               mostrarSomenteDependentes={mostrarSomenteDependentes}
               setMostrarSomenteDependentes={setMostrarSomenteDependentes}
+              categoriasDisponiveis={categoriasDisponiveis}
+              categoriasSelecionadas={categoriasSelecionadas}
+              setCategoriasSelecionadas={setCategoriasSelecionadas}
+              filtroMensalidade={filtroMensalidade}
+              setFiltroMensalidade={setFiltroMensalidade}
+              filtroSituacao={filtroSituacao}
+              setFiltroSituacao={setFiltroSituacao}
             />
           )}
 
@@ -1477,6 +1533,13 @@ function Socios({
   carregando,
   mostrarSomenteDependentes,
   setMostrarSomenteDependentes,
+  categoriasDisponiveis,
+  categoriasSelecionadas,
+  setCategoriasSelecionadas,
+  filtroMensalidade,
+  setFiltroMensalidade,
+  filtroSituacao,
+  setFiltroSituacao,
 }: {
   socios: Socio[];
   quantidadeTotal: number;
@@ -1491,6 +1554,13 @@ sincronizarMensalidades: () => void;
   carregando: boolean;
   mostrarSomenteDependentes: boolean;
   setMostrarSomenteDependentes: (valor: boolean) => void;
+  categoriasDisponiveis: string[];
+  categoriasSelecionadas: string[];
+  setCategoriasSelecionadas: (valor: string[]) => void;
+  filtroMensalidade: string;
+  setFiltroMensalidade: (valor: string) => void;
+  filtroSituacao: string;
+  setFiltroSituacao: (valor: string) => void;
 }) {
   return (
     <div>
@@ -1570,18 +1640,168 @@ sincronizarMensalidades: () => void;
 
       <div className="mb-5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
 
-          <span className="text-xl">
-            🔎
-          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[#e2ebe6] px-4">
+            <span className="text-xl">
+              🔎
+            </span>
 
-          <input
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por nome, CPF ou matrícula..."
-            className="w-full bg-transparent py-2 outline-none"
-          />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por nome, CPF ou matrícula..."
+              className="w-full bg-transparent py-3 outline-none"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+
+            <select
+              value={filtroMensalidade}
+              onChange={(e) => setFiltroMensalidade(e.target.value)}
+              className="rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e] outline-none focus:border-[#005a3c]"
+            >
+              <option value="todas">Mensalidade: todas</option>
+              <option value="com">Com mensalidade</option>
+              <option value="sem">Sem mensalidade</option>
+            </select>
+
+            <select
+              value={filtroSituacao}
+              onChange={(e) => setFiltroSituacao(e.target.value)}
+              className="rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e] outline-none focus:border-[#005a3c]"
+            >
+              <option value="todas">Situação: todas</option>
+              <option value="ativo">Ativo</option>
+              <option value="inativo">Inativo</option>
+              <option value="suspenso">Suspenso</option>
+            </select>
+
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e]">
+              <input
+                type="checkbox"
+                checked={mostrarSomenteDependentes}
+                onChange={(e) => setMostrarSomenteDependentes(e.target.checked)}
+                className="h-4 w-4 accent-[#005a3c]"
+              />
+              Somente dependentes
+            </label>
+
+          </div>
+
+        </div>
+
+        <div className="mt-4 border-t border-[#edf2ef] pt-4">
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+            <div>
+              <p className="text-sm font-bold text-[#173d2e]">
+                Filtrar por categoria
+              </p>
+
+              <p className="mt-1 text-xs text-gray-500">
+                Marque uma ou várias categorias para revisar os associados.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+
+              <button
+                type="button"
+                onClick={() => setCategoriasSelecionadas(categoriasDisponiveis)}
+                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c] hover:bg-[#dce8df]"
+              >
+                Selecionar todas
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCategoriasSelecionadas([])}
+                className="rounded-lg border border-[#e2ebe6] bg-white px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50"
+              >
+                Limpar categorias
+              </button>
+
+            </div>
+
+          </div>
+
+          <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto rounded-xl border border-[#e2ebe6] bg-[#fafcfb] p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+
+            {categoriasDisponiveis.map((categoria) => {
+              const selecionada = categoriasSelecionadas.includes(categoria);
+              const label =
+                categoria === "__SEM_CATEGORIA__"
+                  ? "Sem categoria"
+                  : categoria;
+
+              return (
+                <label
+                  key={categoria}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
+                    selecionada
+                      ? "bg-[#e8f3ee] font-bold text-[#005a3c]"
+                      : "hover:bg-white"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selecionada}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setCategoriasSelecionadas([
+                          ...categoriasSelecionadas,
+                          categoria,
+                        ]);
+                      } else {
+                        setCategoriasSelecionadas(
+                          categoriasSelecionadas.filter(
+                            (item) => item !== categoria
+                          )
+                        );
+                      }
+                    }}
+                    className="h-4 w-4 accent-[#005a3c]"
+                  />
+
+                  <span className="min-w-0 truncate" title={label}>
+                    {label}
+                  </span>
+                </label>
+              );
+            })}
+
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span>
+              {categoriasSelecionadas.length === 0
+                ? "Todas as categorias"
+                : `${categoriasSelecionadas.length} categoria(s) selecionada(s)`}
+            </span>
+
+            {(categoriasSelecionadas.length > 0 ||
+              filtroMensalidade !== "todas" ||
+              filtroSituacao !== "todas" ||
+              mostrarSomenteDependentes ||
+              busca.trim()) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBusca("");
+                  setCategoriasSelecionadas([]);
+                  setFiltroMensalidade("todas");
+                  setFiltroSituacao("todas");
+                  setMostrarSomenteDependentes(false);
+                }}
+                className="rounded-lg px-2 py-1 font-bold text-[#005a3c] hover:bg-[#e8f3ee]"
+              >
+                Limpar todos os filtros
+              </button>
+            )}
+          </div>
 
         </div>
 
