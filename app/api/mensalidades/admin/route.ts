@@ -24,6 +24,49 @@ const TIPOS_DEPENDENTES_COM_MENSALIDADE = [
   "dependente_contribuinte_individual_mensalidade",
 ];
 
+function normalizarTexto(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Para dependentes, a categoria importada do sistema antigo é a
+ * referência principal para saber se aquela pessoa realmente paga
+ * mensalidade. Isso evita transformar automaticamente esposa, filhos
+ * e outros dependentes em pagadores apenas porque o tipo_socio foi
+ * normalizado durante a migração/sincronização.
+ *
+ * Exemplos de categorias pagantes:
+ * - Dependente Patrimonial C/ Mensalidade
+ * - Dependente Contribuinte C/ Mensalidade
+ * - Sócio dependente c/ mensalidade
+ *
+ * Quando a categoria não estiver preenchida, usamos o tipo_socio como
+ * fallback para manter compatibilidade com novos cadastros.
+ */
+function dependenteTemMensalidade(socio: any) {
+  const categoria = normalizarTexto(socio?.categoria);
+
+  if (categoria) {
+    if (
+      categoria.includes("c/ mensalidade") ||
+      categoria.includes("com mensalidade")
+    ) {
+      return true;
+    }
+
+    // Categoria preenchida e sem indicação de mensalidade: não cobrar.
+    return false;
+  }
+
+  return TIPOS_DEPENDENTES_COM_MENSALIDADE.includes(
+    String(socio?.tipo_socio || "")
+  );
+}
+
 const primeiroDia = (ano: number, mes: number) =>
   `${ano}-${String(mes).padStart(2, "0")}-01`;
 
@@ -51,11 +94,6 @@ function escolherConfiguracao(
     )[0];
 }
 
-function dependenteTemMensalidade(tipoSocio: string) {
-  return TIPOS_DEPENDENTES_COM_MENSALIDADE.includes(
-    String(tipoSocio || "")
-  );
-}
 
 function valorTarifa(
   tarifas: any[],
@@ -208,7 +246,7 @@ export async function GET(request: Request) {
     const { data: socios, error: erroSocios } = await db
       .from("socios")
       .select(
-        "id,matricula,nome,cpf,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
+        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
       )
       .order("nome");
 
@@ -302,20 +340,24 @@ export async function POST(request: Request) {
      * SINCRONIZAR MENSALIDADES DOS SÓCIOS
      * =====================================================
      *
-     * Para dependentes, o tipo_socio é a fonte da verdade.
+     * Para dependentes, a categoria preservada da migração é a
+     * referência principal.
      *
-     * Sem "com_mensalidade" = não paga e valor 0.
-     * Com "com_mensalidade" = paga e usa a configuração
-     * correspondente ao tipo exato.
+     * Categoria sem "C/ Mensalidade" = não paga e valor 0.
+     * Categoria com "C/ Mensalidade" = paga e usa a configuração
+     * correspondente ao tipo_socio cadastrado.
      *
-     * Não usamos parentesco, idade ou quantidade de filhos/
-     * dependentes para decidir cobrança.
+     * Isso evita transformar esposa, filhos e outros dependentes em
+     * pagadores apenas porque o tipo_socio foi normalizado.
+     *
+     * Se a categoria estiver vazia, usamos o tipo_socio como fallback.
+     * Não alteramos titulares automaticamente.
      */
     if (acao === "sincronizar_socios") {
       const { data: todosSocios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade"
+          "id,tipo_socio,categoria,responsavel_id,possui_mensalidade,valor_mensalidade"
         );
 
       if (erroSocios) throw erroSocios;
@@ -351,7 +393,7 @@ export async function POST(request: Request) {
         }
 
         if (ehDependente) {
-          const temMensalidade = dependenteTemMensalidade(tipoSocio);
+          const temMensalidade = dependenteTemMensalidade(socio);
 
           if (!temMensalidade) {
             const { error } = await db
