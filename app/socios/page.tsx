@@ -1145,10 +1145,14 @@ async function carregarConfiguracoesMensalidades() {
   const categoriasDisponiveis = useMemo(() => {
     return Array.from(
       new Set(
-        socios.map((socio) => {
-          const categoria = (socio.categoria || "").trim();
-          return categoria || "__SEM_CATEGORIA__";
-        })
+        socios
+          .map((socio) => (socio.categoria || "").trim())
+          .filter((categoria) => {
+            const valor = categoria.toLowerCase();
+            // Categorias específicas criadas apenas para a temporada passada.
+            return !valor.startsWith("dependente temporário do sócio");
+          })
+          .map((categoria) => categoria || "__SEM_CATEGORIA__")
       )
     ).sort((a, b) => {
       const nomeA = a === "__SEM_CATEGORIA__" ? "Sem categoria" : a;
