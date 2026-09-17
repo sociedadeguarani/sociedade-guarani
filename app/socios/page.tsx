@@ -1187,10 +1187,6 @@ async function carregarConfiguracoesMensalidades() {
             <Socios
               socios={sociosFiltrados}
               quantidadeTotal={socios.length}
-              sincronizandoMensalidades={sincronizandoMensalidades}
-sincronizarMensalidades={() =>
-  void sincronizarMensalidadesSocios()
-}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1484,8 +1480,6 @@ function Socios({
 }: {
   socios: Socio[];
   quantidadeTotal: number;
-  sincronizandoMensalidades: boolean;
-sincronizarMensalidades: () => void;
   busca: string;
   setBusca: (valor: string) => void;
   novoSocio: () => void;
@@ -1523,7 +1517,7 @@ sincronizarMensalidades: () => void;
         </div>
 
 <div className="flex flex-wrap gap-3">
-  <button
+<button
     type="button"
     onClick={novoSocio}
     className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
