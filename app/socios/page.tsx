@@ -111,7 +111,7 @@ const TIPOS_SOCIO = [
   value: "dependente_patrimonial",
   label: "Dependente Sócio Patrimonial",
 },
-  
+  {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
   },
