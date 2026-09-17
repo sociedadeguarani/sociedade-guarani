@@ -57,6 +57,136 @@ function dependenteTemMensalidade(tipoSocio: string) {
   );
 }
 
+function valorTarifa(
+  tarifas: any[],
+  tipoPagamento: unknown
+) {
+  const tipo = String(tipoPagamento || "").toLowerCase().trim();
+  if (!tipo) return 0;
+
+  const aliases: Record<string, string> = {
+    banrisul: "banrisul",
+    debito_banrisul: "banrisul",
+    "débito banrisul": "banrisul",
+    sicredi: "sicredi",
+    debito_sicredi: "sicredi",
+    "débito sicredi": "sicredi",
+    bb: "bb",
+    banco_do_brasil: "bb",
+    debito_bb: "bb",
+    debito_banco_do_brasil: "bb",
+    "débito banco do brasil": "bb",
+    boleto: "boleto",
+    pix: "pix",
+    dinheiro: "dinheiro",
+    transferencia: "transferencia",
+    transferência: "transferencia",
+    outro: "outro",
+  };
+
+  const chave = aliases[tipo] || tipo;
+  const tarifa = (tarifas || []).find(
+    (t: any) =>
+      String(t.tipo_pagamento || "").toLowerCase() === chave &&
+      t.ativo !== false
+  );
+
+  return Number(tarifa?.valor_tarifa || 0);
+}
+
+function diasDeAtraso(
+  vencimento: string | null,
+  dataReferencia: string
+) {
+  if (!vencimento) return 0;
+
+  const inicio = new Date(`${vencimento.slice(0, 10)}T00:00:00`);
+  const fim = new Date(`${dataReferencia.slice(0, 10)}T00:00:00`);
+
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime())) {
+    return 0;
+  }
+
+  const diferenca = Math.floor(
+    (fim.getTime() - inicio.getTime()) / 86400000
+  );
+
+  return Math.max(0, diferenca);
+}
+
+function calcularCobranca(
+  valorBase: number,
+  dataVencimentoAtual: string | null,
+  dataReferencia: string,
+  tarifa: number,
+  regra: any
+) {
+  const dias = diasDeAtraso(dataVencimentoAtual, dataReferencia);
+  const tolerancia = Number(regra?.dias_tolerancia || 0);
+  const diasCobrados = Math.max(0, dias - tolerancia);
+
+  let multa = 0;
+  let juros = 0;
+
+  if (diasCobrados > 0) {
+    if (regra?.multa_tipo === "valor") {
+      multa = Number(regra?.multa_valor || 0);
+    } else {
+      multa =
+        valorBase * (Number(regra?.multa_valor || 0) / 100);
+    }
+
+    const jurosValor = Number(regra?.juros_valor || 0);
+
+    switch (regra?.juros_tipo) {
+      case "percentual_dia":
+        juros =
+          valorBase *
+          (jurosValor / 100) *
+          diasCobrados;
+        break;
+      case "valor_dia":
+        juros = jurosValor * diasCobrados;
+        break;
+      case "valor_mes":
+        juros =
+          jurosValor *
+          Math.ceil(diasCobrados / 30);
+        break;
+      case "percentual_mes":
+      default:
+        juros =
+          valorBase *
+          (jurosValor / 100) *
+          (diasCobrados / 30);
+        break;
+    }
+  }
+
+  let desconto = 0;
+  if (regra?.desconto_tipo === "percentual") {
+    desconto =
+      valorBase *
+      (Number(regra?.desconto_valor || 0) / 100);
+  } else {
+    desconto = Number(regra?.desconto_valor || 0);
+  }
+
+  const total = Math.max(
+    0,
+    valorBase + tarifa + multa + juros - desconto
+  );
+
+  return {
+    dias_atraso: dias,
+    multa: Number(multa.toFixed(2)),
+    juros: Number(juros.toFixed(2)),
+    desconto: Number(desconto.toFixed(2)),
+    tarifa_pagamento: Number(tarifa.toFixed(2)),
+    total_cobrado: Number(total.toFixed(2)),
+  };
+}
+
 export async function GET(request: Request) {
   const auth = await exigirAdministrador(request);
   if ("error" in auth) {
@@ -107,6 +237,22 @@ export async function GET(request: Request) {
 
     if (erroConfiguracoes) throw erroConfiguracoes;
 
+    const { data: tarifas, error: erroTarifas } = await db
+      .from("configuracoes_tarifas_mensalidades")
+      .select("*")
+      .order("tipo_pagamento");
+
+    if (erroTarifas) throw erroTarifas;
+
+    const { data: cobrancas, error: erroCobrancas } = await db
+      .from("configuracoes_cobranca_mensalidades")
+      .select("*")
+      .eq("ativo", true)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (erroCobrancas) throw erroCobrancas;
+
     const mapaSocios = new Map<string, any>(
       (socios || []).map((s: any) => [String(s.id), s])
     );
@@ -120,6 +266,8 @@ export async function GET(request: Request) {
       socios: socios || [],
       mensalidades: mensalidadesComSocio,
       configuracoes: configuracoes || [],
+      tarifas: tarifas || [],
+      cobranca: cobrancas?.[0] || null,
       motivos: MOTIVOS,
     });
   } catch (e) {
@@ -355,6 +503,24 @@ export async function POST(request: Request) {
 
       if (erroConfiguracoes) throw erroConfiguracoes;
 
+      const { data: tarifas, error: erroTarifas } = await db
+        .from("configuracoes_tarifas_mensalidades")
+        .select("*")
+        .eq("ativo", true);
+
+      if (erroTarifas) throw erroTarifas;
+
+      const { data: cobrancas, error: erroCobrancas } = await db
+        .from("configuracoes_cobranca_mensalidades")
+        .select("*")
+        .eq("ativo", true)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (erroCobrancas) throw erroCobrancas;
+
+      const regraCobranca = cobrancas?.[0] || null;
+
       const { data: existentes, error: erroExistentes } = await db
         .from("mensalidades")
         .select("socio_id")
@@ -394,11 +560,28 @@ export async function POST(request: Request) {
             config?.tipo_pagamento ||
             null;
 
+          const vencimento = dataVencimento(competencia, dia);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
+          const calculado = calcularCobranca(
+            valor,
+            vencimento,
+            competencia,
+            tarifa,
+            regraCobranca
+          );
+
           return {
             socio_id: s.id,
             competencia,
             valor,
-            data_vencimento: dataVencimento(competencia, dia),
+            valor_base: valor,
+            tarifa_pagamento: calculado.tarifa_pagamento,
+            multa: calculado.multa,
+            juros: calculado.juros,
+            desconto: calculado.desconto,
+            total_cobrado: calculado.total_cobrado,
+            dias_atraso: calculado.dias_atraso,
+            data_vencimento: vencimento,
             situacao: valor === 0 ? "isento" : "em_aberto",
             tipo_pagamento: tipoPagamento,
           };
@@ -446,7 +629,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,situacao")
+        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -467,17 +650,62 @@ export async function POST(request: Request) {
         });
       }
 
-      const { error: erroBaixa } = await db
-        .from("mensalidades")
-        .update({
-          situacao: "pago",
-          data_pagamento: dataPagamento,
-          tipo_pagamento: tipoPagamento,
-          observacoes: body.observacoes || null,
-        })
-        .in("id", idsParaBaixar);
+      const { data: tarifas, error: erroTarifas } = await db
+        .from("configuracoes_tarifas_mensalidades")
+        .select("*")
+        .eq("ativo", true);
 
-      if (erroBaixa) throw erroBaixa;
+      if (erroTarifas) throw erroTarifas;
+
+      const { data: cobrancas, error: erroCobrancas } = await db
+        .from("configuracoes_cobranca_mensalidades")
+        .select("*")
+        .eq("ativo", true)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (erroCobrancas) throw erroCobrancas;
+
+      const regraCobranca = cobrancas?.[0] || null;
+      const registrosParaBaixar = (registros || []).filter((r: any) =>
+        idsParaBaixar.includes(String(r.id))
+      );
+
+      for (const registro of registrosParaBaixar) {
+        const formaPagamento =
+          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
+
+        const valorBase = Number(
+          registro.valor_base ?? registro.valor ?? 0
+        );
+
+        const calculado = calcularCobranca(
+          valorBase,
+          registro.data_vencimento || null,
+          String(dataPagamento),
+          valorTarifa(tarifas || [], formaPagamento),
+          regraCobranca
+        );
+
+        const { error: erroBaixa } = await db
+          .from("mensalidades")
+          .update({
+            situacao: "pago",
+            data_pagamento: dataPagamento,
+            tipo_pagamento: formaPagamento,
+            valor_base: valorBase,
+            tarifa_pagamento: calculado.tarifa_pagamento,
+            multa: calculado.multa,
+            juros: calculado.juros,
+            desconto: calculado.desconto,
+            total_cobrado: calculado.total_cobrado,
+            dias_atraso: calculado.dias_atraso,
+            observacoes: body.observacoes || null,
+          })
+          .eq("id", registro.id);
+
+        if (erroBaixa) throw erroBaixa;
+      }
 
       return NextResponse.json({
         ok: true,
@@ -530,6 +758,162 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         message: "Mensalidade atualizada.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * EDITAR TARIFA
+     * =====================================================
+     */
+    if (acao === "tarifa_editar") {
+      const tipoPagamento = String(body.tipo_pagamento || "").trim();
+
+      if (!tipoPagamento) {
+        return NextResponse.json(
+          { error: "Forma de pagamento não informada." },
+          { status: 400 }
+        );
+      }
+
+      const dados = {
+        tipo_pagamento: tipoPagamento,
+        nome:
+          String(body.nome || "").trim() ||
+          tipoPagamento,
+        valor_tarifa: Number(body.valor_tarifa || 0),
+        ativo: body.ativo !== false,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (dados.valor_tarifa < 0) {
+        return NextResponse.json(
+          { error: "A tarifa não pode ser negativa." },
+          { status: 400 }
+        );
+      }
+
+      const { data, error } = await db
+        .from("configuracoes_tarifas_mensalidades")
+        .upsert(dados, { onConflict: "tipo_pagamento" })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        tarifa: data,
+        message: "Tarifa atualizada com sucesso.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * EDITAR REGRAS DE COBRANÇA
+     * =====================================================
+     */
+    if (acao === "cobranca_editar") {
+      const dados = {
+        nome:
+          String(body.nome || "Configuração padrão").trim() ||
+          "Configuração padrão",
+        multa_tipo:
+          body.multa_tipo === "valor"
+            ? "valor"
+            : "percentual",
+        multa_valor: Number(body.multa_valor || 0),
+        juros_tipo: [
+          "percentual_dia",
+          "percentual_mes",
+          "valor_dia",
+          "valor_mes",
+        ].includes(String(body.juros_tipo))
+          ? String(body.juros_tipo)
+          : "percentual_mes",
+        juros_valor: Number(body.juros_valor || 0),
+        desconto_tipo:
+          body.desconto_tipo === "percentual"
+            ? "percentual"
+            : "valor",
+        desconto_valor: Number(body.desconto_valor || 0),
+        dias_tolerancia: Math.max(
+          0,
+          Number(body.dias_tolerancia || 0)
+        ),
+        ativo: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (
+        dados.multa_valor < 0 ||
+        dados.juros_valor < 0 ||
+        dados.desconto_valor < 0
+      ) {
+        return NextResponse.json(
+          { error: "Os valores de cobrança não podem ser negativos." },
+          { status: 400 }
+        );
+      }
+
+      const id = String(body.id || "");
+
+      if (id) {
+        const { data, error } = await db
+          .from("configuracoes_cobranca_mensalidades")
+          .update(dados)
+          .eq("id", id)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        return NextResponse.json({
+          ok: true,
+          cobranca: data,
+          message: "Regras de cobrança atualizadas com sucesso.",
+        });
+      }
+
+      const { data: existentesCobranca, error: erroBuscaCobranca } =
+        await db
+          .from("configuracoes_cobranca_mensalidades")
+          .select("id")
+          .eq("ativo", true)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+      if (erroBuscaCobranca) throw erroBuscaCobranca;
+
+      if (existentesCobranca?.[0]?.id) {
+        const { data, error } = await db
+          .from("configuracoes_cobranca_mensalidades")
+          .update(dados)
+          .eq("id", existentesCobranca[0].id)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        return NextResponse.json({
+          ok: true,
+          cobranca: data,
+          message: "Regras de cobrança atualizadas com sucesso.",
+        });
+      }
+
+      const { data, error } = await db
+        .from("configuracoes_cobranca_mensalidades")
+        .insert(dados)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        cobranca: data,
+        message: "Regras de cobrança criadas com sucesso.",
       });
     }
 
