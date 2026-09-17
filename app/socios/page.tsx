@@ -377,77 +377,60 @@ export default function Home() {
     setMensagem("");
 
     try {
-      // A mensalidade é familiar: somente o titular/responsável gera a cobrança.
-      // Dependentes acompanham o status financeiro do titular e nunca geram uma
-      // mensalidade própria.
-      const pessoasComMensalidade = socios.filter(
-        (s) =>
-          !s.responsavel_id &&
-          s.possui_mensalidade === true &&
-          Number(s.valor_mensalidade || 0) >= 0 &&
-          s.situacao?.toLowerCase() !== "inativo"
-      );
+      const [ano, mes] = referencia.split("-").map(Number);
 
-      if (pessoasComMensalidade.length === 0) {
-        setMensalidades([]);
-        setMensagem("Nenhum associado/dependente possui mensalidade ativa.");
-        return;
+      if (!Number.isInteger(ano) || !Number.isInteger(mes)) {
+        throw new Error("Competência inválida.");
       }
 
-      const competencia = primeiroDiaDoMes(referencia);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      const { data: existentes, error: erroBusca } = await supabase
-        .from("mensalidades")
-        .select("socio_id")
-        .eq("competencia", competencia);
+      if (!session) {
+        throw new Error("Sessão expirada. Faça login novamente.");
+      }
 
-      if (erroBusca) throw erroBusca;
+      // O Financeiro usa o mesmo gerador oficial da API de mensalidades.
+      // Assim não existem duas regras diferentes criando lançamentos.
+      const resposta = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          acao: "gerar",
+          ano,
+          mes,
+        }),
+      });
 
-      const idsExistentes = new Set(
-        (existentes || []).map((item: { socio_id: string }) => item.socio_id)
-      );
+      const resultado = await resposta.json().catch(() => ({}));
 
-      const novos = pessoasComMensalidade
-        .filter((socio) => !idsExistentes.has(socio.id))
-        .map((socio) => ({
-          socio_id: socio.id,
-          competencia,
-          valor: Number(socio.valor_mensalidade || 0),
-          data_vencimento: calcularVencimento(
-            referencia,
-            socio.dia_vencimento
-          ),
-          situacao:
-            Number(socio.valor_mensalidade || 0) === 0
-              ? "isento"
-              : "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: socio.tipo_pagamento || null,
-          comprovante_url: null,
-          observacoes: null,
-        }));
-
-      if (novos.length > 0) {
-        const { error: erroInsercao } = await supabase
-          .from("mensalidades")
-          .insert(novos);
-
-        if (erroInsercao) throw erroInsercao;
+      if (!resposta.ok) {
+        throw new Error(
+          resultado?.error || "Não foi possível gerar as mensalidades."
+        );
       }
 
       await carregarMensalidades(referencia);
       setMensagem(
-        novos.length > 0
-          ? `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
-          : `As mensalidades de ${formatarCompetencia(referencia)} já estavam geradas.`
+        resultado?.message ||
+          `${resultado?.criadas || 0} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
       );
     } catch (error) {
       console.error(error);
-      setMensagem("Não foi possível gerar as mensalidades.");
+      setMensagem(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível gerar as mensalidades."
+      );
     } finally {
       setGerandoMensalidades(false);
     }
   }
+
 
   async function abrirFinanceiro() {
     await carregarMensalidades(competenciaFinanceiro);
