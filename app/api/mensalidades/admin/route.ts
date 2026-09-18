@@ -801,7 +801,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento")
+        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_bancaria_id")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -866,7 +866,7 @@ export async function POST(request: Request) {
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento),
+          valorTarifa(tarifas || [], formaPagamento, registro.conta_bancaria_id ? mapaContas.get(String(registro.conta_bancaria_id)) || null : null),
           regraCobranca
         );
 
