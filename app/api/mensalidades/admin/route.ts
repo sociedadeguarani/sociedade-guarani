@@ -95,49 +95,77 @@ function escolherConfiguracao(
 }
 
 
-function valorTarifa(
-  tarifas: any[],
-  tipoPagamento: unknown
+function normalizarBanco(valor: unknown) {
+  return normalizarTexto(valor)
+    .replace(/banco\s+do\s+brasil/g, "bb")
+    .replace(/banco\s+banrisul/g, "banrisul");
+}
+
+function chaveTarifa(
+  tipoPagamento: unknown,
+  contaBancaria: any | null
 ) {
-  const tipo = String(tipoPagamento || "").toLowerCase().trim();
-  if (!tipo) return 0;
+  const tipo = normalizarTexto(tipoPagamento);
 
   const aliases: Record<string, string> = {
-    // Banrisul / "bergs" — nome usado na planilha antiga
     banrisul: "banrisul",
     bergs: "banrisul",
     debito_banrisul: "banrisul",
-    "débito banrisul": "banrisul",
-
-    // Sicredi
+    "debito banrisul": "banrisul",
     sicredi: "sicredi",
     debito_sicredi: "sicredi",
-    "débito sicredi": "sicredi",
-
-    // Banco do Brasil
+    "debito sicredi": "sicredi",
     bb: "bb",
     banco_do_brasil: "bb",
     debito_bb: "bb",
     debito_banco_do_brasil: "bb",
-    "débito banco do brasil": "bb",
-
-    // Boleto
+    "debito banco do brasil": "bb",
     boleto: "boleto",
-
-    // PIX — "botero" é a identificação usada na planilha antiga
     pix: "pix",
     botero: "pix",
-
     dinheiro: "dinheiro",
     transferencia: "transferencia",
-    transferência: "transferencia",
     outro: "outro",
   };
 
-  const chave = aliases[tipo] || tipo;
+  if (aliases[tipo]) return aliases[tipo];
+
+  // No cadastro, Banrisul/Sicredi/BB ficam como "debito_em_conta".
+  // A tarifa correta vem da instituição da conta bancária vinculada.
+  if (
+    tipo === "debito_em_conta" ||
+    tipo === "debito em conta" ||
+    tipo === "debito"
+  ) {
+    const banco = normalizarBanco(
+      `${contaBancaria?.nome || ""} ${contaBancaria?.banco || ""}`
+    );
+
+    if (banco.includes("banrisul") || banco.includes("bergs")) {
+      return "banrisul";
+    }
+    if (banco.includes("sicredi")) {
+      return "sicredi";
+    }
+    if (banco === "bb" || banco.includes("bb") || banco.includes("banco do brasil")) {
+      return "bb";
+    }
+  }
+
+  return tipo;
+}
+
+function valorTarifa(
+  tarifas: any[],
+  tipoPagamento: unknown,
+  contaBancaria: any | null
+) {
+  const chave = chaveTarifa(tipoPagamento, contaBancaria);
+  if (!chave) return 0;
+
   const tarifa = (tarifas || []).find(
     (t: any) =>
-      String(t.tipo_pagamento || "").toLowerCase() === chave &&
+      normalizarTexto(t.tipo_pagamento) === chave &&
       t.ativo !== false
   );
 
@@ -390,7 +418,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
+          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
         )
         .order("nome");
 
@@ -424,6 +452,17 @@ export async function POST(request: Request) {
         .from("configuracoes_tarifas_mensalidades")
         .select("*")
         .eq("ativo", true);
+
+      const { data: contasBancarias, error: erroContas } = await db
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .eq("ativo", true);
+
+      if (erroContas) throw erroContas;
+
+      const mapaContas = new Map<string, any>(
+        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      );
 
       if (erroTarifas) throw erroTarifas;
 
@@ -470,7 +509,8 @@ export async function POST(request: Request) {
           const tipoPagamento =
             s.tipo_pagamento || config?.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
-          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
+          const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -491,6 +531,7 @@ export async function POST(request: Request) {
             desconto: calculado.desconto,
             total_cobrado: calculado.total_cobrado,
             tipo_pagamento: tipoPagamento,
+            conta_bancaria_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
         });
@@ -567,7 +608,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
+          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
         );
 
       if (erroSocios) throw erroSocios;
@@ -626,6 +667,17 @@ export async function POST(request: Request) {
         .select("*")
         .eq("ativo", true);
 
+      const { data: contasBancarias, error: erroContas } = await db
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .eq("ativo", true);
+
+      if (erroContas) throw erroContas;
+
+      const mapaContas = new Map<string, any>(
+        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      );
+
       if (erroTarifas) throw erroTarifas;
 
       const { data: cobrancas, error: erroCobrancas } = await db
@@ -679,7 +731,8 @@ export async function POST(request: Request) {
             null;
 
           const vencimento = dataVencimento(competencia, dia);
-          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
+          const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -702,6 +755,7 @@ export async function POST(request: Request) {
             data_vencimento: vencimento,
             situacao: valor === 0 ? "isento" : "em_aberto",
             tipo_pagamento: tipoPagamento,
+            conta_bancaria_id: s.conta_bancaria_id || null,
           };
         });
 
@@ -772,6 +826,17 @@ export async function POST(request: Request) {
         .from("configuracoes_tarifas_mensalidades")
         .select("*")
         .eq("ativo", true);
+
+      const { data: contasBancarias, error: erroContas } = await db
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .eq("ativo", true);
+
+      if (erroContas) throw erroContas;
+
+      const mapaContas = new Map<string, any>(
+        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      );
 
       if (erroTarifas) throw erroTarifas;
 
