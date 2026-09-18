@@ -531,7 +531,7 @@ export async function POST(request: Request) {
             desconto: calculado.desconto,
             total_cobrado: calculado.total_cobrado,
             tipo_pagamento: tipoPagamento,
-            conta_bancaria_id: s.conta_bancaria_id || null,
+            conta_pagadora_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
         });
@@ -755,7 +755,7 @@ export async function POST(request: Request) {
             data_vencimento: vencimento,
             situacao: valor === 0 ? "isento" : "em_aberto",
             tipo_pagamento: tipoPagamento,
-            conta_bancaria_id: s.conta_bancaria_id || null,
+            conta_pagadora_id: s.conta_bancaria_id || null,
           };
         });
 
@@ -818,7 +818,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_bancaria_id")
+        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -883,7 +883,7 @@ export async function POST(request: Request) {
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento, registro.conta_bancaria_id ? mapaContas.get(String(registro.conta_bancaria_id)) || null : null),
+          valorTarifa(tarifas || [], formaPagamento, registro.conta_pagadora_id ? mapaContas.get(String(registro.conta_pagadora_id)) || null : null),
           regraCobranca
         );
 
