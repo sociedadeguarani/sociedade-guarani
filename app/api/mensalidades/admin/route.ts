@@ -337,6 +337,183 @@ export async function POST(request: Request) {
 
     /*
      * =====================================================
+     * PRÉVIA DA COMPETÊNCIA
+     * =====================================================
+     */
+    if (acao === "previsualizar" || acao === "preview") {
+      const ano = Number(body.ano);
+      const mes = Number(body.mes);
+
+      if (
+        !Number.isInteger(ano) ||
+        !Number.isInteger(mes) ||
+        mes < 1 ||
+        mes > 12
+      ) {
+        return NextResponse.json(
+          { error: "Ano ou competência inválidos." },
+          { status: 400 }
+        );
+      }
+
+      const competencia = primeiroDia(ano, mes);
+      const agora = new Date();
+      const inicioMesAtual = new Date(
+        agora.getFullYear(),
+        agora.getMonth(),
+        1
+      );
+      const inicioMesAlvo = new Date(ano, mes - 1, 1);
+
+      if (inicioMesAlvo > inicioMesAtual) {
+        return NextResponse.json(
+          {
+            error:
+              "Não é permitido gerar mensalidades de meses futuros.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data: socios, error: erroSocios } = await db
+        .from("socios")
+        .select(
+          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
+        )
+        .order("nome");
+
+      if (erroSocios) throw erroSocios;
+
+      const cobraveis = (socios || []).filter((s: any) => {
+        if (
+          String(s.situacao || "").toLowerCase() === "inativo" ||
+          s.ativo === false
+        ) {
+          return false;
+        }
+
+        if (!s.responsavel_id) {
+          return Boolean(s.possui_mensalidade);
+        }
+
+        return dependenteTemMensalidade(s);
+      });
+
+      const { data: configuracoes, error: erroConfiguracoes } =
+        await db
+          .from("configuracoes_mensalidades")
+          .select("*")
+          .eq("ativo", true)
+          .order("vigencia_inicio", { ascending: false });
+
+      if (erroConfiguracoes) throw erroConfiguracoes;
+
+      const { data: tarifas, error: erroTarifas } = await db
+        .from("configuracoes_tarifas_mensalidades")
+        .select("*")
+        .eq("ativo", true);
+
+      if (erroTarifas) throw erroTarifas;
+
+      const { data: cobrancas, error: erroCobrancas } = await db
+        .from("configuracoes_cobranca_mensalidades")
+        .select("*")
+        .eq("ativo", true)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (erroCobrancas) throw erroCobrancas;
+
+      const regraCobranca = cobrancas?.[0] || null;
+
+      const { data: existentes, error: erroExistentes } = await db
+        .from("mensalidades")
+        .select("socio_id")
+        .eq("competencia", competencia);
+
+      if (erroExistentes) throw erroExistentes;
+
+      const idsExistentes = new Set<string>(
+        (existentes || []).map((x: any) => String(x.socio_id))
+      );
+
+      const novos = cobraveis
+        .filter((s: any) => !idsExistentes.has(String(s.id)))
+        .map((s: any) => {
+          const config = escolherConfiguracao(
+            configuracoes || [],
+            s.tipo_socio,
+            competencia
+          );
+
+          const valor =
+            config?.valor !== undefined
+              ? Number(config.valor || 0)
+              : Number(s.valor_mensalidade || 0);
+
+          const dia = config?.dia_vencimento
+            ? Number(config.dia_vencimento)
+            : Number(s.dia_vencimento || 10);
+
+          const tipoPagamento =
+            s.tipo_pagamento || config?.tipo_pagamento || null;
+          const vencimento = dataVencimento(competencia, dia);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
+          const calculado = calcularCobranca(
+            valor,
+            vencimento,
+            competencia,
+            tarifa,
+            regraCobranca
+          );
+
+          return {
+            id: s.id,
+            nome: s.nome,
+            matricula: s.matricula,
+            categoria: s.categoria,
+            valor_base: Number(valor.toFixed(2)),
+            tarifa_pagamento: calculado.tarifa_pagamento,
+            multa: calculado.multa,
+            juros: calculado.juros,
+            desconto: calculado.desconto,
+            total_cobrado: calculado.total_cobrado,
+            tipo_pagamento: tipoPagamento,
+            data_vencimento: vencimento,
+          };
+        });
+
+      const soma = (campo: string) =>
+        Number(
+          novos
+            .reduce(
+              (total: number, item: any) =>
+                total + Number(item[campo] || 0),
+              0
+            )
+            .toFixed(2)
+        );
+
+      return NextResponse.json({
+        ok: true,
+        competencia,
+        total_cobraveis: cobraveis.length,
+        ja_existentes: cobraveis.filter((s: any) =>
+          idsExistentes.has(String(s.id))
+        ).length,
+        quantidade_nova: novos.length,
+        valor_base: soma("valor_base"),
+        tarifa_pagamento: soma("tarifa_pagamento"),
+        multa: soma("multa"),
+        juros: soma("juros"),
+        desconto: soma("desconto"),
+        total_cobrado: soma("total_cobrado"),
+        itens: novos,
+      });
+    }
+
+    /*
+     * =====================================================
      * GERAR COMPETÊNCIA
      * =====================================================
      */
