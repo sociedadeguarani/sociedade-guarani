@@ -760,20 +760,37 @@ export async function POST(request: Request) {
         });
 
       if (novos.length > 0) {
-        const { error: erroInsert } = await db
-          .from("mensalidades")
-          .insert(novos);
+        // Inserimos em lotes para evitar timeout da função/serverless
+        // quando uma competência possui centenas de lançamentos.
+        const TAMANHO_LOTE = 50;
+        let criadas = 0;
 
-        if (erroInsert) throw erroInsert;
+        for (let inicio = 0; inicio < novos.length; inicio += TAMANHO_LOTE) {
+          const lote = novos.slice(inicio, inicio + TAMANHO_LOTE);
+          const { error: erroInsert } = await db
+            .from("mensalidades")
+            .insert(lote);
+
+          if (erroInsert) {
+            throw new Error(
+              `Erro ao gerar o lote ${Math.floor(inicio / TAMANHO_LOTE) + 1}: ${erroInsert.message}`
+            );
+          }
+
+          criadas += lote.length;
+        }
+
+        return NextResponse.json({
+          ok: true,
+          criadas,
+          message: `${criadas} mensalidade(s) gerada(s) com sucesso.`,
+        });
       }
 
       return NextResponse.json({
         ok: true,
-        criadas: novos.length,
-        message:
-          novos.length > 0
-            ? `${novos.length} mensalidade(s) gerada(s).`
-            : "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
+        criadas: 0,
+        message: "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
       });
     }
 
