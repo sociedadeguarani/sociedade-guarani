@@ -24,6 +24,7 @@ type Socio = {
   data_associacao: string | null;
   categoria: string | null;
   situacao: string | null;
+  ativo?: boolean | null;
   observacoes: string | null;
   foto_url: string | null;
 
@@ -2147,9 +2148,37 @@ function Financeiro({
     .filter((m) => m.situacao === "em_atraso")
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
-  const pessoasComMensalidade = socios.filter(
-    (s) => s.possui_mensalidade === true && s.situacao?.toLowerCase() !== "inativo"
-  ).length;
+  function dependenteTemMensalidade(socio: Socio) {
+    const categoria = String(socio.categoria || "")
+      .trim()
+      .toLowerCase();
+
+    if (categoria) {
+      return (
+        categoria.includes("c/ mensalidade") ||
+        categoria.includes("com mensalidade")
+      );
+    }
+
+    return [
+      "dependente_patrimonial_familiar_mensalidade",
+      "dependente_patrimonial_individual_mensalidade",
+      "dependente_contribuinte_familiar_mensalidade",
+      "dependente_contribuinte_individual_mensalidade",
+    ].includes(socio.tipo_socio || "");
+  }
+
+  const pessoasComMensalidade = socios.filter((s) => {
+    if (String(s.situacao || "").toLowerCase() === "inativo" || s.ativo === false) {
+      return false;
+    }
+
+    if (!s.responsavel_id) {
+      return Boolean(s.possui_mensalidade);
+    }
+
+    return dependenteTemMensalidade(s);
+  }).length;
 
   return (
     <div>
@@ -2214,8 +2243,8 @@ function Financeiro({
               Competência {formatarCompetencia(competencia)}
             </p>
             <p className="mt-1 text-sm text-[#587066]">
-              O sistema cria automaticamente uma cobrança para cada pessoa com mensalidade,
-              sem duplicar registros existentes.
+              A prévia considera os pagadores definidos pelas regras atuais e não cria
+              nenhum lançamento até a confirmação.
             </p>
           </div>
           <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#005a3c] ring-1 ring-[#cfe3d8]">
