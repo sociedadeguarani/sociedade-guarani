@@ -103,19 +103,31 @@ function valorTarifa(
   if (!tipo) return 0;
 
   const aliases: Record<string, string> = {
+    // Banrisul / "bergs" — nome usado na planilha antiga
     banrisul: "banrisul",
+    bergs: "banrisul",
     debito_banrisul: "banrisul",
     "débito banrisul": "banrisul",
+
+    // Sicredi
     sicredi: "sicredi",
     debito_sicredi: "sicredi",
     "débito sicredi": "sicredi",
+
+    // Banco do Brasil
     bb: "bb",
     banco_do_brasil: "bb",
     debito_bb: "bb",
     debito_banco_do_brasil: "bb",
     "débito banco do brasil": "bb",
+
+    // Boleto
     boleto: "boleto",
+
+    // PIX — "botero" é a identificação usada na planilha antiga
     pix: "pix",
+    botero: "pix",
+
     dinheiro: "dinheiro",
     transferencia: "transferencia",
     transferência: "transferencia",
