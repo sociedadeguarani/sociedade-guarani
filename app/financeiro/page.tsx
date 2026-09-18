@@ -195,6 +195,8 @@ export default function FinanceiroPage() {
   const [carregando, setCarregando] = useState(true);
   const [gerando, setGerando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [previewMensalidades, setPreviewMensalidades] = useState<any | null>(null);
+const [carregandoPreview, setCarregandoPreview] = useState(false);
   const [busca, setBusca] = useState("");
   const [filtroAtraso, setFiltroAtraso] = useState<
     "todos" | "atrasados" | "verde" | "amarelo" | "vermelho"
