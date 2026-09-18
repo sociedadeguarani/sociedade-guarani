@@ -56,6 +56,19 @@ type Cobranca = {
   ativo: boolean;
 };
 
+type PreviaGeracao = {
+  competencia: string;
+  total_cobraveis: number;
+  ja_existentes: number;
+  quantidade_nova: number;
+  valor_base: number;
+  tarifa_pagamento: number;
+  multa: number;
+  juros: number;
+  desconto: number;
+  total_cobrado: number;
+};
+
 const nomes: Record<string, string> = {
   patrimonial_familiar: "Patrimonial Familiar",
   patrimonial_individual: "Patrimonial Individual",
@@ -147,6 +160,10 @@ export default function Page() {
 
   const [salvandoConfig, setSalvandoConfig] = useState(false);
 
+  const [previa, setPrevia] = useState<PreviaGeracao | null>(null);
+  const [abrindoPrevia, setAbrindoPrevia] = useState(false);
+  const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
+
   async function h() {
     const {
       data: { session },
@@ -224,6 +241,72 @@ export default function Page() {
     }
   }
 
+  async function previsualizarGeracao() {
+    setErro("");
+    setMsg("");
+    setAbrindoPrevia(true);
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "previsualizar",
+          ano,
+          mes,
+        }),
+      });
+
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível gerar a prévia.");
+
+      setPrevia(d);
+    } catch (e) {
+      setAbrindoPrevia(false);
+      setPrevia(null);
+      setErro(e instanceof Error ? e.message : "Erro ao gerar prévia.");
+    }
+  }
+
+  async function confirmarGeracao() {
+    if (!previa || previa.quantidade_nova <= 0) return;
+
+    setConfirmandoGeracao(true);
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "gerar",
+          ano,
+          mes,
+        }),
+      });
+
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível gerar a competência.");
+
+      setAbrindoPrevia(false);
+      setPrevia(null);
+      setMsg(d.message || `${d.criadas || previa.quantidade_nova} mensalidade(s) gerada(s) com sucesso.`);
+      setSel([]);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao gerar competência.");
+    } finally {
+      setConfirmandoGeracao(false);
+    }
+  }
+
+  function fecharPrevia() {
+    if (confirmandoGeracao) return;
+    setAbrindoPrevia(false);
+    setPrevia(null);
+  }
+
   function abrirConfiguracao() {
     setAbaConfig("mensalidades");
     setEdit(null);
@@ -285,7 +368,7 @@ export default function Page() {
 
             <div className="flex gap-2">
               <button
-                onClick={() => void post({ acao: "gerar", ano, mes })}
+                onClick={() => void previsualizarGeracao()}
                 className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white"
               >
                 Gerar competência
@@ -544,6 +627,106 @@ export default function Page() {
           </section>
         </div>
       </main>
+
+      {abrindoPrevia && previa && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">
+                  Prévia da geração — {String(mes).padStart(2, "0")}/{ano}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Confira os valores antes de criar os lançamentos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fecharPrevia}
+                disabled={confirmandoGeracao}
+                className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-xl bg-[#eef7f2] p-4">
+              <div className="text-xs font-semibold uppercase text-gray-500">
+                Competência
+              </div>
+              <div className="mt-1 text-2xl font-black text-[#005a3c]">
+                {String(mes).padStart(2, "0")}/{ano}
+              </div>
+              <p className="mt-1 text-sm text-gray-600">
+                Nenhum lançamento será criado até você confirmar.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border p-4">
+                <div className="text-sm text-gray-500">Pagadores encontrados</div>
+                <div className="mt-1 text-2xl font-black">{previa.total_cobraveis}</div>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-sm text-gray-500">Novos lançamentos</div>
+                <div className="mt-1 text-2xl font-black text-[#005a3c]">{previa.quantidade_nova}</div>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-sm text-gray-500">Já existentes</div>
+                <div className="mt-1 text-2xl font-black">{previa.ja_existentes}</div>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-sm text-gray-500">Mensalidades base</div>
+                <div className="mt-1 text-xl font-black text-[#005a3c]">{moeda(previa.valor_base)}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border p-4">
+              <h3 className="font-black text-[#005a3c]">Composição da cobrança</h3>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-4"><span>Mensalidades</span><b>{moeda(previa.valor_base)}</b></div>
+                <div className="flex justify-between gap-4"><span>Tarifas bancárias</span><b>{moeda(previa.tarifa_pagamento)}</b></div>
+                <div className="flex justify-between gap-4"><span>Multa</span><b>{moeda(previa.multa)}</b></div>
+                <div className="flex justify-between gap-4"><span>Juros</span><b>{moeda(previa.juros)}</b></div>
+                <div className="flex justify-between gap-4"><span>Desconto</span><b>- {moeda(previa.desconto)}</b></div>
+                <div className="border-t pt-3 text-base flex justify-between gap-4">
+                  <span className="font-black">Total a cobrar</span>
+                  <b className="text-[#005a3c]">{moeda(previa.total_cobrado)}</b>
+                </div>
+              </div>
+            </div>
+
+            {previa.quantidade_nova === 0 ? (
+              <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm font-semibold text-gray-700">
+                Não há novos lançamentos para esta competência.
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                Atenção: esta é somente uma prévia. As mensalidades só serão gravadas depois da confirmação.
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={fecharPrevia}
+                disabled={confirmandoGeracao}
+                className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmarGeracao()}
+                disabled={confirmandoGeracao || previa.quantidade_nova === 0}
+                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
+              >
+                {confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
