@@ -681,73 +681,105 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
     );
   }
 
-  async function gerarMensalidades() {
+  async function previsualizarMensalidades() {
+    setCarregandoPreview(true);
+    setMensagem("");
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        throw new Error("Sessão expirada. Faça login novamente.");
+      }
+
+      const [ano, mes] = competencia.split("-").map(Number);
+
+      const resposta = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          acao: "previsualizar",
+          ano,
+          mes,
+        }),
+      });
+
+      const resultado = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          resultado?.error || "Não foi possível calcular a prévia."
+        );
+      }
+
+      setPreviewMensalidades(resultado);
+    } catch (error) {
+      console.error(error);
+      setMensagem(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível calcular a prévia."
+      );
+    } finally {
+      setCarregandoPreview(false);
+    }
+  }
+
+  async function confirmarGeracaoMensalidades() {
     setGerando(true);
     setMensagem("");
 
     try {
-      await atualizarAtrasos();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      const existentes = mensalidades.filter(
-        (m) => m.competencia?.slice(0, 7) === competencia
-      );
-
-      const chavesExistentes = new Set(
-        existentes.map((m) =>
-          m.dependente_id
-            ? `dependente:${m.dependente_id}`
-            : `socio:${m.socio_id}`
-        )
-      );
-
-      const novos = pessoas
-        .filter((p) => !chavesExistentes.has(p.chave))
-        .map((p) => ({
-          socio_id: p.socio_id,
-          dependente_id: p.dependente_id,
-          competencia: primeiroDia(competencia),
-          valor: Number(p.valor_mensalidade || 0),
-          data_vencimento: vencimentoCompetencia(
-            competencia,
-            p.dia_vencimento
-          ),
-          situacao:
-            Number(p.valor_mensalidade || 0) === 0 ? "isento" : "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: p.tipo_pagamento || "pix",
-          comprovante_url: null,
-          observacoes: null,
-        }));
-
-      if (novos.length === 0) {
-        setMensagem(
-          `As mensalidades de ${formatarCompetencia(
-            competencia
-          )} já estão lançadas.`
-        );
-        return;
+      if (!token) {
+        throw new Error("Sessão expirada. Faça login novamente.");
       }
 
-      const { data, error } = await supabase
-        .from("mensalidades")
-        .insert(novos)
-        .select("*");
+      const [ano, mes] = competencia.split("-").map(Number);
 
-      if (error) throw error;
+      const resposta = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          acao: "gerar",
+          ano,
+          mes,
+        }),
+      });
 
-      setMensalidades((lista) => [...(data as Mensalidade[]), ...lista]);
+      const resultado = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          resultado?.error || "Não foi possível gerar as mensalidades."
+        );
+      }
+
+      setPreviewMensalidades(null);
+
+      await carregarTudo();
 
       setMensagem(
-        `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(
-          competencia
-        )}.`
+        resultado?.message ||
+          `${resultado?.criadas || 0} mensalidade(s) gerada(s) para ${formatarCompetencia(
+            competencia
+          )}.`
       );
     } catch (error) {
       console.error(error);
       setMensagem(
-        `Não foi possível gerar as mensalidades. ${
-          error instanceof Error ? error.message : ""
-        }`
+        error instanceof Error
+          ? error.message
+          : "Não foi possível gerar as mensalidades."
       );
     } finally {
       setGerando(false);
@@ -1351,11 +1383,13 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
               </div>
 
               <button
-                onClick={() => void gerarMensalidades()}
-                disabled={gerando || carregando}
+                onClick={() => void previsualizarMensalidades()}
+                disabled={carregandoPreview || gerando || carregando}
                 className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
               >
-                {gerando ? "Gerando..." : "⚡ Gerar mensalidades"}
+                {carregandoPreview
+                  ? "Calculando prévia..."
+                  : "⚡ Gerar mensalidades"}
               </button>
             </div>
           </div>
@@ -1373,8 +1407,16 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             <Resumo titulo="Em atraso" valor={formatarMoeda(totalAtrasado)} />
             <Resumo
               titulo="Com mensalidade"
-              valor={String(pessoas.length)}
-              subtitulo="Sócios e dependentes"
+              valor={
+                previewMensalidades
+                  ? String(previewMensalidades.total_cobraveis || 0)
+                  : "—"
+              }
+              subtitulo={
+                previewMensalidades
+                  ? "Pagadores na prévia"
+                  : "Calcule a prévia para conferir"
+              }
             />
           </div>
 
@@ -2129,6 +2171,144 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
             <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
             <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Transferir</button></div>
+          </div>
+        </Modal>
+      )}
+
+      {previewMensalidades && (
+        <Modal
+          titulo={`Prévia da geração — ${formatarCompetencia(competencia)}`}
+          fechar={() => {
+            if (!gerando) setPreviewMensalidades(null);
+          }}
+        >
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-[#e8f3ee] p-5">
+              <p className="text-sm text-gray-500">Competência</p>
+
+              <p className="text-2xl font-extrabold text-[#003d2b]">
+                {formatarCompetencia(competencia)}
+              </p>
+
+              <p className="mt-2 text-sm text-gray-600">
+                Nenhum lançamento será criado até você confirmar.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border p-4">
+                <p className="text-xs text-gray-500">
+                  Pagadores encontrados
+                </p>
+                <p className="mt-1 text-2xl font-extrabold text-[#005a3c]">
+                  {previewMensalidades.total_cobraveis || 0}
+                </p>
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <p className="text-xs text-gray-500">
+                  Novos lançamentos
+                </p>
+                <p className="mt-1 text-2xl font-extrabold text-[#005a3c]">
+                  {previewMensalidades.quantidade_nova || 0}
+                </p>
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <p className="text-xs text-gray-500">
+                  Já existentes
+                </p>
+                <p className="mt-1 text-2xl font-extrabold text-gray-700">
+                  {previewMensalidades.ja_existentes || 0}
+                </p>
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <p className="text-xs text-gray-500">
+                  Mensalidades base
+                </p>
+                <p className="mt-1 text-xl font-extrabold text-[#005a3c]">
+                  {formatarMoeda(previewMensalidades.valor_base)}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[#d5e0da] p-5">
+              <h3 className="font-extrabold text-[#003d2b]">
+                Composição da cobrança
+              </h3>
+
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span>Mensalidades</span>
+                  <strong>
+                    {formatarMoeda(previewMensalidades.valor_base)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Tarifas bancárias</span>
+                  <strong>
+                    {formatarMoeda(previewMensalidades.tarifa_pagamento)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Multa</span>
+                  <strong>
+                    {formatarMoeda(previewMensalidades.multa)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Juros</span>
+                  <strong>
+                    {formatarMoeda(previewMensalidades.juros)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Desconto</span>
+                  <strong>
+                    - {formatarMoeda(previewMensalidades.desconto)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between border-t pt-4 text-lg">
+                  <span className="font-extrabold">Total a cobrar</span>
+
+                  <strong className="text-[#005a3c]">
+                    {formatarMoeda(previewMensalidades.total_cobrado)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-yellow-50 p-4 text-sm text-yellow-800">
+              <strong>Atenção:</strong> esta é somente uma prévia.
+              Nenhuma mensalidade foi gravada ainda.
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setPreviewMensalidades(null)}
+                disabled={gerando}
+                className="rounded-xl border px-5 py-3 font-semibold"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={() => void confirmarGeracaoMensalidades()}
+                disabled={
+                  gerando ||
+                  Number(previewMensalidades.quantidade_nova || 0) === 0
+                }
+                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
+              >
+                {gerando ? "Gerando..." : "✓ Confirmar geração"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
