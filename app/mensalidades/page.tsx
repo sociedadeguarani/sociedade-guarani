@@ -43,6 +43,12 @@ type T = {
   ativo: boolean;
 };
 
+type Conta = {
+  id: string;
+  nome: string;
+  banco?: string | null;
+};
+
 type Cobranca = {
   id?: string;
   nome: string;
@@ -136,9 +142,11 @@ export default function Page() {
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
   const [busca, setBusca] = useState("");
+  const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
   const [configs, setConfigs] = useState<C[]>([]);
   const [tarifas, setTarifas] = useState<T[]>([]);
+  const [contas, setContas] = useState<Conta[]>([]);
   const [cobranca, setCobranca] = useState<Cobranca>(cobrancaInicial);
 
   const [sel, setSel] = useState<string[]>([]);
@@ -163,6 +171,7 @@ export default function Page() {
   const [previa, setPrevia] = useState<PreviaGeracao | null>(null);
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
+  const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
 
   async function h() {
     const {
@@ -197,6 +206,13 @@ export default function Page() {
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
+
+      const { data: contasData } = await supabase
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .order("nome");
+
+      setContas(contasData || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
@@ -206,17 +222,46 @@ export default function Page() {
     void carregar();
   }, [ano, mes]);
 
+  function tipoCobranca(m: M) {
+    const pagamento = String(m.tipo_pagamento || "").toLowerCase().trim();
+    if (pagamento === "boleto") return "boleto";
+    if (pagamento === "pix") return "pix";
+    if (pagamento === "dinheiro") return "dinheiro";
+    if (pagamento === "transferencia") return "transferencia";
+    if (pagamento === "outro") return "outro";
+
+    if (pagamento === "debito_em_conta") {
+      const conta = contas.find(
+        (c) => String(c.id) === String(m.socio?.conta_bancaria_id)
+      );
+      const nome = `${conta?.nome || ""} ${conta?.banco || ""}`.toLowerCase();
+      if (nome.includes("banrisul")) return "banrisul";
+      if (nome.includes("sicredi")) return "sicredi";
+      if (nome.includes("brasil") || nome.includes("bb")) return "bb";
+      return "debito_em_conta";
+    }
+
+    return "sem_pagamento";
+  }
+
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
 
-    return lista.filter(
-      (x) =>
+    return lista.filter((x) => {
+      const bateBusca =
         !q ||
-        `${x.socio?.nome || ""} ${x.socio?.matricula || ""}`
+        `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
           .toLowerCase()
-          .includes(q)
-    );
-  }, [lista, busca]);
+          .includes(q);
+
+      const cobrancaAtual = tipoCobranca(x);
+      const bateCobranca =
+        cobrancasSelecionadas.length === 0 ||
+        cobrancasSelecionadas.includes(cobrancaAtual);
+
+      return bateBusca && bateCobranca;
+    });
+  }, [lista, busca, cobrancasSelecionadas, contas]);
 
   async function post(body: any) {
     setErro("");
@@ -453,6 +498,55 @@ export default function Page() {
                 />
               </div>
 
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-sm font-bold text-gray-600">
+                  Tipo de cobrança:
+                </span>
+                {[
+                  ["banrisul", "Banrisul"],
+                  ["sicredi", "Sicredi"],
+                  ["bb", "Banco do Brasil"],
+                  ["boleto", "Boleto"],
+                  ["pix", "PIX"],
+                  ["sem_pagamento", "Sem pagamento"],
+                ].map(([valor, label]) => {
+                  const ativo = cobrancasSelecionadas.includes(valor);
+                  return (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() =>
+                        setCobrancasSelecionadas((atual) =>
+                          ativo
+                            ? atual.filter((x) => x !== valor)
+                            : [...atual, valor]
+                        )
+                      }
+                      className={`rounded-full border px-3 py-1.5 text-xs font-bold ${
+                        ativo
+                          ? "border-[#005a3c] bg-[#005a3c] text-white"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+                {cobrancasSelecionadas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCobrancasSelecionadas([])}
+                    className="rounded-full px-3 py-1.5 text-xs font-bold text-gray-500 underline"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3 text-xs text-gray-500">
+                Exibindo <b>{filtrada.length}</b> de <b>{lista.length}</b> mensalidade(s)
+              </div>
+
               <button
                 disabled={!sel.length}
                 onClick={() =>
@@ -509,7 +603,13 @@ export default function Page() {
                         </td>
 
                         <td className="p-3 font-bold">
-                          {x.socio?.nome || "—"}
+                          <button
+                            type="button"
+                            onClick={() => setSocioSelecionado(x)}
+                            className="text-left text-[#005a3c] underline-offset-2 hover:underline"
+                          >
+                            {x.socio?.nome || "—"}
+                          </button>
                         </td>
 
                         <td className="p-3">{x.socio?.matricula || "—"}</td>
@@ -627,6 +727,137 @@ export default function Page() {
           </section>
         </div>
       </main>
+
+      {socioSelecionado && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-gray-500">Cadastro do associado</p>
+                <h2 className="text-2xl font-black text-[#005a3c]">
+                  {socioSelecionado.socio?.nome || "Associado"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSocioSelecionado(null)}
+                className="rounded-full p-2 hover:bg-gray-100"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                ["Matrícula", socioSelecionado.socio?.matricula],
+                ["CPF", socioSelecionado.socio?.cpf],
+                ["Categoria", socioSelecionado.socio?.categoria],
+                [
+                  "Tipo de sócio",
+                  nomes[socioSelecionado.socio?.tipo_socio] ||
+                    socioSelecionado.socio?.tipo_socio,
+                ],
+                ["Situação", socioSelecionado.socio?.situacao],
+                ["Parentesco", socioSelecionado.socio?.parentesco],
+                ["Responsável ID", socioSelecionado.socio?.responsavel_id],
+                ["Telefone", socioSelecionado.socio?.telefone],
+                ["E-mail", socioSelecionado.socio?.email],
+                ["Endereço", socioSelecionado.socio?.endereco],
+              ].map(([label, valor]) => (
+                <div key={label} className="rounded-xl border bg-gray-50 p-3">
+                  <div className="text-xs font-bold uppercase text-gray-500">
+                    {label}
+                  </div>
+                  <div className="mt-1 break-words font-semibold">
+                    {valor || "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
+              <h3 className="font-black text-[#005a3c]">
+                Mensalidade {String(mes).padStart(2, "0")}/{ano}
+              </h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span className="text-xs text-gray-500">Valor base</span>
+                  <p className="font-bold">
+                    {moeda(
+                      socioSelecionado.valor_base ?? socioSelecionado.valor
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Tipo de cobrança</span>
+                  <p className="font-bold">
+                    {{
+                      banrisul: "Banrisul",
+                      sicredi: "Sicredi",
+                      bb: "Banco do Brasil",
+                      boleto: "Boleto",
+                      pix: "PIX",
+                      sem_pagamento: "Sem pagamento",
+                      debito_em_conta: "Débito em conta",
+                      dinheiro: "Dinheiro",
+                      transferencia: "Transferência",
+                      outro: "Outro",
+                    }[tipoCobranca(socioSelecionado)] || "—"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Tarifa</span>
+                  <p className="font-bold">
+                    {moeda(socioSelecionado.tarifa_pagamento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Total cobrado</span>
+                  <p className="font-black text-[#005a3c]">
+                    {moeda(socioSelecionado.total_cobrado)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Vencimento</span>
+                  <p className="font-bold">
+                    {data(socioSelecionado.data_vencimento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Situação</span>
+                  <p className="font-bold">
+                    {status(socioSelecionado.situacao)[0]}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Data de pagamento</span>
+                  <p className="font-bold">
+                    {data(socioSelecionado.data_pagamento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Observações</span>
+                  <p className="font-bold">
+                    {socioSelecionado.motivo ||
+                      socioSelecionado.observacoes ||
+                      "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSocioSelecionado(null)}
+                className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {abrindoPrevia && previa && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
