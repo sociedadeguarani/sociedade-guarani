@@ -98,12 +98,17 @@ type MovimentoFinanceiro = {
 
 const MENU = [
   ["Início", "🏠", "/painel"],
-  ["Sócios", "👥", "/socios"],
-  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
+  ["Avisos", "📢", "/avisos"],
   ["Reservas", "📅", "/reservas"],
   ["Eventos", "🎉", "/eventos"],
+  ["Convites", "🎟️", "/convites"],
+  ["Carteirinhas", "🎫", "/carteirinhas"],
+  ["Sócios", "👥", "/socios"],
+  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
+  ["Mensalidades", "💳", "/mensalidades"],
   ["Financeiro", "💰", "/financeiro"],
-  ["Espaços", "🏛️", "/espacos"],
+  ["Inventário", "📦", "/inventario"],
+  ["Acessos", "🚪", "/acessos"],
   ["Relatórios", "📊", "/relatorios"],
 ] as const;
 
