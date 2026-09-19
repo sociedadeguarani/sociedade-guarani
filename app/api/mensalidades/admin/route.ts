@@ -286,7 +286,7 @@ export async function GET(request: Request) {
     const { data: socios, error: erroSocios } = await db
       .from("socios")
       .select(
-        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
+        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
       )
       .order("nome");
 
