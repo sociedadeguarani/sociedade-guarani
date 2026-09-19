@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
 type Socio = {
   id: string;
@@ -96,21 +97,7 @@ type MovimentoFinanceiro = {
   observacoes: string | null;
 };
 
-const MENU = [
-  ["Início", "🏠", "/painel"],
-  ["Avisos", "📢", "/avisos"],
-  ["Reservas", "📅", "/reservas"],
-  ["Eventos", "🎉", "/eventos"],
-  ["Convites", "🎟️", "/convites"],
-  ["Carteirinhas", "🎫", "/carteirinhas"],
-  ["Sócios", "👥", "/socios"],
-  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
-  ["Mensalidades", "💳", "/mensalidades"],
-  ["Financeiro", "💰", "/financeiro"],
-  ["Inventário", "📦", "/inventario"],
-  ["Acessos", "🚪", "/acessos"],
-  ["Relatórios", "📊", "/relatorios"],
-] as const;
+
 
 const FORMAS = [
   ["pix", "PIX"],
@@ -1308,63 +1295,10 @@ export default function FinanceiroPage() {
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-80px)]">
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] p-3 md:block">
-          <p className="mb-3 px-3 pt-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
+      <div className="min-h-[calc(100vh-80px)]">
+        <MenuLateralPadrao />
 
-          <nav className="space-y-2">
-            {MENU.map(([nome, icone, rota]) => (
-              <button
-                key={nome}
-                onClick={() => {
-                  if (rota !== "/financeiro") window.location.href = rota;
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  nome === "Financeiro"
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">{icone}</span>
-                {nome}
-              </button>
-            ))}
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-          </div>
-        </aside>
-
-        <section className="min-w-0 flex-1 p-5 sm:p-7 lg:p-8">
-          <div className="mb-6 md:hidden">
-            <div className="grid grid-cols-2 gap-2">
-              {MENU.map(([nome, icone, rota]) => (
-                <button
-                  key={nome}
-                  onClick={() => {
-                    if (rota !== "/financeiro") window.location.href = rota;
-                  }}
-                  className={`rounded-xl p-3 text-left text-xs font-bold ${
-                    nome === "Financeiro"
-                      ? "bg-[#005a3c] text-white"
-                      : "bg-white text-gray-700 shadow-sm"
-                  }`}
-                >
-                  <span className="mr-2 text-lg">{icone}</span>
-                  {nome}
-                </button>
-              ))}
-            </div>
-          </div>
-
+                <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
           <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
             <div>
               <p className="text-sm font-medium text-gray-500">Administração</p>
