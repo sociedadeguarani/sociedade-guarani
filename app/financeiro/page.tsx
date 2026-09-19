@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabaseClient";
 
 type Socio = {
   id: string;
@@ -103,6 +96,17 @@ type MovimentoFinanceiro = {
   observacoes: string | null;
 };
 
+const MENU = [
+  ["Início", "🏠", "/painel"],
+  ["Sócios", "👥", "/socios"],
+  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
+  ["Reservas", "📅", "/reservas"],
+  ["Eventos", "🎉", "/eventos"],
+  ["Financeiro", "💰", "/financeiro"],
+  ["Espaços", "🏛️", "/espacos"],
+  ["Relatórios", "📊", "/relatorios"],
+] as const;
+
 const FORMAS = [
   ["pix", "PIX"],
   ["debito_em_conta", "Débito em conta"],
@@ -195,8 +199,6 @@ export default function FinanceiroPage() {
   const [carregando, setCarregando] = useState(true);
   const [gerando, setGerando] = useState(false);
   const [mensagem, setMensagem] = useState("");
-  const [previewMensalidades, setPreviewMensalidades] = useState<any | null>(null);
-const [carregandoPreview, setCarregandoPreview] = useState(false);
   const [busca, setBusca] = useState("");
   const [filtroAtraso, setFiltroAtraso] = useState<
     "todos" | "atrasados" | "verde" | "amarelo" | "vermelho"
@@ -225,7 +227,7 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
 
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [abaFinanceira, setAbaFinanceira] = useState<"mensalidades" | "inadimplencia" | "contas" | "fluxo">("mensalidades");
+  const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
   const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
@@ -258,10 +260,6 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
   const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
   const [transObservacoes, setTransObservacoes] = useState("");
   const [contaPagamentoId, setContaPagamentoId] = useState("");
-  const [comprovantesPendentes, setComprovantesPendentes] = useState<any[]>([]);
-  const [comprovanteSelecionado, setComprovanteSelecionado] = useState<any | null>(null);
-  const [contaComprovanteId, setContaComprovanteId] = useState("");
-  const [processandoComprovante, setProcessandoComprovante] = useState(false);
 
   // Filtros do fluxo de caixa
   const [fluxoInicio, setFluxoInicio] = useState("");
@@ -601,18 +599,6 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
     if (contasResult.error) console.error(contasResult.error);
     if (movimentosResult.error) console.error(movimentosResult.error);
 
-    try {
-      const sessao = await supabase.auth.getSession();
-      const token = sessao.data.session?.access_token || "";
-      if (token) {
-        const r = await fetch("/api/comprovantes/pagamentos", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok) setComprovantesPendentes(j.comprovantes || []);
-      }
-    } catch (error) {
-      console.error("Comprovantes pendentes:", error);
-    }
-
     if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
     if (dependentesResult.data)
       setDependentes(dependentesResult.data as Dependente[]);
@@ -681,105 +667,73 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
     );
   }
 
-  async function previsualizarMensalidades() {
-    setCarregandoPreview(true);
-    setMensagem("");
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-
-      if (!token) {
-        throw new Error("Sessão expirada. Faça login novamente.");
-      }
-
-      const [ano, mes] = competencia.split("-").map(Number);
-
-      const resposta = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          acao: "previsualizar",
-          ano,
-          mes,
-        }),
-      });
-
-      const resultado = await resposta.json();
-
-      if (!resposta.ok) {
-        throw new Error(
-          resultado?.error || "Não foi possível calcular a prévia."
-        );
-      }
-
-      setPreviewMensalidades(resultado);
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível calcular a prévia."
-      );
-    } finally {
-      setCarregandoPreview(false);
-    }
-  }
-
-  async function confirmarGeracaoMensalidades() {
+  async function gerarMensalidades() {
     setGerando(true);
     setMensagem("");
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
+      await atualizarAtrasos();
 
-      if (!token) {
-        throw new Error("Sessão expirada. Faça login novamente.");
-      }
+      const existentes = mensalidades.filter(
+        (m) => m.competencia?.slice(0, 7) === competencia
+      );
 
-      const [ano, mes] = competencia.split("-").map(Number);
+      const chavesExistentes = new Set(
+        existentes.map((m) =>
+          m.dependente_id
+            ? `dependente:${m.dependente_id}`
+            : `socio:${m.socio_id}`
+        )
+      );
 
-      const resposta = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          acao: "gerar",
-          ano,
-          mes,
-        }),
-      });
+      const novos = pessoas
+        .filter((p) => !chavesExistentes.has(p.chave))
+        .map((p) => ({
+          socio_id: p.socio_id,
+          dependente_id: p.dependente_id,
+          competencia: primeiroDia(competencia),
+          valor: Number(p.valor_mensalidade || 0),
+          data_vencimento: vencimentoCompetencia(
+            competencia,
+            p.dia_vencimento
+          ),
+          situacao:
+            Number(p.valor_mensalidade || 0) === 0 ? "isento" : "em_aberto",
+          data_pagamento: null,
+          tipo_pagamento: p.tipo_pagamento || "pix",
+          comprovante_url: null,
+          observacoes: null,
+        }));
 
-      const resultado = await resposta.json();
-
-      if (!resposta.ok) {
-        throw new Error(
-          resultado?.error || "Não foi possível gerar as mensalidades."
+      if (novos.length === 0) {
+        setMensagem(
+          `As mensalidades de ${formatarCompetencia(
+            competencia
+          )} já estão lançadas.`
         );
+        return;
       }
 
-      setPreviewMensalidades(null);
+      const { data, error } = await supabase
+        .from("mensalidades")
+        .insert(novos)
+        .select("*");
 
-      await carregarTudo();
+      if (error) throw error;
+
+      setMensalidades((lista) => [...(data as Mensalidade[]), ...lista]);
 
       setMensagem(
-        resultado?.message ||
-          `${resultado?.criadas || 0} mensalidade(s) gerada(s) para ${formatarCompetencia(
-            competencia
-          )}.`
+        `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(
+          competencia
+        )}.`
       );
     } catch (error) {
       console.error(error);
       setMensagem(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível gerar as mensalidades."
+        `Não foi possível gerar as mensalidades. ${
+          error instanceof Error ? error.message : ""
+        }`
       );
     } finally {
       setGerando(false);
@@ -1209,10 +1163,18 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
       if (fluxoInicio && data < fluxoInicio) return false;
       if (fluxoFim && data > fluxoFim) return false;
       if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
-      if (fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
+
+      if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
+      if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
+      if (
+        abaFinanceira === "aluguéis" &&
+        !String(m.categoria || "").toLowerCase().includes("alug")
+      ) return false;
+
+      if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
       return true;
     });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo]);
+  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, abaFinanceira]);
 
   const entradasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "entrada")
@@ -1248,6 +1210,7 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
 
   async function salvarConferenciaSaldo() {
     if (!contaConferindo) return;
+
     const saldoInformado = Number(String(saldoConferido).replace(",", "."));
     if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
       setMensagem("Informe um saldo bancário válido.");
@@ -1257,52 +1220,36 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
     const saldoAtual = saldoConta(contaConferindo);
     const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
 
-    if (Math.abs(diferenca) < 0.01) {
-      setMensagem(`Saldo de ${contaConferindo.nome} já está conferido em ${formatarMoeda(saldoAtual)}.`);
-      setContaConferindo(null);
-      return;
-    }
-
     setSalvandoConferencia(true);
+
     try {
-      const tipo = diferenca > 0 ? "entrada" : "saida";
-      const descricao = diferenca > 0
-        ? `Ajuste de conciliação bancária - ${contaConferindo.nome}`
-        : `Ajuste de conciliação bancária - ${contaConferindo.nome}`;
-
-      const payload = {
-        conta_bancaria_id: contaConferindo.id,
-        conta_destino_id: null,
-        grupo_transferencia: null,
-        tipo,
-        categoria: "Conciliação bancária",
-        descricao,
-        valor: Math.abs(diferenca),
-        data_movimentacao: dataConferencia,
-        forma_pagamento: "outro",
-        origem_tipo: "ajuste_conciliacao",
-        origem_id: null,
-        socio_id: null,
-        dependente_id: null,
-        comprovante_url: null,
-        conciliado: true,
-        data_conciliacao: dataConferencia,
-        observacoes: `${observacaoConferencia || "Conferência do saldo bancário"}. Saldo anterior: ${formatarMoeda(saldoAtual)}. Saldo conferido: ${formatarMoeda(saldoInformado)}.`,
-      };
-
-      const { data, error } = await supabase
-        .from("movimentacoes_financeiras")
-        .insert(payload)
-        .select("*")
-        .single();
+      const { error } = await supabase
+        .from("conferencias_bancarias")
+        .insert({
+          conta_bancaria_id: contaConferindo.id,
+          saldo_sistema: saldoAtual,
+          saldo_banco: saldoInformado,
+          diferenca,
+          data_conferencia: dataConferencia,
+          observacao:
+            observacaoConferencia ||
+            "Conferência do saldo bancário",
+        });
 
       if (error) throw error;
 
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]);
-      setMensagem(`Saldo de ${contaConferindo.nome} conferido com sucesso. Novo saldo: ${formatarMoeda(saldoInformado)}.`);
+      setMensagem(
+        diferenca === 0
+          ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
+          : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`
+      );
       setContaConferindo(null);
     } catch (error) {
-      setMensagem(`Não foi possível conferir o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+      setMensagem(
+        `Não foi possível registrar a conferência. ${
+          error instanceof Error ? error.message : "Erro desconhecido."
+        }`
+      );
     } finally {
       setSalvandoConferencia(false);
     }
@@ -1327,36 +1274,91 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
     setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
   }
 
-  async function processarComprovante(acao: "aprovar" | "recusar") {
-    if (!comprovanteSelecionado) return;
-    if (acao === "aprovar" && !contaComprovanteId) { setMensagem("Selecione a conta bancária que recebeu o PIX."); return; }
-    const motivo = acao === "recusar" ? (window.prompt("Motivo da recusa:", "Comprovante não confirmado.") || "Comprovante recusado pela administração.") : "";
-    setProcessandoComprovante(true);
-    try {
-      const sessao = await supabase.auth.getSession();
-      const token = sessao.data.session?.access_token || "";
-      const r = await fetch("/api/comprovantes/pagamentos", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ origem_tipo: comprovanteSelecionado.origem_tipo, origem_id: comprovanteSelecionado.origem_id, acao, conta_bancaria_id: contaComprovanteId || null, motivo_recusa: motivo }), cache: "no-store" });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Não foi possível processar o comprovante.");
-      setComprovanteSelecionado(null);
-      setContaComprovanteId("");
-      setMensagem(acao === "aprovar" ? "Comprovante aprovado e pagamento lançado no financeiro." : "Comprovante recusado.");
-      await carregarTudo();
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Erro ao processar comprovante.");
-    } finally {
-      setProcessandoComprovante(false);
-    }
-  }
-
   async function abrirPagamentoComConta(item: Mensalidade) { setContaPagamentoId(""); await abrirPagamento(item); }
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
-      <CabecalhoPadrao />
-      <MenuLateralPadrao />
+      <header className="sticky top-0 z-40 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
+        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5">
+              <img
+                src="/logo-guarani.png"
+                alt="Sociedade Guarani"
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div>
+              <h1 className="text-lg font-extrabold text-[#123c2b]">
+                SOCIEDADE GUARANI
+              </h1>
+              <p className="text-xs font-medium text-[#6b7d74]">
+                Sociedade Recreativa Guarani — S.R.G.
+              </p>
+            </div>
+          </div>
+          <div className="hidden sm:block">
+            <span className="text-sm text-gray-400">Área Administrativa</span>
+          </div>
+        </div>
+      </header>
 
-      <section className="min-w-0 p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+      <div className="flex min-h-[calc(100vh-80px)]">
+        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] p-3 md:block">
+          <p className="mb-3 px-3 pt-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
+            Menu principal
+          </p>
+
+          <nav className="space-y-2">
+            {MENU.map(([nome, icone, rota]) => (
+              <button
+                key={nome}
+                onClick={() => {
+                  if (rota !== "/financeiro") window.location.href = rota;
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
+                  nome === "Financeiro"
+                    ? "bg-[#005a3c] text-white shadow-sm"
+                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+                }`}
+              >
+                <span className="text-xl">{icone}</span>
+                {nome}
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
+            <p className="text-xs font-bold text-[#705c00]">
+              SOCIEDADE GUARANI
+            </p>
+            <p className="mt-1 text-sm text-[#574900]">
+              Sistema integrado de gestão
+            </p>
+          </div>
+        </aside>
+
+        <section className="min-w-0 flex-1 p-5 sm:p-7 lg:p-8">
+          <div className="mb-6 md:hidden">
+            <div className="grid grid-cols-2 gap-2">
+              {MENU.map(([nome, icone, rota]) => (
+                <button
+                  key={nome}
+                  onClick={() => {
+                    if (rota !== "/financeiro") window.location.href = rota;
+                  }}
+                  className={`rounded-xl p-3 text-left text-xs font-bold ${
+                    nome === "Financeiro"
+                      ? "bg-[#005a3c] text-white"
+                      : "bg-white text-gray-700 shadow-sm"
+                  }`}
+                >
+                  <span className="mr-2 text-lg">{icone}</span>
+                  {nome}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
             <div>
@@ -1365,31 +1367,22 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
                 Financeiro
               </h2>
               <p className="mt-1 text-gray-500">
-                Mensalidades, pagamentos, vencimentos e inadimplência.
+                Contas bancárias, receitas, despesas e fluxo de caixa.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <div className="rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
-                <label className="mr-2 text-xs font-bold text-gray-500">
-                  Competência
-                </label>
-                <input
-                  type="month"
-                  value={competencia}
-                  onChange={(e) => setCompetencia(e.target.value)}
-                  className="font-bold text-[#005a3c] outline-none"
-                />
-              </div>
-
               <button
-                onClick={() => void previsualizarMensalidades()}
-                disabled={carregandoPreview || gerando || carregando}
-                className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
+                onClick={() => setAbaFinanceira("contas")}
+                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"
               >
-                {carregandoPreview
-                  ? "Calculando prévia..."
-                  : "⚡ Gerar mensalidades"}
+                🏦 Contas bancárias
+              </button>
+              <button
+                onClick={() => setAbaFinanceira("fluxo")}
+                className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                📊 Fluxo de caixa
               </button>
             </div>
           </div>
@@ -1400,152 +1393,67 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             </div>
           )}
 
-          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <Resumo titulo="Total lançado" valor={formatarMoeda(totalLancado)} />
-            <Resumo titulo="Recebido" valor={formatarMoeda(totalRecebido)} />
-            <Resumo titulo="Em aberto" valor={formatarMoeda(totalAberto)} />
-            <Resumo titulo="Em atraso" valor={formatarMoeda(totalAtrasado)} />
+          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Resumo
-              titulo="Com mensalidade"
-              valor={
-                previewMensalidades
-                  ? String(previewMensalidades.total_cobraveis || 0)
-                  : "—"
-              }
-              subtitulo={
-                previewMensalidades
-                  ? "Pagadores na prévia"
-                  : "Calcule a prévia para conferir"
-              }
+              titulo="Saldo em bancos"
+              valor={formatarMoeda(saldoTotalBancos)}
+              subtitulo={`${contasBancarias.length} conta(s) ativa(s)}`}
+              destaque
+            />
+            <Resumo
+              titulo="Entradas"
+              valor={formatarMoeda(entradasPeriodo)}
+              subtitulo="Movimentações financeiras"
+            />
+            <Resumo
+              titulo="Saídas"
+              valor={formatarMoeda(saidasPeriodo)}
+              subtitulo="Movimentações financeiras"
+            />
+            <Resumo
+              titulo="Resultado"
+              valor={formatarMoeda(entradasPeriodo - saidasPeriodo)}
+              subtitulo="Entradas − saídas"
             />
           </div>
 
-          <div
-            className={`mb-5 rounded-2xl border p-5 ${
-              quantidadeAtrasados > 0
-                ? "border-red-200 bg-red-50"
-                : "border-green-200 bg-green-50"
-            }`}
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p
-                  className={`text-lg font-extrabold ${
-                    quantidadeAtrasados > 0
-                      ? "text-red-700"
-                      : "text-green-700"
+          <div className="mb-6 border-b border-[#dfe9e3]">
+            <div className="flex flex-wrap gap-1 overflow-x-auto">
+              {[
+                ["aluguéis", "🏠", "Aluguéis"],
+                ["entradas", "💵", "Entradas"],
+                ["saidas", "💸", "Saídas"],
+                ["inadimplencia", "🚨", `Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
+                ["contas", "🏦", "Contas bancárias"],
+                ["fluxo", "📊", "Fluxo de caixa"],
+              ].map(([id, icone, label]) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    const aba = id as typeof abaFinanceira;
+                    setAbaFinanceira(aba);
+                    if (aba === "entradas") setFluxoTipo("entrada");
+                    else if (aba === "saidas") setFluxoTipo("saida");
+                    else if (aba === "fluxo") setFluxoTipo("todos");
+                    if (aba === "aluguéis") {
+                      setMovTipo("entrada");
+                      setMovCategoria("Aluguel");
+                    }
+                  }}
+                  className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-semibold transition ${
+                    abaFinanceira === id
+                      ? "text-[#005a3c]"
+                      : "text-[#8a9a92] hover:text-[#005a3c]"
                   }`}
                 >
-                  {quantidadeAtrasados > 0
-                    ? `⚠️ ${quantidadeAtrasados} ${
-                        quantidadeAtrasados === 1 ? "sócio" : "sócios"
-                      } em atraso`
-                    : "✓ Nenhum sócio em atraso"}
-                </p>
-                <p className="mt-1 text-sm text-gray-600">
-                  Atrasos são calculados pelo histórico de mensalidades.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 text-xs font-bold">
-                <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">
-                  🟢 Em dia
-                </span>
-                <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                  🟡 1–2 meses: {amarelos}
-                </span>
-                <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                  🔴 3+ meses: {vermelhos}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {atrasoPessoas.length > 0 && (
-            <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-                <div>
-                  <h3 className="font-extrabold text-[#003d2b]">
-                    Alertas de inadimplência
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    Verde = em dia · amarelo = 1 ou 2 meses · vermelho = 3 ou mais.
-                  </p>
-                </div>
-
-                <div className="flex gap-2">
-                  {(["todos", "atrasados", "verde", "amarelo", "vermelho"] as const).map(
-                    (filtro) => (
-                      <button
-                        key={filtro}
-                        onClick={() => setFiltroAtraso(filtro)}
-                        className={`rounded-lg px-3 py-2 text-xs font-bold ${
-                          filtroAtraso === filtro
-                            ? "bg-[#005a3c] text-white"
-                            : "bg-[#f1f5f2] text-gray-600"
-                        }`}
-                      >
-                        {filtro === "todos"
-                          ? "Todos"
-                          : filtro === "atrasados"
-                            ? "⚠️"
-                            : filtro === "verde"
-                              ? "🟢"
-                              : filtro === "amarelo"
-                                ? "🟡"
-                                : "🔴"}
-                      </button>
-                    )
+                  <span className="text-base">{icone}</span>
+                  {label}
+                  {abaFinanceira === id && (
+                    <span className="absolute inset-x-2 -bottom-px h-[3px] rounded-full bg-[#005a3c]" />
                   )}
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {atrasoPessoas
-                  .filter((x) => {
-                    if (filtroAtraso === "todos") return true;
-                    if (filtroAtraso === "atrasados") return x.meses > 0;
-                    if (filtroAtraso === "verde") return x.meses === 0;
-                    if (filtroAtraso === "amarelo")
-                      return x.meses >= 1 && x.meses <= 2;
-                    return x.meses >= 3;
-                  })
-                  .map((x) => (
-                    <div
-                      key={x.pessoa.chave}
-                      className="flex items-center justify-between rounded-xl border border-[#e2ebe6] bg-[#fafcfb] p-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-bold text-[#173d2e]">
-                          {x.pessoa.nome}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Matrícula {x.pessoa.matricula || "—"}
-                          {x.pessoa.responsavel_nome
-                            ? ` · Resp.: ${x.pessoa.responsavel_nome}`
-                            : ""}
-                        </p>
-                      </div>
-                      <span
-                        className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-xs font-extrabold ${x.nivel.classe}`}
-                      >
-                        {x.nivel.texto}
-                      </span>
-                    </div>
-                  ))}
-              </div>
+                </button>
+              ))}
             </div>
-          )}
-
-          <div className="mb-5 grid gap-2 rounded-2xl border border-[#e2ebe6] bg-white p-2 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              ["mensalidades", "💰 Mensalidades"],
-              ["inadimplencia", `🚨 Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
-              ["contas", "🏦 Contas bancárias"],
-              ["fluxo", "📊 Fluxo de caixa"],
-            ].map(([id, label]) => (
-              <button key={id} onClick={() => setAbaFinanceira(id as typeof abaFinanceira)} className={`rounded-xl px-4 py-3 text-sm font-bold ${abaFinanceira === id ? "bg-[#005a3c] text-white" : "bg-[#f7faf8] text-[#50625a]"}`}>{label}</button>
-            ))}
           </div>
 
           {abaFinanceira === "inadimplencia" && (
@@ -1708,14 +1616,12 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             </div>
           )}
 
-          {abaFinanceira !== "mensalidades" &&
-            abaFinanceira !== "inadimplencia" && (
+          {abaFinanceira !== "inadimplencia" && (
             <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Resumo titulo="Total nos bancos" valor={formatarMoeda(saldoTotalBancos)} subtitulo="Saldo inicial + movimentações" />
-                <Resumo titulo="Entradas registradas" valor={formatarMoeda(entradasPeriodo)} subtitulo="Livro financeiro" />
-                <Resumo titulo="Saídas registradas" valor={formatarMoeda(saidasPeriodo)} subtitulo="Livro financeiro" />
-                <Resumo titulo="Contas ativas" valor={String(contasBancarias.length)} subtitulo="Instituições cadastradas" />
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Resumo titulo="Entradas no período" valor={formatarMoeda(entradasPeriodo)} subtitulo="Conforme filtro aplicado" />
+                <Resumo titulo="Saídas no período" valor={formatarMoeda(saidasPeriodo)} subtitulo="Conforme filtro aplicado" />
+                <Resumo titulo="Resultado do período" valor={formatarMoeda(entradasPeriodo - saidasPeriodo)} subtitulo="Entradas − saídas" />
               </div>
 
               {abaFinanceira === "contas" && (
@@ -1728,16 +1634,44 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
                 </div>
               )}
 
-              {abaFinanceira === "fluxo" && (
+              {["fluxo", "entradas", "saidas", "aluguéis"].includes(abaFinanceira) && (
                 <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
                   <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <h3 className="text-lg font-extrabold text-[#003d2b]">Livro de movimentações</h3>
-                      <p className="text-sm text-gray-500">Entradas, saídas e transferências ficam registradas para prestação de contas.</p>
+                      <h3 className="text-lg font-extrabold text-[#003d2b]">
+                        {abaFinanceira === "aluguéis"
+                          ? "Aluguéis recebidos"
+                          : abaFinanceira === "entradas"
+                            ? "Entradas financeiras"
+                            : abaFinanceira === "saidas"
+                              ? "Saídas financeiras"
+                              : "Livro de movimentações"}
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        {abaFinanceira === "aluguéis"
+                          ? "Registre e acompanhe os valores recebidos pelo aluguel dos espaços da Sociedade."
+                          : "Entradas, saídas e transferências ficam registradas para prestação de contas."}
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova movimentação</button>
-                      <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button>
+                      <button
+                        onClick={() => {
+                          if (abaFinanceira === "aluguéis") {
+                            setMovTipo("entrada");
+                            setMovCategoria("Aluguel");
+                            setMovDescricao("");
+                          }
+                          setMostrarMovimentoModal(true);
+                        }}
+                        className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
+                      >
+                        ＋ {abaFinanceira === "aluguéis" ? "Novo aluguel" : "Nova movimentação"}
+                      </button>
+                      {abaFinanceira === "fluxo" && (
+                        <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
+                          ↔ Transferência
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1766,7 +1700,12 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label>
-                        <select value={fluxoTipo} onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
+                        <select
+                          value={abaFinanceira === "entradas" ? "entrada" : abaFinanceira === "saidas" ? "saida" : fluxoTipo}
+                          disabled={abaFinanceira === "entradas" || abaFinanceira === "saidas"}
+                          onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)}
+                          className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 disabled:bg-gray-100"
+                        >
                           <option value="todos">Todos</option>
                           <option value="entrada">Entradas</option>
                           <option value="saida">Saídas</option>
@@ -1840,264 +1779,9 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             </div>
           )}
 
-          {abaFinanceira === "mensalidades" && (
-            <>
-          {comprovantesPendentes.length > 0 && (
-            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div><p className="font-black text-amber-900">Comprovantes aguardando aprovação</p><p className="text-sm text-amber-800">O pagamento só entra no financeiro depois da conferência da administração.</p></div>
-                <span className="rounded-full bg-amber-200 px-3 py-1 text-xs font-black text-amber-900">{comprovantesPendentes.length}</span>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {comprovantesPendentes.map((c) => (
-                  <div key={`${c.origem_tipo}-${c.origem_id}`} className="rounded-xl bg-white p-4 shadow-sm">
-                    <div className="text-[10px] font-black uppercase text-gray-400">{c.origem_tipo === "mensalidade" ? "Mensalidade" : c.origem_tipo === "convite" ? "Convite" : "Reserva"}</div>
-                    <div className="mt-1 font-black text-[#173d2e]">{c.origem_tipo === "mensalidade" ? (c.pessoa?.nome || "Associado") : c.origem_tipo === "convite" ? (c.nome_convidado || "Convidado") : (c.nome || "Responsável")}</div>
-                    <div className="mt-1 text-sm text-gray-600">Valor: <b className="text-[#005a3c]">{formatarMoeda(c.valor)}</b></div>
-                    {c.origem_tipo === "mensalidade" && <div className="text-xs text-gray-500">Competência {formatarCompetencia(c.competencia)}</div>}
-                    {c.origem_tipo === "reserva" && <div className="text-xs text-gray-500">{c.data ? new Date(`${c.data}T00:00:00`).toLocaleDateString("pt-BR") : "—"} · {c.horario || ""}</div>}
-                    {c.comprovante_url && <a href={c.comprovante_url} target="_blank" rel="noreferrer" className="mt-3 block rounded-lg bg-[#eef7f2] px-3 py-2 text-center text-xs font-black text-[#005a3c]">📎 Abrir comprovante</a>}
-                    <button onClick={() => { setComprovanteSelecionado(c); setContaComprovanteId(contasBancarias[0]?.id || ""); }} className="mt-2 w-full rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Analisar</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <p className="font-bold text-[#003d2b]">
-                  Competência {formatarCompetencia(competencia)}
-                </p>
-                <p className="mt-1 text-sm text-[#587066]">
-                  {pessoas.length} pessoa(s) com mensalidade configurada.
-                  Gere a competência para criar os lançamentos.
-                </p>
-              </div>
-              <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#005a3c] ring-1 ring-[#cfe3d8]">
-                {mensalidadesCompetencia.length} lançamento(s)
-              </span>
-            </div>
-          </div>
-
-          <div className="mb-6 overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1050px]">
-                <thead className="bg-[#e8f3ee]">
-                  <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                    <th className="px-5 py-4">Associado</th>
-                    <th className="px-5 py-4">Competência</th>
-                    <th className="px-5 py-4">Vencimento</th>
-                    <th className="px-5 py-4">Valor</th>
-                    <th className="px-5 py-4">Situação</th>
-                    <th className="px-5 py-4">Pagamento</th>
-                    <th className="px-5 py-4 text-right">Ações</th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y">
-                  {carregando && (
-                    <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center text-gray-500">
-                        Carregando financeiro...
-                      </td>
-                    </tr>
-                  )}
-
-                  {!carregando && mensalidadesCompetencia.length > 0 && filtradas.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center">
-                        <div className="text-4xl">🔎</div>
-                        <p className="mt-3 font-bold text-gray-700">
-                          Nenhum lançamento corresponde aos filtros
-                        </p>
-                        <p className="mt-1 text-sm text-gray-500">
-                          Limpe a busca/filtro para visualizar os lançamentos.
-                        </p>
-                      </td>
-                    </tr>
-                  )}
-
-                  {!carregando && mensalidadesCompetencia.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-5 py-14 text-center">
-                        <div className="text-4xl">💰</div>
-                        <p className="mt-3 font-bold text-gray-700">
-                          Nenhum lançamento nesta competência
-                        </p>
-                        <p className="mt-1 text-sm text-gray-500">
-                          Clique em “Gerar mensalidades” para criar as cobranças.
-                        </p>
-                      </td>
-                    </tr>
-                  )}
-
-                  {!carregando &&
-                    filtradas.map((item) => {
-                      const pessoa = pessoaDoLancamento(item);
-                      const meses = pessoa
-                        ? historicoPorPessoa.get(pessoa.chave) || 0
-                        : 0;
-                      const nivel = nivelAtraso(meses);
-
-                      return (
-                        <tr
-                          key={item.id}
-                          className="transition hover:bg-[#fafcfb]"
-                        >
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              {pessoa?.foto_url ? (
-                                <img
-                                  src={pessoa.foto_url}
-                                  alt={pessoa.nome}
-                                  className="h-11 w-11 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f3ee]">
-                                  👤
-                                </div>
-                              )}
-                              <div>
-                                <p className="font-bold text-[#173d2e]">
-                                  {pessoa?.nome || "Cadastro não localizado"}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  Matrícula {pessoa?.matricula || "—"}
-                                  {pessoa?.dependente_id ? " · Dependente" : ""}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4 font-medium">
-                            {formatarCompetencia(item.competencia)}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            {formatarData(item.data_vencimento)}
-                          </td>
-
-                          <td className="px-5 py-4 font-bold text-[#005a3c]">
-                            {formatarMoeda(item.valor)}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="flex flex-col items-start gap-1.5">
-                              <span
-                                className={`rounded-full px-3 py-1.5 text-xs font-bold ${situacaoClasse(
-                                  item.situacao
-                                )}`}
-                              >
-                                {situacaoRotulo(item.situacao)}
-                              </span>
-
-                              {item.situacao !== "pago" &&
-                                item.situacao !== "isento" && (
-                                  <span
-                                    className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${nivel.classe}`}
-                                  >
-                                    {nivel.texto}
-                                  </span>
-                                )}
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4 text-sm text-gray-600">
-                            {item.data_pagamento
-                              ? `${formatarData(item.data_pagamento)} · ${
-                                  FORMAS.find(
-                                    ([v]) => v === item.tipo_pagamento
-                                  )?.[1] || item.tipo_pagamento || "—"
-                                }`
-                              : "—"}
-
-                            {item.comprovante_url && (
-                              <button
-                                onClick={() =>
-                                  void abrirComprovante(item.comprovante_url)
-                                }
-                                className="ml-2 font-bold text-[#005a3c] underline"
-                              >
-                                Comprovante
-                              </button>
-                            )}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="flex justify-end gap-2">
-                              {item.situacao !== "pago" &&
-                                item.situacao !== "isento" && (
-                                  <button
-                                    onClick={() => abrirPagamento(item)}
-                                    className="rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white"
-                                  >
-                                    💳 Pagar
-                                  </button>
-                                )}
-
-                              {item.situacao === "pago" && (
-                                <>
-                                  <button
-                                    onClick={() => void abrirRecibo(item)}
-                                    className="rounded-lg bg-[#eef5ff] px-3 py-2 text-xs font-bold text-[#064b9b]"
-                                  >
-                                    🧾 Recibo
-                                  </button>
-                                  <button
-                                    onClick={() => void estornarPagamento(item)}
-                                    disabled={processandoEstorno}
-                                    className="rounded-lg bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 disabled:opacity-50"
-                                  >
-                                    ↩️ Estornar
-                                  </button>
-                                </>
-                              )}
-
-                              <button
-                                onClick={() => abrirEdicao(item)}
-                                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
-                              >
-                                ✏️
-                              </button>
-
-                              <button
-                                onClick={() => void excluir(item)}
-                                className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-600"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-            <h3 className="font-bold text-[#003d2b]">Como funciona</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <Info
-                titulo="1. Configure"
-                texto="No cadastro do sócio ou dependente, informe se possui mensalidade, valor e vencimento."
-              />
-              <Info
-                titulo="2. Gere"
-                texto="Gere a competência. O sistema não duplica uma cobrança já existente."
-              />
-              <Info
-                titulo="3. Receba"
-                texto="Registre o pagamento e, se necessário, anexe o comprovante."
-              />
-            </div>
-          </div>
-            </>
-          )}
         </section>
+      </div>
 
       {mostrarContaModal && (
         <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
@@ -2125,7 +1809,7 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
               <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">Se houver diferença, o sistema criará uma movimentação de conciliação para que o histórico continue transparente.</p>
+              <p className="mt-2 text-xs text-gray-500">A conferência fica registrada separadamente e não cria entrada nem saída no caixa.</p>
             </div>
             <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
             <div>
@@ -2133,7 +1817,7 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
               <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
             </div>
             <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial não será apagado nem alterado. Se o saldo real for diferente, a diferença ficará registrada no livro financeiro como ajuste de conciliação.
+              <strong>Transparência:</strong> o saldo inicial e as movimentações não serão alterados. A diferença ficará registrada apenas no histórico de conferência bancária.
             </div>
             <div className="flex justify-end gap-3">
               <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
@@ -2171,144 +1855,6 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
             <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
             <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Transferir</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {previewMensalidades && (
-        <Modal
-          titulo={`Prévia da geração — ${formatarCompetencia(competencia)}`}
-          fechar={() => {
-            if (!gerando) setPreviewMensalidades(null);
-          }}
-        >
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-5">
-              <p className="text-sm text-gray-500">Competência</p>
-
-              <p className="text-2xl font-extrabold text-[#003d2b]">
-                {formatarCompetencia(competencia)}
-              </p>
-
-              <p className="mt-2 text-sm text-gray-600">
-                Nenhum lançamento será criado até você confirmar.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-gray-500">
-                  Pagadores encontrados
-                </p>
-                <p className="mt-1 text-2xl font-extrabold text-[#005a3c]">
-                  {previewMensalidades.total_cobraveis || 0}
-                </p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-gray-500">
-                  Novos lançamentos
-                </p>
-                <p className="mt-1 text-2xl font-extrabold text-[#005a3c]">
-                  {previewMensalidades.quantidade_nova || 0}
-                </p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-gray-500">
-                  Já existentes
-                </p>
-                <p className="mt-1 text-2xl font-extrabold text-gray-700">
-                  {previewMensalidades.ja_existentes || 0}
-                </p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-gray-500">
-                  Mensalidades base
-                </p>
-                <p className="mt-1 text-xl font-extrabold text-[#005a3c]">
-                  {formatarMoeda(previewMensalidades.valor_base)}
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[#d5e0da] p-5">
-              <h3 className="font-extrabold text-[#003d2b]">
-                Composição da cobrança
-              </h3>
-
-              <div className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span>Mensalidades</span>
-                  <strong>
-                    {formatarMoeda(previewMensalidades.valor_base)}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between">
-                  <span>Tarifas bancárias</span>
-                  <strong>
-                    {formatarMoeda(previewMensalidades.tarifa_pagamento)}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between">
-                  <span>Multa</span>
-                  <strong>
-                    {formatarMoeda(previewMensalidades.multa)}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between">
-                  <span>Juros</span>
-                  <strong>
-                    {formatarMoeda(previewMensalidades.juros)}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between">
-                  <span>Desconto</span>
-                  <strong>
-                    - {formatarMoeda(previewMensalidades.desconto)}
-                  </strong>
-                </div>
-
-                <div className="flex justify-between border-t pt-4 text-lg">
-                  <span className="font-extrabold">Total a cobrar</span>
-
-                  <strong className="text-[#005a3c]">
-                    {formatarMoeda(previewMensalidades.total_cobrado)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-yellow-50 p-4 text-sm text-yellow-800">
-              <strong>Atenção:</strong> esta é somente uma prévia.
-              Nenhuma mensalidade foi gravada ainda.
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setPreviewMensalidades(null)}
-                disabled={gerando}
-                className="rounded-xl border px-5 py-3 font-semibold"
-              >
-                Cancelar
-              </button>
-
-              <button
-                onClick={() => void confirmarGeracaoMensalidades()}
-                disabled={
-                  gerando ||
-                  Number(previewMensalidades.quantidade_nova || 0) === 0
-                }
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
-              >
-                {gerando ? "Gerando..." : "✓ Confirmar geração"}
-              </button>
-            </div>
           </div>
         </Modal>
       )}
@@ -2621,18 +2167,6 @@ const [carregandoPreview, setCarregandoPreview] = useState(false);
           }
         }
       `}</style>
-          {comprovanteSelecionado && (
-            <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4">
-              <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-[#005a3c]">{comprovanteSelecionado.origem_tipo === "mensalidade" ? "Mensalidade" : comprovanteSelecionado.origem_tipo === "convite" ? "Convite" : "Reserva"}</p><h3 className="mt-1 text-xl font-black text-[#003d2b]">Conferir comprovante</h3></div><button onClick={() => setComprovanteSelecionado(null)} className="rounded-lg bg-gray-100 px-3 py-2">✕</button></div>
-                <div className="mt-4 rounded-xl bg-[#f8faf9] p-4 text-sm"><b>{comprovanteSelecionado.origem_tipo === "mensalidade" ? (comprovanteSelecionado.pessoa?.nome || "Associado") : comprovanteSelecionado.origem_tipo === "convite" ? (comprovanteSelecionado.nome_convidado || "Convidado") : (comprovanteSelecionado.nome || "Responsável")}</b><div className="mt-1">Valor: <b className="text-[#005a3c]">{formatarMoeda(comprovanteSelecionado.valor)}</b></div></div>
-                {comprovanteSelecionado.comprovante_url && <a href={comprovanteSelecionado.comprovante_url} target="_blank" rel="noreferrer" className="mt-4 block rounded-xl border p-3 text-center font-black text-[#005a3c]">📎 Abrir comprovante</a>}
-                <label className="mt-4 block text-sm font-bold">Conta que recebeu o PIX<select value={contaComprovanteId} onChange={e => setContaComprovanteId(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3"><option value="">Selecione a conta</option>{contasBancarias.map(c => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}</select></label>
-                <div className="mt-5 flex gap-2"><button disabled={processandoComprovante} onClick={() => void processarComprovante("recusar")} className="flex-1 rounded-xl bg-red-600 px-4 py-3 font-black text-white">Recusar</button><button disabled={processandoComprovante} onClick={() => void processarComprovante("aprovar")} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-black text-white">{processandoComprovante ? "Processando..." : "Aprovar e lançar"}</button></div>
-              </div>
-            </div>
-          )}
-
     </main>
   );
 }
@@ -2641,11 +2175,23 @@ function Resumo({
   titulo,
   valor,
   subtitulo,
+  destaque = false,
 }: {
   titulo: string;
   valor: string;
   subtitulo?: string;
+  destaque?: boolean;
 }) {
+  if (destaque) {
+    return (
+      <div className="rounded-2xl border border-[#0a6b47] bg-gradient-to-br from-[#005a3c] to-[#00432c] p-5 shadow-md">
+        <p className="text-sm font-medium text-[#bfe3d2]">{titulo}</p>
+        <p className="mt-1 text-2xl font-extrabold text-white">{valor}</p>
+        {subtitulo && <p className="mt-1 text-xs text-[#9fd4bd]">{subtitulo}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
       <p className="text-sm text-gray-500">{titulo}</p>
