@@ -1227,6 +1227,8 @@ export default function Home() {
           contasBancarias={contasBancarias}
           form={form}
           socioEditando={socioEditando}
+          buscaResponsavel={buscaResponsavel}
+          setBuscaResponsavel={setBuscaResponsavel}
           salvando={salvando}
           mensagem={mensagem}
           fechar={fecharCadastro}
@@ -2735,6 +2737,8 @@ function ModalSocio({
   contasBancarias,
   form,
   socioEditando,
+  buscaResponsavel,
+  setBuscaResponsavel,
   salvando,
   mensagem,
   fechar,
@@ -2747,6 +2751,8 @@ function ModalSocio({
   contasBancarias: ContaBancaria[];
   form: Partial<Socio>;
   socioEditando: Socio | null;
+  buscaResponsavel: string;
+  setBuscaResponsavel: (valor: string) => void;
   salvando: boolean;
   mensagem: string;
   fechar: () => void;
