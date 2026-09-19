@@ -696,6 +696,7 @@ export default function Home() {
 
   function novoSocio() {
     setSocioEditando(null);
+    setBuscaResponsavel("");
     setForm({
       ...socioInicial,
       data_associacao: new Date().toISOString().split("T")[0],
@@ -712,6 +713,7 @@ export default function Home() {
     }
 
     setSocioEditando(null);
+    setBuscaResponsavel(responsavel.nome);
     setForm({
       ...socioInicial,
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
@@ -728,6 +730,7 @@ export default function Home() {
 
   function editarSocio(socio: Socio) {
     setSocioEditando(socio);
+    setBuscaResponsavel(socio.responsavel_id ? (socios.find((p) => p.id === socio.responsavel_id)?.nome || "") : "");
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
     setFotoArquivo(null);
     setAbrirCadastro(true);
@@ -738,6 +741,7 @@ export default function Home() {
     if (!salvando) {
       setAbrirCadastro(false);
       setSocioEditando(null);
+      setBuscaResponsavel("");
     }
   }
 
