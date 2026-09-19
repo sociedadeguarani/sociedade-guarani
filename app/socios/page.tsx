@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type Socio = {
   id: string;
@@ -24,7 +27,6 @@ type Socio = {
   data_associacao: string | null;
   categoria: string | null;
   situacao: string | null;
-  ativo?: boolean | null;
   observacoes: string | null;
   foto_url: string | null;
 
@@ -57,33 +59,6 @@ type Mensalidade = {
   numero_recibo?: string | null;
   created_at?: string;
   updated_at?: string;
-};
-
-type PreviewMensalidades = {
-  competencia: string;
-  total_cobraveis: number;
-  ja_existentes: number;
-  quantidade_nova: number;
-  valor_base: number;
-  tarifa_pagamento: number;
-  multa: number;
-  juros: number;
-  desconto: number;
-  total_cobrado: number;
-  itens?: Array<{
-    id: string;
-    nome: string;
-    matricula: number | null;
-    categoria: string | null;
-    valor_base: number;
-    tarifa_pagamento: number;
-    multa: number;
-    juros: number;
-    desconto: number;
-    total_cobrado: number;
-    tipo_pagamento: string | null;
-    data_vencimento: string;
-  }>;
 };
 
 const menus = [
@@ -136,10 +111,6 @@ const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
   {
-  value: "dependente_patrimonial",
-  label: "Dependente Sócio Patrimonial",
-},
-  {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
   },
@@ -149,10 +120,6 @@ const TIPOS_SOCIO = [
   },
   { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
   { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
-  {
-  value: "dependente_contribuinte",
-  label: "Dependente Sócio Contribuinte",
-},
   {
     value: "dependente_contribuinte_familiar_mensalidade",
     label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
@@ -267,27 +234,23 @@ function tipoSocioClasse(tipo?: string | null) {
 }
 
 export default function Home() {
-  const [menu] = useState("Sócios");
+  const [menu, setMenu] = useState("Início");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
-  const [configuracoesMensalidades, setConfiguracoesMensalidades] = useState<any[]>([]);
   const [busca, setBusca] = useState("");
+  const [buscaResponsavel, setBuscaResponsavel] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
   const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
 
   const [form, setForm] = useState<Partial<Socio>>(socioInicial);
   const [salvando, setSalvando] = useState(false);
-  const [gerandoAcesso, setGerandoAcesso] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
-  const [categoriasSelecionadas, setCategoriasSelecionadas] = useState<string[]>([]);
-  const [filtroMensalidade, setFiltroMensalidade] = useState("todas");
-  const [filtroSituacao, setFiltroSituacao] = useState("todas");
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
@@ -296,8 +259,6 @@ export default function Home() {
   const [buscaFinanceiro, setBuscaFinanceiro] = useState("");
   const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(false);
   const [gerandoMensalidades, setGerandoMensalidades] = useState(false);
-  const [previsualizandoMensalidades, setPrevisualizandoMensalidades] = useState(false);
-  const [previewMensalidades, setPreviewMensalidades] = useState<PreviewMensalidades | null>(null);
   const [mensalidadeEditando, setMensalidadeEditando] = useState<Mensalidade | null>(null);
   const [abrirPagamento, setAbrirPagamento] = useState(false);
   const [mensalidadePagamento, setMensalidadePagamento] = useState<Mensalidade | null>(null);
@@ -402,119 +363,81 @@ export default function Home() {
     setCarregandoFinanceiro(false);
   }
 
-  async function previsualizarMensalidadesCompetencia(referencia = competenciaFinanceiro) {
-    setPrevisualizandoMensalidades(true);
-    setMensagem("");
-
-    try {
-      const [ano, mes] = referencia.split("-").map(Number);
-
-      if (!Number.isInteger(ano) || !Number.isInteger(mes)) {
-        throw new Error("Competência inválida.");
-      }
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        throw new Error("Sessão expirada. Faça login novamente.");
-      }
-
-      const resposta = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          acao: "previsualizar",
-          ano,
-          mes,
-        }),
-      });
-
-      const resultado = await resposta.json().catch(() => ({}));
-
-      if (!resposta.ok) {
-        throw new Error(
-          resultado?.error || "Não foi possível calcular a prévia."
-        );
-      }
-
-      setPreviewMensalidades(resultado as PreviewMensalidades);
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível calcular a prévia."
-      );
-    } finally {
-      setPrevisualizandoMensalidades(false);
-    }
-  }
-
   async function gerarMensalidadesCompetencia(referencia = competenciaFinanceiro) {
     setGerandoMensalidades(true);
     setMensagem("");
 
     try {
-      const [ano, mes] = referencia.split("-").map(Number);
+      const pessoasComMensalidade = socios.filter(
+        (s) =>
+          s.possui_mensalidade === true &&
+          Number(s.valor_mensalidade || 0) >= 0 &&
+          s.situacao?.toLowerCase() !== "inativo"
+      );
 
-      if (!Number.isInteger(ano) || !Number.isInteger(mes)) {
-        throw new Error("Competência inválida.");
+      if (pessoasComMensalidade.length === 0) {
+        setMensalidades([]);
+        setMensagem("Nenhum associado/dependente possui mensalidade ativa.");
+        return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const competencia = primeiroDiaDoMes(referencia);
 
-      if (!session) {
-        throw new Error("Sessão expirada. Faça login novamente.");
+      const { data: existentes, error: erroBusca } = await supabase
+        .from("mensalidades")
+        .select("socio_id")
+        .eq("competencia", competencia);
+
+      if (erroBusca) throw erroBusca;
+
+      const idsExistentes = new Set(
+        (existentes || []).map((item: { socio_id: string }) => item.socio_id)
+      );
+
+      const novos = pessoasComMensalidade
+        .filter((socio) => !idsExistentes.has(socio.id))
+        .map((socio) => ({
+          socio_id: socio.id,
+          competencia,
+          valor: Number(socio.valor_mensalidade || 0),
+          data_vencimento: calcularVencimento(
+            referencia,
+            socio.dia_vencimento
+          ),
+          situacao:
+            Number(socio.valor_mensalidade || 0) === 0
+              ? "isento"
+              : "em_aberto",
+          data_pagamento: null,
+          tipo_pagamento: socio.tipo_pagamento || null,
+          comprovante_url: null,
+          observacoes: null,
+        }));
+
+      if (novos.length > 0) {
+        const { error: erroInsercao } = await supabase
+          .from("mensalidades")
+          .insert(novos);
+
+        if (erroInsercao) throw erroInsercao;
       }
 
-      const resposta = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          acao: "gerar",
-          ano,
-          mes,
-        }),
-      });
-
-      const resultado = await resposta.json().catch(() => ({}));
-
-      if (!resposta.ok) {
-        throw new Error(
-          resultado?.error || "Não foi possível gerar as mensalidades."
-        );
-      }
-
-      setPreviewMensalidades(null);
       await carregarMensalidades(referencia);
       setMensagem(
-        resultado?.message ||
-          `${resultado?.criadas || 0} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
+        novos.length > 0
+          ? `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
+          : `As mensalidades de ${formatarCompetencia(referencia)} já estavam geradas.`
       );
     } catch (error) {
       console.error(error);
-      setMensagem(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível gerar as mensalidades."
-      );
+      setMensagem("Não foi possível gerar as mensalidades.");
     } finally {
       setGerandoMensalidades(false);
     }
   }
 
-
   async function abrirFinanceiro() {
+    setMenu("Financeiro");
     await carregarMensalidades(competenciaFinanceiro);
   }
 
@@ -727,74 +650,26 @@ export default function Home() {
   }
 
   function abrirRelatorios() {
+    setMenu("Relatórios");
     void carregarRelatorioFinanceiro(relatorioCompetencia);
   }
 
   async function carregarContasBancarias() {
-    try {
-      // As contas bancárias são protegidas por RLS no Supabase.
-      // A tela de Sócios usa a API administrativa do Financeiro, que já
-      // valida o perfil e consulta com o service client — por isso
-      // precisa do token de sessão aqui, senão a API sempre nega o acesso
-      // e a lista fica vazia mesmo com contas cadastradas.
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setContasBancarias([]); return; }
+    const { data, error } = await supabase
+      .from("contas_bancarias")
+      .select("id,nome,banco,agencia,conta,ativo")
+      .eq("ativo", true)
+      .order("nome", { ascending: true });
 
-      const resposta = await fetch("/api/financeiro", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-
-      const resultado = await resposta.json().catch(() => ({}));
-
-      if (!resposta.ok) {
-        throw new Error(resultado?.error || "Não foi possível carregar as contas bancárias.");
-      }
-
-      setContasBancarias((resultado?.contas || []) as ContaBancaria[]);
-    } catch (error) {
-      console.error("Erro ao carregar contas bancárias:", error);
+    if (error) {
+      console.error(error);
       setContasBancarias([]);
-    }
-  }
-async function carregarConfiguracoesMensalidades() {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      setConfiguracoesMensalidades([]);
       return;
     }
 
-    const resposta = await fetch("/api/mensalidades/config", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      cache: "no-store",
-    });
-
-    const resultado = await resposta.json().catch(() => ({}));
-
-    if (!resposta.ok) {
-      throw new Error(
-        resultado?.error ||
-          "Não foi possível carregar as configurações de mensalidade."
-      );
-    }
-
-    setConfiguracoesMensalidades(
-      (resultado?.configuracoes || []) as any[]
-    );
-  } catch (error) {
-    console.error(
-      "Erro ao carregar configurações de mensalidades:",
-      error
-    );
-    setConfiguracoesMensalidades([]);
+    setContasBancarias((data || []) as ContaBancaria[]);
   }
-}
+
   async function carregarSocios() {
     setCarregando(true);
 
@@ -816,7 +691,6 @@ async function carregarConfiguracoesMensalidades() {
   useEffect(() => {
     carregarSocios();
     void carregarContasBancarias();
-    void carregarConfiguracoesMensalidades();
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
 
@@ -843,14 +717,8 @@ async function carregarConfiguracoesMensalidades() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      // O dependente não recebe cobrança própria. A família possui uma única
-      // mensalidade, controlada pelo titular/responsável.
-      possui_mensalidade: false,
+      possui_mensalidade: true,
       valor_mensalidade: 0,
-      dia_vencimento: responsavel.dia_vencimento || 10,
-      tipo_pagamento: responsavel.tipo_pagamento || "pix",
-      situacao_financeira: responsavel.situacao_financeira || "isento",
-      data_ultimo_pagamento: responsavel.data_ultimo_pagamento || "",
       data_associacao: new Date().toISOString().split("T")[0],
     });
     setFotoArquivo(null);
@@ -859,44 +727,12 @@ async function carregarConfiguracoesMensalidades() {
   }
 
   function editarSocio(socio: Socio) {
-  const configuracao = configuracoesMensalidades.find(
-    (item: any) =>
-      item.tipo_socio === socio.tipo_socio &&
-      item.ativo !== false
-  );
-
-  const valorConfigurado = Number(configuracao?.valor || 0);
-
-  const mensalidadeObrigatoria = [
-    "dependente_patrimonial_familiar_mensalidade",
-    "dependente_patrimonial_individual_mensalidade",
-    "dependente_contribuinte_familiar_mensalidade",
-    "dependente_contribuinte_individual_mensalidade",
-  ].includes(socio.tipo_socio || "");
-
-  setSocioEditando(socio);
-
-  setForm({
-    ...socio,
-    situacao: socio.situacao?.toLowerCase() || "ativo",
-    possui_mensalidade:
-      socio.tipo_socio === "remido"
-        ? false
-        : mensalidadeObrigatoria
-          ? true
-          : Boolean(socio.possui_mensalidade),
-    valor_mensalidade:
-      socio.tipo_socio === "remido"
-        ? 0
-        : configuracao
-          ? valorConfigurado
-          : Number(socio.valor_mensalidade || 0),
-  });
-
-  setFotoArquivo(null);
-  setAbrirCadastro(true);
-  setMensagem("");
-}
+    setSocioEditando(socio);
+    setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
+    setFotoArquivo(null);
+    setAbrirCadastro(true);
+    setMensagem("");
+  }
 
   function fecharCadastro() {
     if (!salvando) {
@@ -916,38 +752,26 @@ async function carregarConfiguracoesMensalidades() {
       };
 
       if (campo === "tipo_socio") {
-  const tipo = valor;
+        const tipo = valor;
+        const mensalidadeObrigatoria = [
+          "dependente_patrimonial_familiar_mensalidade",
+          "dependente_patrimonial_individual_mensalidade",
+          "dependente_contribuinte_familiar_mensalidade",
+          "dependente_contribuinte_individual_mensalidade",
+        ].includes(tipo);
 
-  const configuracao = configuracoesMensalidades.find(
-    (item: any) =>
-      item.tipo_socio === tipo &&
-      item.ativo !== false
-  );
+        if (tipo === "remido") {
+          proximo.possui_mensalidade = false;
+          proximo.valor_mensalidade = 0;
+        } else if (mensalidadeObrigatoria) {
+          proximo.possui_mensalidade = true;
+        }
 
-  const valorConfigurado = Number(configuracao?.valor || 0);
-
-  const mensalidadeObrigatoria = [
-    "dependente_patrimonial_familiar_mensalidade",
-    "dependente_patrimonial_individual_mensalidade",
-    "dependente_contribuinte_familiar_mensalidade",
-    "dependente_contribuinte_individual_mensalidade",
-  ].includes(tipo);
-
-  if (tipo === "remido") {
-    proximo.possui_mensalidade = false;
-    proximo.valor_mensalidade = 0;
-  } else if (mensalidadeObrigatoria) {
-    proximo.possui_mensalidade = true;
-    proximo.valor_mensalidade = valorConfigurado;
-  } else if (configuracao) {
-    proximo.valor_mensalidade = valorConfigurado;
-  }
-
-  if (!tipo.startsWith("dependente_")) {
-    proximo.responsavel_id = null;
-    proximo.parentesco = "";
-  }
-}
+        if (!tipo.startsWith("dependente_")) {
+          proximo.responsavel_id = null;
+          proximo.parentesco = "";
+        }
+      }
 
       return proximo;
     });
@@ -959,20 +783,10 @@ async function carregarConfiguracoesMensalidades() {
       return;
     }
 
-    if (form.possui_mensalidade && form.tipo_pagamento === "debito_em_conta" && !form.conta_bancaria_id) {
-      setMensagem("Selecione o banco / conta que será usado para o débito da mensalidade.");
-      return;
-    }
-
     setSalvando(true);
     setMensagem("");
 
-    const responsavel = form.responsavel_id
-      ? socios.find((s) => s.id === form.responsavel_id) || null
-      : null;
-
     const dadosBase = {
-      matricula: form.matricula == null || String(form.matricula).trim() === "" ? null : Number(form.matricula),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -996,23 +810,17 @@ async function carregarConfiguracoesMensalidades() {
       parentesco: form.parentesco || null,
       possui_mensalidade: Boolean(form.possui_mensalidade),
       valor_mensalidade: Number(form.valor_mensalidade || 0),
-      dia_vencimento: Number(form.dia_vencimento || responsavel?.dia_vencimento || 10),
-      tipo_pagamento: responsavel ? (responsavel.tipo_pagamento || "pix") : (form.tipo_pagamento || "pix"),
+      dia_vencimento: Number(form.dia_vencimento || 10),
+      tipo_pagamento: form.tipo_pagamento || "pix",
       conta_bancaria_id:
-        responsavel
-          ? null
-          : form.tipo_pagamento === "debito_em_conta"
-            ? form.conta_bancaria_id || null
-            : null,
+        form.tipo_pagamento === "debito_em_conta"
+          ? form.conta_bancaria_id || null
+          : null,
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
-      situacao_financeira: responsavel
-        ? (responsavel.situacao_financeira || "isento")
-        : (form.situacao_financeira || "isento"),
-      data_ultimo_pagamento: responsavel
-        ? (responsavel.data_ultimo_pagamento || null)
-        : (form.data_ultimo_pagamento || null),
+      situacao_financeira: form.situacao_financeira || "isento",
+      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
     try {
@@ -1071,39 +879,6 @@ async function carregarConfiguracoesMensalidades() {
           : "Sócio cadastrado com sucesso!"
       );
 
-      // Cria (ou mantém sincronizado) o acesso de login do associado:
-      // usuário = matrícula, senha inicial = 6 primeiros dígitos do CPF.
-      if (socioId) {
-        setGerandoAcesso(true);
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            const respostaAcesso = await fetch("/api/socios/acesso", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ socio_id: socioId }),
-            });
-            const resultadoAcesso = await respostaAcesso.json().catch(() => ({}));
-            if (!respostaAcesso.ok) {
-              setMensagem(
-                `Sócio salvo, mas o acesso não foi criado: ${resultadoAcesso?.error || "erro desconhecido"}`
-              );
-            } else if (resultadoAcesso?.criado) {
-              setMensagem(
-                `Sócio salvo! Login: matrícula ${resultadoAcesso.matricula} · Senha inicial: ${resultadoAcesso.senhaInicial}`
-              );
-            }
-          }
-        } catch (erroAcesso) {
-          console.error("Erro ao criar acesso do sócio:", erroAcesso);
-        } finally {
-          setGerandoAcesso(false);
-        }
-      }
-
       setFotoArquivo(null);
       await carregarSocios();
 
@@ -1111,11 +886,11 @@ async function carregarConfiguracoesMensalidades() {
         setAbrirCadastro(false);
         setSocioEditando(null);
         setMensagem("");
-      }, 2500);
+      }, 900);
     } catch (error) {
       console.error(error);
       setMensagem(
-        `Não foi possível salvar. ${error instanceof Error ? error.message : "Verifique o Supabase e o bucket fotos-associados."}`
+        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
       );
     } finally {
       setSalvando(false);
@@ -1146,25 +921,6 @@ async function carregarConfiguracoesMensalidades() {
     setTimeout(() => setMensagem(""), 1500);
   }
 
-  const categoriasDisponiveis = useMemo(() => {
-    return Array.from(
-      new Set(
-        socios
-          .map((socio) => (socio.categoria || "").trim())
-          .filter((categoria) => {
-            const valor = categoria.toLowerCase();
-            // Categorias específicas criadas apenas para a temporada passada.
-            return !valor.startsWith("dependente temporário do sócio");
-          })
-          .map((categoria) => categoria || "__SEM_CATEGORIA__")
-      )
-    ).sort((a, b) => {
-      const nomeA = a === "__SEM_CATEGORIA__" ? "Sem categoria" : a;
-      const nomeB = b === "__SEM_CATEGORIA__" ? "Sem categoria" : b;
-      return nomeA.localeCompare(nomeB, "pt-BR");
-    });
-  }, [socios]);
-
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
@@ -1180,40 +936,9 @@ async function carregarConfiguracoesMensalidades() {
         Boolean(socio.responsavel_id) ||
         (socio.tipo_socio || "").startsWith("dependente_");
 
-      const categoriaFiltro =
-        (socio.categoria || "").trim() || "__SEM_CATEGORIA__";
-
-      const correspondeCategoria =
-        categoriasSelecionadas.length === 0 ||
-        categoriasSelecionadas.includes(categoriaFiltro);
-
-      const correspondeMensalidade =
-        filtroMensalidade === "todas" ||
-        (filtroMensalidade === "com" && socio.possui_mensalidade === true) ||
-        (filtroMensalidade === "sem" && socio.possui_mensalidade !== true);
-
-      const situacaoSocio = socio.situacao?.toLowerCase() || "";
-
-      const correspondeSituacao =
-        filtroSituacao === "todas" ||
-        situacaoSocio === filtroSituacao;
-
-      return (
-        correspondeBusca &&
-        correspondeTipo &&
-        correspondeCategoria &&
-        correspondeMensalidade &&
-        correspondeSituacao
-      );
+      return correspondeBusca && correspondeTipo;
     });
-  }, [
-    socios,
-    busca,
-    mostrarSomenteDependentes,
-    categoriasSelecionadas,
-    filtroMensalidade,
-    filtroSituacao,
-  ]);
+  }, [socios, busca, mostrarSomenteDependentes]);
 
   if (verificandoLogin) {
     return (
@@ -1231,12 +956,141 @@ async function carregarConfiguracoesMensalidades() {
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
-      <CabecalhoPadrao />
-      <MenuLateralPadrao />
+      {/* CABEÇALHO */}
+      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
+        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
 
-      <div className="lg:ml-[220px]">
+          <div className="flex items-center gap-4">
+
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
+              <img
+                src="/logo-guarani.png"
+                alt="Sociedade Guarani"
+                className="h-full w-full object-contain"
+              />
+            </div>
+
+            <div>
+              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
+                SOCIEDADE GUARANI
+              </h1>
+
+              <p className="text-xs font-medium text-[#6b7d74]">
+                Sociedade Recreativa Guarani — S.R.G.
+              </p>
+            </div>
+
+          </div>
+
+          <div className="hidden items-center gap-4 sm:flex">
+            <div className="text-right">
+              <p className="text-xs text-gray-500">
+                {usuarioEmail || "Usuário autenticado"}
+              </p>
+
+              <p className="font-bold text-[#005a3c]">
+                Área Administrativa
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={sair}
+              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
+            >
+              Sair
+            </button>
+          </div>
+
+        </div>
+      </header>
+
+      <div className="flex min-h-[calc(100vh-80px)]">
+
+        {/* MENU LATERAL */}
+        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
+
+          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
+            Menu principal
+          </p>
+
+          <nav className="space-y-2">
+
+            {menus.map((item) => (
+              <button
+                key={item.nome}
+                onClick={() => {
+                    if (item.nome === "Financeiro") {
+                      void abrirFinanceiro();
+                    } else if (item.nome === "Relatórios") {
+                      abrirRelatorios();
+                    } else {
+                      setMenu(item.nome);
+                    }
+                  }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
+                  menu === item.nome
+                    ? "bg-[#005a3c] text-white shadow-sm"
+                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+                }`}
+              >
+                <span className="text-xl">
+                  {item.icone}
+                </span>
+
+                {item.nome}
+              </button>
+            ))}
+
+          </nav>
+
+          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
+
+            <p className="text-xs font-bold text-[#705c00]">
+              SOCIEDADE GUARANI
+            </p>
+
+            <p className="mt-1 text-sm text-[#574900]">
+              Sistema integrado de gestão
+            </p>
+
+          </div>
+
+        </aside>
+
         {/* CONTEÚDO */}
         <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
+
+          {/* MENU MOBILE */}
+          <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
+
+            {menus.map((item) => (
+              <button
+                key={item.nome}
+                onClick={() => {
+                    if (item.nome === "Financeiro") {
+                      void abrirFinanceiro();
+                    } else if (item.nome === "Relatórios") {
+                      abrirRelatorios();
+                    } else {
+                      setMenu(item.nome);
+                    }
+                  }}
+                className={`rounded-xl p-3 text-xs font-semibold ${
+                  menu === item.nome
+                    ? "bg-[#005a3c] text-white"
+                    : "bg-white text-gray-700 shadow-sm"
+                }`}
+              >
+                <div className="mb-1 text-xl">
+                  {item.icone}
+                </div>
+
+                {item.nome}
+              </button>
+            ))}
+
+          </div>
 
           {/* INÍCIO */}
           {menu === "Início" && (
@@ -1261,13 +1115,6 @@ async function carregarConfiguracoesMensalidades() {
               carregando={carregando}
               mostrarSomenteDependentes={mostrarSomenteDependentes}
               setMostrarSomenteDependentes={setMostrarSomenteDependentes}
-              categoriasDisponiveis={categoriasDisponiveis}
-              categoriasSelecionadas={categoriasSelecionadas}
-              setCategoriasSelecionadas={setCategoriasSelecionadas}
-              filtroMensalidade={filtroMensalidade}
-              setFiltroMensalidade={setFiltroMensalidade}
-              filtroSituacao={filtroSituacao}
-              setFiltroSituacao={setFiltroSituacao}
             />
           )}
 
@@ -1290,8 +1137,7 @@ async function carregarConfiguracoesMensalidades() {
               setBusca={setBuscaFinanceiro}
               carregando={carregandoFinanceiro}
               gerando={gerandoMensalidades}
-              previsualizando={previsualizandoMensalidades}
-              gerarMensalidades={() => void previsualizarMensalidadesCompetencia()}
+              gerarMensalidades={() => void gerarMensalidadesCompetencia()}
               alterarCompetencia={alterarCompetenciaFinanceiro}
               editarMensalidade={editarMensalidade}
               excluirMensalidade={excluirMensalidade}
@@ -1336,15 +1182,6 @@ async function carregarConfiguracoesMensalidades() {
         </section>
       </div>
 
-      {previewMensalidades && (
-        <ModalPreviewMensalidades
-          preview={previewMensalidades}
-          fechar={() => setPreviewMensalidades(null)}
-          confirmar={() => void gerarMensalidadesCompetencia(competenciaFinanceiro)}
-          gerando={gerandoMensalidades}
-        />
-      )}
-
       {mensalidadeEditando && (
         <ModalEdicaoMensalidade
           item={mensalidadeEditando}
@@ -1384,11 +1221,9 @@ async function carregarConfiguracoesMensalidades() {
         <ModalSocio
           socios={socios}
           contasBancarias={contasBancarias}
-          configuracoesMensalidades={configuracoesMensalidades}
           form={form}
           socioEditando={socioEditando}
           salvando={salvando}
-          gerandoAcesso={gerandoAcesso}
           mensagem={mensagem}
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
@@ -1545,13 +1380,6 @@ function Socios({
   carregando,
   mostrarSomenteDependentes,
   setMostrarSomenteDependentes,
-  categoriasDisponiveis,
-  categoriasSelecionadas,
-  setCategoriasSelecionadas,
-  filtroMensalidade,
-  setFiltroMensalidade,
-  filtroSituacao,
-  setFiltroSituacao,
 }: {
   socios: Socio[];
   quantidadeTotal: number;
@@ -1564,13 +1392,6 @@ function Socios({
   carregando: boolean;
   mostrarSomenteDependentes: boolean;
   setMostrarSomenteDependentes: (valor: boolean) => void;
-  categoriasDisponiveis: string[];
-  categoriasSelecionadas: string[];
-  setCategoriasSelecionadas: (valor: string[]) => void;
-  filtroMensalidade: string;
-  setFiltroMensalidade: (valor: string) => void;
-  filtroSituacao: string;
-  setFiltroSituacao: (valor: string) => void;
 }) {
   return (
     <div>
@@ -1591,15 +1412,12 @@ function Socios({
           </p>
         </div>
 
-<div className="flex flex-wrap gap-3">
-<button
-    type="button"
-    onClick={novoSocio}
-    className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
-  >
-    + Novo Sócio
-  </button>
-</div>
+        <button
+          onClick={novoSocio}
+          className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
+        >
+          + Novo Sócio
+        </button>
 
       </div>
 
@@ -1639,168 +1457,18 @@ function Socios({
 
       <div className="mb-5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
 
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-3">
 
-          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[#e2ebe6] px-4">
-            <span className="text-xl">
-              🔎
-            </span>
+          <span className="text-xl">
+            🔎
+          </span>
 
-            <input
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar por nome, CPF ou matrícula..."
-              className="w-full bg-transparent py-3 outline-none"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-
-            <select
-              value={filtroMensalidade}
-              onChange={(e) => setFiltroMensalidade(e.target.value)}
-              className="rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e] outline-none focus:border-[#005a3c]"
-            >
-              <option value="todas">Mensalidade: todas</option>
-              <option value="com">Com mensalidade</option>
-              <option value="sem">Sem mensalidade</option>
-            </select>
-
-            <select
-              value={filtroSituacao}
-              onChange={(e) => setFiltroSituacao(e.target.value)}
-              className="rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e] outline-none focus:border-[#005a3c]"
-            >
-              <option value="todas">Situação: todas</option>
-              <option value="ativo">Ativo</option>
-              <option value="inativo">Inativo</option>
-              <option value="suspenso">Suspenso</option>
-            </select>
-
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#e2ebe6] bg-white px-4 py-3 text-sm font-semibold text-[#173d2e]">
-              <input
-                type="checkbox"
-                checked={mostrarSomenteDependentes}
-                onChange={(e) => setMostrarSomenteDependentes(e.target.checked)}
-                className="h-4 w-4 accent-[#005a3c]"
-              />
-              Somente dependentes
-            </label>
-
-          </div>
-
-        </div>
-
-        <div className="mt-4 border-t border-[#edf2ef] pt-4">
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-
-            <div>
-              <p className="text-sm font-bold text-[#173d2e]">
-                Filtrar por categoria
-              </p>
-
-              <p className="mt-1 text-xs text-gray-500">
-                Marque uma ou várias categorias para revisar os associados.
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-
-              <button
-                type="button"
-                onClick={() => setCategoriasSelecionadas(categoriasDisponiveis)}
-                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c] hover:bg-[#dce8df]"
-              >
-                Selecionar todas
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategoriasSelecionadas([])}
-                className="rounded-lg border border-[#e2ebe6] bg-white px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50"
-              >
-                Limpar categorias
-              </button>
-
-            </div>
-
-          </div>
-
-          <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto rounded-xl border border-[#e2ebe6] bg-[#fafcfb] p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-
-            {categoriasDisponiveis.map((categoria) => {
-              const selecionada = categoriasSelecionadas.includes(categoria);
-              const label =
-                categoria === "__SEM_CATEGORIA__"
-                  ? "Sem categoria"
-                  : categoria;
-
-              return (
-                <label
-                  key={categoria}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
-                    selecionada
-                      ? "bg-[#e8f3ee] font-bold text-[#005a3c]"
-                      : "hover:bg-white"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selecionada}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setCategoriasSelecionadas([
-                          ...categoriasSelecionadas,
-                          categoria,
-                        ]);
-                      } else {
-                        setCategoriasSelecionadas(
-                          categoriasSelecionadas.filter(
-                            (item) => item !== categoria
-                          )
-                        );
-                      }
-                    }}
-                    className="h-4 w-4 accent-[#005a3c]"
-                  />
-
-                  <span className="min-w-0 truncate" title={label}>
-                    {label}
-                  </span>
-                </label>
-              );
-            })}
-
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-            <span>
-              {categoriasSelecionadas.length === 0
-                ? "Todas as categorias"
-                : `${categoriasSelecionadas.length} categoria(s) selecionada(s)`}
-            </span>
-
-            {(categoriasSelecionadas.length > 0 ||
-              filtroMensalidade !== "todas" ||
-              filtroSituacao !== "todas" ||
-              mostrarSomenteDependentes ||
-              busca.trim()) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setBusca("");
-                  setCategoriasSelecionadas([]);
-                  setFiltroMensalidade("todas");
-                  setFiltroSituacao("todas");
-                  setMostrarSomenteDependentes(false);
-                }}
-                className="rounded-lg px-2 py-1 font-bold text-[#005a3c] hover:bg-[#e8f3ee]"
-              >
-                Limpar todos os filtros
-              </button>
-            )}
-          </div>
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar por nome, CPF ou matrícula..."
+            className="w-full bg-transparent py-2 outline-none"
+          />
 
         </div>
 
@@ -2101,7 +1769,6 @@ function Financeiro({
   setBusca,
   carregando,
   gerando,
-  previsualizando,
   gerarMensalidades,
   alterarCompetencia,
   editarMensalidade,
@@ -2117,7 +1784,6 @@ function Financeiro({
   setBusca: (valor: string) => void;
   carregando: boolean;
   gerando: boolean;
-  previsualizando: boolean;
   gerarMensalidades: () => void;
   alterarCompetencia: (valor: string) => void;
   editarMensalidade: (item: Mensalidade) => void;
@@ -2148,37 +1814,9 @@ function Financeiro({
     .filter((m) => m.situacao === "em_atraso")
     .reduce((s, m) => s + Number(m.valor || 0), 0);
 
-  function dependenteTemMensalidade(socio: Socio) {
-    const categoria = String(socio.categoria || "")
-      .trim()
-      .toLowerCase();
-
-    if (categoria) {
-      return (
-        categoria.includes("c/ mensalidade") ||
-        categoria.includes("com mensalidade")
-      );
-    }
-
-    return [
-      "dependente_patrimonial_familiar_mensalidade",
-      "dependente_patrimonial_individual_mensalidade",
-      "dependente_contribuinte_familiar_mensalidade",
-      "dependente_contribuinte_individual_mensalidade",
-    ].includes(socio.tipo_socio || "");
-  }
-
-  const pessoasComMensalidade = socios.filter((s) => {
-    if (String(s.situacao || "").toLowerCase() === "inativo" || s.ativo === false) {
-      return false;
-    }
-
-    if (!s.responsavel_id) {
-      return Boolean(s.possui_mensalidade);
-    }
-
-    return dependenteTemMensalidade(s);
-  }).length;
+  const pessoasComMensalidade = socios.filter(
+    (s) => s.possui_mensalidade === true && s.situacao?.toLowerCase() !== "inativo"
+  ).length;
 
   return (
     <div>
@@ -2204,10 +1842,10 @@ function Financeiro({
 
           <button
             onClick={gerarMensalidades}
-            disabled={gerando || previsualizando}
+            disabled={gerando}
             className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
           >
-            {previsualizando ? "Calculando prévia..." : "⚡ Gerar mensalidades"}
+            {gerando ? "Gerando..." : "⚡ Gerar mensalidades"}
           </button>
         </div>
       </div>
@@ -2243,8 +1881,8 @@ function Financeiro({
               Competência {formatarCompetencia(competencia)}
             </p>
             <p className="mt-1 text-sm text-[#587066]">
-              A prévia considera os pagadores definidos pelas regras atuais e não cria
-              nenhum lançamento até a confirmação.
+              O sistema cria automaticamente uma cobrança para cada pessoa com mensalidade,
+              sem duplicar registros existentes.
             </p>
           </div>
           <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#005a3c] ring-1 ring-[#cfe3d8]">
@@ -2424,107 +2062,6 @@ function Financeiro({
               Informe a forma, data e, se quiser, anexe o comprovante.
             </p>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ModalPreviewMensalidades({
-  preview,
-  fechar,
-  confirmar,
-  gerando,
-}: {
-  preview: PreviewMensalidades;
-  fechar: () => void;
-  confirmar: () => void;
-  gerando: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="border-b border-[#e2ebe6] px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Prévia da geração</p>
-              <h3 className="mt-1 text-2xl font-bold text-[#005a3c]">
-                Competência {formatarCompetencia(preview.competencia.slice(0, 7))}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Nenhum lançamento foi criado nesta etapa.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={fechar}
-              className="rounded-lg px-3 py-2 text-gray-500 hover:bg-gray-100"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Pagadores</p>
-            <p className="mt-1 text-2xl font-bold text-[#005a3c]">{preview.total_cobraveis}</p>
-          </div>
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Novos lançamentos</p>
-            <p className="mt-1 text-2xl font-bold text-[#005a3c]">{preview.quantidade_nova}</p>
-          </div>
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Já existentes</p>
-            <p className="mt-1 text-2xl font-bold text-[#705c00]">{preview.ja_existentes}</p>
-          </div>
-          <div className="rounded-xl bg-[#e8f3ee] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Total a cobrar</p>
-            <p className="mt-1 text-2xl font-bold text-[#005a3c]">{formatarMoeda(preview.total_cobrado)}</p>
-          </div>
-        </div>
-
-        <div className="mx-6 mb-6 grid gap-3 rounded-xl border border-[#e2ebe6] p-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div><p className="text-xs text-gray-500">Mensalidades</p><p className="font-bold">{formatarMoeda(preview.valor_base)}</p></div>
-          <div><p className="text-xs text-gray-500">Tarifas</p><p className="font-bold">{formatarMoeda(preview.tarifa_pagamento)}</p></div>
-          <div><p className="text-xs text-gray-500">Multa</p><p className="font-bold">{formatarMoeda(preview.multa)}</p></div>
-          <div><p className="text-xs text-gray-500">Juros</p><p className="font-bold">{formatarMoeda(preview.juros)}</p></div>
-          <div><p className="text-xs text-gray-500">Desconto</p><p className="font-bold">- {formatarMoeda(preview.desconto)}</p></div>
-        </div>
-
-        <div className="max-h-72 overflow-y-auto border-y border-[#e2ebe6]">
-          <table className="w-full min-w-[720px]">
-            <thead className="sticky top-0 bg-[#e8f3ee]">
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                <th className="px-5 py-3">Associado</th>
-                <th className="px-5 py-3">Categoria</th>
-                <th className="px-5 py-3">Pagamento</th>
-                <th className="px-5 py-3">Base</th>
-                <th className="px-5 py-3">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {(preview.itens || []).slice(0, 100).map((item) => (
-                <tr key={item.id}>
-                  <td className="px-5 py-3 text-sm font-semibold">{item.nome}</td>
-                  <td className="px-5 py-3 text-xs text-gray-500">{item.categoria || "—"}</td>
-                  <td className="px-5 py-3 text-xs text-gray-500">{item.tipo_pagamento || "—"}</td>
-                  <td className="px-5 py-3 text-sm font-semibold">{formatarMoeda(item.valor_base)}</td>
-                  <td className="px-5 py-3 text-sm font-bold text-[#005a3c]">{formatarMoeda(item.total_cobrado)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {(preview.itens || []).length > 100 && (
-            <p className="px-5 py-3 text-xs text-gray-500">Mostrando os primeiros 100 de {preview.itens?.length} novos lançamentos.</p>
-          )}
-        </div>
-
-        <div className="flex flex-col-reverse gap-3 px-6 py-5 sm:flex-row sm:justify-end">
-          <button type="button" onClick={fechar} className="rounded-xl border border-[#d5e0da] px-5 py-3 font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
-          <button type="button" onClick={confirmar} disabled={gerando || preview.quantidade_nova === 0} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
-            {gerando ? "Gerando..." : `Confirmar geração (${preview.quantidade_nova})`}
-          </button>
         </div>
       </div>
     </div>
@@ -3192,11 +2729,9 @@ function Dependentes({
 function ModalSocio({
   socios,
   contasBancarias,
-  configuracoesMensalidades,
   form,
   socioEditando,
   salvando,
-  gerandoAcesso,
   mensagem,
   fechar,
   alterarCampo,
@@ -3206,11 +2741,9 @@ function ModalSocio({
 }: {
   socios: Socio[];
   contasBancarias: ContaBancaria[];
-  configuracoesMensalidades: any[];
   form: Partial<Socio>;
   socioEditando: Socio | null;
   salvando: boolean;
-  gerandoAcesso: boolean;
   mensagem: string;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
@@ -3259,15 +2792,6 @@ function ModalSocio({
               value={form.nome}
               onChange={(v) => alterarCampo("nome", v)}
               className="md:col-span-2"
-            />
-
-            <Campo
-              label="Matrícula"
-              obrigatorio
-              type="number"
-              value={form.matricula ?? ""}
-              onChange={(v) => alterarCampo("matricula", v)}
-              placeholder="Ex.: 184"
             />
 
             <Campo
@@ -3451,25 +2975,31 @@ function ModalSocio({
                   opcoes={PARENTESCOS}
                 />
 
-                <SelectCampo
-                  label="Responsável"
-                  value={form.responsavel_id || ""}
-                  onChange={(v) => alterarCampo("responsavel_id", v)}
-                  opcoes={[
-                    "",
-                    ...socios
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">Responsável</label>
+                  <input
+                    type="text"
+                    value={buscaResponsavel}
+                    onChange={(e) => setBuscaResponsavel(e.target.value)}
+                    placeholder="Digite o nome do responsável para buscar..."
+                    className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c]"
+                  />
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-[#dfe9e3] bg-white">
+                    <button type="button" onClick={() => { alterarCampo("responsavel_id", ""); setBuscaResponsavel(""); }} className="block w-full px-4 py-2 text-left text-sm text-gray-500 hover:bg-[#e8f3ee]">Sem responsável</button>
+                    {socios
                       .filter((p) => p.id !== socioEditando?.id)
-                      .map((p) => p.id),
-                  ]}
-                  labels={{
-                    "": "Selecione o responsável",
-                    ...Object.fromEntries(
-                      socios
-                        .filter((p) => p.id !== socioEditando?.id)
-                        .map((p) => [p.id, p.nome])
-                    ),
-                  }}
-                />
+                      .filter((p) => p.nome.toLowerCase().includes(buscaResponsavel.toLowerCase()))
+                      .slice(0, 50)
+                      .map((p) => (
+                        <button key={p.id} type="button" onClick={() => { alterarCampo("responsavel_id", p.id); setBuscaResponsavel(p.nome); }} className={`block w-full px-4 py-2 text-left text-sm hover:bg-[#e8f3ee] ${form.responsavel_id === p.id ? "bg-[#e8f3ee] font-bold text-[#005a3c]" : "text-gray-700"}`}>
+                          {p.nome}
+                        </button>
+                      ))}
+                    {buscaResponsavel && socios.filter((p) => p.id !== socioEditando?.id && p.nome.toLowerCase().includes(buscaResponsavel.toLowerCase())).length === 0 && (
+                      <p className="px-4 py-3 text-sm text-gray-500">Nenhum responsável encontrado.</p>
+                    )}
+                  </div>
+                </div>
               </>
             ) : null}
 
@@ -3479,22 +3009,20 @@ function ModalSocio({
                   💰 Mensalidade
                 </p>
                 <p className="mt-1 text-xs text-[#718079]">
-                  A mensalidade é familiar: o titular/responsável possui uma única cobrança e os dependentes acompanham o mesmo status.
+                  Cada associado ou dependente pode ter sua própria mensalidade.
                 </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-             <SelectCampo
-  label="Possui mensalidade?"
-  value={form.possui_mensalidade ? "sim" : "nao"}
-  onChange={(v) =>
-    alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")
-  }
-  opcoes={["sim", "nao"]}
-  labels={{ sim: "Sim", nao: "Não" }}
-/>             
+                <SelectCampo
+                  label="Possui mensalidade?"
+                  value={form.possui_mensalidade ? "sim" : "nao"}
+                  onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
+                  opcoes={["sim", "nao"]}
+                  labels={{ sim: "Sim", nao: "Não" }}
+                />
 
-               {form.possui_mensalidade ? (
+                {form.possui_mensalidade ? (
                   <>
                     <Campo
                       label="Valor mensal"
@@ -3630,7 +3158,7 @@ function ModalSocio({
 
           <button
             onClick={fechar}
-            disabled={salvando || gerandoAcesso}
+            disabled={salvando}
             className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
           >
             Cancelar
@@ -3638,11 +3166,11 @@ function ModalSocio({
 
           <button
             onClick={salvar}
-            disabled={salvando || gerandoAcesso}
+            disabled={salvando}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvando || gerandoAcesso
-              ? gerandoAcesso ? "🔐 Criando acesso..." : "Salvando..."
+            {salvando
+              ? "Salvando..."
               : socioEditando
                 ? "💾 Salvar alterações"
                 : "💾 Cadastrar Sócio"}
