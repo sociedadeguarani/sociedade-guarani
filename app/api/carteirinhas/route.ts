@@ -26,36 +26,14 @@ export async function GET(request: Request) {
   if ("response" in auth) return auth.response;
   try {
     const supabase = getServiceClient();
-    const base = "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,responsavel_id,parentesco";
+    const base = "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade";
     let socios: any[] = [];
-
     if (auth.usuario.perfil === "associado") {
-      const { data: pessoa, error: pessoaError } = await supabase
-        .from("socios")
-        .select(base)
-        .eq("id", auth.usuario.socio_id)
-        .maybeSingle();
-      if (pessoaError) throw pessoaError;
-
-      if (pessoa) {
-        const titularId = pessoa.responsavel_id || pessoa.id;
-        const { data: titular, error: titularError } = await supabase
-          .from("socios")
-          .select(base)
-          .eq("id", titularId)
-          .maybeSingle();
-        if (titularError) throw titularError;
-        if (titular) socios = [titular];
-      }
+      const { data, error } = await supabase.from("socios").select(base).eq("id", auth.usuario.socio_id).maybeSingle();
+      if (error) throw error;
+      if (data) socios = [data];
     } else {
-      // A tabela socios agora é a fonte única: titulares são os registros
-      // sem responsavel_id. Dependentes ficam em socios com responsavel_id.
-      const { data, error } = await supabase
-        .from("socios")
-        .select(base)
-        .is("responsavel_id", null)
-        .order("nome")
-        .limit(1000);
+      const { data, error } = await supabase.from("socios").select(base).order("nome").limit(1000);
       if (error) throw error;
       socios = data || [];
     }
@@ -65,7 +43,6 @@ export async function GET(request: Request) {
     let dependentes: any[] = [];
 
     if (ids.length) {
-      // Mensalidade é da família/titular.
       const { data, error } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
@@ -73,22 +50,14 @@ export async function GET(request: Request) {
       if (error) throw error;
       mensalidades = data || [];
 
-      // Dependentes também estão em socios.
-      const { data: dependentesData, error: dependentesError } = await supabase
-        .from("socios")
-        .select("id,responsavel_id,matricula,nome,cpf,parentesco,situacao,foto_url")
-        .in("responsavel_id", ids)
+      const dependentesQuery = supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,cpf,parentesco,ativo")
+        .in("socio_id", ids)
         .order("nome", { ascending: true });
+      const { data: dependentesData, error: dependentesError } = await dependentesQuery;
       if (dependentesError) throw dependentesError;
-      dependentes = (dependentesData || []).map((d) => ({
-        id: d.id,
-        socio_id: d.responsavel_id,
-        nome: d.nome,
-        cpf: d.cpf,
-        parentesco: d.parentesco,
-        ativo: d.situacao !== "inativo",
-        foto_url: d.foto_url,
-      }));
+      dependentes = (dependentesData || []).filter((d) => d.ativo !== false);
     }
 
     const resultado = socios.map((s) => ({ ...s, ...calcularStatus(mensalidades, s.id) }));
