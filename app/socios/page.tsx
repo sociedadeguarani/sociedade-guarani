@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -61,21 +62,7 @@ type Mensalidade = {
   updated_at?: string;
 };
 
-const menus = [
-  { nome: "Início", icone: "🏠", rota: "/painel" },
-  { nome: "Avisos", icone: "📢", rota: "/avisos" },
-  { nome: "Reservas", icone: "📅", rota: "/reservas" },
-  { nome: "Eventos", icone: "🎉", rota: "/eventos" },
-  { nome: "Convites", icone: "🎟️", rota: "/convites" },
-  { nome: "Carteirinhas", icone: "🎫", rota: "/carteirinhas" },
-  { nome: "Sócios", icone: "👥", rota: "/socios" },
-  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦", rota: "/dependentes" },
-  { nome: "Mensalidades", icone: "💳", rota: "/mensalidades" },
-  { nome: "Financeiro", icone: "💰", rota: "/financeiro" },
-  { nome: "Inventário", icone: "📦", rota: "/inventario" },
-  { nome: "Acessos", icone: "🚪", rota: "/acessos" },
-  { nome: "Relatórios", icone: "📊", rota: "/relatorios" },
-];
+
 
 const socioInicial: Partial<Socio> = {
   nome: "",
@@ -239,7 +226,7 @@ function tipoSocioClasse(tipo?: string | null) {
 }
 
 export default function Home() {
-  const [menu, setMenu] = useState("Início");
+  const [menu, setMenu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
 
@@ -1016,88 +1003,11 @@ export default function Home() {
 
       <div className="flex min-h-[calc(100vh-80px)]">
 
-        {/* MENU LATERAL */}
-        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] px-3 py-5 md:block">
-
-          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
-            Menu principal
-          </p>
-
-          <nav className="space-y-2">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                type="button"
-                onClick={() => {
-                  if (item.rota === "/socios") {
-                    setMenu("Sócios");
-                    return;
-                  }
-                  window.location.href = item.rota;
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  item.rota === "/socios"
-                    ? "bg-[#005a3c] text-white shadow-sm"
-                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
-                }`}
-              >
-                <span className="text-xl">
-                  {item.icone}
-                </span>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </nav>
-
-          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
-
-            <p className="text-xs font-bold text-[#705c00]">
-              SOCIEDADE GUARANI
-            </p>
-
-            <p className="mt-1 text-sm text-[#574900]">
-              Sistema integrado de gestão
-            </p>
-
-          </div>
-
-        </aside>
+        {/* MENU LATERAL PADRÃO DO SISTEMA */}
+        <MenuLateralPadrao />
 
         {/* CONTEÚDO */}
-        <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:p-8">
-
-          {/* MENU MOBILE */}
-          <div className="mb-6 grid grid-cols-3 gap-2 md:hidden">
-
-            {menus.map((item) => (
-              <button
-                key={item.nome}
-                type="button"
-                onClick={() => {
-                  if (item.rota === "/socios") {
-                    setMenu("Sócios");
-                    return;
-                  }
-                  window.location.href = item.rota;
-                }}
-                className={`rounded-xl p-3 text-xs font-semibold ${
-                  item.rota === "/socios"
-                    ? "bg-[#005a3c] text-white"
-                    : "bg-white text-gray-700 shadow-sm"
-                }`}
-              >
-                <div className="mb-1 text-xl">
-                  {item.icone}
-                </div>
-
-                {item.nome}
-              </button>
-            ))}
-
-          </div>
+        <section className="ml-0 min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
 
           {/* INÍCIO */}
           {menu === "Início" && (
