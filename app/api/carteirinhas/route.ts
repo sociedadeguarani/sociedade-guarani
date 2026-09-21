@@ -162,7 +162,7 @@ async function autenticar(request: Request) {
 
   const { data: perfil, error: perfilError } = await supabase
     .from("perfis")
-    .select("id,codigo,nome")
+    .select("id,nome")
     .eq("id", usuario.perfil_id)
     .maybeSingle();
 
@@ -185,7 +185,7 @@ async function autenticar(request: Request) {
     };
   }
 
-  const perfilNormalizado = String(perfil.codigo || perfil.nome || "")
+  const perfilNormalizado = String(perfil.nome || "")
     .trim()
     .toLowerCase();
 
