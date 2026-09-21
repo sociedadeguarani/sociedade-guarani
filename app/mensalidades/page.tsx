@@ -23,6 +23,7 @@ type M = {
   tipo_pagamento: string | null;
   observacoes: string | null;
   motivo: string | null;
+  conta_pagadora_id?: string | null;
   socio?: any;
 };
 
@@ -222,51 +223,71 @@ export default function Page() {
     void carregar();
   }, [ano, mes]);
 
-  function tipoCobranca(m: M) {
-    const pagamento = String(m.tipo_pagamento || "")
+  function normalizarPagamento(valor: unknown) {
+    return String(valor || "")
       .toLowerCase()
       .trim()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[ -]+/g, "_");
+      .replace(/[\s-]+/g, "_");
+  }
 
-    // O cadastro histórico usa diretamente banrisul/sicredi/bb,
-    // enquanto alguns registros antigos usam debito_em_conta.
-    // O filtro precisa entender os dois formatos.
-    if (pagamento === "banrisul" || pagamento === "bergs" || pagamento === "debito_banrisul") {
+  function normalizarBanco(valor: unknown) {
+    return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s_-]+/g, " ");
+  }
+
+  function tipoCobranca(m: M) {
+    const pagamento = normalizarPagamento(m.tipo_pagamento);
+
+    // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
+    if (pagamento === "pix" || pagamento === "botero") return "pix";
+    if (pagamento === "boleto") return "boleto";
+    if (pagamento === "dinheiro") return "dinheiro";
+    if (pagamento === "transferencia") return "transferencia";
+    if (pagamento === "outro") return "outro";
+
+    // Alguns cadastros antigos gravam o banco diretamente no tipo_pagamento.
+    if (pagamento === "banrisul" || pagamento === "bergs" || pagamento.includes("banrisul")) {
       return "banrisul";
     }
-    if (pagamento === "sicredi" || pagamento === "debito_sicredi") {
+    if (pagamento === "sicredi" || pagamento.includes("sicredi")) {
       return "sicredi";
     }
     if (
       pagamento === "bb" ||
       pagamento === "banco_do_brasil" ||
-      pagamento === "debito_bb" ||
-      pagamento === "debito_banco_do_brasil"
+      pagamento.includes("banco_do_brasil") ||
+      pagamento === "debito_bb"
     ) {
       return "bb";
     }
 
-    if (pagamento === "boleto") return "boleto";
-    if (pagamento === "pix") return "pix";
-    if (pagamento === "dinheiro") return "dinheiro";
-    if (pagamento === "transferencia") return "transferencia";
-    if (pagamento === "outro") return "outro";
+    // O cadastro atual normalmente grava apenas "debito_em_conta".
+    // Nesse caso, a instituição vem da conta bancária vinculada ao associado
+    // ou da conta pagadora gravada no próprio lançamento.
+    if (
+      pagamento === "debito_em_conta" ||
+      pagamento === "debito" ||
+      pagamento === "debito_em_conta_bancaria"
+    ) {
+      const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+      const conta = contas.find((c) => String(c.id) === String(contaId));
+      const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
-    if (pagamento === "debito_em_conta" || pagamento === "debito") {
-      const conta = contas.find(
-        (c) => String(c.id) === String(m.socio?.conta_bancaria_id)
-      );
-      const nome = `${conta?.nome || ""} ${conta?.banco || ""}`
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-
-      if (nome.includes("banrisul") || nome.includes("bergs")) return "banrisul";
-      if (nome.includes("sicredi")) return "sicredi";
-      if (nome.includes("banco do brasil") || /\bbb\b/.test(nome)) return "bb";
-      return "sem_pagamento";
+      if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
+      if (banco.includes("sicredi")) return "sicredi";
+      if (
+        banco === "bb" ||
+        banco.includes(" bb ") ||
+        banco.includes("banco do brasil")
+      ) {
+        return "bb";
+      }
     }
 
     return "sem_pagamento";
