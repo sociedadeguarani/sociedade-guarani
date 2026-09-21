@@ -268,17 +268,19 @@ export default function Page() {
     }
 
     // O cadastro atual normalmente grava apenas "debito_em_conta".
-    // Nesse caso, a instituição vem da conta bancária vinculada ao associado
-    // ou da conta pagadora gravada no próprio lançamento.
+    // Também inferimos pelo banco quando o tipo_pagamento veio vazio,
+    // usando primeiro a conta gravada na própria mensalidade e depois
+    // a conta atual do associado.
+    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
+
     if (
       pagamento === "debito_em_conta" ||
       pagamento === "debito" ||
-      pagamento === "debito_em_conta_bancaria"
+      pagamento === "debito_em_conta_bancaria" ||
+      !pagamento
     ) {
-      const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-      const conta = contas.find((c) => String(c.id) === String(contaId));
-      const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
-
       if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
       if (banco.includes("sicredi")) return "sicredi";
       if (
@@ -332,6 +334,40 @@ export default function Page() {
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
+    }
+  }
+
+  async function estornarBaixa(item: M) {
+    if (item.situacao !== "pago") return;
+
+    const confirmar = window.confirm(
+      `Deseja estornar a baixa de ${item.socio?.nome || "este associado"}?\n\nA mensalidade voltará para Em aberto e a entrada financeira pendente será removida.`
+    );
+
+    if (!confirmar) return;
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "estornar",
+          id: item.id,
+        }),
+      });
+
+      const d = await r.json();
+
+      if (!r.ok) throw Error(d.error || "Não foi possível estornar a baixa.");
+
+      setMsg(d.message || "Pagamento estornado com sucesso.");
+      setSel((atual) => atual.filter((id) => id !== item.id));
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
     }
   }
 
@@ -626,6 +662,7 @@ export default function Page() {
                     <th className="p-3 text-left">Total cobrado</th>
                     <th className="p-3 text-left">Situação</th>
                     <th className="p-3 text-left">Motivo</th>
+                    <th className="sticky right-0 z-20 bg-[#e8f3ee] p-3 text-left shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">Ações</th>
                   </tr>
                 </thead>
 
@@ -706,6 +743,20 @@ export default function Page() {
 
                         <td className="p-3">
                           {x.motivo || x.observacoes || "—"}
+                        </td>
+
+                        <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
+                          {x.situacao === "pago" ? (
+                            <button
+                              type="button"
+                              onClick={() => void estornarBaixa(x)}
+                              className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 hover:bg-yellow-100"
+                            >
+                              ↩️ Estornar baixa
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
                         </td>
                       </tr>
                     );
