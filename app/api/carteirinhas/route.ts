@@ -4,54 +4,70 @@ import { getServiceClient } from "@/lib/guaraniAuth";
 
 function isPago(situacao: unknown) {
   return ["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(
-    String(situacao || "").toLowerCase()
+    String(situacao || "").trim().toLowerCase()
   );
+}
+
+function mesesAtraso(dataVencimento: unknown, hoje = new Date()) {
+  if (!dataVencimento) return 0;
+  const valor = String(dataVencimento).slice(0, 10);
+  const vencimento = new Date(`${valor}T00:00:00`);
+  if (Number.isNaN(vencimento.getTime()) || vencimento > hoje) return 0;
+
+  let meses =
+    (hoje.getFullYear() - vencimento.getFullYear()) * 12 +
+    (hoje.getMonth() - vencimento.getMonth());
+
+  if (hoje.getDate() < vencimento.getDate()) meses -= 1;
+  return Math.max(1, meses + 1);
 }
 
 function calcularStatus(mensalidades: any[], socioId: string) {
   const hoje = new Date();
-
   const pendentes = mensalidades.filter(
-    (m) =>
-      String(m.socio_id) === String(socioId) &&
-      !isPago(m.situacao)
+    (m) => String(m.socio_id) === String(socioId) && !isPago(m.situacao)
   );
 
-  let maxDias = 0;
+  let maiorAtrasoMeses = 0;
+  let maiorAtrasoDias = 0;
 
-  for (const m of pendentes) {
-    if (!m.data_vencimento) continue;
-
-    const d = new Date(
-      `${String(m.data_vencimento).slice(0, 10)}T00:00:00`
+  for (const mensalidade of pendentes) {
+    if (!mensalidade.data_vencimento) continue;
+    const vencimento = new Date(
+      `${String(mensalidade.data_vencimento).slice(0, 10)}T00:00:00`
     );
+    if (Number.isNaN(vencimento.getTime()) || vencimento > hoje) continue;
 
-    if (Number.isNaN(d.getTime())) continue;
-
-    const diff = Math.floor(
-      (hoje.getTime() - d.getTime()) / 86400000
+    const dias = Math.max(
+      0,
+      Math.floor((hoje.getTime() - vencimento.getTime()) / 86400000)
     );
+    const meses = mesesAtraso(mensalidade.data_vencimento, hoje);
 
-    if (diff > maxDias) maxDias = diff;
+    maiorAtrasoDias = Math.max(maiorAtrasoDias, dias);
+    maiorAtrasoMeses = Math.max(maiorAtrasoMeses, meses);
   }
 
-  if (maxDias <= 14) {
+  if (maiorAtrasoMeses >= 3) {
     return {
-      financeiro_status: "em_dia",
-      dias_atraso: 0,
+      financeiro_status: "muito_atrasado",
+      dias_atraso: maiorAtrasoDias,
+      meses_atraso: maiorAtrasoMeses,
     };
   }
 
-  if (maxDias <= 60) {
+  if (maiorAtrasoMeses >= 1) {
     return {
       financeiro_status: "atrasado",
-      dias_atraso: maxDias,
+      dias_atraso: maiorAtrasoDias,
+      meses_atraso: maiorAtrasoMeses,
     };
   }
 
   return {
-    financeiro_status: "muito_atrasado",
-    dias_atraso: maxDias,
+    financeiro_status: "em_dia",
+    dias_atraso: 0,
+    meses_atraso: 0,
   };
 }
 
@@ -69,9 +85,11 @@ async function autenticar(request: Request) {
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!url || !anonKey) {
+  if (!url || !key) {
     console.error("[API carteirinhas] Supabase não configurado.");
     return {
       response: NextResponse.json(
@@ -81,7 +99,7 @@ async function autenticar(request: Request) {
     };
   }
 
-  const supabaseAuth = createClient(url, anonKey, {
+  const supabaseAuth = createClient(url, key, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -98,7 +116,6 @@ async function autenticar(request: Request) {
       "[API carteirinhas] Token inválido:",
       authError?.message || "usuário não encontrado"
     );
-
     return {
       response: NextResponse.json(
         { error: "Sessão inválida ou expirada." },
@@ -116,14 +133,10 @@ async function autenticar(request: Request) {
     .maybeSingle();
 
   if (usuarioError) {
-    console.error(
-      "[API carteirinhas] Erro usuarios_sistema:",
-      usuarioError
-    );
-
+    console.error("[API carteirinhas] Erro usuarios_sistema:", usuarioError);
     return {
       response: NextResponse.json(
-        { error: "Não foi possível consultar seu cadastro." },
+        { error: usuarioError.message },
         { status: 500 }
       ),
     };
@@ -149,19 +162,15 @@ async function autenticar(request: Request) {
 
   const { data: perfil, error: perfilError } = await supabase
     .from("perfis")
-    .select("id,nome")
+    .select("id,codigo,nome")
     .eq("id", usuario.perfil_id)
     .maybeSingle();
 
   if (perfilError) {
-    console.error(
-      "[API carteirinhas] Erro perfis:",
-      perfilError
-    );
-
+    console.error("[API carteirinhas] Erro perfis:", perfilError);
     return {
       response: NextResponse.json(
-        { error: "Não foi possível identificar seu perfil." },
+        { error: perfilError.message },
         { status: 500 }
       ),
     };
@@ -176,17 +185,24 @@ async function autenticar(request: Request) {
     };
   }
 
-  const perfilNormalizado = String(perfil.nome || "")
+  const perfilNormalizado = String(perfil.codigo || perfil.nome || "")
     .trim()
     .toLowerCase();
 
-  const permitidos = new Set([
-    "administrador",
-    "funcionario",
-    "associado",
-  ]);
+  const perfilCanonico =
+    perfilNormalizado === "administrador" ||
+    perfilNormalizado === "admin" ||
+    perfilNormalizado === "administrador_normal"
+      ? "administrador_normal"
+      : perfilNormalizado === "administrador_master" || perfilNormalizado === "master"
+        ? "administrador_master"
+        : perfilNormalizado === "funcionario" || perfilNormalizado === "funcionário"
+          ? "funcionario"
+          : perfilNormalizado === "associado"
+            ? "associado"
+            : "";
 
-  if (!permitidos.has(perfilNormalizado)) {
+  if (!perfilCanonico) {
     return {
       response: NextResponse.json(
         { error: "Seu perfil não possui acesso às carteirinhas." },
@@ -198,7 +214,7 @@ async function autenticar(request: Request) {
   return {
     usuario: {
       id: usuario.id,
-      perfil: perfilNormalizado,
+      perfil: perfilCanonico,
       socio_id: usuario.socio_id,
       ativo: usuario.ativo,
       nome_exibicao: usuario.nome_exibicao,
@@ -210,13 +226,9 @@ async function autenticar(request: Request) {
 export async function GET(request: Request) {
   try {
     const auth = await autenticar(request);
-
-    if ("response" in auth) {
-      return auth.response;
-    }
+    if ("response" in auth) return auth.response;
 
     const supabase = getServiceClient();
-
     const base =
       "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade";
 
@@ -235,9 +247,7 @@ export async function GET(request: Request) {
         .select(base)
         .eq("id", auth.usuario.socio_id)
         .maybeSingle();
-
       if (error) throw error;
-
       if (data) socios = [data];
     } else {
       const { data, error } = await supabase
@@ -245,39 +255,29 @@ export async function GET(request: Request) {
         .select(base)
         .order("nome")
         .limit(1000);
-
       if (error) throw error;
-
       socios = data || [];
     }
 
     const ids = socios.map((s) => s.id).filter(Boolean);
-
     let mensalidades: any[] = [];
     let dependentes: any[] = [];
 
     if (ids.length) {
-      const { data, error } = await supabase
+      const { data: mensalidadesData, error: mensalidadesError } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
         .in("socio_id", ids);
+      if (mensalidadesError) throw mensalidadesError;
+      mensalidades = mensalidadesData || [];
 
-      if (error) throw error;
-
-      mensalidades = data || [];
-
-      const { data: dependentesData, error: dependentesError } =
-        await supabase
-          .from("dependentes")
-          .select("id,socio_id,nome,cpf,parentesco,ativo")
-          .in("socio_id", ids)
-          .order("nome", { ascending: true });
-
+      const { data: dependentesData, error: dependentesError } = await supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,cpf,parentesco,ativo")
+        .in("socio_id", ids)
+        .order("nome", { ascending: true });
       if (dependentesError) throw dependentesError;
-
-      dependentes = (dependentesData || []).filter(
-        (d) => d.ativo !== false
-      );
+      dependentes = (dependentesData || []).filter((d) => d.ativo !== false);
     }
 
     const resultado = socios.map((s) => ({
@@ -289,14 +289,13 @@ export async function GET(request: Request) {
       const titular = resultado.find(
         (s) => String(s.id) === String(d.socio_id)
       );
-
       return {
         ...d,
         titular_nome: titular?.nome || null,
         titular_matricula: titular?.matricula || null,
-        financeiro_status:
-          titular?.financeiro_status || "em_dia",
+        financeiro_status: titular?.financeiro_status || "em_dia",
         dias_atraso: titular?.dias_atraso || 0,
+        meses_atraso: titular?.meses_atraso || 0,
         situacao: titular?.situacao || null,
       };
     });
@@ -307,12 +306,12 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     console.error("[API carteirinhas] Erro:", error);
-
     return NextResponse.json(
       {
         error:
           error?.message ||
           error?.details ||
+          error?.hint ||
           "Erro ao carregar carteirinhas.",
         code: error?.code || null,
         details: error?.details || null,
