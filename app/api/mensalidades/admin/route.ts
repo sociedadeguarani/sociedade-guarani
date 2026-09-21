@@ -818,7 +818,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
+        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id,observacoes")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -923,10 +923,13 @@ export async function POST(request: Request) {
 
       const idsParaLimparOrfaos = new Set(
         registrosParaBaixar
-          .filter((r: any) =>
-            r.situacao !== "pago" &&
-            normalizarTexto(r.observacoes).includes("pagamento estornado")
-          )
+          .filter((r: any) => {
+            const observacao = normalizarTexto(r.observacoes || "");
+            return (
+              r.situacao !== "pago" &&
+              observacao.includes("pagamento estornado")
+            );
+          })
           .map((r: any) => String(r.id))
       );
 
