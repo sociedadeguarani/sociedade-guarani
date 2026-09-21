@@ -30,6 +30,7 @@ type Socio = {
   situacao: string | null;
   observacoes: string | null;
   foto_url: string | null;
+  exame_medico_validade: string | null;
 
   tipo_socio: string | null;
   responsavel_id: string | null;
@@ -100,6 +101,7 @@ const socioInicial: Partial<Socio> = {
   situacao: "ativo",
   observacoes: "",
   foto_url: "",
+  exame_medico_validade: "",
 
   tipo_socio: "patrimonial_individual",
   responsavel_id: null,
@@ -817,6 +819,7 @@ export default function Home() {
       categoria: form.categoria || "Titular",
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
+      exame_medico_validade: form.exame_medico_validade || null,
 
       tipo_socio: form.tipo_socio || "patrimonial_individual",
       responsavel_id: form.responsavel_id || null,
@@ -2942,6 +2945,28 @@ function ModalSocio({
                 </div>
               </>
             ) : null}
+
+            <div className="md:col-span-4 rounded-2xl border border-[#b9dcca] bg-[#f0f7f3] p-4">
+              <div className="mb-4">
+                <p className="text-sm font-extrabold text-[#003d2b]">🩺 Exame médico</p>
+                <p className="mt-1 text-xs text-[#718079]">
+                  Informe a data até a qual o exame médico está válido. O status será mostrado na carteirinha.
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Campo
+                  label="Válido até"
+                  type="date"
+                  value={form.exame_medico_validade}
+                  onChange={(v) => alterarCampo("exame_medico_validade", v)}
+                />
+                <div className="flex items-end">
+                  <div className="w-full rounded-xl bg-white p-3 text-sm text-gray-600 ring-1 ring-[#dfe9e3]">
+                    <b>Carteirinha:</b> a data será exibida como validade do exame médico.
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div className="md:col-span-4 rounded-2xl border border-[#dfe9e3] bg-[#f7faf8] p-4">
               <div className="mb-4">
