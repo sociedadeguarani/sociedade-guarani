@@ -223,22 +223,50 @@ export default function Page() {
   }, [ano, mes]);
 
   function tipoCobranca(m: M) {
-    const pagamento = String(m.tipo_pagamento || "").toLowerCase().trim();
+    const pagamento = String(m.tipo_pagamento || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[ -]+/g, "_");
+
+    // O cadastro histórico usa diretamente banrisul/sicredi/bb,
+    // enquanto alguns registros antigos usam debito_em_conta.
+    // O filtro precisa entender os dois formatos.
+    if (pagamento === "banrisul" || pagamento === "bergs" || pagamento === "debito_banrisul") {
+      return "banrisul";
+    }
+    if (pagamento === "sicredi" || pagamento === "debito_sicredi") {
+      return "sicredi";
+    }
+    if (
+      pagamento === "bb" ||
+      pagamento === "banco_do_brasil" ||
+      pagamento === "debito_bb" ||
+      pagamento === "debito_banco_do_brasil"
+    ) {
+      return "bb";
+    }
+
     if (pagamento === "boleto") return "boleto";
     if (pagamento === "pix") return "pix";
     if (pagamento === "dinheiro") return "dinheiro";
     if (pagamento === "transferencia") return "transferencia";
     if (pagamento === "outro") return "outro";
 
-    if (pagamento === "debito_em_conta") {
+    if (pagamento === "debito_em_conta" || pagamento === "debito") {
       const conta = contas.find(
         (c) => String(c.id) === String(m.socio?.conta_bancaria_id)
       );
-      const nome = `${conta?.nome || ""} ${conta?.banco || ""}`.toLowerCase();
-      if (nome.includes("banrisul")) return "banrisul";
+      const nome = `${conta?.nome || ""} ${conta?.banco || ""}`
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+      if (nome.includes("banrisul") || nome.includes("bergs")) return "banrisul";
       if (nome.includes("sicredi")) return "sicredi";
-      if (nome.includes("brasil") || nome.includes("bb")) return "bb";
-      return "debito_em_conta";
+      if (nome.includes("banco do brasil") || /\bbb\b/.test(nome)) return "bb";
+      return "sem_pagamento";
     }
 
     return "sem_pagamento";
