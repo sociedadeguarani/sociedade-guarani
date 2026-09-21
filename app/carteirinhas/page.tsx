@@ -33,6 +33,7 @@ type Socio = {
   foto_url: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
+  exame_medico_validade: string | null;
   financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
   dias_atraso?: number;
 };
@@ -52,6 +53,22 @@ function formatarData(valor: string | null) {
   const data = new Date(valor);
   if (Number.isNaN(data.getTime())) return valor;
   return data.toLocaleDateString("pt-BR");
+}
+
+function statusExame(valor: string | null | undefined) {
+  if (!valor) {
+    return { texto: "NÃO INFORMADO", ponto: "bg-gray-400", textoClasse: "text-gray-600" };
+  }
+  const data = new Date(`${String(valor).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(data.getTime())) {
+    return { texto: "DATA INVÁLIDA", ponto: "bg-gray-400", textoClasse: "text-gray-600" };
+  }
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  if (data < hoje) {
+    return { texto: `VENCIDO EM ${formatarData(valor)}`, ponto: "bg-red-500", textoClasse: "text-red-700" };
+  }
+  return { texto: `VÁLIDO ATÉ ${formatarData(valor)}`, ponto: "bg-emerald-500", textoClasse: "text-emerald-700" };
 }
 
 function formatarCpf(valor: string | null | undefined) {
@@ -134,6 +151,7 @@ export default function CarteirinhasPage() {
   const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
   const statusFinanceiroText = statusFinanceiro === "atrasado" ? "Atrasada há 2 semanas ou mais" : statusFinanceiro === "muito_atrasado" ? "Atrasada há mais de 2 meses" : "Mensalidades em dia";
   const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
+  const exame = statusExame(selecionado?.exame_medico_validade);
 
   function imprimirCarteirinha() {
     if (!selecionado) return;
@@ -333,6 +351,7 @@ export default function CarteirinhasPage() {
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div></div>
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{validade ? formatarData(validade) : "Conforme cadastro"}</div></div>
                         <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>
+                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exame.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exame.textoClasse}`}>{exame.texto}</div></div></div>
                       </div>
                       <QRCodeSVG className="card-qr" value={qrValue} size={112} includeMargin />
                     </div>
