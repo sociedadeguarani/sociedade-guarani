@@ -23,6 +23,7 @@ type M = {
   tipo_pagamento: string | null;
   observacoes: string | null;
   motivo: string | null;
+  conta_pagadora_id?: string | null;
   socio?: any;
 };
 
@@ -172,7 +173,6 @@ export default function Page() {
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
-  const [processandoEstornoId, setProcessandoEstornoId] = useState<string | null>(null);
 
   async function h() {
     const {
@@ -223,23 +223,73 @@ export default function Page() {
     void carregar();
   }, [ano, mes]);
 
+  function normalizarPagamento(valor: unknown) {
+    return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_");
+  }
+
+  function normalizarBanco(valor: unknown) {
+    return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s_-]+/g, " ");
+  }
+
   function tipoCobranca(m: M) {
-    const pagamento = String(m.tipo_pagamento || "").toLowerCase().trim();
+    const pagamento = normalizarPagamento(m.tipo_pagamento);
+
+    // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
+    if (pagamento === "pix" || pagamento === "botero") return "pix";
     if (pagamento === "boleto") return "boleto";
-    if (pagamento === "pix") return "pix";
     if (pagamento === "dinheiro") return "dinheiro";
     if (pagamento === "transferencia") return "transferencia";
     if (pagamento === "outro") return "outro";
 
-    if (pagamento === "debito_em_conta") {
-      const conta = contas.find(
-        (c) => String(c.id) === String(m.socio?.conta_bancaria_id)
-      );
-      const nome = `${conta?.nome || ""} ${conta?.banco || ""}`.toLowerCase();
-      if (nome.includes("banrisul")) return "banrisul";
-      if (nome.includes("sicredi")) return "sicredi";
-      if (nome.includes("brasil") || nome.includes("bb")) return "bb";
-      return "debito_em_conta";
+    // Alguns cadastros antigos gravam o banco diretamente no tipo_pagamento.
+    if (pagamento === "banrisul" || pagamento === "bergs" || pagamento.includes("banrisul")) {
+      return "banrisul";
+    }
+    if (pagamento === "sicredi" || pagamento.includes("sicredi")) {
+      return "sicredi";
+    }
+    if (
+      pagamento === "bb" ||
+      pagamento === "banco_do_brasil" ||
+      pagamento.includes("banco_do_brasil") ||
+      pagamento === "debito_bb"
+    ) {
+      return "bb";
+    }
+
+    // O cadastro atual normalmente grava apenas "debito_em_conta".
+    // Também inferimos pelo banco quando o tipo_pagamento veio vazio,
+    // usando primeiro a conta gravada na própria mensalidade e depois
+    // a conta atual do associado.
+    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
+
+    if (
+      pagamento === "debito_em_conta" ||
+      pagamento === "debito" ||
+      pagamento === "debito_em_conta_bancaria" ||
+      !pagamento
+    ) {
+      if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
+      if (banco.includes("sicredi")) return "sicredi";
+      if (
+        banco === "bb" ||
+        banco.includes(" bb ") ||
+        banco.includes("banco do brasil")
+      ) {
+        return "bb";
+      }
     }
 
     return "sem_pagamento";
@@ -287,16 +337,15 @@ export default function Page() {
     }
   }
 
-  async function estornarPagamento(item: M) {
+  async function estornarBaixa(item: M) {
     if (item.situacao !== "pago") return;
 
     const confirmar = window.confirm(
-      `Estornar a baixa de ${item.socio?.nome || "este associado"}?\n\nA mensalidade voltará para Em aberto e, se existir, a entrada financeira correspondente também será estornada.`
+      `Deseja estornar a baixa de ${item.socio?.nome || "este associado"}?\n\nA mensalidade voltará para Em aberto e a entrada financeira pendente será removida.`
     );
 
     if (!confirmar) return;
 
-    setProcessandoEstornoId(item.id);
     setErro("");
     setMsg("");
 
@@ -311,14 +360,14 @@ export default function Page() {
       });
 
       const d = await r.json();
+
       if (!r.ok) throw Error(d.error || "Não foi possível estornar a baixa.");
 
-      setMsg(d.message || "Baixa estornada com sucesso.");
+      setMsg(d.message || "Pagamento estornado com sucesso.");
+      setSel((atual) => atual.filter((id) => id !== item.id));
       await carregar();
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao estornar a baixa.");
-    } finally {
-      setProcessandoEstornoId(null);
+      setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
     }
   }
 
@@ -700,13 +749,10 @@ export default function Page() {
                           {x.situacao === "pago" ? (
                             <button
                               type="button"
-                              onClick={() => void estornarPagamento(x)}
-                              disabled={processandoEstornoId === x.id}
-                              className="whitespace-nowrap rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => void estornarBaixa(x)}
+                              className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 hover:bg-yellow-100"
                             >
-                              {processandoEstornoId === x.id
-                                ? "Estornando..."
-                                : "↩ Estornar baixa"}
+                              ↩️ Estornar baixa
                             </button>
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
