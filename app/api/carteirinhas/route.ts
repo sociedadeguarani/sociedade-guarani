@@ -263,21 +263,33 @@ export async function GET(request: Request) {
     let mensalidades: any[] = [];
     let dependentes: any[] = [];
 
-    if (ids.length) {
+    // O sistema pode ter centenas de sócios. Fazer um único .in("socio_id", ids)
+    // gera uma URL muito grande no PostgREST e pode retornar 400 Bad Request.
+    // Por isso, as consultas são feitas em lotes pequenos, sem alterar nenhuma
+    // regra de mensalidade ou de dependentes.
+    const TAMANHO_LOTE = 100;
+
+    for (let inicio = 0; inicio < ids.length; inicio += TAMANHO_LOTE) {
+      const loteIds = ids.slice(inicio, inicio + TAMANHO_LOTE);
+
       const { data: mensalidadesData, error: mensalidadesError } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
-        .in("socio_id", ids);
+        .in("socio_id", loteIds);
+
       if (mensalidadesError) throw mensalidadesError;
-      mensalidades = mensalidadesData || [];
+      mensalidades.push(...(mensalidadesData || []));
 
       const { data: dependentesData, error: dependentesError } = await supabase
         .from("dependentes")
         .select("id,socio_id,nome,cpf,parentesco,ativo")
-        .in("socio_id", ids)
+        .in("socio_id", loteIds)
         .order("nome", { ascending: true });
+
       if (dependentesError) throw dependentesError;
-      dependentes = (dependentesData || []).filter((d) => d.ativo !== false);
+      dependentes.push(
+        ...(dependentesData || []).filter((d) => d.ativo !== false)
+      );
     }
 
     const resultado = socios.map((s) => ({
