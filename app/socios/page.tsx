@@ -62,14 +62,19 @@ type Mensalidade = {
 };
 
 const menus = [
-  { nome: "Início", icone: "🏠" },
-  { nome: "Sócios", icone: "👥" },
-  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦" },
-  { nome: "Reservas", icone: "📅" },
-  { nome: "Eventos", icone: "🎉" },
-  { nome: "Financeiro", icone: "💰" },
-  { nome: "Espaços", icone: "🏛️" },
-  { nome: "Relatórios", icone: "📊" },
+  { nome: "Início", icone: "🏠", rota: "/painel" },
+  { nome: "Avisos", icone: "📢", rota: "/avisos" },
+  { nome: "Reservas", icone: "📅", rota: "/reservas" },
+  { nome: "Eventos", icone: "🎉", rota: "/eventos" },
+  { nome: "Convites", icone: "🎟️", rota: "/convites" },
+  { nome: "Carteirinhas", icone: "🎫", rota: "/carteirinhas" },
+  { nome: "Sócios", icone: "👥", rota: "/socios" },
+  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦", rota: "/dependentes" },
+  { nome: "Mensalidades", icone: "💳", rota: "/mensalidades" },
+  { nome: "Financeiro", icone: "💰", rota: "/financeiro" },
+  { nome: "Inventário", icone: "📦", rota: "/inventario" },
+  { nome: "Acessos", icone: "🚪", rota: "/acessos" },
+  { nome: "Relatórios", icone: "📊", rota: "/relatorios" },
 ];
 
 const socioInicial: Partial<Socio> = {
@@ -1023,17 +1028,16 @@ export default function Home() {
             {menus.map((item) => (
               <button
                 key={item.nome}
+                type="button"
                 onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
+                  if (item.rota === "/socios") {
+                    setMenu("Sócios");
+                    return;
+                  }
+                  window.location.href = item.rota;
+                }}
                 className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
-                  menu === item.nome
+                  item.rota === "/socios"
                     ? "bg-[#005a3c] text-white shadow-sm"
                     : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
                 }`}
@@ -1071,17 +1075,16 @@ export default function Home() {
             {menus.map((item) => (
               <button
                 key={item.nome}
+                type="button"
                 onClick={() => {
-                    if (item.nome === "Financeiro") {
-                      void abrirFinanceiro();
-                    } else if (item.nome === "Relatórios") {
-                      abrirRelatorios();
-                    } else {
-                      setMenu(item.nome);
-                    }
-                  }}
+                  if (item.rota === "/socios") {
+                    setMenu("Sócios");
+                    return;
+                  }
+                  window.location.href = item.rota;
+                }}
                 className={`rounded-xl p-3 text-xs font-semibold ${
-                  menu === item.nome
+                  item.rota === "/socios"
                     ? "bg-[#005a3c] text-white"
                     : "bg-white text-gray-700 shadow-sm"
                 }`}
