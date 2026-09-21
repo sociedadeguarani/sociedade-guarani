@@ -909,18 +909,47 @@ export async function POST(request: Request) {
       }
 
       // Verifica antes da baixa se alguma mensalidade já possui entrada.
-      // Assim uma nova tentativa nunca duplica o recebimento.
+      // Registros antigos podem ter ficado órfãos após um estorno: nesses casos
+      // a mensalidade fica "em_aberto" com observação de estorno e a entrada
+      // antiga precisa ser removida antes de permitir uma nova baixa.
       const { data: movimentosExistentes, error: erroMovimentosExistentes } =
         await db
           .from("movimentacoes_financeiras")
-          .select("id,origem_id")
+          .select("id,origem_id,conta_bancaria_id,valor,conciliado,descricao")
           .eq("origem_tipo", "mensalidade")
           .in("origem_id", idsParaBaixar);
 
       if (erroMovimentosExistentes) throw erroMovimentosExistentes;
 
+      const idsParaLimparOrfaos = new Set(
+        registrosParaBaixar
+          .filter((r: any) =>
+            r.situacao !== "pago" &&
+            normalizarTexto(r.observacoes).includes("pagamento estornado")
+          )
+          .map((r: any) => String(r.id))
+      );
+
+      const movimentosOrfaos = (movimentosExistentes || []).filter(
+        (m: any) => idsParaLimparOrfaos.has(String(m.origem_id)) && m.conciliado !== true
+      );
+
+      if (movimentosOrfaos.length > 0) {
+        const idsMovimentosOrfaos = movimentosOrfaos.map((m: any) => String(m.id));
+        const { error: erroLimpezaOrfaos } = await db
+          .from("movimentacoes_financeiras")
+          .delete()
+          .in("id", idsMovimentosOrfaos);
+
+        if (erroLimpezaOrfaos) throw erroLimpezaOrfaos;
+      }
+
+      const movimentosRestantes = (movimentosExistentes || []).filter(
+        (m: any) => !movimentosOrfaos.some((o: any) => String(o.id) === String(m.id))
+      );
+
       const idsComEntrada = new Set(
-        (movimentosExistentes || []).map((m: any) => String(m.origem_id))
+        movimentosRestantes.map((m: any) => String(m.origem_id))
       );
 
       const registrosComEntrada = registrosParaBaixar.filter((r: any) =>
@@ -1033,10 +1062,6 @@ export async function POST(request: Request) {
      * =====================================================
      * ESTORNAR BAIXA
      * =====================================================
-     * Reabre a mensalidade e remove a entrada financeira vinculada
-     * quando ela ainda não foi conciliada. Se a entrada já estiver
-     * conciliada, preservamos o histórico e lançamos uma saída de
-     * estorno para neutralizar o efeito no caixa.
      */
     if (acao === "estornar") {
       const id = String(body.id || "").trim();
@@ -1050,12 +1075,11 @@ export async function POST(request: Request) {
 
       const { data: mensalidade, error: erroMensalidade } = await db
         .from("mensalidades")
-        .select("id,socio_id,competencia,situacao,data_pagamento,tipo_pagamento,comprovante_url,observacoes,total_cobrado,valor,conta_pagadora_id")
+        .select("id,socio_id,competencia,situacao,valor,total_cobrado,observacoes")
         .eq("id", id)
         .maybeSingle();
 
       if (erroMensalidade) throw erroMensalidade;
-
       if (!mensalidade) {
         return NextResponse.json(
           { error: "Mensalidade não encontrada." },
@@ -1065,107 +1089,97 @@ export async function POST(request: Request) {
 
       if (mensalidade.situacao !== "pago") {
         return NextResponse.json(
-          { error: "Esta mensalidade não está baixada como paga." },
+          { error: "Esta mensalidade não está paga." },
           { status: 400 }
         );
       }
 
       const { data: movimentos, error: erroMovimentos } = await db
         .from("movimentacoes_financeiras")
-        .select("id,conta_bancaria_id,tipo,valor,conciliado,origem_tipo,origem_id,descricao,observacoes")
+        .select("id,conta_bancaria_id,valor,conciliado,descricao,data_movimentacao")
         .eq("origem_tipo", "mensalidade")
-        .eq("origem_id", id);
+        .eq("origem_id", id)
+        .order("data_movimentacao", { ascending: false });
 
       if (erroMovimentos) throw erroMovimentos;
 
-      const { data: estornosExistentes, error: erroEstornos } = await db
-        .from("movimentacoes_financeiras")
-        .select("id")
-        .eq("origem_tipo", "estorno_mensalidade")
-        .eq("origem_id", id)
-        .limit(1);
+      const pendentes = (movimentos || []).filter((m: any) => m.conciliado !== true);
+      const conciliadas = (movimentos || []).filter((m: any) => m.conciliado === true);
 
-      if (erroEstornos) throw erroEstornos;
-
-      if ((estornosExistentes || []).length > 0) {
-        return NextResponse.json(
-          { error: "Esta mensalidade já possui um estorno financeiro registrado." },
-          { status: 409 }
-        );
-      }
-
-      const pendentes = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado !== true
-      );
-      const conciliados = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado === true
-      );
-
-      // Entradas ainda pendentes podem ser removidas sem perder
-      // conciliação/histórico bancário. Isso faz o valor desaparecer
-      // imediatamente do quadro de Entradas, como no caso do Aldoir.
-      for (const movimento of pendentes) {
+      if (pendentes.length > 0) {
+        const ids = pendentes.map((m: any) => String(m.id));
         const { error } = await db
           .from("movimentacoes_financeiras")
           .delete()
-          .eq("id", movimento.id);
-
+          .in("id", ids);
         if (error) throw error;
       }
 
-      // Se já foi conciliada, não apagamos o histórico. Criamos uma
-      // saída correspondente, mantendo a trilha do estorno.
-      for (const movimento of conciliados) {
-        const { error } = await db
+      if (conciliadas.length > 0) {
+        // Mantém a entrada conciliada para preservar o histórico e cria uma
+        // saída compensatória na mesma conta. A operação é idempotente.
+        const { data: estornoExistente, error: erroBuscaEstorno } = await db
           .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: movimento.conta_bancaria_id,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "saida",
-            categoria: "Estorno de Mensalidade",
-            descricao: `Estorno de mensalidade ${String(mensalidade.competencia || "").slice(0, 7)}`,
-            valor: Number(movimento.valor || mensalidade.total_cobrado || mensalidade.valor || 0),
-            data_movimentacao: new Date().toISOString().slice(0, 10),
-            forma_pagamento: mensalidade.tipo_pagamento || null,
-            origem_tipo: "estorno_mensalidade",
-            origem_id: id,
-            socio_id: mensalidade.socio_id || null,
-            dependente_id: null,
-            comprovante_url: null,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: `Estorno da entrada financeira ${movimento.id}.`,
-          });
+          .select("id")
+          .eq("origem_tipo", "estorno_mensalidade")
+          .eq("origem_id", id)
+          .limit(1);
 
-        if (error) throw error;
+        if (erroBuscaEstorno) throw erroBuscaEstorno;
+
+        if (!estornoExistente?.length) {
+          const movimento = conciliadas[0];
+          const valor = Number(movimento.valor ?? mensalidade.total_cobrado ?? mensalidade.valor ?? 0);
+
+          const { error: erroSaida } = await db
+            .from("movimentacoes_financeiras")
+            .insert({
+              conta_bancaria_id: movimento.conta_bancaria_id,
+              conta_destino_id: null,
+              grupo_transferencia: null,
+              tipo: "saida",
+              categoria: "Estorno de Mensalidade",
+              descricao: `Estorno de mensalidade ${String(mensalidade.competencia || "").slice(0, 7)}`,
+              valor,
+              data_movimentacao: new Date().toISOString().slice(0, 10),
+              forma_pagamento: null,
+              origem_tipo: "estorno_mensalidade",
+              origem_id: id,
+              socio_id: mensalidade.socio_id,
+              dependente_id: null,
+              comprovante_url: null,
+              conciliado: false,
+              data_conciliacao: null,
+              observacoes: "Estorno de mensalidade conciliada.",
+            });
+
+          if (erroSaida) throw erroSaida;
+        }
       }
 
       const observacaoAnterior = String(mensalidade.observacoes || "").trim();
-      const observacaoEstorno = `Pagamento estornado em ${new Date().toLocaleDateString("pt-BR")} — aguardando nova baixa.`;
-      const observacoes = observacaoAnterior
-        ? `${observacaoAnterior}\n${observacaoEstorno}`
-        : observacaoEstorno;
+      const observacaoEstorno = `Pagamento estornado — aguardando nova baixa.${
+        observacaoAnterior && !normalizarTexto(observacaoAnterior).includes("pagamento estornado")
+          ? ` ${observacaoAnterior}`
+          : ""
+      }`;
 
-      const { error: erroUpdate } = await db
+      const { error: erroAtualizacao } = await db
         .from("mensalidades")
         .update({
           situacao: "em_aberto",
           data_pagamento: null,
           tipo_pagamento: null,
           comprovante_url: null,
-          observacoes,
+          observacoes: observacaoEstorno,
         })
         .eq("id", id);
 
-      if (erroUpdate) throw erroUpdate;
+      if (erroAtualizacao) throw erroAtualizacao;
 
       return NextResponse.json({
         ok: true,
-        mensagemId: id,
-        entradas_removidas: pendentes.length,
-        estornos_conciliados: conciliados.length,
-        message: "Pagamento estornado com sucesso. A mensalidade voltou para Em aberto.",
+        message: "Baixa estornada com sucesso.",
       });
     }
 
