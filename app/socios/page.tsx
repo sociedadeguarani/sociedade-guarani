@@ -64,6 +64,23 @@ type Mensalidade = {
 
 
 
+const menus = [
+  { nome: "Início", icone: "🏠", rota: "/painel" },
+  { nome: "Avisos", icone: "📢", rota: "/avisos" },
+  { nome: "Reservas", icone: "📅", rota: "/reservas" },
+  { nome: "Eventos", icone: "🎉", rota: "/eventos" },
+  { nome: "Convites", icone: "🎟️", rota: "/convites" },
+  { nome: "Carteirinhas", icone: "🎫", rota: "/carteirinhas" },
+  { nome: "Sócios", icone: "👥", rota: "/socios" },
+  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦", rota: "/dependentes" },
+  { nome: "Mensalidades", icone: "💳", rota: "/mensalidades" },
+  { nome: "Financeiro", icone: "💰", rota: "/financeiro" },
+  { nome: "Inventário", icone: "📦", rota: "/inventario" },
+  { nome: "Acessos", icone: "🚪", rota: "/acessos" },
+  { nome: "Relatórios", icone: "📊", rota: "/relatorios" },
+];
+
+
 const socioInicial: Partial<Socio> = {
   nome: "",
   cpf: "",
