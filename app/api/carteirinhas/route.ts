@@ -74,7 +74,24 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ socios: resultado, dependentes: dependentesResultado });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar carteirinhas." }, { status: 500 });
+  } catch (error: any) {
+    console.error("[API carteirinhas] Erro:", error);
+
+    const mensagem =
+      error?.message ||
+      error?.details ||
+      error?.hint ||
+      (typeof error === "string" ? error : null) ||
+      "Erro ao carregar carteirinhas.";
+
+    return NextResponse.json(
+      {
+        error: mensagem,
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+      },
+      { status: 500 },
+    );
   }
 }
