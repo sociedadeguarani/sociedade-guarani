@@ -286,7 +286,7 @@ export async function GET(request: Request) {
     const { data: socios, error: erroSocios } = await db
       .from("socios")
       .select(
-        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
+        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
       )
       .order("nome");
 
@@ -818,7 +818,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
+        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -867,11 +867,84 @@ export async function POST(request: Request) {
       if (erroCobrancas) throw erroCobrancas;
 
       const regraCobranca = cobrancas?.[0] || null;
+
+      // Recupera a conta vinculada ao associado para que a baixa também
+      // gere automaticamente a entrada correspondente no fluxo financeiro.
+      const socioIds = Array.from(
+        new Set((registros || []).map((r: any) => String(r.socio_id)))
+      );
+
+      const { data: sociosBaixa, error: erroSociosBaixa } = await db
+        .from("socios")
+        .select("id,nome,matricula,conta_bancaria_id,responsavel_id")
+        .in("id", socioIds);
+
+      if (erroSociosBaixa) throw erroSociosBaixa;
+
+      const mapaSociosBaixa = new Map<string, any>(
+        (sociosBaixa || []).map((s: any) => [String(s.id), s])
+      );
+
       const registrosParaBaixar = (registros || []).filter((r: any) =>
         idsParaBaixar.includes(String(r.id))
       );
 
+      // Não permite marcar como pago sem uma conta de destino definida.
+      const semConta = registrosParaBaixar.filter((r: any) => {
+        const socio = mapaSociosBaixa.get(String(r.socio_id));
+        return !r.conta_pagadora_id && !socio?.conta_bancaria_id;
+      });
+
+      if (semConta.length > 0) {
+        const nomes = semConta
+          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
+          .join(", ");
+
+        return NextResponse.json(
+          {
+            error: `Não foi possível registrar a entrada financeira. Cadastre a conta bancária de: ${nomes}.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Verifica antes da baixa se alguma mensalidade já possui entrada.
+      // Assim uma nova tentativa nunca duplica o recebimento.
+      const { data: movimentosExistentes, error: erroMovimentosExistentes } =
+        await db
+          .from("movimentacoes_financeiras")
+          .select("id,origem_id")
+          .eq("origem_tipo", "mensalidade")
+          .in("origem_id", idsParaBaixar);
+
+      if (erroMovimentosExistentes) throw erroMovimentosExistentes;
+
+      const idsComEntrada = new Set(
+        (movimentosExistentes || []).map((m: any) => String(m.origem_id))
+      );
+
+      const registrosComEntrada = registrosParaBaixar.filter((r: any) =>
+        idsComEntrada.has(String(r.id))
+      );
+
+      if (registrosComEntrada.length > 0) {
+        const nomes = registrosComEntrada
+          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
+          .join(", ");
+
+        return NextResponse.json(
+          {
+            error: `Já existe entrada financeira para: ${nomes}. A baixa foi interrompida para evitar duplicidade.`,
+          },
+          { status: 409 }
+        );
+      }
+
       for (const registro of registrosParaBaixar) {
+        const socio = mapaSociosBaixa.get(String(registro.socio_id));
+        const contaId =
+          registro.conta_pagadora_id || socio?.conta_bancaria_id || null;
+
         const formaPagamento =
           body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
 
@@ -883,7 +956,7 @@ export async function POST(request: Request) {
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento, registro.conta_pagadora_id ? mapaContas.get(String(registro.conta_pagadora_id)) || null : null),
+          valorTarifa(tarifas || [], formaPagamento, contaId ? mapaContas.get(String(contaId)) || null : null),
           regraCobranca
         );
 
@@ -905,6 +978,46 @@ export async function POST(request: Request) {
           .eq("id", registro.id);
 
         if (erroBaixa) throw erroBaixa;
+
+        // A baixa da mensalidade precisa gerar a entrada no Financeiro.
+        // Cada mensalidade recebe sua própria origem_id para impedir
+        // duplicidade e permitir rastrear o recebimento até a cobrança.
+        const { error: erroEntrada } = await db
+          .from("movimentacoes_financeiras")
+          .insert({
+            conta_bancaria_id: contaId,
+            conta_destino_id: null,
+            grupo_transferencia: null,
+            tipo: "entrada",
+            categoria: "Mensalidade",
+            descricao: `Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
+            valor: Number(calculado.total_cobrado || valorBase || 0),
+            data_movimentacao: dataPagamento,
+            forma_pagamento: formaPagamento,
+            origem_tipo: "mensalidade",
+            origem_id: registro.id,
+            socio_id: registro.socio_id,
+            dependente_id: null,
+            comprovante_url: null,
+            conciliado: false,
+            data_conciliacao: null,
+            observacoes: body.observacoes || null,
+          });
+
+        if (erroEntrada) {
+          // Se a entrada falhar, desfaz a marcação como paga para não
+          // deixar a mensalidade quitada sem correspondente financeiro.
+          await db
+            .from("mensalidades")
+            .update({
+              situacao: registro.situacao,
+              data_pagamento: null,
+              tipo_pagamento: registro.tipo_pagamento || null,
+            })
+            .eq("id", registro.id);
+
+          throw erroEntrada;
+        }
       }
 
       return NextResponse.json({
