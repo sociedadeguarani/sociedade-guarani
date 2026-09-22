@@ -3059,10 +3059,6 @@ function ModalSocio({
                       value={form.valor_mensalidade}
                       onChange={(v) => alterarCampo("valor_mensalidade", v)}
                       placeholder="0,00"
-                      disabled={
-                        ehDependenteComMensalidadeIndividual(form.tipo_socio) ||
-                        ehDependenteComMensalidadeFamiliar(form.tipo_socio)
-                      }
                     />
 
                     <Campo
