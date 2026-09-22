@@ -30,7 +30,6 @@ type Socio = {
   situacao: string | null;
   observacoes: string | null;
   foto_url: string | null;
-  exame_medico_validade: string | null;
 
   tipo_socio: string | null;
   responsavel_id: string | null;
@@ -43,6 +42,7 @@ type Socio = {
   modalidade_temporada: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
+  exame_medico_validade: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
 };
@@ -101,7 +101,6 @@ const socioInicial: Partial<Socio> = {
   situacao: "ativo",
   observacoes: "",
   foto_url: "",
-  exame_medico_validade: "",
 
   tipo_socio: "patrimonial_individual",
   responsavel_id: null,
@@ -114,6 +113,7 @@ const socioInicial: Partial<Socio> = {
   modalidade_temporada: null,
   inicio_temporada: "",
   fim_temporada: "",
+  exame_medico_validade: "",
   situacao_financeira: "isento",
   data_ultimo_pagamento: "",
 };
@@ -819,7 +819,6 @@ export default function Home() {
       categoria: form.categoria || "Titular",
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
-      exame_medico_validade: form.exame_medico_validade || null,
 
       tipo_socio: form.tipo_socio || "patrimonial_individual",
       responsavel_id: form.responsavel_id || null,
@@ -835,6 +834,7 @@ export default function Home() {
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
+      exame_medico_validade: form.exame_medico_validade || null,
       situacao_financeira: form.situacao_financeira || "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
@@ -2946,28 +2946,6 @@ function ModalSocio({
               </>
             ) : null}
 
-            <div className="md:col-span-4 rounded-2xl border border-[#b9dcca] bg-[#f0f7f3] p-4">
-              <div className="mb-4">
-                <p className="text-sm font-extrabold text-[#003d2b]">🩺 Exame médico</p>
-                <p className="mt-1 text-xs text-[#718079]">
-                  Informe a data até a qual o exame médico está válido. O status será mostrado na carteirinha.
-                </p>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Campo
-                  label="Válido até"
-                  type="date"
-                  value={form.exame_medico_validade}
-                  onChange={(v) => alterarCampo("exame_medico_validade", v)}
-                />
-                <div className="flex items-end">
-                  <div className="w-full rounded-xl bg-white p-3 text-sm text-gray-600 ring-1 ring-[#dfe9e3]">
-                    <b>Carteirinha:</b> a data será exibida como validade do exame médico.
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <div className="md:col-span-4 rounded-2xl border border-[#dfe9e3] bg-[#f7faf8] p-4">
               <div className="mb-4">
                 <p className="text-sm font-extrabold text-[#003d2b]">
@@ -3090,6 +3068,32 @@ function ModalSocio({
                 </div>
               </div>
             ) : null}
+
+            <div className="md:col-span-4 rounded-2xl border border-[#cfe3d8] bg-[#f4faf7] p-4">
+
+              <div className="mb-4">
+                <p className="text-sm font-extrabold text-[#005a3c]">🩺 Exame médico</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Se o exame foi realizado, informe a data de validade. A carteirinha mostrará automaticamente se está válido ou vencido.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Campo
+                  label="Válido até"
+                  type="date"
+                  value={form.exame_medico_validade || ""}
+                  onChange={(v) => alterarCampo("exame_medico_validade", v)}
+                />
+                <div className="flex items-end">
+                  <div className="rounded-xl border border-[#d5e0da] bg-white p-3 text-sm text-gray-600">
+                    {form.exame_medico_validade
+                      ? "Exame registrado — validade informada."
+                      : "Exame ainda não informado."}
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div className="md:col-span-3">
 
