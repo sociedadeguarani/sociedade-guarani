@@ -741,6 +741,18 @@ export default function Home() {
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
 
+  // Permite que a página /dependentes abra diretamente o cadastro do dependente.
+  useEffect(() => {
+    const idParaEditar = new URLSearchParams(window.location.search).get("editar");
+    if (!idParaEditar || socios.length === 0 || abrirCadastro) return;
+
+    const socio = socios.find((s) => String(s.id) === String(idParaEditar));
+    if (socio) {
+      editarSocio(socio);
+      window.history.replaceState({}, "", "/socios");
+    }
+  }, [socios, abrirCadastro]);
+
   function novoSocio() {
     setSocioEditando(null);
     setBuscaResponsavel("");
@@ -836,18 +848,26 @@ export default function Home() {
       const responsavel = socios.find((s) => s.id === responsavelId);
 
       if (responsavel && tipoFinal.startsWith("dependente_")) {
-        if (ehDependenteComMensalidadeIndividual(tipoFinal)) {
-          proximo.possui_mensalidade = true;
-          proximo.valor_mensalidade =
-            Number(responsavel.valor_mensalidade || 0) * 0.5;
-        } else if (ehDependenteComMensalidadeFamiliar(tipoFinal)) {
-          proximo.possui_mensalidade = true;
-          proximo.valor_mensalidade =
-            Number(responsavel.valor_mensalidade || 0);
+        // Ao definir/trocar o responsável, o sistema preenche automaticamente
+        // o valor correto. Depois disso, o campo Valor mensal pode ser ajustado
+        // manualmente sem ser sobrescrito a cada tecla.
+        if (campo !== "valor_mensalidade") {
+          if (ehDependenteComMensalidadeIndividual(tipoFinal)) {
+            proximo.possui_mensalidade = true;
+            proximo.valor_mensalidade =
+              Number(responsavel.valor_mensalidade || 0) * 0.5;
+          } else if (ehDependenteComMensalidadeFamiliar(tipoFinal)) {
+            proximo.possui_mensalidade = true;
+            proximo.valor_mensalidade =
+              Number(responsavel.valor_mensalidade || 0);
+          } else if (ehTipoDependenteSemMensalidade(tipoFinal)) {
+            proximo.possui_mensalidade = false;
+            proximo.valor_mensalidade = 0;
+          } else if (proximo.possui_mensalidade !== true) {
+            proximo.valor_mensalidade = 0;
+          }
         } else if (ehTipoDependenteSemMensalidade(tipoFinal)) {
           proximo.possui_mensalidade = false;
-          proximo.valor_mensalidade = 0;
-        } else if (proximo.possui_mensalidade !== true) {
           proximo.valor_mensalidade = 0;
         }
       }
@@ -1542,7 +1562,7 @@ function Socios({
                   Situação
                 </th>
 
-                <th className="px-5 py-4 text-right">
+                <th className="sticky right-0 z-20 bg-[#e8f3ee] px-5 py-4 text-right shadow-[-5px_0_10px_rgba(0,0,0,0.05)]">
                   Ações
                 </th>
 
@@ -1676,7 +1696,7 @@ function Socios({
 
                     </td>
 
-                    <td className="px-5 py-4">
+                    <td className="sticky right-0 z-10 bg-white px-5 py-4 shadow-[-5px_0_10px_rgba(0,0,0,0.05)]">
 
                       <div className="flex justify-end gap-2">
 
@@ -3087,7 +3107,7 @@ function ModalSocio({
                             : "Valor mensal"
                       }
                       type="number"
-                      value={form.valor_mensalidade}
+                      value={form.valor_mensalidade ?? ""}
                       onChange={(v) => alterarCampo("valor_mensalidade", v)}
                       placeholder="0,00"
                     />
