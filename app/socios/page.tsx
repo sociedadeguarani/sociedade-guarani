@@ -82,6 +82,7 @@ const menus = [
 
 
 const socioInicial: Partial<Socio> = {
+  matricula: null,
   nome: "",
   cpf: "",
   rg: "",
@@ -807,6 +808,11 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
+      ...(form.matricula !== undefined &&
+      form.matricula !== null &&
+      String(form.matricula).trim() !== ""
+        ? { matricula: Number(form.matricula) }
+        : {}),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -2898,6 +2904,20 @@ function ModalSocio({
 
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
+
+            <Campo
+              label="Matrícula"
+              type="number"
+              value={form.matricula ?? ""}
+              onChange={(v) => alterarCampo("matricula", v)}
+              placeholder="Ex.: 157"
+            />
+
+            <div className="flex items-end pb-2">
+              <p className="text-xs text-gray-500">
+                Informe a matrícula do associado. Ao editar, a matrícula atual será preservada.
+              </p>
+            </div>
 
             <Campo
               label="Data de associação"
