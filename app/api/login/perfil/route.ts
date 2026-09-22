@@ -3,6 +3,57 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+function normalizarPerfil(codigo?: string | null, nome?: string | null) {
+  const valorCodigo = String(codigo || "").trim().toLowerCase();
+  const valorNome = String(nome || "").trim().toLowerCase();
+
+  // O código é a fonte principal para diferenciar Administrador Master
+  // de Administrador Normal quando os nomes exibidos forem iguais.
+  const valor = valorCodigo || valorNome;
+
+  if (valor === "administrador_master" || valor === "master") {
+    return "administrador_master";
+  }
+
+  if (
+    valor === "administrador" ||
+    valor === "admin" ||
+    valor === "administrador_normal"
+  ) {
+    return "administrador_normal";
+  }
+
+  if (valor === "funcionario" || valor === "funcionário") {
+    return "funcionario";
+  }
+
+  if (valor === "associado") {
+    return "associado";
+  }
+
+  // Fallback: se o código não estiver preenchido, tenta o nome.
+  if (valorCodigo && valorCodigo !== valorNome) {
+    if (valorNome === "administrador_master" || valorNome === "master") {
+      return "administrador_master";
+    }
+    if (
+      valorNome === "administrador" ||
+      valorNome === "admin" ||
+      valorNome === "administrador_normal"
+    ) {
+      return "administrador_normal";
+    }
+    if (valorNome === "funcionario" || valorNome === "funcionário") {
+      return "funcionario";
+    }
+    if (valorNome === "associado") {
+      return "associado";
+    }
+  }
+
+  return "";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const authorization = request.headers.get("authorization");
@@ -27,7 +78,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Cliente para validar o token do usuário.
     const supabaseAuth = createClient(url, anonKey, {
       auth: {
         autoRefreshToken: false,
@@ -47,7 +97,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Cliente administrativo: consulta o banco sem depender do RLS do navegador.
     const supabaseAdmin = createClient(url, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
@@ -85,7 +134,7 @@ export async function GET(request: NextRequest) {
 
     const { data: perfil, error: perfilError } = await supabaseAdmin
       .from("perfis")
-      .select("id, nome")
+      .select("id, codigo, nome")
       .eq("id", usuario.perfil_id)
       .maybeSingle();
 
@@ -104,13 +153,25 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const perfilNormalizado = String(perfil.nome || "").trim().toLowerCase();
+    const perfilCanonico = normalizarPerfil(perfil.codigo, perfil.nome);
+
+    if (!perfilCanonico) {
+      return NextResponse.json(
+        { error: "Seu perfil de acesso não está configurado corretamente." },
+        { status: 403 }
+      );
+    }
 
     return NextResponse.json({
       usuario: {
         id: usuario.id,
         perfil_id: usuario.perfil_id,
-        perfil: perfilNormalizado,
+        // O login grava o perfil canônico no localStorage.
+        // Isso evita que "Administrador" seja confundido com associado
+        // ou com administrador normal quando o código real é Master.
+        perfil: perfilCanonico,
+        perfil_nome: perfil.nome,
+        perfil_codigo: perfil.codigo,
         socio_id: usuario.socio_id,
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
@@ -125,4 +186,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
