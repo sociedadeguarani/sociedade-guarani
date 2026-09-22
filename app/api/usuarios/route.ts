@@ -250,7 +250,7 @@ export async function PATCH(request: Request) {
       const { error: delError } = await db.from("permissoes_usuario").delete().eq("usuario_id", id);
       if (delError) throw new Error(delError.message);
       if (validas.length) {
-        const { error } = await db.from("permissoes_usuario").insert(validas.map((chave) => ({ usuario_id: id, chave, permitido: true })));
+        const { error } = await db.from("permissoes_usuario").insert(validas.map((chave: string) => ({ usuario_id: id, chave, permitido: true })));
         if (error) throw new Error(error.message);
       }
     }
