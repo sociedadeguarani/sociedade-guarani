@@ -230,9 +230,9 @@ export async function GET(request: Request) {
 
     const supabase = getServiceClient();
     const base =
-      "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade";
+      "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade,responsavel_id,parentesco";
 
-    let socios: any[] = [];
+    let todosSocios: any[] = [];
 
     if (auth.usuario.perfil === "associado") {
       if (!auth.usuario.socio_id) {
@@ -248,7 +248,7 @@ export async function GET(request: Request) {
         .eq("id", auth.usuario.socio_id)
         .maybeSingle();
       if (error) throw error;
-      if (data) socios = [data];
+      if (data) todosSocios = [data];
     } else {
       const { data, error } = await supabase
         .from("socios")
@@ -256,19 +256,42 @@ export async function GET(request: Request) {
         .order("nome")
         .limit(1000);
       if (error) throw error;
-      socios = data || [];
+      todosSocios = data || [];
+    }
+
+    // Nesta base, os dependentes podem estar cadastrados de duas formas:
+    // 1) como linhas na tabela socios, ligadas por responsavel_id;
+    // 2) na tabela dependentes, ligada por socio_id.
+    // Mantemos os dois modelos para não perder cadastros existentes.
+    const dependentesSocios =
+      auth.usuario.perfil === "associado"
+        ? []
+        : todosSocios.filter((s) => Boolean(s.responsavel_id));
+
+    let socios = todosSocios.filter((s) => !s.responsavel_id);
+
+    // Para associado, além do titular, carregamos seus dependentes da tabela socios.
+    if (auth.usuario.perfil === "associado" && auth.usuario.socio_id) {
+      const { data: filhosSocios, error: filhosError } = await supabase
+        .from("socios")
+        .select(base)
+        .eq("responsavel_id", auth.usuario.socio_id)
+        .order("nome");
+      if (filhosError) throw filhosError;
+      dependentesSocios.push(...(filhosSocios || []));
+    }
+
+    // Garante que o titular apareça mesmo se, por algum motivo, vier com responsavel_id.
+    if (auth.usuario.perfil === "associado" && todosSocios[0]) {
+      socios = [todosSocios[0]];
     }
 
     const ids = socios.map((s) => s.id).filter(Boolean);
     let mensalidades: any[] = [];
-    let dependentes: any[] = [];
+    let dependentesTabela: any[] = [];
 
-    // O sistema pode ter centenas de sócios. Fazer um único .in("socio_id", ids)
-    // gera uma URL muito grande no PostgREST e pode retornar 400 Bad Request.
-    // Por isso, as consultas são feitas em lotes pequenos, sem alterar nenhuma
-    // regra de mensalidade ou de dependentes.
+    // Evita URL gigante no PostgREST: consulta mensalidades/dependentes em lotes.
     const TAMANHO_LOTE = 100;
-
     for (let inicio = 0; inicio < ids.length; inicio += TAMANHO_LOTE) {
       const loteIds = ids.slice(inicio, inicio + TAMANHO_LOTE);
 
@@ -276,18 +299,16 @@ export async function GET(request: Request) {
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
         .in("socio_id", loteIds);
-
       if (mensalidadesError) throw mensalidadesError;
       mensalidades.push(...(mensalidadesData || []));
 
       const { data: dependentesData, error: dependentesError } = await supabase
         .from("dependentes")
-        .select("id,socio_id,nome,cpf,parentesco,ativo")
+        .select("id,socio_id,nome,cpf,parentesco,ativo,foto_url")
         .in("socio_id", loteIds)
         .order("nome", { ascending: true });
-
       if (dependentesError) throw dependentesError;
-      dependentes.push(
+      dependentesTabela.push(
         ...(dependentesData || []).filter((d) => d.ativo !== false)
       );
     }
@@ -297,10 +318,34 @@ export async function GET(request: Request) {
       ...calcularStatus(mensalidades, s.id),
     }));
 
-    const dependentesResultado = dependentes.map((d) => {
-      const titular = resultado.find(
-        (s) => String(s.id) === String(d.socio_id)
-      );
+    const titularesPorId = new Map(
+      resultado.map((s) => [String(s.id), s])
+    );
+
+    // Dependentes cadastrados como linhas da tabela socios.
+    const dependentesSociosResultado = dependentesSocios.map((d) => {
+      const titular = titularesPorId.get(String(d.responsavel_id));
+      return {
+        id: d.id,
+        socio_id: d.responsavel_id,
+        nome: d.nome,
+        cpf: d.cpf,
+        parentesco: d.parentesco,
+        ativo: d.situacao !== "inativo",
+        foto_url: d.foto_url || null,
+        titular_nome: titular?.nome || null,
+        titular_matricula: titular?.matricula || null,
+        financeiro_status: titular?.financeiro_status || "em_dia",
+        dias_atraso: titular?.dias_atraso || 0,
+        meses_atraso: titular?.meses_atraso || 0,
+        situacao: titular?.situacao || d.situacao || null,
+        exame_medico_validade: d.exame_medico_validade || null,
+      };
+    });
+
+    // Dependentes cadastrados na tabela dependentes.
+    const dependentesTabelaResultado = dependentesTabela.map((d) => {
+      const titular = titularesPorId.get(String(d.socio_id));
       return {
         ...d,
         titular_nome: titular?.nome || null,
@@ -309,12 +354,18 @@ export async function GET(request: Request) {
         dias_atraso: titular?.dias_atraso || 0,
         meses_atraso: titular?.meses_atraso || 0,
         situacao: titular?.situacao || null,
+        exame_medico_validade: null,
       };
     });
 
+    const mapaDependentes = new Map<string, any>();
+    for (const d of [...dependentesSociosResultado, ...dependentesTabelaResultado]) {
+      mapaDependentes.set(String(d.id), d);
+    }
+
     return NextResponse.json({
       socios: resultado,
-      dependentes: dependentesResultado,
+      dependentes: Array.from(mapaDependentes.values()),
     });
   } catch (error: any) {
     console.error("[API carteirinhas] Erro:", error);
