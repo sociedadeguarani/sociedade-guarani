@@ -121,6 +121,10 @@ const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
   {
+    value: "dependente_patrimonial_familiar",
+    label: "Dependente Sócio Patrimonial Familiar sem Mensalidade",
+  },
+  {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
   },
@@ -130,6 +134,10 @@ const TIPOS_SOCIO = [
   },
   { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
   { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
+  {
+    value: "dependente_contribuinte_familiar",
+    label: "Dependente Sócio Contribuinte Familiar sem Mensalidade",
+  },
   {
     value: "dependente_contribuinte_familiar_mensalidade",
     label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
@@ -191,14 +199,23 @@ function ehDependenteSemMensalidade(socio: Pick<Socio, "responsavel_id" | "possu
   return Boolean(socio.responsavel_id) && socio.possui_mensalidade !== true;
 }
 
+function ehTipoDependenteSemMensalidade(tipo?: string | null) {
+  return [
+    "dependente_patrimonial_familiar",
+    "dependente_contribuinte_familiar",
+  ].includes(tipo || "");
+}
+
 function tipoDependenteParaResponsavel(tipo?: string | null) {
   switch (tipo) {
     case "patrimonial_familiar":
+    case "dependente_patrimonial_familiar":
     case "dependente_patrimonial_familiar_mensalidade":
-      return "dependente_patrimonial_familiar_mensalidade";
+      return "dependente_patrimonial_familiar";
     case "contribuinte_familiar":
+    case "dependente_contribuinte_familiar":
     case "dependente_contribuinte_familiar_mensalidade":
-      return "dependente_contribuinte_familiar_mensalidade";
+      return "dependente_contribuinte_familiar";
     case "temporada_familiar":
       return "dependente_patrimonial_familiar_mensalidade";
     case "transitorio":
@@ -232,6 +249,7 @@ function tipoSocioClasse(tipo?: string | null) {
       return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
     case "patrimonial_familiar":
       return "bg-[#cfe7dc] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+    case "dependente_patrimonial_familiar":
     case "dependente_patrimonial_familiar_mensalidade":
       return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
     case "dependente_patrimonial_individual_mensalidade":
@@ -240,6 +258,7 @@ function tipoSocioClasse(tipo?: string | null) {
       return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
     case "contribuinte_familiar":
       return "bg-[#cddff4] text-[#064b9b] ring-1 ring-[#aac4e4]";
+    case "dependente_contribuinte_familiar":
     case "dependente_contribuinte_familiar_mensalidade":
       return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
     case "dependente_contribuinte_individual_mensalidade":
@@ -795,7 +814,7 @@ export default function Home() {
           "dependente_contribuinte_individual_mensalidade",
         ].includes(tipo);
 
-        if (tipo === "remido") {
+        if (tipo === "remido" || ehTipoDependenteSemMensalidade(tipo)) {
           proximo.possui_mensalidade = false;
           proximo.valor_mensalidade = 0;
         } else if (mensalidadeObrigatoria) {
@@ -825,9 +844,21 @@ export default function Home() {
           proximo.possui_mensalidade = true;
           proximo.valor_mensalidade =
             Number(responsavel.valor_mensalidade || 0);
+        } else if (ehTipoDependenteSemMensalidade(tipoFinal)) {
+          proximo.possui_mensalidade = false;
+          proximo.valor_mensalidade = 0;
         } else if (proximo.possui_mensalidade !== true) {
           proximo.valor_mensalidade = 0;
         }
+      }
+
+      // Dependente classificado sem mensalidade nunca recebe cobrança própria.
+      if (
+        campo === "possui_mensalidade" &&
+        ehTipoDependenteSemMensalidade(proximo.tipo_socio)
+      ) {
+        proximo.possui_mensalidade = false;
+        proximo.valor_mensalidade = 0;
       }
 
       // Se o usuário desligar a mensalidade manualmente, zera o valor.
