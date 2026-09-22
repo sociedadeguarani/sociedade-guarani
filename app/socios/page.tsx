@@ -42,7 +42,6 @@ type Socio = {
   modalidade_temporada: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
-  exame_medico_validade: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
 };
@@ -83,7 +82,6 @@ const menus = [
 
 
 const socioInicial: Partial<Socio> = {
-  matricula: "" as any,
   nome: "",
   cpf: "",
   rg: "",
@@ -114,7 +112,6 @@ const socioInicial: Partial<Socio> = {
   modalidade_temporada: null,
   inicio_temporada: "",
   fim_temporada: "",
-  exame_medico_validade: "",
   situacao_financeira: "isento",
   data_ultimo_pagamento: "",
 };
@@ -187,6 +184,10 @@ function podeTerDependentes(tipo?: string | null) {
     "dependente_patrimonial_familiar_mensalidade",
     "dependente_contribuinte_familiar_mensalidade",
   ].includes(tipo || "");
+}
+
+function ehDependenteSemMensalidade(socio: Pick<Socio, "responsavel_id" | "possui_mensalidade">) {
+  return Boolean(socio.responsavel_id) && socio.possui_mensalidade !== true;
 }
 
 function tipoDependenteParaResponsavel(tipo?: string | null) {
@@ -731,7 +732,10 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      // Novo dependente entra, por padrão, como dependente da família,
+      // sem uma mensalidade própria. Se for um dependente adulto com
+      // cobrança individual, isso pode ser definido no cadastro.
+      possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -803,9 +807,6 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
-      ...(form.matricula !== undefined && String(form.matricula).trim() !== ""
-        ? { matricula: Number(form.matricula) }
-        : {}),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -838,7 +839,6 @@ export default function Home() {
       modalidade_temporada: form.modalidade_temporada || null,
       inicio_temporada: form.inicio_temporada || null,
       fim_temporada: form.fim_temporada || null,
-      exame_medico_validade: form.exame_medico_validade || null,
       situacao_financeira: form.situacao_financeira || "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
@@ -2462,13 +2462,26 @@ function Dependentes({
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
 }) {
-  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
+  // A aba Dependentes mostra somente quem pertence à família de um
+  // responsável e NÃO possui uma mensalidade própria.
+  //
+  // Importante: o vínculo familiar e a unidade de cobrança são coisas
+  // diferentes. Uma pessoa pode ser dependente do próprio pai e, ao
+  // mesmo tempo, ser responsável pela sua própria família.
+  const dependentes = socios.filter(ehDependenteSemMensalidade);
+
   const responsaveis = socios.filter((s) =>
-    socios.some((filho) => filho.responsavel_id === s.id)
+    socios.some(
+      (filho) =>
+        filho.responsavel_id === s.id &&
+        ehDependenteSemMensalidade(filho)
+    )
   );
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id);
+    return socios.filter(
+      (s) => s.responsavel_id === id && ehDependenteSemMensalidade(s)
+    );
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2564,11 +2577,12 @@ function Dependentes({
     );
   }
 
-  const raizes = socios.filter(
-    (s) =>
-      !s.responsavel_id &&
-      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
-  );
+  // Um responsável pode ter responsavel_id preenchido e ainda assim
+  // possuir sua própria família. Ex.: filho adulto do pai que passou a
+  // ser responsável pela esposa e filhos.
+  // Por isso, a raiz da família é qualquer pessoa que tenha pelo menos
+  // um dependente sem mensalidade própria.
+  const raizes = socios.filter((s) => filhosDe(s.id).length > 0);
 
   return (
     <div>
@@ -2732,14 +2746,6 @@ function ModalSocio({
 
           {/* DADOS PESSOAIS */}
           <FormularioSecao titulo="👤 Dados pessoais">
-
-            <Campo
-              label="Matrícula"
-              type="number"
-              value={form.matricula ?? ""}
-              onChange={(v) => alterarCampo("matricula", v)}
-              placeholder="Ex.: 25"
-            />
 
             <Campo
               label="Nome completo"
@@ -3080,32 +3086,6 @@ function ModalSocio({
                 </div>
               </div>
             ) : null}
-
-            <div className="md:col-span-4 rounded-2xl border border-[#cfe3d8] bg-[#f4faf7] p-4">
-
-              <div className="mb-4">
-                <p className="text-sm font-extrabold text-[#005a3c]">🩺 Exame médico</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  Se o exame foi realizado, informe a data de validade. A carteirinha mostrará automaticamente se está válido ou vencido.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Campo
-                  label="Válido até"
-                  type="date"
-                  value={form.exame_medico_validade || ""}
-                  onChange={(v) => alterarCampo("exame_medico_validade", v)}
-                />
-                <div className="flex items-end">
-                  <div className="rounded-xl border border-[#d5e0da] bg-white p-3 text-sm text-gray-600">
-                    {form.exame_medico_validade
-                      ? "Exame registrado — validade informada."
-                      : "Exame ainda não informado."}
-                  </div>
-                </div>
-              </div>
-            </div>
 
             <div className="md:col-span-3">
 
