@@ -208,6 +208,20 @@ function tipoDependenteParaResponsavel(tipo?: string | null) {
   }
 }
 
+function ehDependenteComMensalidadeIndividual(tipo?: string | null) {
+  return [
+    "dependente_patrimonial_individual_mensalidade",
+    "dependente_contribuinte_individual_mensalidade",
+  ].includes(tipo || "");
+}
+
+function ehDependenteComMensalidadeFamiliar(tipo?: string | null) {
+  return [
+    "dependente_patrimonial_familiar_mensalidade",
+    "dependente_contribuinte_familiar_mensalidade",
+  ].includes(tipo || "");
+}
+
 function tipoSocioLabel(tipo?: string | null) {
   return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
 }
@@ -764,7 +778,7 @@ export default function Home() {
 
   function alterarCampo(campo: keyof Socio, valor: string) {
     setForm((atual) => {
-      const proximo = {
+      const proximo: Partial<Socio> = {
         ...atual,
         [campo]:
           campo === "possui_mensalidade"
@@ -794,9 +808,37 @@ export default function Home() {
         }
       }
 
+      // Regra financeira dos dependentes:
+      // - dependente individual com mensalidade = 50% da mensalidade familiar do responsável;
+      // - dependente familiar com mensalidade = valor integral da mensalidade familiar do responsável;
+      // - dependente sem mensalidade = R$ 0,00.
+      const tipoFinal = proximo.tipo_socio || "";
+      const responsavelId = proximo.responsavel_id || "";
+      const responsavel = socios.find((s) => s.id === responsavelId);
+
+      if (responsavel && tipoFinal.startsWith("dependente_")) {
+        if (ehDependenteComMensalidadeIndividual(tipoFinal)) {
+          proximo.possui_mensalidade = true;
+          proximo.valor_mensalidade =
+            Number(responsavel.valor_mensalidade || 0) * 0.5;
+        } else if (ehDependenteComMensalidadeFamiliar(tipoFinal)) {
+          proximo.possui_mensalidade = true;
+          proximo.valor_mensalidade =
+            Number(responsavel.valor_mensalidade || 0);
+        } else if (proximo.possui_mensalidade !== true) {
+          proximo.valor_mensalidade = 0;
+        }
+      }
+
+      // Se o usuário desligar a mensalidade manualmente, zera o valor.
+      if (campo === "possui_mensalidade" && valor !== "true") {
+        proximo.valor_mensalidade = 0;
+      }
+
       return proximo;
     });
   }
+
 
   async function salvarSocio() {
     if (!form.nome?.trim()) {
@@ -3006,11 +3048,21 @@ function ModalSocio({
                 {form.possui_mensalidade ? (
                   <>
                     <Campo
-                      label="Valor mensal"
+                      label={
+                        ehDependenteComMensalidadeIndividual(form.tipo_socio)
+                          ? "Valor mensal (50% da familiar)"
+                          : ehDependenteComMensalidadeFamiliar(form.tipo_socio)
+                            ? "Valor mensal (familiar)"
+                            : "Valor mensal"
+                      }
                       type="number"
                       value={form.valor_mensalidade}
                       onChange={(v) => alterarCampo("valor_mensalidade", v)}
                       placeholder="0,00"
+                      disabled={
+                        ehDependenteComMensalidadeIndividual(form.tipo_socio) ||
+                        ehDependenteComMensalidadeFamiliar(form.tipo_socio)
+                      }
                     />
 
                     <Campo
