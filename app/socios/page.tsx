@@ -83,6 +83,7 @@ const menus = [
 
 
 const socioInicial: Partial<Socio> = {
+  matricula: "" as any,
   nome: "",
   cpf: "",
   rg: "",
@@ -802,6 +803,9 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
+      ...(form.matricula !== undefined && String(form.matricula).trim() !== ""
+        ? { matricula: Number(form.matricula) }
+        : {}),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -2728,6 +2732,14 @@ function ModalSocio({
 
           {/* DADOS PESSOAIS */}
           <FormularioSecao titulo="👤 Dados pessoais">
+
+            <Campo
+              label="Matrícula"
+              type="number"
+              value={form.matricula ?? ""}
+              onChange={(v) => alterarCampo("matricula", v)}
+              placeholder="Ex.: 25"
+            />
 
             <Campo
               label="Nome completo"
