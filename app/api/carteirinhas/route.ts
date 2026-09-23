@@ -7,38 +7,34 @@ function isPago(situacao: unknown) {
   );
 }
 
-function calcularStatus(mensalidades: any[], socioId: string) {
-  const pendentes = mensalidades.filter(
-    (m) => String(m.socio_id) === String(socioId) && !isPago(m.situacao)
-  );
-
-  const competenciasPendentes = new Set<string>();
-  for (const m of pendentes) {
+function calcularStatus(mensalidades: any[], socioId: string, responsavelId?: string | null) {
+  const alvoId = String(responsavelId || socioId);
+  const hoje = new Date().toISOString().slice(0, 10);
+  const vencidas = mensalidades.filter((m) => {
+    if (String(m.socio_id) !== alvoId) return false;
     const vencimento = String(m.data_vencimento || "").slice(0, 10);
-    if (!vencimento) continue;
+    if (!vencimento || vencimento >= hoje) return false;
+    return !isPago(m.situacao);
+  });
+
+  const quantidade = vencidas.length;
+  const dias = vencidas.reduce((max, m) => {
+    const vencimento = String(m.data_vencimento || "").slice(0, 10);
+    if (!vencimento) return max;
     const d = new Date(`${vencimento}T00:00:00`);
-    if (Number.isNaN(d.getTime()) || d >= new Date()) continue;
-    const competencia = String(m.competencia || vencimento).slice(0, 7);
-    competenciasPendentes.add(competencia);
+    const h = new Date(`${hoje}T00:00:00`);
+    const diff = Math.max(0, Math.floor((h.getTime() - d.getTime()) / 86400000));
+    return Math.max(max, diff);
+  }, 0);
+
+  if (quantidade <= 2) {
+    return { financeiro_status: "em_dia", dias_atraso: dias, meses_atraso: quantidade };
   }
-
-  const mesesAtraso = competenciasPendentes.size;
-
-  if (mesesAtraso <= 2) {
-    return { financeiro_status: "em_dia", meses_atraso: mesesAtraso, dias_atraso: 0 };
+  if (quantidade <= 4) {
+    return { financeiro_status: "atrasado", dias_atraso: dias, meses_atraso: quantidade };
   }
-
-  if (mesesAtraso <= 4) {
-    return { financeiro_status: "atrasado", meses_atraso: mesesAtraso, dias_atraso: 0 };
-  }
-
-  return {
-    financeiro_status: "muito_atrasado",
-    meses_atraso: mesesAtraso,
-    dias_atraso: 0,
-  };
+  return { financeiro_status: "muito_atrasado", dias_atraso: dias, meses_atraso: quantidade };
 }
-
 function emLotes<T>(lista: T[], tamanho = 100): T[][] {
   const lotes: T[][] = [];
 
@@ -132,7 +128,7 @@ export async function GET(request: Request) {
     for (const lote of emLotes(ids, 100)) {
       const { data, error } = await supabase
         .from("mensalidades")
-        .select("socio_id,competencia,data_vencimento,situacao")
+        .select("socio_id,data_vencimento,situacao")
         .in("socio_id", lote);
 
       if (error) throw error;
@@ -142,7 +138,7 @@ export async function GET(request: Request) {
 
     const resultado = socios.map((s) => ({
       ...s,
-      ...calcularStatus(mensalidades, s.id),
+      ...calcularStatus(mensalidades, s.id, s.responsavel_id),
     }));
 
     // Dependentes reais são os registros de socios ligados por
@@ -170,7 +166,6 @@ export async function GET(request: Request) {
           titular_matricula: titular?.matricula || null,
           financeiro_status:
             titular?.financeiro_status || "em_dia",
-          meses_atraso: titular?.meses_atraso || 0,
           dias_atraso: titular?.dias_atraso || 0,
           situacao: d.situacao || null,
           responsavel_id: d.responsavel_id,
