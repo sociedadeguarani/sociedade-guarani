@@ -37,7 +37,7 @@ type Inadimplente = {
   meses: number;
   valor: number;
   competencias: string[];
-  nivel: "amarelo" | "vermelho";
+  nivel: "verde" | "amarelo" | "vermelho";
 };
 
 function moeda(valor: number | string | null | undefined) {
@@ -77,7 +77,7 @@ export default function InadimplenciaPage() {
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
-  const [filtro, setFiltro] = useState<"todos" | "amarelo" | "vermelho">("todos");
+  const [filtro, setFiltro] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
   const [busca, setBusca] = useState("");
 
   async function carregar() {
@@ -165,6 +165,35 @@ export default function InadimplenciaPage() {
       }
     >();
 
+    // Começa com todas as pessoas cadastradas para que quem está em dia
+    // também apareça no relatório para conferência.
+    for (const socio of socios) {
+      grupos.set(socio.id, {
+        pessoaId: socio.id,
+        socioId: socio.id,
+        nome: socio.nome,
+        matricula: socio.matricula != null ? String(socio.matricula) : "—",
+        responsavel: "Titular",
+        competencias: new Set<string>(),
+        valor: 0,
+      });
+    }
+
+    // Mantém compatibilidade com dependentes do modelo antigo.
+    for (const dependente of dependentes) {
+      grupos.set(dependente.id, {
+        pessoaId: dependente.id,
+        socioId: dependente.socio_id,
+        nome: dependente.nome,
+        matricula: socioMap.get(dependente.socio_id)?.matricula != null
+          ? String(socioMap.get(dependente.socio_id)?.matricula)
+          : "—",
+        responsavel: responsaveis.get(dependente.id) || "—",
+        competencias: new Set<string>(),
+        valor: 0,
+      });
+    }
+
     for (const m of mensalidades) {
       if (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hoje) continue;
       if (isPago(m) || isIsento(m)) continue;
@@ -173,23 +202,18 @@ export default function InadimplenciaPage() {
         ? dependenteMap.get(m.dependente_id)
         : null;
       const socio = m.socio_id ? socioMap.get(m.socio_id) : null;
-
       const pessoaId = dependente?.id || socio?.id;
       if (!pessoaId) continue;
-
-      const nome = dependente?.nome || socio?.nome || "Pessoa";
-      const matricula = socio?.matricula != null ? String(socio.matricula) : "—";
-      const responsavel = dependente
-        ? responsaveis.get(dependente.id) || "—"
-        : "Titular";
 
       if (!grupos.has(pessoaId)) {
         grupos.set(pessoaId, {
           pessoaId,
           socioId: m.socio_id || dependente?.socio_id || pessoaId,
-          nome,
-          matricula,
-          responsavel,
+          nome: dependente?.nome || socio?.nome || "Pessoa",
+          matricula: socio?.matricula != null ? String(socio.matricula) : "—",
+          responsavel: dependente
+            ? responsaveis.get(dependente.id) || "—"
+            : "Titular",
           competencias: new Set<string>(),
           valor: 0,
         });
@@ -211,12 +235,16 @@ export default function InadimplenciaPage() {
           ...g,
           competencias: Array.from(g.competencias),
           meses,
-          nivel: meses >= 5 ? ("vermelho" as const) : ("amarelo" as const),
+          nivel:
+            meses >= 5
+              ? ("vermelho" as const)
+              : meses >= 3
+                ? ("amarelo" as const)
+                : ("verde" as const),
         };
       })
-      .filter((item) => item.meses >= 3)
       .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
-  }, [mensalidades, socioMap, dependenteMap, responsaveis, hoje]);
+  }, [mensalidades, socios, dependentes, socioMap, dependenteMap, responsaveis, hoje]);
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -236,6 +264,7 @@ export default function InadimplenciaPage() {
   }, [inadimplentes, filtro, busca]);
 
   const totalDevido = inadimplentes.reduce((s, i) => s + i.valor, 0);
+  const verdes = inadimplentes.filter((i) => i.nivel === "verde").length;
   const amarelos = inadimplentes.filter((i) => i.nivel === "amarelo").length;
   const vermelhos = inadimplentes.filter((i) => i.nivel === "vermelho").length;
 
@@ -299,7 +328,7 @@ export default function InadimplenciaPage() {
               Relatório de Inadimplência
             </h1>
             <p className="mt-1 text-gray-500">
-              Controle de mensalidades vencidas, quantidade de meses e valores devidos.
+              Controle de mensalidades, situação por meses em atraso e valores devidos.
             </p>
           </div>
 
@@ -334,7 +363,7 @@ export default function InadimplenciaPage() {
             <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
                 <p className="text-sm text-gray-500">Pessoas monitoradas</p>
-                <p className="mt-2 text-3xl font-extrabold text-red-600">
+                <p className="mt-2 text-3xl font-extrabold text-[#005a3c]">
                   {inadimplentes.length}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">Em dia + atenção + crítico</p>
@@ -471,16 +500,18 @@ export default function InadimplenciaPage() {
                               className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${
                                 item.nivel === "vermelho"
                                   ? "bg-red-100 text-red-700"
-                                  : "bg-yellow-100 text-yellow-700"
+                                  : item.nivel === "amarelo"
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-green-100 text-green-700"
                               }`}
                             >
                               {item.meses} {item.meses === 1 ? "mês" : "meses"}
                             </span>
                           </td>
                           <td className="px-5 py-4 text-gray-600">
-                            {item.competencias.join(", ")}
+                            {item.competencias.length ? item.competencias.join(", ") : "Nenhuma em atraso"}
                           </td>
-                          <td className="px-5 py-4 font-extrabold text-red-600">
+                          <td className={`px-5 py-4 font-extrabold ${item.nivel === "verde" ? "text-green-600" : "text-red-600"}`}>
                             {moeda(item.valor)}
                           </td>
                           <td className="nao-imprimir px-5 py-4">
