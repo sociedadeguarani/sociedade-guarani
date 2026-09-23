@@ -1,122 +1,169 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getServiceClient } from "@/lib/guaraniAuth";
+import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 function isPago(situacao: unknown) {
-  return ["pago","paid","quitado","recebido","isento","isenta"].includes(String(situacao || "").toLowerCase());
+  return ["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(
+    String(situacao || "").toLowerCase()
+  );
 }
 
 function calcularStatus(mensalidades: any[], socioId: string) {
   const hoje = new Date();
-  const pendentes = mensalidades.filter((m) => String(m.socio_id) === String(socioId) && !isPago(m.situacao));
+  const pendentes = mensalidades.filter(
+    (m) => String(m.socio_id) === String(socioId) && !isPago(m.situacao)
+  );
+
   let maxDias = 0;
+
   for (const m of pendentes) {
     if (!m.data_vencimento) continue;
-    const d = new Date(`${String(m.data_vencimento).slice(0,10)}T00:00:00`);
+
+    const d = new Date(
+      `${String(m.data_vencimento).slice(0, 10)}T00:00:00`
+    );
+
     if (Number.isNaN(d.getTime())) continue;
-    const diff = Math.floor((hoje.getTime() - d.getTime()) / 86400000);
+
+    const diff = Math.floor(
+      (hoje.getTime() - d.getTime()) / 86400000
+    );
+
     if (diff > maxDias) maxDias = diff;
   }
-  if (maxDias <= 14) return { financeiro_status: "em_dia", dias_atraso: 0 };
-  if (maxDias <= 60) return { financeiro_status: "atrasado", dias_atraso: maxDias };
-  return { financeiro_status: "muito_atrasado", dias_atraso: maxDias };
+
+  if (maxDias <= 14) {
+    return { financeiro_status: "em_dia", dias_atraso: 0 };
+  }
+
+  if (maxDias <= 60) {
+    return { financeiro_status: "atrasado", dias_atraso: maxDias };
+  }
+
+  return {
+    financeiro_status: "muito_atrasado",
+    dias_atraso: maxDias,
+  };
 }
 
-async function autenticar(request: Request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  if (!token) return { response: NextResponse.json({ error: "Sessão não encontrada." }, { status: 401 }) };
+function emLotes<T>(lista: T[], tamanho = 100): T[][] {
+  const lotes: T[][] = [];
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return { response: NextResponse.json({ error: "Configuração do servidor incompleta." }, { status: 500 }) };
+  for (let i = 0; i < lista.length; i += tamanho) {
+    lotes.push(lista.slice(i, i + tamanho));
+  }
 
-  const authClient = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: { user }, error: authError } = await authClient.auth.getUser(token);
-  if (authError || !user) return { response: NextResponse.json({ error: "Sessão inválida ou expirada." }, { status: 401 }) };
-
-  const supabase = getServiceClient();
-  const { data: usuario, error: usuarioError } = await supabase
-    .from("usuarios_sistema")
-    .select("id,perfil_id,socio_id,ativo,nome_exibicao")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (usuarioError || !usuario) return { response: NextResponse.json({ error: "Usuário do sistema não encontrado." }, { status: 403 }) };
-  if (!usuario.ativo) return { response: NextResponse.json({ error: "Seu acesso não está ativo no sistema." }, { status: 403 }) };
-
-  const { data: perfil } = await supabase
-    .from("perfis")
-    .select("id,codigo,nome")
-    .eq("id", usuario.perfil_id)
-    .maybeSingle();
-
-  const raw = String(perfil?.codigo || perfil?.nome || "").trim().toLowerCase();
-  const perfilCanonico =
-    raw === "administrador" || raw === "admin" ? "administrador_normal" :
-    raw === "administrador_master" || raw === "master" ? "administrador_master" :
-    raw === "funcionario" || raw === "funcionário" ? "funcionario" :
-    raw === "associado" ? "associado" : "";
-
-  if (!perfilCanonico) return { response: NextResponse.json({ error: "Perfil de acesso não configurado." }, { status: 403 }) };
-
-  return { usuario: { id: usuario.id, perfil: perfilCanonico, socio_id: usuario.socio_id, ativo: usuario.ativo, nome_exibicao: usuario.nome_exibicao, email: user.email } };
+  return lotes;
 }
 
 export async function GET(request: Request) {
+  const auth = await requireRoles(request, [
+    "administrador",
+    "administrador_normal",
+    "administrador_master",
+    "funcionario",
+    "associado",
+  ]);
+
+  if ("response" in auth) return auth.response;
+
   try {
-    const auth = await autenticar(request);
-    if ("response" in auth) return auth.response;
-
     const supabase = getServiceClient();
-    const base = "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade,responsavel_id,parentesco,possui_mensalidade,valor_mensalidade";
 
-    // A família real está em socios.responsavel_id. Não usamos a tabela dependentes para montar a árvore.
-    const { data: todosSocios, error } = await supabase.from("socios").select(base).order("nome").limit(1000);
-    if (error) throw error;
+    const base =
+      "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade,responsavel_id,parentesco,possui_mensalidade,valor_mensalidade";
 
-    const todos = todosSocios || [];
-    let socios = todos;
+    let socios: any[] = [];
 
     if (auth.usuario.perfil === "associado") {
-      if (!auth.usuario.socio_id) return NextResponse.json({ error: "Seu usuário associado não está vinculado a um sócio." }, { status: 403 });
+      const { data: proprio, error: proprioError } = await supabase
+        .from("socios")
+        .select(base)
+        .eq("id", auth.usuario.socio_id)
+        .maybeSingle();
 
-      const proprio = todos.find((s) => String(s.id) === String(auth.usuario.socio_id));
-      if (!proprio) return NextResponse.json({ error: "Seu cadastro de associado não foi encontrado." }, { status: 404 });
+      if (proprioError) throw proprioError;
 
-      // Mostra o próprio associado e toda a sua descendência familiar.
-      const familia = new Set<string>([String(proprio.id)]);
-      let mudou = true;
-      while (mudou) {
-        mudou = false;
-        for (const s of todos) {
-          if (s.responsavel_id && familia.has(String(s.responsavel_id)) && !familia.has(String(s.id))) {
-            familia.add(String(s.id));
-            mudou = true;
+      if (proprio) {
+        const { data: todos, error: todosError } = await supabase
+          .from("socios")
+          .select(base)
+          .order("nome")
+          .limit(5000);
+
+        if (todosError) throw todosError;
+
+        const familia = new Set<string>([String(proprio.id)]);
+        let mudou = true;
+
+        while (mudou) {
+          mudou = false;
+
+          for (const s of todos || []) {
+            if (
+              s.responsavel_id &&
+              familia.has(String(s.responsavel_id)) &&
+              !familia.has(String(s.id))
+            ) {
+              familia.add(String(s.id));
+              mudou = true;
+            }
           }
         }
+
+        socios = (todos || []).filter((s) =>
+          familia.has(String(s.id))
+        );
       }
-      socios = todos.filter((s) => familia.has(String(s.id)));
+    } else {
+      const { data, error } = await supabase
+        .from("socios")
+        .select(base)
+        .order("nome")
+        .limit(5000);
+
+      if (error) throw error;
+
+      socios = data || [];
     }
 
-    const ids = socios.map((s) => s.id).filter(Boolean);
+    const ids = socios
+      .map((s) => s.id)
+      .filter(Boolean)
+      .map(String);
+
     let mensalidades: any[] = [];
-    if (ids.length) {
-      const { data, error: mensalidadesError } = await supabase
+
+    // IMPORTANTE: não usar .in() com todos os IDs de uma vez.
+    // Isso pode gerar Bad Request quando há muitos associados.
+    for (const lote of emLotes(ids, 100)) {
+      const { data, error } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
-        .in("socio_id", ids);
-      if (mensalidadesError) throw mensalidadesError;
-      mensalidades = data || [];
+        .in("socio_id", lote);
+
+      if (error) throw error;
+
+      mensalidades.push(...(data || []));
     }
 
-    const resultado = socios.map((s) => ({ ...s, ...calcularStatus(mensalidades, s.id) }));
+    const resultado = socios.map((s) => ({
+      ...s,
+      ...calcularStatus(mensalidades, s.id),
+    }));
 
-    // Dependente da família = possui responsavel_id e não possui mensalidade própria.
-    // Quem possui mensalidade continua na lista principal, mas pode ser responsável por outra família.
+    // Dependentes reais são os registros de socios ligados por
+    // responsavel_id e sem mensalidade própria.
     const dependentes = resultado
-      .filter((s) => Boolean(s.responsavel_id) && !s.possui_mensalidade)
+      .filter(
+        (s) =>
+          Boolean(s.responsavel_id) &&
+          !Boolean(s.possui_mensalidade)
+      )
       .map((d) => {
-        const titular = resultado.find((s) => String(s.id) === String(d.responsavel_id));
+        const titular = resultado.find(
+          (s) => String(s.id) === String(d.responsavel_id)
+        );
+
         return {
           id: d.id,
           socio_id: d.responsavel_id,
@@ -127,17 +174,31 @@ export async function GET(request: Request) {
           foto_url: d.foto_url,
           titular_nome: titular?.nome || null,
           titular_matricula: titular?.matricula || null,
-          financeiro_status: titular?.financeiro_status || "em_dia",
+          financeiro_status:
+            titular?.financeiro_status || "em_dia",
           dias_atraso: titular?.dias_atraso || 0,
           situacao: d.situacao || null,
           responsavel_id: d.responsavel_id,
-          possui_mensalidade: false
+          possui_mensalidade: false,
         };
-      });
+      })
+      .filter((d) => d.ativo !== false);
 
-    return NextResponse.json({ socios: resultado, dependentes });
-  } catch (error: any) {
-    console.error("[API carteirinhas] Erro:", error);
-    return NextResponse.json({ error: error?.message || error?.details || error?.hint || "Erro ao carregar carteirinhas.", code: error?.code || null, details: error?.details || null, hint: error?.hint || null }, { status: 500 });
+    return NextResponse.json({
+      socios: resultado,
+      dependentes,
+    });
+  } catch (error) {
+    console.error("GET /api/carteirinhas:", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao carregar carteirinhas.",
+      },
+      { status: 500 }
+    );
   }
 }
