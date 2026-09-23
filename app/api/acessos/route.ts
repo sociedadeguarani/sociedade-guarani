@@ -80,39 +80,42 @@ export async function GET(request: Request) {
   }
 }
 
-function situacaoMensalidade(situacaoFinanceira: string | null | undefined) {
-  const v = String(situacaoFinanceira || "").toLowerCase();
-  if (v === "em_atraso") return { texto: "Em atraso", cor: "vermelho" };
-  if (v === "em_dia") return { texto: "Em dia", cor: "verde" };
-  if (v === "isento") return { texto: "Isento", cor: "cinza" };
-  return { texto: "Não informado", cor: "cinza" };
+function situacaoMensalidadePorQuantidade(quantidade: number) {
+  if (quantidade <= 2) return { texto: "Em dia", cor: "verde" };
+  if (quantidade <= 4) return { texto: "Atenção", cor: "amarelo" };
+  return { texto: "Crítico", cor: "vermelho" };
 }
 
-async function verificarMensalidadesAtrasadas(supabase: ReturnType<typeof getServiceClient>, socioId: string) {
+async function verificarMensalidadesAtrasadas(
+  supabase: ReturnType<typeof getServiceClient>,
+  socioId: string
+) {
   const hoje = new Date().toISOString().slice(0, 10);
-  const { data: itens, error } = await supabase
+  const { data, error } = await supabase
     .from("mensalidades")
-    .select("id,valor,competencia,data_vencimento,situacao")
-    .eq("socio_id", socioId);
+    .select("id,valor,data_vencimento,situacao")
+    .eq("socio_id", socioId)
+    .lt("data_vencimento", hoje);
 
   if (error) throw error;
 
-  const pendentes = (itens || []).filter((m: any) => {
-    const situacao = String(m.situacao || "").toLowerCase();
-    if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) return false;
-    return Boolean(m.data_vencimento) && String(m.data_vencimento).slice(0, 10) < hoje;
-  });
+  const itens = (data || []).filter((m: any) =>
+    !["pago", "isento", "isenta", "quitado", "recebido"].includes(
+      String(m.situacao || "").toLowerCase()
+    )
+  );
 
-  const competencias = new Set<string>();
-  for (const m of pendentes) {
-    competencias.add(String(m.competencia || m.data_vencimento).slice(0, 7));
-  }
+  const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
+  const quantidade = itens.length;
 
-  const quantidade = competencias.size;
-  const valorTotal = pendentes.reduce((soma: number, m: any) => soma + Number(m.valor || 0), 0);
-  return { atrasado: quantidade > 2, criticoCincoMesesOuMais: quantidade >= 5, quantidade, valorTotal };
+  return {
+    atrasado: quantidade > 0,
+    criticoTresMesesOuMais: quantidade >= 3,
+    quantidade,
+    valorTotal,
+    status: situacaoMensalidadePorQuantidade(quantidade),
+  };
 }
-
 async function avisarAdministradoresInadimplencia(
   supabase: ReturnType<typeof getServiceClient>,
   socio: { nome: string; matricula: number | string | null },
@@ -122,8 +125,8 @@ async function avisarAdministradoresInadimplencia(
 ) {
   try {
     await supabase.from("avisos").insert({
-      titulo: "🔴 Sócio com 5+ meses de atraso acessou a sociedade",
-      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (5 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      titulo: "🔴 Sócio com 3+ meses de atraso acessou a sociedade",
+      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (3 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
       tipo: "urgente",
       prioridade: "alta",
       fixado: false,
@@ -204,11 +207,10 @@ export async function POST(request: Request) {
     if (acessoError) throw acessoError;
 
     etapa = "verificando mensalidades";
-    const statusMensalidadeSocio = situacaoMensalidade(socio.situacao_financeira);
-    const statusMensalidadeDependente = dependente ? situacaoMensalidade(dependente.situacao_financeira) : null;
-
     const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
-    if (inadimplenciaSocio.criticoCincoMesesOuMais) {
+    const statusMensalidadeSocio = inadimplenciaSocio.status;
+    const statusMensalidadeDependente = dependente ? inadimplenciaSocio.status : null;
+    if (inadimplenciaSocio.criticoTresMesesOuMais) {
       etapa = "gerando aviso de inadimplência";
       await avisarAdministradoresInadimplencia(supabase, socio, inadimplenciaSocio.quantidade, inadimplenciaSocio.valorTotal, auth.usuario.id);
     }
