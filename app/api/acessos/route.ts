@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
+function mensagemErro(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const msg = (error as { message?: unknown }).message;
+    if (msg) return String(msg);
+  }
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
+}
+
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ["administrador", "funcionario"]);
   if ("response" in auth) return auth.response;
@@ -9,19 +23,58 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const de = searchParams.get("de");
     const ate = searchParams.get("ate");
+
+    // Evitamos o embedding automático do Supabase (socio:socios(...), etc.)
+    // porque ele depende do nome exato da chave estrangeira no banco — se
+    // essa constraint tiver outro nome (ou nunca tiver sido criada com esse
+    // nome específico), a consulta inteira falha. Buscamos os acessos
+    // primeiro e os dados de sócio/dependente/usuário depois, separadamente.
     let query = supabase
       .from("acessos_sociedade")
-      .select("id,socio_id,dependente_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por,observacoes,socio:socios(nome,matricula,foto_url),dependente:dependentes(nome),usuario:usuarios_sistema!acessos_sociedade_registrado_por_fkey(nome_exibicao)")
+      .select("id,socio_id,dependente_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por")
       .order("data_hora_entrada", { ascending: false })
       .limit(1000);
     if (de) query = query.gte("data_hora_entrada", `${de}T00:00:00`);
     if (ate) query = query.lte("data_hora_entrada", `${ate}T23:59:59`);
-    const { data, error } = await query;
+
+    const { data: acessos, error } = await query;
     if (error) throw error;
-    return NextResponse.json({ acessos: data || [] });
+
+    const lista = acessos || [];
+    const socioIds = [...new Set(lista.map((a) => a.socio_id).filter(Boolean))];
+    const dependenteIds = [...new Set(lista.map((a) => a.dependente_id).filter(Boolean))];
+    const usuarioIds = [...new Set(lista.map((a) => a.registrado_por).filter(Boolean))];
+
+    const [sociosResult, dependentesResult, usuariosResult] = await Promise.all([
+      socioIds.length
+        ? supabase.from("socios").select("id,nome,matricula,foto_url").in("id", socioIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      dependenteIds.length
+        ? supabase.from("dependentes").select("id,nome").in("id", dependenteIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      usuarioIds.length
+        ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+    ]);
+    if (sociosResult.error) throw sociosResult.error;
+    if (dependentesResult.error) throw dependentesResult.error;
+    if (usuariosResult.error) throw usuariosResult.error;
+
+    const mapaSocios = new Map((sociosResult.data || []).map((s: any) => [s.id, s]));
+    const mapaDependentes = new Map((dependentesResult.data || []).map((d: any) => [d.id, d]));
+    const mapaUsuarios = new Map((usuariosResult.data || []).map((u: any) => [u.id, u]));
+
+    const resultado = lista.map((a) => ({
+      ...a,
+      socio: a.socio_id ? mapaSocios.get(a.socio_id) || null : null,
+      dependente: a.dependente_id ? mapaDependentes.get(a.dependente_id) || null : null,
+      usuario: a.registrado_por ? mapaUsuarios.get(a.registrado_por) || null : null,
+    }));
+
+    return NextResponse.json({ acessos: resultado });
   } catch (error) {
     return NextResponse.json(
-      { error: `Erro ao carregar acessos: ${error instanceof Error ? error.message : String(error)}` },
+      { error: `Erro ao carregar acessos: ${mensagemErro(error, "erro desconhecido")}` },
       { status: 500 }
     );
   }
@@ -91,7 +144,7 @@ export async function POST(request: Request) {
       etapa = "buscando sócio pela matrícula";
       const { data: socioPorMatricula, error: matriculaError } = await supabase
         .from("socios").select("id").eq("matricula", matricula).maybeSingle();
-      if (matriculaError) throw new Error(`Falha ao buscar pela matrícula: ${matriculaError.message}`);
+      if (matriculaError) throw matriculaError;
       if (!socioPorMatricula) return NextResponse.json({ error: `Nenhum associado encontrado com a matrícula ${matricula}.` }, { status: 404 });
       id = socioPorMatricula.id;
     }
@@ -102,7 +155,7 @@ export async function POST(request: Request) {
       etapa = "buscando dependente";
       const { data: dep, error: depError } = await supabase
         .from("dependentes").select("id,socio_id,nome,situacao_financeira,ativo").eq("id", dependenteId).maybeSingle();
-      if (depError) throw new Error(`Falha ao buscar dependente: ${depError.message}`);
+      if (depError) throw depError;
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
       id = String(dep.socio_id);
@@ -115,7 +168,7 @@ export async function POST(request: Request) {
       .from("socios")
       .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url")
       .eq("id", id).maybeSingle();
-    if (socioError) throw new Error(`Falha ao buscar associado: ${socioError.message}`);
+    if (socioError) throw socioError;
     if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
 
     const situacao = String(socio.situacao || "").toLowerCase();
@@ -134,7 +187,7 @@ export async function POST(request: Request) {
       })
       .select("id,socio_id,dependente_id,data_hora_entrada,autorizado,motivo_negacao")
       .single();
-    if (acessoError) throw new Error(`Falha ao registrar a entrada: ${acessoError.message}`);
+    if (acessoError) throw acessoError;
 
     etapa = "verificando mensalidades";
     const statusMensalidadeSocio = situacaoMensalidade(socio.situacao_financeira);
@@ -164,7 +217,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error(`Erro ao registrar acesso (etapa: ${etapa}):`, error);
     return NextResponse.json(
-      { error: `Erro ao registrar acesso (${etapa}): ${error instanceof Error ? error.message : String(error)}` },
+      { error: `Erro ao registrar acesso (${etapa}): ${mensagemErro(error, "erro desconhecido")}` },
       { status: 500 }
     );
   }
