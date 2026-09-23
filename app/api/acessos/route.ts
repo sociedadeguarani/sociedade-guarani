@@ -90,13 +90,27 @@ function situacaoMensalidade(situacaoFinanceira: string | null | undefined) {
 
 async function verificarMensalidadesAtrasadas(supabase: ReturnType<typeof getServiceClient>, socioId: string) {
   const hoje = new Date().toISOString().slice(0, 10);
-  const [emAtraso, emAbertoVencida] = await Promise.all([
-    supabase.from("mensalidades").select("id,valor").eq("socio_id", socioId).eq("situacao", "em_atraso"),
-    supabase.from("mensalidades").select("id,valor").eq("socio_id", socioId).eq("situacao", "em_aberto").lt("data_vencimento", hoje),
-  ]);
-  const itens = [...(emAtraso.data || []), ...(emAbertoVencida.data || [])];
-  const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
-  return { atrasado: itens.length > 0, criticoTresMesesOuMais: itens.length >= 3, quantidade: itens.length, valorTotal };
+  const { data: itens, error } = await supabase
+    .from("mensalidades")
+    .select("id,valor,competencia,data_vencimento,situacao")
+    .eq("socio_id", socioId);
+
+  if (error) throw error;
+
+  const pendentes = (itens || []).filter((m: any) => {
+    const situacao = String(m.situacao || "").toLowerCase();
+    if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) return false;
+    return Boolean(m.data_vencimento) && String(m.data_vencimento).slice(0, 10) < hoje;
+  });
+
+  const competencias = new Set<string>();
+  for (const m of pendentes) {
+    competencias.add(String(m.competencia || m.data_vencimento).slice(0, 7));
+  }
+
+  const quantidade = competencias.size;
+  const valorTotal = pendentes.reduce((soma: number, m: any) => soma + Number(m.valor || 0), 0);
+  return { atrasado: quantidade > 2, criticoCincoMesesOuMais: quantidade >= 5, quantidade, valorTotal };
 }
 
 async function avisarAdministradoresInadimplencia(
@@ -108,8 +122,8 @@ async function avisarAdministradoresInadimplencia(
 ) {
   try {
     await supabase.from("avisos").insert({
-      titulo: "🔴 Sócio com 3+ meses de atraso acessou a sociedade",
-      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (3 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      titulo: "🔴 Sócio com 5+ meses de atraso acessou a sociedade",
+      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (5 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
       tipo: "urgente",
       prioridade: "alta",
       fixado: false,
@@ -194,7 +208,7 @@ export async function POST(request: Request) {
     const statusMensalidadeDependente = dependente ? situacaoMensalidade(dependente.situacao_financeira) : null;
 
     const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
-    if (inadimplenciaSocio.criticoTresMesesOuMais) {
+    if (inadimplenciaSocio.criticoCincoMesesOuMais) {
       etapa = "gerando aviso de inadimplência";
       await avisarAdministradoresInadimplencia(supabase, socio, inadimplenciaSocio.quantidade, inadimplenciaSocio.valorTotal, auth.usuario.id);
     }
