@@ -2,18 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabaseClient";
 
 type Socio = {
   id: string;
   matricula: string | null;
   nome: string;
   situacao: string | null;
+  responsavel_id?: string | null;
 };
 
 type Dependente = {
@@ -32,6 +28,7 @@ type Dependente = {
   tipo_pagamento: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  source?: "socios" | "dependentes";
 };
 
 const parentescos = [
@@ -143,62 +140,71 @@ export default function DependentesPage() {
     }
 
     const [sociosResult, dependentesResult] = await Promise.all([
-      supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
+      supabase.from("socios").select("*").order("nome"),
       supabase.from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
         .order("nome"),
     ]);
 
     if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
-    if (dependentesResult.error) setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
 
-    const sociosData = sociosResult.data || [];
-    let dependentesData = dependentesResult.data || [];
+    const sociosData = (sociosResult.data || []) as any[];
+    const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
 
-    // Mantém a tabela dependentes como fonte principal. Se ela estiver vazia,
-    // usamos a relação real de família em socios.responsavel_id apenas para
-    // montar a tela, sem criar ou alterar registros no banco.
-    if (!dependentesResult.error && dependentesData.length === 0) {
-      const { data: sociosFamilia, error: sociosFamiliaError } = await supabase
-        .from("socios")
-        .select("id, responsavel_id, nome, cpf, data_nascimento, parentesco, telefone, situacao, possui_mensalidade")
-        .not("responsavel_id", "is", null)
-        .order("nome");
+    // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
+    // A tabela dependentes fica apenas como legado para não perder registros
+    // que ainda não tenham sido migrados.
+    const dependentesAtuais: Dependente[] = sociosData
+      .filter((s) => s.responsavel_id)
+      .map((s) => ({
+        id: String(s.id),
+        socio_id: String(s.responsavel_id),
+        nome: s.nome,
+        cpf: s.cpf ?? null,
+        data_nascimento: s.data_nascimento ?? null,
+        parentesco: s.parentesco ?? null,
+        telefone: s.telefone ?? s.whatsapp ?? null,
+        ativo: String(s.situacao || "").toLowerCase() !== "inativo",
+        created_at: s.created_at ?? null,
+        possui_mensalidade: Boolean(s.possui_mensalidade),
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
+        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
+        tipo_pagamento: s.tipo_pagamento ?? null,
+        situacao_financeira: s.situacao_financeira ?? null,
+        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+        source: "socios",
+      }));
 
-      if (!sociosFamiliaError) {
-        dependentesData = (sociosFamilia || [])
-          .filter((s: any) => !Boolean(s.possui_mensalidade))
-          .map((s: any) => ({
-            id: String(s.id),
-            socio_id: String(s.responsavel_id),
-            nome: s.nome,
-            cpf: s.cpf,
-            data_nascimento: s.data_nascimento,
-            parentesco: s.parentesco,
-            telefone: s.telefone,
-            ativo: String(s.situacao || "").toLowerCase() !== "inativo",
-            created_at: null,
-            possui_mensalidade: false,
-            valor_mensalidade: 0,
-            dia_vencimento: null,
-            tipo_pagamento: null,
-            situacao_financeira: null,
-            data_ultimo_pagamento: null,
-          }));
-      }
-    }
+    const chavesAtuais = new Set(
+      dependentesAtuais.map((d) => `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${d.nome.trim().toLowerCase()}`)
+    );
 
-    setSocios(sociosData);
-    setDependentes(dependentesData as Dependente[]);
+    const dependentesLegados: Dependente[] = (dependentesResult.data || [])
+      .map((d: any) => ({ ...d, source: "dependentes" as const }))
+      .filter((d: any) => {
+        const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
+        return !chavesAtuais.has(chave);
+      });
 
-    const responsaveisIds = Array.from(new Set(dependentesData.map((d: any) => String(d.socio_id)).filter(Boolean)));
+    const dependentesData = [...dependentesAtuais, ...dependentesLegados];
+
+    setSocios(sociosData.map((s) => ({
+      id: String(s.id),
+      matricula: s.matricula == null ? null : String(s.matricula),
+      nome: s.nome,
+      situacao: s.situacao ?? null,
+    })));
+    setDependentes(dependentesData);
+
+    const responsaveisIds = Array.from(new Set(dependentesData.map((d) => String(d.socio_id)).filter(Boolean)));
     const statusMap: Record<string, string> = {};
 
     for (let i = 0; i < responsaveisIds.length; i += 100) {
       const lote = responsaveisIds.slice(i, i + 100);
       const { data: mensalidades, error: mensalidadesError } = await supabase
         .from("mensalidades")
-        .select("socio_id, data_vencimento, situacao")
+        .select("socio_id, competencia, data_vencimento, situacao")
         .in("socio_id", lote);
 
       if (mensalidadesError) {
@@ -208,24 +214,36 @@ export default function DependentesPage() {
 
       for (const id of lote) {
         const itens = (mensalidades || []).filter((m: any) => String(m.socio_id) === id);
-        let atraso = 0;
         const hoje = new Date();
+        const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const pendencias = new Set<string>();
 
         for (const m of itens) {
           const situacao = String(m.situacao || "").trim().toLowerCase();
           if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) continue;
-          if (!m.data_vencimento) continue;
-          const venc = new Date(`${String(m.data_vencimento).slice(0, 10)}T00:00:00`);
-          if (Number.isNaN(venc.getTime())) continue;
-          const dias = Math.floor((hoje.getTime() - venc.getTime()) / 86400000);
-          if (dias > atraso) atraso = dias;
+          const dataBase = m.competencia || m.data_vencimento;
+          if (!dataBase) continue;
+          const texto = String(dataBase).slice(0, 10);
+          const partes = texto.split("-").map(Number);
+          if (partes.length < 2 || !partes[0] || !partes[1]) continue;
+          const mes = new Date(partes[0], partes[1] - 1, 1);
+          if (mes < inicioMesAtual) pendencias.add(`${partes[0]}-${String(partes[1]).padStart(2, "0")}`);
         }
 
-        statusMap[id] = itens.length === 0 ? "sem_historico" : atraso <= 0 ? "em_dia" : atraso <= 60 ? "atrasado" : "muito_atrasado";
+        const atrasoMeses = pendencias.size;
+        statusMap[id] = atrasoMeses <= 2 ? "em_dia" : atrasoMeses <= 4 ? "atrasado" : "muito_atrasado";
       }
     }
 
-    setStatusResponsaveis(statusMap);
+    // Se o responsável ainda não tem histórico de mensalidades, respeita o
+    // status financeiro gravado no cadastro, mas sem inventar atraso.
+    for (const id of responsaveisIds) {
+      if (statusMap[id]) continue;
+      const socio = sociosMap.get(id);
+      const situacao = String(socio?.situacao_financeira || "").toLowerCase();
+      statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
+    }
+
     setCarregando(false);
   }
 
@@ -308,9 +326,43 @@ export default function DependentesPage() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    const resultado = editando
-      ? await supabase.from("dependentes").update(dados).eq("id", editando.id)
-      : await supabase.from("dependentes").insert(dados);
+    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+    const { data: responsavelCompleto } = await supabase.from("socios").select("tipo_socio").eq("id", form.socio_id).maybeSingle();
+    const dadosSocio = {
+      nome: dados.nome,
+      cpf: dados.cpf,
+      data_nascimento: dados.data_nascimento,
+      parentesco: dados.parentesco,
+      telefone: dados.telefone,
+      situacao: dados.ativo ? "ativo" : "inativo",
+      categoria: "Dependente",
+      tipo_socio: (() => {
+        const contribuinte = String(responsavelCompleto?.tipo_socio || "").toLowerCase().includes("contribuinte");
+        if (dados.possui_mensalidade) return contribuinte ? "dependente_contribuinte_familiar_mensalidade" : "dependente_patrimonial_familiar_mensalidade";
+        return contribuinte ? "dependente_contribuinte" : "dependente_patrimonial";
+      })(),
+      responsavel_id: dados.socio_id,
+      possui_mensalidade: dados.possui_mensalidade,
+      valor_mensalidade: dados.valor_mensalidade,
+      dia_vencimento: dados.dia_vencimento,
+      tipo_pagamento: dados.tipo_pagamento,
+      situacao_financeira: dados.situacao_financeira,
+      data_ultimo_pagamento: dados.data_ultimo_pagamento,
+    };
+
+    let resultado;
+    if (editando?.source === "socios" || !editando) {
+      if (!socioResponsavel) {
+        setErro("Selecione um sócio responsável válido.");
+        setSalvando(false);
+        return;
+      }
+      resultado = editando
+        ? await supabase.from("socios").update(dadosSocio).eq("id", editando.id)
+        : await supabase.from("socios").insert(dadosSocio);
+    } else {
+      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+    }
 
     if (resultado.error) {
       setErro(`Não foi possível salvar: ${resultado.error.message}`);
@@ -331,7 +383,9 @@ export default function DependentesPage() {
   async function excluirDependente(d: Dependente) {
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
-    const { error } = await supabase.from("dependentes").delete().eq("id", d.id);
+    const { error } = d.source === "socios"
+      ? await supabase.from("socios").update({ situacao: "inativo" }).eq("id", d.id)
+      : await supabase.from("dependentes").delete().eq("id", d.id);
     if (error) {
       setErro(`Não foi possível excluir: ${error.message}`);
       return;
@@ -343,8 +397,9 @@ export default function DependentesPage() {
 
   async function alternarStatus(d: Dependente) {
     setErro("");
-    const { error } = await supabase.from("dependentes")
-      .update({ ativo: d.ativo !== true }).eq("id", d.id);
+    const { error } = d.source === "socios"
+      ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
+      : await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
     if (error) {
       setErro(`Não foi possível alterar a situação: ${error.message}`);
       return;
@@ -432,6 +487,9 @@ export default function DependentesPage() {
                     <tbody>
                       {dependentesFiltrados.map((d) => {
                         const socio = socioPorId[d.socio_id];
+                        const statusResponsavel = statusResponsaveis[d.socio_id] || "em_dia";
+                        const statusLabel = statusResponsavel === "muito_atrasado" ? "5+ meses" : statusResponsavel === "atrasado" ? "3–4 meses" : "Até 2 meses";
+                        const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
                             <td className="px-5 py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
@@ -440,13 +498,8 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
                             <td className="px-5 py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
-                            <td className="px-5 py-4 text-sm font-bold text-slate-700">Sem mensalidade</td>
-                            <td className="px-5 py-4">{(() => {
-                              const status = statusResponsaveis[String(d.socio_id)] || "sem_historico";
-                              const label = status === "em_dia" ? "Em dia" : status === "atrasado" ? "Em atraso" : status === "muito_atrasado" ? "Muito atrasado" : "Sem histórico";
-                              const classe = status === "em_dia" ? "bg-emerald-100 text-emerald-700" : status === "sem_historico" ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-700";
-                              return <span className={`rounded-full px-3 py-1 text-xs font-black ${classe}`}>{label}</span>;
-                            })()}</td>
+                            <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
+                            <td className="px-5 py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button><button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button></div></td>
                           </tr>
