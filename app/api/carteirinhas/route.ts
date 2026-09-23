@@ -8,40 +8,34 @@ function isPago(situacao: unknown) {
 }
 
 function calcularStatus(mensalidades: any[], socioId: string) {
-  const hoje = new Date();
   const pendentes = mensalidades.filter(
     (m) => String(m.socio_id) === String(socioId) && !isPago(m.situacao)
   );
 
-  let maxDias = 0;
-
+  const competenciasPendentes = new Set<string>();
   for (const m of pendentes) {
-    if (!m.data_vencimento) continue;
-
-    const d = new Date(
-      `${String(m.data_vencimento).slice(0, 10)}T00:00:00`
-    );
-
-    if (Number.isNaN(d.getTime())) continue;
-
-    const diff = Math.floor(
-      (hoje.getTime() - d.getTime()) / 86400000
-    );
-
-    if (diff > maxDias) maxDias = diff;
+    const vencimento = String(m.data_vencimento || "").slice(0, 10);
+    if (!vencimento) continue;
+    const d = new Date(`${vencimento}T00:00:00`);
+    if (Number.isNaN(d.getTime()) || d >= new Date()) continue;
+    const competencia = String(m.competencia || vencimento).slice(0, 7);
+    competenciasPendentes.add(competencia);
   }
 
-  if (maxDias <= 14) {
-    return { financeiro_status: "em_dia", dias_atraso: 0 };
+  const mesesAtraso = competenciasPendentes.size;
+
+  if (mesesAtraso <= 2) {
+    return { financeiro_status: "em_dia", meses_atraso: mesesAtraso, dias_atraso: 0 };
   }
 
-  if (maxDias <= 60) {
-    return { financeiro_status: "atrasado", dias_atraso: maxDias };
+  if (mesesAtraso <= 4) {
+    return { financeiro_status: "atrasado", meses_atraso: mesesAtraso, dias_atraso: 0 };
   }
 
   return {
     financeiro_status: "muito_atrasado",
-    dias_atraso: maxDias,
+    meses_atraso: mesesAtraso,
+    dias_atraso: 0,
   };
 }
 
@@ -138,7 +132,7 @@ export async function GET(request: Request) {
     for (const lote of emLotes(ids, 100)) {
       const { data, error } = await supabase
         .from("mensalidades")
-        .select("socio_id,data_vencimento,situacao")
+        .select("socio_id,competencia,data_vencimento,situacao")
         .in("socio_id", lote);
 
       if (error) throw error;
@@ -176,6 +170,7 @@ export async function GET(request: Request) {
           titular_matricula: titular?.matricula || null,
           financeiro_status:
             titular?.financeiro_status || "em_dia",
+          meses_atraso: titular?.meses_atraso || 0,
           dias_atraso: titular?.dias_atraso || 0,
           situacao: d.situacao || null,
           responsavel_id: d.responsavel_id,
