@@ -156,7 +156,7 @@ export default function DependentesPage() {
     const dependentesData = dependentesResult.data || [];
 
     setSocios(sociosData);
-    setDependentes(dependentesData);
+    setDependentes(dependentesData as Dependente[]);
 
     const responsaveisIds = Array.from(new Set(dependentesData.map((d: any) => String(d.socio_id)).filter(Boolean)));
     const statusMap: Record<string, string> = {};
