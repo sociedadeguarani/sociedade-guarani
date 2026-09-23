@@ -108,6 +108,56 @@ function escolherConfiguracao(
 }
 
 
+
+async function sincronizarStatusFinanceiroFamilias(db: any, responsaveisIds: string[]) {
+  const idsUnicos = [...new Set((responsaveisIds || []).filter(Boolean).map(String))];
+  if (!idsUnicos.length) return;
+
+  const { data: familia, error: erroFamilia } = await db
+    .from("socios")
+    .select("id,responsavel_id")
+    .or(`id.in.(${idsUnicos.join(",")}),responsavel_id.in.(${idsUnicos.join(",")})`);
+  if (erroFamilia) throw erroFamilia;
+
+  const idsFamilia = [...new Set((familia || []).map((s: any) => String(s.id)))];
+  if (!idsFamilia.length) return;
+
+  const { data: mensalidades, error: erroMensalidades } = await db
+    .from("mensalidades")
+    .select("socio_id,situacao,data_vencimento")
+    .in("socio_id", idsFamilia);
+  if (erroMensalidades) throw erroMensalidades;
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  for (const responsavelId of idsUnicos) {
+    const quantidade = (mensalidades || []).filter((m: any) => {
+      const vencimento = String(m.data_vencimento || "").slice(0, 10);
+      return String(m.socio_id) === responsavelId && vencimento && vencimento < hoje &&
+        !["pago", "isento", "isenta", "quitado", "recebido"].includes(String(m.situacao || "").toLowerCase());
+    }).length;
+
+    const status = quantidade <= 2 ? "em_dia" : quantidade <= 4 ? "atrasado" : "muito_atrasado";
+
+    const { error: erroResponsavel } = await db
+      .from("socios")
+      .update({ situacao_financeira: status })
+      .eq("id", responsavelId);
+    if (erroResponsavel) throw erroResponsavel;
+
+    const dependentes = (familia || [])
+      .filter((s: any) => String(s.responsavel_id || "") === responsavelId)
+      .map((s: any) => String(s.id));
+
+    if (dependentes.length) {
+      const { error: erroDependentes } = await db
+        .from("socios")
+        .update({ situacao_financeira: status })
+        .in("id", dependentes);
+      if (erroDependentes) throw erroDependentes;
+    }
+  }
+}
+
 function normalizarBanco(valor: unknown) {
   return normalizarTexto(valor)
     .replace(/banco\s+do\s+brasil/g, "bb")
@@ -1065,6 +1115,13 @@ export async function POST(request: Request) {
         }
       }
 
+      const responsaveisParaSincronizar = (registrosParaBaixar || []).map((r: any) => {
+        const socio = mapaSociosBaixa.get(String(r.socio_id));
+        return String(socio?.responsavel_id || socio?.id || r.socio_id);
+      });
+
+      await sincronizarStatusFinanceiroFamilias(db, responsaveisParaSincronizar);
+
       return NextResponse.json({
         ok: true,
         baixadas: idsParaBaixar.length,
@@ -1109,6 +1166,14 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+
+      const { data: socioEstorno, error: erroSocioEstorno } = await db
+        .from("socios")
+        .select("id,responsavel_id")
+        .eq("id", mensalidade.socio_id)
+        .maybeSingle();
+
+      if (erroSocioEstorno) throw erroSocioEstorno;
 
       const { data: movimentos, error: erroMovimentos } = await db
         .from("movimentacoes_financeiras")
@@ -1192,6 +1257,10 @@ export async function POST(request: Request) {
         .eq("id", id);
 
       if (erroAtualizacao) throw erroAtualizacao;
+
+      await sincronizarStatusFinanceiroFamilias(db, [
+        String(socioEstorno?.responsavel_id || socioEstorno?.id || mensalidade.socio_id),
+      ]);
 
       return NextResponse.json({
         ok: true,
