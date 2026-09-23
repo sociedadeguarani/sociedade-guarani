@@ -61,54 +61,36 @@ function formatarTelefone(valor: string | null) {
   return valor;
 }
 
-
-type StatusFinanceiro = "em_dia" | "atrasado" | "muito_atrasado" | "sem_historico";
-
 function ehPago(situacao: unknown) {
-  return ["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(
+  return ["pago", "paid", "quitado", "recebido"].includes(
     String(situacao || "").trim().toLowerCase()
   );
 }
 
-function calcularStatusFinanceiro(mensalidades: any[]): StatusFinanceiro {
+function calcularStatusResponsavel(mensalidades: any[]) {
+  if (!mensalidades.length) return "sem_historico";
   const hoje = new Date();
   let maiorAtraso = 0;
+  let temAberta = false;
 
   for (const m of mensalidades) {
     if (ehPago(m.situacao) || !m.data_vencimento) continue;
-
+    temAberta = true;
     const vencimento = new Date(`${String(m.data_vencimento).slice(0, 10)}T00:00:00`);
     if (Number.isNaN(vencimento.getTime())) continue;
-
     const dias = Math.floor((hoje.getTime() - vencimento.getTime()) / 86400000);
     if (dias > maiorAtraso) maiorAtraso = dias;
   }
 
-  if (maiorAtraso <= 0) {
-    return mensalidades.length ? "em_dia" : "sem_historico";
-  }
-
-  if (maiorAtraso <= 60) return "atrasado";
+  if (!temAberta || maiorAtraso <= 0) return "em_dia";
+  if (maiorAtraso <= 60) return "em_atraso";
   return "muito_atrasado";
-}
-
-function statusFinanceiroLabel(status: StatusFinanceiro) {
-  if (status === "em_dia") return "Em dia";
-  if (status === "atrasado") return "Em atraso";
-  if (status === "muito_atrasado") return "Muito atrasado";
-  return "Sem histórico";
-}
-
-function statusFinanceiroClasse(status: StatusFinanceiro) {
-  if (status === "em_dia") return "bg-emerald-100 text-emerald-700";
-  if (status === "atrasado") return "bg-red-100 text-red-700";
-  if (status === "muito_atrasado") return "bg-red-100 text-red-700";
-  return "bg-slate-100 text-slate-500";
 }
 
 export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
+  const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, string>>({});
   const [busca, setBusca] = useState("");
   const [filtroSocio, setFiltroSocio] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("todos");
@@ -118,9 +100,24 @@ export default function DependentesPage() {
   const [sucesso, setSucesso] = useState("");
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
-  const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, StatusFinanceiro>>({});
 
-  const [form, setForm] = useState({
+  type FormDependente = {
+    socio_id: string;
+    nome: string;
+    cpf: string;
+    data_nascimento: string;
+    parentesco: string;
+    telefone: string;
+    ativo: boolean;
+    possui_mensalidade: boolean;
+    valor_mensalidade: number;
+    dia_vencimento: number;
+    tipo_pagamento: string;
+    situacao_financeira: string;
+    data_ultimo_pagamento: string;
+  };
+
+  const [form, setForm] = useState<FormDependente>({
     socio_id: "",
     nome: "",
     cpf: "",
@@ -178,55 +175,42 @@ export default function DependentesPage() {
         .order("nome"),
     ]);
 
-    if (sociosResult.error) {
-      setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
-    }
-    if (dependentesResult.error) {
-      setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
-    }
+    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
 
-    const listaSocios = sociosResult.data || [];
-    const listaDependentes = dependentesResult.data || [];
+    const sociosData = sociosResult.data || [];
+    const dependentesData = dependentesResult.data || [];
 
-    const idsResponsaveis = Array.from(
-      new Set(
-        listaDependentes
-          .map((d) => d.socio_id)
-          .filter(Boolean)
-          .map(String)
-      )
+    // Dependentes sem mensalidade própria herdam o status financeiro do responsável.
+    // Não altera a tabela dependentes nem cria cobranças novas.
+    const responsavelIds = Array.from(
+      new Set(dependentesData.filter((d) => !d.possui_mensalidade).map((d) => d.socio_id).filter(Boolean))
     );
+    const mapaStatus: Record<string, string> = {};
 
-    const statusMap: Record<string, StatusFinanceiro> = {};
-
-    // Consulta em lotes para não criar uma consulta .in() excessivamente grande.
-    for (let i = 0; i < idsResponsaveis.length; i += 100) {
-      const lote = idsResponsaveis.slice(i, i + 100);
-
-      const { data: mensalidades, error: mensalidadesError } = await supabase
+    for (let i = 0; i < responsavelIds.length; i += 100) {
+      const lote = responsavelIds.slice(i, i + 100);
+      const { data: mensalidadesResponsaveis, error: mensalidadesError } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,situacao")
         .in("socio_id", lote);
 
       if (mensalidadesError) {
-        setErro(`Erro ao carregar situação financeira: ${mensalidadesError.message}`);
+        setErro(`Erro ao carregar situação financeira dos responsáveis: ${mensalidadesError.message}`);
         break;
       }
 
-      const porResponsavel: Record<string, any[]> = {};
-      for (const mensalidade of mensalidades || []) {
-        const id = String(mensalidade.socio_id);
-        (porResponsavel[id] ||= []).push(mensalidade);
-      }
-
       for (const id of lote) {
-        statusMap[id] = calcularStatusFinanceiro(porResponsavel[id] || []);
+        const mensalidades = (mensalidadesResponsaveis || []).filter(
+          (m) => String(m.socio_id) === String(id)
+        );
+        mapaStatus[String(id)] = calcularStatusResponsavel(mensalidades);
       }
     }
 
-    setSocios(listaSocios);
-    setDependentes(listaDependentes);
-    setStatusResponsaveis(statusMap);
+    setSocios(sociosData);
+    setDependentes(dependentesData);
+    setStatusResponsaveis(mapaStatus);
     setCarregando(false);
   }
 
@@ -469,25 +453,21 @@ export default function DependentesPage() {
                             <td className="px-5 py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Sem mensalidade"}</td>
-                            <td className="px-5 py-4">
-                              {(() => {
-                                const status = d.possui_mensalidade
-                                  ? (
-                                      d.situacao_financeira === "em_atraso"
-                                        ? "atrasado"
-                                        : d.situacao_financeira === "em_dia"
-                                          ? "em_dia"
-                                          : "sem_historico"
-                                    ) as StatusFinanceiro
-                                  : (statusResponsaveis[String(d.socio_id)] || "sem_historico");
-
-                                return (
-                                  <span className={`rounded-full px-3 py-1 text-xs font-black ${statusFinanceiroClasse(status)}`}>
-                                    {statusFinanceiroLabel(status)}
-                                  </span>
-                                );
-                              })()}
-                            </td>
+                            <td className="px-5 py-4">{(() => {
+                              const status = d.possui_mensalidade
+                                ? d.situacao_financeira || "sem_historico"
+                                : statusResponsaveis[String(d.socio_id)] || "sem_historico";
+                              const classe =
+                                status === "em_dia" ? "bg-emerald-100 text-emerald-700" :
+                                status === "em_atraso" || status === "muito_atrasado" ? "bg-red-100 text-red-700" :
+                                "bg-slate-100 text-slate-500";
+                              const label =
+                                status === "em_dia" ? "Em dia" :
+                                status === "em_atraso" ? "Em atraso" :
+                                status === "muito_atrasado" ? "Muito atrasado" :
+                                "Sem histórico";
+                              return <span className={`rounded-full px-3 py-1 text-xs font-black ${classe}`}>{label}</span>;
+                            })()}</td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button><button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button></div></td>
                           </tr>
