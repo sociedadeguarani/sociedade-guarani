@@ -331,13 +331,21 @@ export default function InadimplenciaPage() {
           </div>
         ) : (
           <>
-            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">Total inadimplentes</p>
+                <p className="text-sm text-gray-500">Pessoas monitoradas</p>
                 <p className="mt-2 text-3xl font-extrabold text-red-600">
                   {inadimplentes.length}
                 </p>
-                <p className="mt-1 text-xs text-gray-500">Sócios e dependentes</p>
+                <p className="mt-1 text-xs text-gray-500">Em dia + atenção + crítico</p>
+              </div>
+
+              <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">0 a 2 meses</p>
+                <p className="mt-2 text-3xl font-extrabold text-green-600">
+                  {verdes}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Em dia</p>
               </div>
 
               <div className="rounded-2xl border border-yellow-100 bg-white p-5 shadow-sm">
@@ -382,6 +390,7 @@ export default function InadimplenciaPage() {
                 <div className="flex gap-2">
                   {[
                     ["todos", "Todos"],
+                    ["verde", "🟢 0–2 meses"],
                     ["amarelo", "🟡 3–4 meses"],
                     ["vermelho", "🔴 5+ meses"],
                   ].map(([valor, label]) => (
@@ -402,7 +411,7 @@ export default function InadimplenciaPage() {
 
               <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold">
                 <span className="rounded-full bg-green-50 px-3 py-2 text-green-700">
-                  🟢 Em dia: não aparece na lista
+                  🟢 0–2 meses: Em dia
                 </span>
                 <span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-700">
                   🟡 3–4 meses em atraso
@@ -416,7 +425,7 @@ export default function InadimplenciaPage() {
             <section className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
               <div className="border-b border-[#dfe7e2] p-5">
                 <h2 className="text-xl font-extrabold text-[#003d2b]">
-                  Inadimplentes
+                  Controle de mensalidades
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
                   {filtrados.length} registro(s) encontrado(s).
@@ -427,7 +436,7 @@ export default function InadimplenciaPage() {
                 <div className="p-12 text-center">
                   <div className="text-4xl">✅</div>
                   <h3 className="mt-3 font-extrabold text-[#005a3c]">
-                    Nenhum inadimplente encontrado
+                    Nenhuma pessoa encontrada com esse filtro
                   </h3>
                   <p className="mt-1 text-sm text-gray-500">
                     Ajuste os filtros ou atualize os dados.
