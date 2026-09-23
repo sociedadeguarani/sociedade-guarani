@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -153,7 +153,40 @@ export default function DependentesPage() {
     if (dependentesResult.error) setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
 
     const sociosData = sociosResult.data || [];
-    const dependentesData = dependentesResult.data || [];
+    let dependentesData = dependentesResult.data || [];
+
+    // Mantém a tabela dependentes como fonte principal. Se ela estiver vazia,
+    // usamos a relação real de família em socios.responsavel_id apenas para
+    // montar a tela, sem criar ou alterar registros no banco.
+    if (!dependentesResult.error && dependentesData.length === 0) {
+      const { data: sociosFamilia, error: sociosFamiliaError } = await supabase
+        .from("socios")
+        .select("id, responsavel_id, nome, cpf, data_nascimento, parentesco, telefone, situacao, possui_mensalidade")
+        .not("responsavel_id", "is", null)
+        .order("nome");
+
+      if (!sociosFamiliaError) {
+        dependentesData = (sociosFamilia || [])
+          .filter((s: any) => !Boolean(s.possui_mensalidade))
+          .map((s: any) => ({
+            id: String(s.id),
+            socio_id: String(s.responsavel_id),
+            nome: s.nome,
+            cpf: s.cpf,
+            data_nascimento: s.data_nascimento,
+            parentesco: s.parentesco,
+            telefone: s.telefone,
+            ativo: String(s.situacao || "").toLowerCase() !== "inativo",
+            created_at: null,
+            possui_mensalidade: false,
+            valor_mensalidade: 0,
+            dia_vencimento: null,
+            tipo_pagamento: null,
+            situacao_financeira: null,
+            data_ultimo_pagamento: null,
+          }));
+      }
+    }
 
     setSocios(sociosData);
     setDependentes(dependentesData as Dependente[]);
@@ -344,13 +377,10 @@ export default function DependentesPage() {
         </div>
       </header>
 
-          <div className="mt-12 rounded-2xl bg-[#FFF1B8] p-4">
-            <div className="text-xs font-black uppercase text-[#806400]">Sociedade Guarani</div>
-            <div className="mt-1 text-xs text-[#806400]">Sistema integrado de gestão</div>
-          </div>
-        </aside>
+      <div className="flex min-h-[calc(100vh-76px)]">
+        <MenuLateralPadrao />
 
-        <section className="min-w-0 flex-1 p-5 lg:p-8">
+        <section className="min-w-0 flex-1 p-5 lg:ml-[220px] lg:p-8">
           <div className="mx-auto max-w-[1400px]">
             <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div>
