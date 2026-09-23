@@ -211,9 +211,10 @@ export default function InadimplenciaPage() {
           ...g,
           competencias: Array.from(g.competencias),
           meses,
-          nivel: meses >= 3 ? ("vermelho" as const) : ("amarelo" as const),
+          nivel: meses >= 5 ? ("vermelho" as const) : ("amarelo" as const),
         };
       })
+      .filter((item) => item.meses >= 3)
       .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
   }, [mensalidades, socioMap, dependenteMap, responsaveis, hoje]);
 
@@ -340,7 +341,7 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-yellow-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">1 ou 2 meses</p>
+                <p className="text-sm text-gray-500">3 ou 4 meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-yellow-600">
                   {amarelos}
                 </p>
@@ -348,7 +349,7 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">3+ meses</p>
+                <p className="text-sm text-gray-500">5+ meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-red-600">
                   {vermelhos}
                 </p>
@@ -381,8 +382,8 @@ export default function InadimplenciaPage() {
                 <div className="flex gap-2">
                   {[
                     ["todos", "Todos"],
-                    ["amarelo", "🟡 1–2 meses"],
-                    ["vermelho", "🔴 3+ meses"],
+                    ["amarelo", "🟡 3–4 meses"],
+                    ["vermelho", "🔴 5+ meses"],
                   ].map(([valor, label]) => (
                     <button
                       key={valor}
@@ -404,10 +405,10 @@ export default function InadimplenciaPage() {
                   🟢 Em dia: não aparece na lista
                 </span>
                 <span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-700">
-                  🟡 1–2 meses em atraso
+                  🟡 3–4 meses em atraso
                 </span>
                 <span className="rounded-full bg-red-50 px-3 py-2 text-red-700">
-                  🔴 3 meses ou mais
+                  🔴 5 meses ou mais
                 </span>
               </div>
             </div>
