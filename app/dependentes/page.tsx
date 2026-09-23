@@ -61,32 +61,6 @@ function formatarTelefone(valor: string | null) {
   return valor;
 }
 
-function ehPago(situacao: unknown) {
-  return ["pago", "paid", "quitado", "recebido"].includes(
-    String(situacao || "").trim().toLowerCase()
-  );
-}
-
-function calcularStatusResponsavel(mensalidades: any[]) {
-  if (!mensalidades.length) return "sem_historico";
-  const hoje = new Date();
-  let maiorAtraso = 0;
-  let temAberta = false;
-
-  for (const m of mensalidades) {
-    if (ehPago(m.situacao) || !m.data_vencimento) continue;
-    temAberta = true;
-    const vencimento = new Date(`${String(m.data_vencimento).slice(0, 10)}T00:00:00`);
-    if (Number.isNaN(vencimento.getTime())) continue;
-    const dias = Math.floor((hoje.getTime() - vencimento.getTime()) / 86400000);
-    if (dias > maiorAtraso) maiorAtraso = dias;
-  }
-
-  if (!temAberta || maiorAtraso <= 0) return "em_dia";
-  if (maiorAtraso <= 60) return "em_atraso";
-  return "muito_atrasado";
-}
-
 export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
@@ -171,7 +145,7 @@ export default function DependentesPage() {
     const [sociosResult, dependentesResult] = await Promise.all([
       supabase.from("socios").select("id, matricula, nome, situacao").order("nome"),
       supabase.from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at")
         .order("nome"),
     ]);
 
@@ -181,36 +155,44 @@ export default function DependentesPage() {
     const sociosData = sociosResult.data || [];
     const dependentesData = dependentesResult.data || [];
 
-    // Dependentes sem mensalidade própria herdam o status financeiro do responsável.
-    // Não altera a tabela dependentes nem cria cobranças novas.
-    const responsavelIds = Array.from(
-      new Set(dependentesData.filter((d) => !d.possui_mensalidade).map((d) => d.socio_id).filter(Boolean))
-    );
-    const mapaStatus: Record<string, string> = {};
+    setSocios(sociosData);
+    setDependentes(dependentesData);
 
-    for (let i = 0; i < responsavelIds.length; i += 100) {
-      const lote = responsavelIds.slice(i, i + 100);
-      const { data: mensalidadesResponsaveis, error: mensalidadesError } = await supabase
+    const responsaveisIds = Array.from(new Set(dependentesData.map((d: any) => String(d.socio_id)).filter(Boolean)));
+    const statusMap: Record<string, string> = {};
+
+    for (let i = 0; i < responsaveisIds.length; i += 100) {
+      const lote = responsaveisIds.slice(i, i + 100);
+      const { data: mensalidades, error: mensalidadesError } = await supabase
         .from("mensalidades")
-        .select("socio_id,data_vencimento,situacao")
+        .select("socio_id, data_vencimento, situacao")
         .in("socio_id", lote);
 
       if (mensalidadesError) {
-        setErro(`Erro ao carregar situação financeira dos responsáveis: ${mensalidadesError.message}`);
-        break;
+        console.error(mensalidadesError);
+        continue;
       }
 
       for (const id of lote) {
-        const mensalidades = (mensalidadesResponsaveis || []).filter(
-          (m) => String(m.socio_id) === String(id)
-        );
-        mapaStatus[String(id)] = calcularStatusResponsavel(mensalidades);
+        const itens = (mensalidades || []).filter((m: any) => String(m.socio_id) === id);
+        let atraso = 0;
+        const hoje = new Date();
+
+        for (const m of itens) {
+          const situacao = String(m.situacao || "").trim().toLowerCase();
+          if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) continue;
+          if (!m.data_vencimento) continue;
+          const venc = new Date(`${String(m.data_vencimento).slice(0, 10)}T00:00:00`);
+          if (Number.isNaN(venc.getTime())) continue;
+          const dias = Math.floor((hoje.getTime() - venc.getTime()) / 86400000);
+          if (dias > atraso) atraso = dias;
+        }
+
+        statusMap[id] = itens.length === 0 ? "sem_historico" : atraso <= 0 ? "em_dia" : atraso <= 60 ? "atrasado" : "muito_atrasado";
       }
     }
 
-    setSocios(sociosData);
-    setDependentes(dependentesData);
-    setStatusResponsaveis(mapaStatus);
+    setStatusResponsaveis(statusMap);
     setCarregando(false);
   }
 
@@ -452,20 +434,11 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
                             <td className="px-5 py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
-                            <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Sem mensalidade"}</td>
+                            <td className="px-5 py-4 text-sm font-bold text-slate-700">Sem mensalidade</td>
                             <td className="px-5 py-4">{(() => {
-                              const status = d.possui_mensalidade
-                                ? d.situacao_financeira || "sem_historico"
-                                : statusResponsaveis[String(d.socio_id)] || "sem_historico";
-                              const classe =
-                                status === "em_dia" ? "bg-emerald-100 text-emerald-700" :
-                                status === "em_atraso" || status === "muito_atrasado" ? "bg-red-100 text-red-700" :
-                                "bg-slate-100 text-slate-500";
-                              const label =
-                                status === "em_dia" ? "Em dia" :
-                                status === "em_atraso" ? "Em atraso" :
-                                status === "muito_atrasado" ? "Muito atrasado" :
-                                "Sem histórico";
+                              const status = statusResponsaveis[String(d.socio_id)] || "sem_historico";
+                              const label = status === "em_dia" ? "Em dia" : status === "atrasado" ? "Em atraso" : status === "muito_atrasado" ? "Muito atrasado" : "Sem histórico";
+                              const classe = status === "em_dia" ? "bg-emerald-100 text-emerald-700" : status === "sem_historico" ? "bg-slate-100 text-slate-500" : "bg-red-100 text-red-700";
                               return <span className={`rounded-full px-3 py-1 text-xs font-black ${classe}`}>{label}</span>;
                             })()}</td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
