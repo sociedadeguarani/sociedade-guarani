@@ -50,7 +50,18 @@ function normalizarTexto(valor: unknown) {
 function dependenteTemMensalidade(socio: any) {
   const categoria = normalizarTexto(socio?.categoria);
 
+  // A categoria do cadastro é a fonte de verdade para dependentes.
+  // Isso evita que registros antigos, que ficaram com
+  // possui_mensalidade=true durante migrações/testes, sejam cobrados
+  // quando a categoria diz explicitamente que não possuem mensalidade.
   if (categoria) {
+    if (
+      categoria.includes("sem mensalidade") ||
+      categoria.includes("s/ mensalidade")
+    ) {
+      return false;
+    }
+
     if (
       categoria.includes("c/ mensalidade") ||
       categoria.includes("com mensalidade")
@@ -62,6 +73,8 @@ function dependenteTemMensalidade(socio: any) {
     return false;
   }
 
+  // Somente quando não houver categoria usamos o tipo_socio como
+  // compatibilidade para cadastros novos/antigos sem categoria.
   return TIPOS_DEPENDENTES_COM_MENSALIDADE.includes(
     String(socio?.tipo_socio || "")
   );
