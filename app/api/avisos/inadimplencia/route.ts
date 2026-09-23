@@ -22,7 +22,7 @@ export async function GET(request: Request) {
         const d = new Date(`${String(m.data_vencimento).slice(0, 10)}T00:00:00`);
         if (!Number.isNaN(d.getTime()) && d < hoje) meses.add(String(m.data_vencimento).slice(0, 7));
       }
-      return meses.size >= 3 ? { ...s, meses_atraso: meses.size } : null;
+      return meses.size >= 5 ? { ...s, meses_atraso: meses.size } : null;
     }).filter(Boolean);
     return NextResponse.json({ alertas });
   } catch (error) {
