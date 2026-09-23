@@ -142,6 +142,9 @@ export default function Page() {
 
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
+  const [anoSelecionado, setAnoSelecionado] = useState(hoje.getFullYear());
+  const [mesSelecionado, setMesSelecionado] = useState(hoje.getMonth() + 1);
+  const [aplicandoCompetencia, setAplicandoCompetencia] = useState(false);
   const [busca, setBusca] = useState("");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
@@ -222,6 +225,14 @@ export default function Page() {
   useEffect(() => {
     void carregar();
   }, [ano, mes]);
+
+  async function aplicarCompetencia() {
+    if (anoSelecionado === ano && mesSelecionado === mes) return;
+    setAplicandoCompetencia(true);
+    setAno(anoSelecionado);
+    setMes(mesSelecionado);
+    setAplicandoCompetencia(false);
+  }
 
   function normalizarPagamento(valor: unknown) {
     return String(valor || "")
@@ -530,8 +541,8 @@ export default function Page() {
             <label className="rounded-2xl border bg-white p-4">
               Ano
               <select
-                value={ano}
-                onChange={(e) => setAno(+e.target.value)}
+                value={anoSelecionado}
+                onChange={(e) => setAnoSelecionado(+e.target.value)}
                 className="mt-2 w-full rounded-xl border p-2"
               >
                 {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map(
@@ -545,8 +556,8 @@ export default function Page() {
             <label className="rounded-2xl border bg-white p-4">
               Competência
               <select
-                value={mes}
-                onChange={(e) => setMes(+e.target.value)}
+                value={mesSelecionado}
+                onChange={(e) => setMesSelecionado(+e.target.value)}
                 className="mt-2 w-full rounded-xl border p-2"
               >
                 {[
@@ -569,6 +580,22 @@ export default function Page() {
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <div className="text-sm text-gray-500">
+              {anoSelecionado === ano && mesSelecionado === mes
+                ? `Competência ativa: ${String(mes).padStart(2, "0")}/${ano}`
+                : `Seleção pendente: ${String(mesSelecionado).padStart(2, "0")}/${anoSelecionado}`}
+            </div>
+            <button
+              type="button"
+              onClick={() => void aplicarCompetencia()}
+              disabled={aplicandoCompetencia || (anoSelecionado === ano && mesSelecionado === mes)}
+              className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {aplicandoCompetencia ? "Aplicando..." : "OK — Abrir competência"}
+            </button>
           </div>
 
           <div className="rounded-2xl border bg-white p-4">
