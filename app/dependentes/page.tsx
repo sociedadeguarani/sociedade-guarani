@@ -344,30 +344,6 @@ export default function DependentesPage() {
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-76px)]">
-        <aside className="hidden w-[220px] shrink-0 border-r border-slate-200 bg-white p-4 lg:block">
-          <div className="mb-4 px-2 text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Menu principal</div>
-          <nav className="space-y-1">
-            {[
-              ["🏠", "Início", "/painel"],
-              ["👥", "Sócios", "/socios"],
-              ["👨‍👩‍👧", "Dependentes", "/dependentes"],
-              ["🗓️", "Reservas", "/reservas"],
-              ["🎉", "Eventos", "/eventos"],
-              ["💰", "Financeiro", "/financeiro"],
-              ["🏛️", "Espaços", "/espacos"],
-              ["📊", "Relatórios", "/relatorios"],
-            ].map(([icone, nome, href]) => (
-              <Link key={nome} href={href}
-                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
-                  nome === "Dependentes"
-                    ? "bg-[#005A3C] text-white shadow-sm"
-                    : "text-slate-600 hover:bg-[#E8F3EE] hover:text-[#005A3C]"
-                }`}>
-                <span className="text-lg">{icone}</span>{nome}
-              </Link>
-            ))}
-          </nav>
           <div className="mt-12 rounded-2xl bg-[#FFF1B8] p-4">
             <div className="text-xs font-black uppercase text-[#806400]">Sociedade Guarani</div>
             <div className="mt-1 text-xs text-[#806400]">Sistema integrado de gestão</div>
