@@ -22,20 +22,20 @@ import {
 
 type Perfil = "associado" | "funcionario" | "funcionario_inventario" | "administrador_normal" | "administrador_master";
 const ITENS_MENU = [
-  { nome: "Início", rota: "/painel", icone: Home, perfis: ["associado", "funcionario", "funcionario_inventario", "administrador_normal", "administrador_master"] },
-  { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
+  { nome: "Início", rota: "/painel", icone: Home, perfis: ["associado", "funcionario", "funcionario_inventario", "administrador_normal"] },
+  { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "administrador_normal", ] },
   { nome: "Minhas mensalidades", rota: "/minhas-mensalidades", icone: Wallet, perfis: ["associado"] },
-  { nome: "Reservas", rota: "/reservas", icone: CalendarDays, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Convites", rota: "/convites", icone: Ticket, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Sócios", rota: "/socios", icone: Users, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Mensalidades", rota: "/mensalidades", icone: Wallet, perfis: ["administrador_normal", "administrador_master"] },
-  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, perfis: ["administrador_normal", "administrador_master"] },
-  { nome: "Inventário", rota: "/inventario", icone: Boxes, perfis: ["funcionario", "funcionario_inventario", "administrador_normal", "administrador_master"] },
-  { nome: "Acessos", rota: "/acessos", icone: DoorOpen, perfis: ["funcionario", "administrador_normal", "administrador_master"] },
-  { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, perfis: ["administrador_normal", "administrador_master"] },
+  { nome: "Reservas", rota: "/reservas", icone: CalendarDays, perfis: ["associado", "funcionario", "administrador_normal", ] },
+  { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "funcionario", "administrador_normal", ] },
+  { nome: "Convites", rota: "/convites", icone: Ticket, perfis: ["associado", "funcionario", "administrador_normal", ] },
+  { nome: "Carteirinhas", rota: "/carteirinhas", icone: CreditCard, perfis: ["associado", "funcionario", "administrador_normal", ] },
+  { nome: "Sócios", rota: "/socios", icone: Users, perfis: ["funcionario", "administrador_normal", ] },
+  { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, perfis: ["funcionario", "administrador_normal", ] },
+  { nome: "Mensalidades", rota: "/mensalidades", icone: Wallet, perfis: ["administrador_normal", ] },
+  { nome: "Financeiro", rota: "/financeiro", icone: Wallet, perfis: ["administrador_normal", ] },
+  { nome: "Inventário", rota: "/inventario", icone: Boxes, perfis: ["funcionario", "funcionario_inventario", "administrador_normal", ] },
+  { nome: "Acessos", rota: "/acessos", icone: DoorOpen, perfis: ["funcionario", "administrador_normal", ] },
+  { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, perfis: ["administrador_normal", ] },
   { nome: "Usuários", rota: "/usuarios", icone: UserCog, perfis: ["administrador_master"] },
 ] as const;
 
