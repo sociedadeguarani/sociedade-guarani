@@ -331,8 +331,29 @@ export async function GET(request: Request) {
 
     if (erroCobrancas) throw erroCobrancas;
 
+    // As contas bancárias precisam vir pelo endpoint administrativo,
+    // porque a página de mensalidades não deve depender de RLS do
+    // navegador para descobrir o banco de cada associado.
+    const { data: contasBancarias, error: erroContasBancarias } = await db
+      .from("contas_bancarias")
+      .select("id,nome,banco")
+      .order("nome");
+
+    if (erroContasBancarias) throw erroContasBancarias;
+
+    const mapaContasBancarias = new Map<string, any>(
+      (contasBancarias || []).map((c: any) => [String(c.id), c])
+    );
+
+    const sociosComConta = (socios || []).map((s: any) => ({
+      ...s,
+      conta_bancaria: s.conta_bancaria_id
+        ? mapaContasBancarias.get(String(s.conta_bancaria_id)) || null
+        : null,
+    }));
+
     const mapaSocios = new Map<string, any>(
-      (socios || []).map((s: any) => [String(s.id), s])
+      sociosComConta.map((s: any) => [String(s.id), s])
     );
 
     const mensalidadesComSocio = (mensalidades || []).map((m: any) => ({
@@ -341,8 +362,9 @@ export async function GET(request: Request) {
     }));
 
     return NextResponse.json({
-      socios: socios || [],
+      socios: sociosComConta,
       mensalidades: mensalidadesComSocio,
+      contas: contasBancarias || [],
       configuracoes: configuracoes || [],
       tarifas: tarifas || [],
       cobranca: cobrancas?.[0] || null,
