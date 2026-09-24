@@ -17,10 +17,13 @@ const TODAS_PERMISSOES = [
   "inventario.devolver",
 ];
 
+const PERFIL_INVENTARIO = "funcionario_inventario";
+
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
   administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
+  funcionario_inventario: ["inventario.consultar", "inventario.emprestar", "inventario.devolver"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
 };
 
@@ -131,9 +134,26 @@ async function somenteMaster(request: Request) {
   };
 }
 
+async function garantirPerfilInventario(db: ReturnType<typeof getServiceClient>) {
+  const { data: existente, error: buscaError } = await db.from("perfis").select("id,nome,ativo,codigo").eq("codigo", PERFIL_INVENTARIO).maybeSingle();
+  if (buscaError) throw new Error(`Erro ao consultar perfil de inventário: ${buscaError.message}`);
+  if (existente) {
+    if (existente.ativo === false) {
+      const { data, error } = await db.from("perfis").update({ ativo: true, nome: "Funcionário — Inventário" }).eq("id", existente.id).select("id,nome,ativo,codigo").single();
+      if (error) throw new Error(`Erro ao ativar perfil de inventário: ${error.message}`);
+      return data;
+    }
+    return existente;
+  }
+  const { data, error } = await db.from("perfis").insert({ nome: "Funcionário — Inventário", codigo: PERFIL_INVENTARIO, ativo: true }).select("id,nome,ativo,codigo").single();
+  if (error) throw new Error(`Não foi possível criar o perfil Funcionário — Inventário: ${error.message}`);
+  return data;
+}
+
 async function carregarDados(db: ReturnType<typeof getServiceClient>) {
+  await garantirPerfilInventario(db);
   const [p, u, s, a, perm] = await Promise.all([
-    db.from("perfis").select("id,nome,ativo").eq("ativo", true).order("nome"),
+    db.from("perfis").select("id,nome,ativo,codigo").eq("ativo", true).order("nome"),
     db.from("usuarios_sistema").select("id,nome_exibicao,socio_id,funcionario_id,perfil_id,ativo").order("nome_exibicao"),
     db.from("socios").select("id,matricula,nome,cpf,email").order("nome"),
     db.auth.admin.listUsers({ page: 1, perPage: 1000 }),
@@ -187,7 +207,7 @@ export async function POST(request: Request) {
     if (String(senha).length < 6) return NextResponse.json({ error: "A senha precisa ter pelo menos 6 caracteres." }, { status: 400 });
 
     const db = getServiceClient();
-    const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,ativo").eq("id", perfil_id).eq("ativo", true).single();
+    const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,ativo,codigo").eq("id", perfil_id).eq("ativo", true).single();
     if (perfilError || !perfil) return NextResponse.json({ error: "Perfil não encontrado ou inativo." }, { status: 400 });
     if (perfil.nome === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
 
