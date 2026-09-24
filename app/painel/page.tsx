@@ -1,320 +1,157 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getServiceClient } from "@/lib/guaraniAuth";
+"use client";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
-export const dynamic = "force-dynamic";
-
-const TODAS_PERMISSOES = [
-  "administracao.tudo",
-  "socios.consultar",
-  "socios.ver_financeiro",
-  "socios.ver_exame_medico",
-  "propria.mensalidade",
-  "propria.reservas",
-  "convites.comprar",
-  "inventario.consultar",
-  "inventario.emprestar",
-  "inventario.devolver",
-  "inventario.cadastrar",
-  "inventario.editar",
+const atalhosAdmin = [
+  ["👥", "Sócios", "/socios", "Cadastre, edite e consulte associados."],
+  ["💰", "Financeiro", "/financeiro", "Mensalidades, recebimentos e despesas."],
+  ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
+  ["🎉", "Eventos", "/eventos", "Eventos, ingressos e fichas."],
+  ["🎫", "Carteirinhas", "/carteirinhas", "Carteirinha digital e QR Code."],
+  ["📢", "Avisos", "/avisos", "Comunicados para os associados."],
+  ["📦", "Inventário", "/inventario", "Patrimônio e controle de itens."],
+  ["🚪", "Acessos", "/acessos", "Controle e consulta de entradas."],
+];
+const atalhosMaster = [
+  ...atalhosAdmin,
+  ["👤", "Usuários", "/usuarios", "Crie, edite, ative ou desative usuários e defina seus perfis."],
+];
+const atalhosFuncionario = [
+  ["🎫", "Carteirinhas", "/carteirinhas", "Consulte por matrícula ou QR Code."],
+  ["📦", "Inventário", "/inventario", "Patrimônio e controle de itens."],
+  ["🚪", "Acessos", "/acessos", "Controle e consulta de entradas."],
+  ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
+  ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
+];
+const atalhosInventario = [
+  ["📦", "Inventário", "/inventario", "Cadastro de itens e controle de empréstimos."],
+  ["🎫", "Carteirinhas", "/carteirinhas", "Consulta de associados e carteirinhas."],
+  ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
+];
+const atalhosAssociado = [
+  ["🎫", "Carteirinhas", "/carteirinhas", "Sua carteirinha e a da sua família."],
+  ["💰", "Minhas mensalidades", "/mensalidades", "Veja suas mensalidades e pague pendências."],
+  ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
+  ["🎉", "Eventos", "/eventos", "Eventos e ingressos."],
+  ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
 ];
 
-const DEFAULTS: Record<string, string[]> = {
-  administrador: TODAS_PERMISSOES,
-  administrador_master: TODAS_PERMISSOES,
-  master: TODAS_PERMISSOES,
-  administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
-  funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
-  associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
-  funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
-};
+export default function PainelPage() {
+  const [nome, setNome] = useState("Usuário");
+  const [perfil, setPerfil] = useState("");
+  const [totalSocios, setTotalSocios] = useState<number | null>(null);
 
-async function somenteMaster(request: Request) {
-  const authorization = request.headers.get("authorization") || "";
-  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  useEffect(() => {
+    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
+    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
 
-  if (!token) {
-    return {
-      response: NextResponse.json(
-        { error: "Sessão não encontrada." },
-        { status: 401 }
-      ),
-    };
-  }
+    (async () => {
+      try {
+        let { data: { session } } = await supabase.auth.getSession();
+        if (!session) session = (await supabase.auth.refreshSession()).data.session;
+        if (!session?.access_token) return;
+        const r = await fetch("/api/socios", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) setTotalSocios(Array.isArray(j.socios) ? j.socios.length : 0);
+      } catch {}
+    })();
+  }, []);
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const p = perfil.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const master = p === "administrador_master" || p === "master";
+  const admin = p === "administrador" || p === "administrador_normal" || p === "admin";
+  const funcionario = p === "funcionario" || p === "funcionario_inventario";
+  const atalhos = master || admin
+    ? (master ? atalhosMaster : atalhosAdmin)
+      : p === "funcionario_inventario"
+        ? atalhosInventario
+        : funcionario
+          ? atalhosFuncionario
+          : atalhosAssociado;
 
-  if (!url || !anonKey) {
-    return {
-      response: NextResponse.json(
-        { error: "Configuração do Supabase incompleta." },
-        { status: 500 }
-      ),
-    };
-  }
+  const nomeDoPerfil = master
+    ? "Administrador Master"
+    : admin
+      ? "Administrador"
+      : p === "funcionario_inventario"
+        ? "Funcionário - Inventário"
+        : p === "funcionario"
+          ? "Funcionário"
+          : "Associado";
 
-  const authClient = createClient(url, anonKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  return (
+    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+      <CabecalhoPadrao />
+      <MenuLateralPadrao />
+      <section className="relative min-w-0 overflow-hidden p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+        <div aria-hidden="true" className="pointer-events-none absolute right-[-120px] top-[180px] z-0 h-[720px] w-[720px] opacity-[0.075] sm:right-[-70px]">
+          <img src="/logo-guarani.png" alt="" className="h-full w-full object-contain" />
+        </div>
 
-  const { data: userData, error: userError } =
-    await authClient.auth.getUser(token);
+        <div className="relative z-10 mx-auto max-w-[1400px]">
+          <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#005a3c] to-[#003d2b] p-6 text-white shadow-lg sm:p-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white/70">Painel de gestão</p>
+                <h1 className="mt-1 text-3xl font-black sm:text-4xl">Olá, {nome}!</h1>
+                <p className="mt-2 text-sm text-white/80">
+                  {"Tudo da Sociedade Recreativa Guarani em um só lugar. Use os atalhos abaixo para acessar os módulos."}
+                </p>
+              </div>
+              {(admin || master) && (
+                <a href="/socios" className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]">
+                  + Novo sócio
+                </a>
+              )}
+              {master && (
+                <a href="/usuarios" className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]">
+                  + Novo usuário
+                </a>
+              )}
+            </div>
+          </div>
 
-  if (userError || !userData.user) {
-    return {
-      response: NextResponse.json(
-        { error: "Sessão inválida ou expirada." },
-        { status: 401 }
-      ),
-    };
-  }
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Associados cadastrados</p>
+              <p className="mt-1 text-3xl font-black text-[#005a3c]">{totalSocios === null ? "—" : totalSocios}</p>
+            </div>
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Perfil atual</p>
+              <p className="mt-1 text-xl font-black text-[#005a3c]">{nomeDoPerfil}</p>
+            </div>
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Área</p>
+              <p className="mt-1 text-xl font-black text-[#005a3c]">Sociedade Guarani</p>
+            </div>
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Acesso</p>
+              <p className="mt-1 text-xl font-black text-[#005a3c]">{master || admin ? "Administrativo" : funcionario ? "Operacional" : "Associado"}</p>
+            </div>
+          </div>
 
-  const db = getServiceClient();
-  const { data: usuario, error: usuarioError } = await db
-    .from("usuarios_sistema")
-    .select("id,perfil_id,socio_id,ativo,nome_exibicao")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-
-  if (usuarioError) {
-    return {
-      response: NextResponse.json(
-        { error: usuarioError.message },
-        { status: 500 }
-      ),
-    };
-  }
-
-  if (!usuario || !usuario.ativo) {
-    return {
-      response: NextResponse.json(
-        { error: "Usuário sem acesso ao sistema." },
-        { status: 403 }
-      ),
-    };
-  }
-
-  const { data: perfil, error: perfilError } = await db
-    .from("perfis")
-    .select("id,nome,codigo")
-    .eq("id", usuario.perfil_id)
-    .maybeSingle();
-
-  if (perfilError) {
-    return {
-      response: NextResponse.json(
-        { error: perfilError.message },
-        { status: 500 }
-      ),
-    };
-  }
-
-  const perfilNormalizado = String(perfil?.codigo || perfil?.nome || "")
-    .trim()
-    .toLowerCase();
-
-  const master =
-    perfilNormalizado === "administrador_master" ||
-    perfilNormalizado === "master";
-
-  if (!master) {
-    return {
-      response: NextResponse.json(
-        { error: "Apenas o Administrador Master pode gerenciar usuários do sistema." },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return {
-    usuario: {
-      ...usuario,
-      perfil: perfilNormalizado,
-      email: userData.user.email || null,
-    },
-  };
+          <div className="mt-8">
+            <h2 className="text-2xl font-black text-[#005a3c]">Acesso rápido</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Clique em um módulo para abrir sua tela.
+            </p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {atalhos.map(([icone, titulo, rota, descricao]) => (
+                <a key={rota} href={rota} className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                  <div className="text-2xl">{icone}</div>
+                  <div className="mt-3 text-lg font-black text-[#003d2b]">{titulo}</div>
+                  <p className="mt-1 text-sm text-slate-500">{descricao}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
 }
-
-async function carregarDados(db: ReturnType<typeof getServiceClient>) {
-  const [p, u, s, a, perm] = await Promise.all([
-    db.from("perfis").select("id,nome,codigo,ativo").order("nome"),
-    db.from("usuarios_sistema").select("id,nome_exibicao,socio_id,funcionario_id,perfil_id,ativo").order("nome_exibicao"),
-    db.from("socios").select("id,matricula,nome,cpf,email").order("nome"),
-    db.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    db.from("permissoes_usuario").select("usuario_id,chave,permitido"),
-  ]);
-
-  if (p.error) throw new Error(`Erro ao carregar perfis: ${p.error.message}`);
-
-  // Garante os perfis padrão sem apagar ou recriar os que já existem.
-  // Isso também recupera instalações em que a tabela de perfis ficou sem
-  // os registros usados pela tela de Usuários.
-  const perfisAtuais = [...(p.data || [])] as any[];
-  const perfisPadrao = [
-    { codigo: "administrador_master", nome: "Administrador Master" },
-    { codigo: "administrador_normal", nome: "Administrador" },
-    { codigo: "funcionario", nome: "Funcionário" },
-    { codigo: "funcionario_inventario", nome: "Funcionário — Inventário" },
-    { codigo: "associado", nome: "Associado" },
-  ];
-
-  for (const padrao of perfisPadrao) {
-    const existe = perfisAtuais.some((x: any) =>
-      String(x.codigo || "").trim().toLowerCase() === padrao.codigo ||
-      String(x.nome || "").trim().toLowerCase() === padrao.nome.toLowerCase()
-    );
-    if (existe) continue;
-
-    const { data: novoPerfil, error: novoPerfilError } = await db
-      .from("perfis")
-      .insert({ nome: padrao.nome, codigo: padrao.codigo, ativo: true })
-      .select("id,nome,codigo,ativo")
-      .single();
-
-    if (!novoPerfilError && novoPerfil) perfisAtuais.push(novoPerfil);
-  }
-  if (u.error) throw new Error(`Erro ao carregar usuários: ${u.error.message}`);
-  if (s.error) throw new Error(`Erro ao carregar sócios: ${s.error.message}`);
-  if (a.error) throw new Error(`Erro ao carregar acessos: ${a.error.message}`);
-  if (perm.error) throw new Error(`Execute primeiro o SQL de permissões: ${perm.error.message}`);
-
-  const perfilMap = new Map(perfisAtuais.map((x) => [x.id, x]));
-  const emailMap = new Map((a.data?.users || []).map((x) => [x.id, x.email || ""]));
-  const permMap = new Map<string, string[]>();
-  for (const x of perm.data || []) {
-    if (!x.permitido) continue;
-    permMap.set(x.usuario_id, [...(permMap.get(x.usuario_id) || []), x.chave]);
-  }
-
-  return {
-    perfis: perfisAtuais,
-    socios: s.data || [],
-    usuarios: (u.data || []).map((x) => ({
-      ...x,
-      email: emailMap.get(x.id) || "",
-      perfil: perfilMap.get(x.perfil_id) || null,
-      permissoes: permMap.get(x.id) || DEFAULTS[perfilMap.get(x.perfil_id)?.nome || ""] || [],
-    })),
-  };
-}
-
-export async function GET(request: Request) {
-  const auth = await somenteMaster(request);
-  if ("response" in auth) return auth.response;
-  try {
-    return NextResponse.json(await carregarDados(getServiceClient()));
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar usuários." }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  const auth = await somenteMaster(request);
-  if ("response" in auth) return auth.response;
-
-  try {
-    const body = await request.json();
-    const { nome, email, senha, perfil_id, socio_id, ativo, permissoes } = body;
-    if (!nome || !email || !senha || !perfil_id) return NextResponse.json({ error: "Nome, e-mail, senha e perfil são obrigatórios." }, { status: 400 });
-    if (String(senha).length < 6) return NextResponse.json({ error: "A senha precisa ter pelo menos 6 caracteres." }, { status: 400 });
-
-    const db = getServiceClient();
-    const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,codigo,ativo").eq("id", perfil_id).eq("ativo", true).single();
-    if (perfilError || !perfil) return NextResponse.json({ error: "Perfil não encontrado ou inativo." }, { status: 400 });
-    if (perfil.nome === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
-
-    const { data: authData, error: authError } = await db.auth.admin.createUser({
-      email: String(email).trim().toLowerCase(),
-      password: String(senha),
-      email_confirm: true,
-      user_metadata: { nome_exibicao: String(nome).trim(), perfil: perfil.nome },
-    });
-    if (authError || !authData.user) return NextResponse.json({ error: authError?.message || "Erro ao criar acesso." }, { status: 400 });
-
-    const { error: usuarioError } = await db.from("usuarios_sistema").insert({
-      id: authData.user.id,
-      perfil_id,
-      socio_id: socio_id || null,
-      funcionario_id: null,
-      ativo: ativo !== false,
-      nome_exibicao: String(nome).trim(),
-    });
-    if (usuarioError) {
-      await db.auth.admin.deleteUser(authData.user.id);
-      return NextResponse.json({ error: `Usuário Auth criado, mas o cadastro do sistema falhou: ${usuarioError.message}` }, { status: 500 });
-    }
-
-    const perfilChave = String(perfil.codigo || perfil.nome || "").toLowerCase();
-    const escolhidas = perfilChave === "administrador" || perfilChave === "administrador_master" || perfilChave === "master"
-      ? TODAS_PERMISSOES
-      : Array.isArray(permissoes)
-        ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x))
-        : (DEFAULTS[perfilChave] || []);
-
-    if (escolhidas.length) {
-      const { error: permError } = await db.from("permissoes_usuario").insert(escolhidas.map((chave) => ({ usuario_id: authData.user.id, chave, permitido: true })));
-      if (permError) {
-        await db.from("usuarios_sistema").delete().eq("id", authData.user.id);
-        await db.auth.admin.deleteUser(authData.user.id);
-        return NextResponse.json({ error: `Usuário criado, mas as permissões falharam: ${permError.message}` }, { status: 500 });
-      }
-    }
-
-    return NextResponse.json({ ok: true, id: authData.user.id, message: "Usuário criado com sucesso." });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro interno do servidor." }, { status: 500 });
-  }
-}
-
-export async function PATCH(request: Request) {
-  const auth = await somenteMaster(request);
-  if ("response" in auth) return auth.response;
-  try {
-    const body = await request.json();
-    const id = String(body?.id || "").trim();
-    if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
-    const db = getServiceClient();
-    if (typeof body.ativo === "boolean") {
-      const { error } = await db.from("usuarios_sistema").update({ ativo: body.ativo }).eq("id", id);
-      if (error) throw new Error(error.message);
-    }
-    if (Array.isArray(body.permissoes)) {
-      const validas = body.permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x));
-      const { error: delError } = await db.from("permissoes_usuario").delete().eq("usuario_id", id);
-      if (delError) throw new Error(delError.message);
-      if (validas.length) {
-        const { error } = await db.from("permissoes_usuario").insert(validas.map((chave: string) => ({ usuario_id: id, chave, permitido: true })));
-        if (error) throw new Error(error.message);
-      }
-    }
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar usuário." }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  const auth = await somenteMaster(request);
-  if ("response" in auth) return auth.response;
-  try {
-    const body = await request.json();
-    const id = String(body?.id || "").trim();
-    if (!id) return NextResponse.json({ error: "Informe o id do usuário." }, { status: 400 });
-    if (id === auth.usuario.id) return NextResponse.json({ error: "O administrador Master atualmente conectado não pode ser excluído por esta tela." }, { status: 400 });
-
-    const db = getServiceClient();
-    const { data: usuario, error: usuarioError } = await db.from("usuarios_sistema").select("id,nome_exibicao").eq("id", id).maybeSingle();
-    if (usuarioError) throw new Error(usuarioError.message);
-    if (!usuario) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
-
-    const { error: sistemaError } = await db.from("usuarios_sistema").delete().eq("id", id);
-    if (sistemaError) throw new Error(sistemaError.message);
-    const { error: authError } = await db.auth.admin.deleteUser(id);
-    if (authError) return NextResponse.json({ error: `Cadastro do sistema excluído, mas o acesso Auth não foi excluído: ${authError.message}` }, { status: 500 });
-    return NextResponse.json({ ok: true, message: "Usuário excluído definitivamente." });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir usuário." }, { status: 500 });
-  }
-}
-
