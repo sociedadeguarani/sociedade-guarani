@@ -1066,6 +1066,7 @@ export default function Home() {
               excluirSocio={excluirSocio}
               carregando={carregando}
               mostrarSomenteDependentes={mostrarSomenteDependentes}
+            somenteConsulta={somenteConsulta}
               setMostrarSomenteDependentes={setMostrarSomenteDependentes}
             />
           )}
@@ -1334,6 +1335,7 @@ function Socios({
   carregando,
   mostrarSomenteDependentes,
   setMostrarSomenteDependentes,
+  somenteConsulta,
 }: {
   socios: Socio[];
   quantidadeTotal: number;
@@ -1346,6 +1348,7 @@ function Socios({
   carregando: boolean;
   mostrarSomenteDependentes: boolean;
   setMostrarSomenteDependentes: (valor: boolean) => void;
+  somenteConsulta: boolean;
 }) {
   return (
     <div>
