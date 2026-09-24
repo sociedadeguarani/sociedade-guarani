@@ -11,9 +11,11 @@ function admin() {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
+    const administradorCompleto = ["administrador", "administrador_normal", "administrador_master", "admin", "master"].includes(perfil);
+    const funcionarioInventario = perfil === "funcionario_inventario";
     const supabase = admin();
     const [{ data: itens, error: itensError }, { data: socios, error: sociosError }, { data: emprestimos, error: empError }] = await Promise.all([
       supabase.from("inventario_itens").select("*").eq("ativo", true).order("nome"),
@@ -21,7 +23,7 @@ export async function GET(request: Request) {
       supabase.from("inventario_emprestimos").select("id,item_id,socio_id,quantidade,data_emprestimo,data_prevista_devolucao,data_devolucao,status,responsavel_emprestimo,responsavel_devolucao,observacoes,item:inventario_itens(nome),socio:socios(nome,matricula)").order("data_emprestimo", { ascending: false }),
     ]);
     if (itensError) throw new Error(itensError.message);
-    const itensVisiveis = ["funcionario", "funcionario_inventario"].includes(perfil) ? (itens || []).filter((item: any) => item.acesso_funcionario === true) : (itens || []);
+    const itensVisiveis = perfil === "funcionario" ? (itens || []).filter((item: any) => item.acesso_funcionario === true) : (itens || []);
     if (sociosError) throw new Error(sociosError.message);
     if (empError) throw new Error(empError.message);
     return NextResponse.json({ itens: itensVisiveis, socios: socios || [], emprestimos: emprestimos || [], perfil });
@@ -33,13 +35,15 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
+    const administradorCompleto = ["administrador", "administrador_normal", "administrador_master", "admin", "master"].includes(perfil);
+    const funcionarioInventario = perfil === "funcionario_inventario";
     const supabase = admin();
 
     if (body.acao === "criar_item" || body.acao === "editar_item") {
-      if (!["administrador", "funcionario_inventario"].includes(perfil)) return NextResponse.json({ error: "Este perfil não pode cadastrar ou editar itens." }, { status: 403 });
+      if (!administradorCompleto && !funcionarioInventario) return NextResponse.json({ error: "Você não tem permissão para cadastrar ou editar itens." }, { status: 403 });
       if (!body.nome?.trim()) return NextResponse.json({ error: "Informe o nome do item." }, { status: 400 });
       const quantidade = Math.max(1, Number(body.quantidade_total || 1));
       const payload = {
@@ -62,7 +66,7 @@ export async function POST(request: Request) {
 
     if (body.acao === "emprestar") {
       if (!body.item_id || !body.socio_id) return NextResponse.json({ error: "Item e associado são obrigatórios." }, { status: 400 });
-      if (["funcionario", "funcionario_inventario"].includes(perfil)) {
+      if (perfil === "funcionario") {
         const { data: item, error: itemError } = await supabase.from("inventario_itens").select("acesso_funcionario,emprestimo_permitido,quantidade_disponivel").eq("id", body.item_id).maybeSingle();
         if (itemError) throw new Error(itemError.message);
         if (!item?.acesso_funcionario) return NextResponse.json({ error: "Este item não está liberado para funcionários." }, { status: 403 });
@@ -85,7 +89,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
     if ("response" in auth) return auth.response;
     if (body.acao !== "devolver" || !body.id) return NextResponse.json({ error: "Informe o empréstimo a devolver." }, { status: 400 });
     const supabase = admin();
