@@ -37,6 +37,7 @@ export default function AvisosPage(){
   const [pagamento,setPagamento]=useState<Notificacao|null>(null);
   const [valorPagamento,setValorPagamento]=useState("");
   const [contaPagamento,setContaPagamento]=useState("");
+  const podeGerenciarAvisos=["administrador","administrador_normal","administrador_master","admin","master"].includes(perfil);
   const [form,setForm]=useState<any>({
     titulo:"",mensagem:"",imagem_url:"",tipo:"informativo",prioridade:"normal",
     fixado:false,ativo:true,publico:"todos",data_inicio:"",data_fim:""
@@ -57,9 +58,10 @@ export default function AvisosPage(){
     const j=await r.json();
     if(!r.ok){setErro(j.error||"Erro ao carregar avisos.");return}
     setAvisos(j.avisos||[]);
-    setPerfil(j.perfil||"");
+    const perfilAtual=j.perfil||"";
+    setPerfil(perfilAtual);
 
-    if((j.perfil||"")==="administrador"){
+    if(["administrador","administrador_normal","administrador_master","admin","master"].includes(perfilAtual)){
       const nr=await api("/api/notificacoes/admin?nao_lidas=true&limite=50");
       const nj=await nr.json();
       if(nr.ok){
@@ -243,12 +245,12 @@ export default function AvisosPage(){
           <h1 className="mt-1 text-3xl font-black text-[#003d2b]">Avisos e comunicados</h1>
           <p className="mt-1 text-sm text-gray-500">Publique informações para os associados.</p>
         </div>
-        {perfil==="administrador"&&<button onClick={novo} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white"><Plus className="h-4 w-4"/> Novo Aviso</button>}
+        {podeGerenciarAvisos&&<button onClick={novo} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white"><Plus className="h-4 w-4"/> Novo Aviso</button>}
       </div>
 
       {erro&&<div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{erro}</div>}
 
-      {perfil==="administrador"&&<div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+      {podeGerenciarAvisos&&<div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-sm font-black text-[#005a3c]"><Bell className="h-4 w-4"/> Notificações internas</div>
@@ -295,7 +297,7 @@ export default function AvisosPage(){
               <h2 className="mt-3 text-xl font-black text-[#003d2b]">{a.titulo}</h2>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{a.mensagem}</p>
               <div className="mt-4 text-xs font-bold text-gray-400">Publicado em {new Date(a.data_publicacao).toLocaleDateString("pt-BR")}</div>
-              {perfil==="administrador"&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
+              {podeGerenciarAvisos&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
             </div>
           </article>
         )}
