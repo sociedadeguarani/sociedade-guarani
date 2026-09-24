@@ -23,7 +23,7 @@ import {
 type Perfil = "associado" | "funcionario" | "funcionario_inventario" | "administrador_normal" | "administrador_master";
 const ITENS_MENU = [
   { nome: "Início", rota: "/painel", icone: Home, perfis: ["associado", "funcionario", "funcionario_inventario", "administrador_normal", "administrador_master"] },
-  { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "funcionario_inventario", "administrador_normal", "administrador_master"] },
+  { nome: "Avisos", rota: "/avisos", icone: Megaphone, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
   { nome: "Minhas mensalidades", rota: "/minhas-mensalidades", icone: Wallet, perfis: ["associado"] },
   { nome: "Reservas", rota: "/reservas", icone: CalendarDays, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
   { nome: "Eventos", rota: "/eventos", icone: PartyPopper, perfis: ["associado", "funcionario", "administrador_normal", "administrador_master"] },
@@ -60,7 +60,8 @@ export default function MenuLateralPadrao() {
     perfil === "master" ? "administrador_master" :
     perfil === "administrador_master" ? "administrador_master" :
     perfil === "administrador_normal" ? "administrador_normal" :
-    perfil === "funcionario_inventario" ? "funcionario_inventario" : perfil === "funcionario" ? "funcionario" : "associado";
+    perfil === "funcionario_inventario" ? "funcionario_inventario" :
+    perfil === "funcionario" ? "funcionario" : "associado";
 
   const itensVisiveis = ITENS_MENU.filter((item) =>
     (item.perfis as readonly string[]).includes(perfilNormalizado)
