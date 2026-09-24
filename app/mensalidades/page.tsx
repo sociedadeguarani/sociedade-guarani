@@ -6,6 +6,21 @@ import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
+type Socio = {
+  id: string;
+  nome: string;
+  matricula?: string | number | null;
+  cpf?: string | null;
+  categoria?: string | null;
+  tipo_socio?: string | null;
+  responsavel_id?: string | null;
+  possui_mensalidade?: boolean | null;
+  situacao?: string | null;
+  ativo?: boolean | null;
+  tipo_pagamento?: string | null;
+  conta_bancaria_id?: string | null;
+};
+
 type M = {
   id: string;
   socio_id: string;
@@ -145,6 +160,7 @@ export default function Page() {
   const [busca, setBusca] = useState("");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
+  const [socios, setSocios] = useState<Socio[]>([]);
   const [configs, setConfigs] = useState<C[]>([]);
   const [tarifas, setTarifas] = useState<T[]>([]);
   const [contas, setContas] = useState<Conta[]>([]);
@@ -205,6 +221,7 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
 
       setLista(d.mensalidades || []);
+      setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
@@ -223,6 +240,28 @@ export default function Page() {
   useEffect(() => {
     void carregar();
   }, [ano, mes]);
+
+  function socioElegivelParaGeracao(s: Socio) {
+    if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
+    if (!s.responsavel_id) return s.possui_mensalidade === true;
+
+    const categoria = String(s.categoria || "").trim().toLowerCase();
+    if (categoria) {
+      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade");
+    }
+
+    return [
+      "dependente_patrimonial_familiar_mensalidade",
+      "dependente_patrimonial_individual_mensalidade",
+      "dependente_contribuinte_familiar_mensalidade",
+      "dependente_contribuinte_individual_mensalidade",
+    ].includes(String(s.tipo_socio || ""));
+  }
+
+  const sociosElegiveis = useMemo(
+    () => socios.filter(socioElegivelParaGeracao),
+    [socios]
+  );
 
   function normalizarPagamento(valor: unknown) {
     return String(valor || "")
@@ -372,11 +411,11 @@ export default function Page() {
     }
   }
 
-  function mesDisponivelParaGeracao(m: number) {
+  function mesDisponivelParaGeracao(m: number, anoReferencia = ano) {
     const anoAtual = hoje.getFullYear();
     const mesAtual = hoje.getMonth() + 1;
-    if (ano > anoAtual) return false;
-    if (ano < anoAtual) return true;
+    if (anoReferencia > anoAtual) return false;
+    if (anoReferencia < anoAtual) return true;
     return m <= mesAtual;
   }
 
@@ -574,7 +613,7 @@ export default function Page() {
 
           <section className="rounded-2xl border bg-white p-4">
             <div className="flex flex-wrap items-end justify-between gap-4">
-              <label className="min-w-[240px] flex-1">
+              <label className="min-w-[260px] flex-1">
                 <span className="text-sm font-bold text-gray-600">Ano</span>
                 <select
                   value={ano}
@@ -582,11 +621,7 @@ export default function Page() {
                     const novoAno = Number(e.target.value);
                     setAno(novoAno);
                     setMesesParaGerar((atual) =>
-                      atual.filter((m) => {
-                        const atualAno = hoje.getFullYear();
-                        const atualMes = hoje.getMonth() + 1;
-                        return novoAno < atualAno || (novoAno === atualAno && m <= atualMes);
-                      })
+                      atual.filter((m) => mesDisponivelParaGeracao(m, novoAno))
                     );
                   }}
                   className="mt-2 w-full rounded-xl border p-3 font-bold"
@@ -604,9 +639,7 @@ export default function Page() {
                 <b className="text-[#005a3c]">
                   {String(mes).padStart(2, "0")}/{ano}
                 </b>
-                <span className="ml-2 text-gray-500">
-                  (carrega automaticamente)
-                </span>
+                <span className="ml-2 text-gray-500">(carrega automaticamente)</span>
               </div>
             </div>
           </section>
@@ -631,36 +664,10 @@ export default function Page() {
                 const disponivel = mesDisponivelParaGeracao(numero);
                 const marcado = mesesParaGerar.includes(numero);
                 return (
-                  <div
-                    key={nomeMes}
-                    className={`rounded-xl border p-2 ${
-                      mes === numero
-                        ? "border-[#005a3c] bg-[#f1faf5] ring-1 ring-[#005a3c]"
-                        : marcado
-                          ? "border-[#005a3c] bg-[#eef7f2]"
-                          : "bg-white"
-                    } ${!disponivel ? "opacity-40" : ""}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <label className={`flex min-w-0 flex-1 items-center gap-2 text-sm font-bold ${disponivel ? "cursor-pointer" : "cursor-not-allowed"}`}>
-                        <input
-                          type="checkbox"
-                          checked={marcado}
-                          disabled={!disponivel}
-                          onChange={() => alternarMesGeracao(numero)}
-                        />
-                        <span className="truncate">{nomeMes}</span>
-                      </label>
-                      <button
-                        type="button"
-                        disabled={!disponivel}
-                        onClick={() => setMes(numero)}
-                        className="rounded-lg border px-2 py-1 text-[11px] font-bold text-[#005a3c] disabled:cursor-not-allowed disabled:text-gray-400"
-                      >
-                        Ver
-                      </button>
-                    </div>
-                  </div>
+                  <label key={nomeMes} className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${marcado ? "border-[#005a3c] bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}>
+                    <input type="checkbox" checked={marcado} disabled={!disponivel} onChange={() => alternarMesGeracao(numero)} />
+                    {nomeMes}
+                  </label>
                 );
               })}
             </div>
@@ -765,7 +772,20 @@ export default function Page() {
                 </thead>
 
                 <tbody className="divide-y">
-                  {filtrada.map((x) => {
+                  {filtrada.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="p-6">
+                        <div className="rounded-xl border border-dashed bg-[#f7faf8] p-5 text-center">
+                          <p className="font-bold text-[#005a3c]">Nenhuma mensalidade gerada para {String(mes).padStart(2, "0")}/{ano}.</p>
+                          <p className="mt-1 text-sm text-gray-600">
+                            Há <b>{sociosElegiveis.length}</b> associado(s) elegível(is) para geração nesta competência.
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">Marque os meses acima e clique em “Gerar competência” para criar os lançamentos. Registros já existentes não serão duplicados.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filtrada.map((x) => {
                     const st = status(x.situacao);
                     const acrescimos =
                       Number(x.multa || 0) + Number(x.juros || 0);
@@ -858,7 +878,8 @@ export default function Page() {
                         </td>
                       </tr>
                     );
-                  })}
+                  })
+                  )}
                 </tbody>
               </table>
             </div>
