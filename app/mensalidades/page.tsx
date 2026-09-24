@@ -148,7 +148,6 @@ export default function Page() {
   const [busca, setBusca] = useState("");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
-  const [socios, setSocios] = useState<any[]>([]);
   const [configs, setConfigs] = useState<C[]>([]);
   const [tarifas, setTarifas] = useState<T[]>([]);
   const [contas, setContas] = useState<Conta[]>([]);
@@ -173,9 +172,11 @@ export default function Page() {
 
   const [salvandoConfig, setSalvandoConfig] = useState(false);
 
-  const [previa, setPrevia] = useState<PreviaGeracao | null>(null);
+  const [previas, setPrevias] = useState<PreviaGeracao[]>([]);
+  const [mesesParaGerar, setMesesParaGerar] = useState<number[]>([mes]);
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
+  const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
 
   async function h() {
     const {
@@ -207,11 +208,16 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
 
       setLista(d.mensalidades || []);
-      setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
-      setContas(d.contas || []);
+
+      const { data: contasData } = await supabase
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .order("nome");
+
+      setContas(contasData || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
@@ -278,9 +284,7 @@ export default function Page() {
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta =
-      m.socio?.conta_bancaria ||
-      contas.find((c) => String(c.id) === String(contaId));
+    const conta = contas.find((c) => String(c.id) === String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (
@@ -303,103 +307,24 @@ export default function Page() {
     return "sem_pagamento";
   }
 
-  function bancoCobranca(m: M) {
-    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta =
-      m.socio?.conta_bancaria ||
-      contas.find((c) => String(c.id) === String(contaId));
-    const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
-
-    if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
-    if (banco.includes("sicredi")) return "sicredi";
-    if (banco === "bb" || banco.includes("banco do brasil") || banco.includes(" bb ")) return "bb";
-    return "";
-  }
-
-  const mensalidadesPorSocio = useMemo(() => {
-    const mapa = new Map<string, M>();
-    for (const item of lista) mapa.set(String(item.socio_id), item);
-    return mapa;
-  }, [lista]);
-
-  const sociosCobraveis = useMemo(() => {
-    return (socios || []).filter((s: any) => {
-      if (String(s.situacao || "").toLowerCase() === "inativo" || s.ativo === false) return false;
-      if (!s.responsavel_id) return Boolean(s.possui_mensalidade);
-      const categoria = String(s.categoria || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade") || [
-        "dependente_patrimonial_familiar_mensalidade",
-        "dependente_patrimonial_individual_mensalidade",
-        "dependente_contribuinte_familiar_mensalidade",
-        "dependente_contribuinte_individual_mensalidade",
-      ].includes(String(s.tipo_socio || ""));
-    });
-  }, [socios]);
-
-  const linhas = useMemo(() => {
-    return sociosCobraveis.map((s: any) => {
-      const mensalidade = mensalidadesPorSocio.get(String(s.id));
-      if (mensalidade) return mensalidade;
-      return {
-        id: `socio:${s.id}`,
-        socio_id: String(s.id),
-        competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
-        valor: Number(s.valor_mensalidade || 0),
-        valor_base: Number(s.valor_mensalidade || 0),
-        tarifa_pagamento: null,
-        multa: 0,
-        juros: 0,
-        desconto: 0,
-        total_cobrado: null,
-        data_vencimento: null,
-        situacao: "nao_gerada",
-        data_pagamento: null,
-        tipo_pagamento: s.tipo_pagamento || null,
-        observacoes: null,
-        motivo: null,
-        conta_pagadora_id: s.conta_bancaria_id || null,
-        socio: s,
-      } as M;
-    });
-  }, [sociosCobraveis, mensalidadesPorSocio, ano, mes]);
-
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
 
-    return linhas.filter((x) => {
+    return lista.filter((x) => {
       const bateBusca =
         !q ||
         `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
           .toLowerCase()
           .includes(q);
 
-      if (cobrancasSelecionadas.length === 0) return bateBusca;
+      const cobrancaAtual = tipoCobranca(x);
+      const bateCobranca =
+        cobrancasSelecionadas.length === 0 ||
+        cobrancasSelecionadas.includes(cobrancaAtual);
 
-      const banco = bancoCobranca(x);
-      const forma = tipoCobranca(x);
-      const bateFiltro = cobrancasSelecionadas.some((filtro) =>
-        ["banrisul", "sicredi", "bb"].includes(filtro)
-          ? banco === filtro
-          : forma === filtro
-      );
-
-      return bateBusca && bateFiltro;
+      return bateBusca && bateCobranca;
     });
-  }, [linhas, busca, cobrancasSelecionadas, contas]);
-
-  const selecionadosVisiveis = filtrada.map((x) => String(x.socio_id));
-  const todosVisiveisSelecionados = selecionadosVisiveis.length > 0 && selecionadosVisiveis.every((id) => sel.includes(id));
-  const mensalidadesSelecionadas = sel
-    .map((socioId) => mensalidadesPorSocio.get(String(socioId)))
-    .filter(Boolean) as M[];
-
-  function selecionarTodos() {
-    setSel((atual) => Array.from(new Set([...atual, ...selecionadosVisiveis])));
-  }
-
-  function limparSelecao() {
-    setSel([]);
-  }
+  }, [lista, busca, cobrancasSelecionadas, contas]);
 
   async function post(body: any) {
     setErro("");
@@ -451,70 +376,113 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Não foi possível estornar a baixa.");
 
       setMsg(d.message || "Pagamento estornado com sucesso.");
-      setSel((atual) => atual.filter((id) => id !== item.socio_id));
+      setSel((atual) => atual.filter((id) => id !== item.id));
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
     }
   }
 
+  function mesDisponivelParaGeracao(m: number) {
+    const anoAtual = hoje.getFullYear();
+    const mesAtual = hoje.getMonth() + 1;
+    if (ano > anoAtual) return false;
+    if (ano < anoAtual) return true;
+    return m <= mesAtual;
+  }
+
+  function alternarMesGeracao(m: number) {
+    if (!mesDisponivelParaGeracao(m)) return;
+    setMesesParaGerar((atual) =>
+      atual.includes(m) ? atual.filter((x) => x !== m) : [...atual, m].sort((a, b) => a - b)
+    );
+  }
+
+  function selecionarMesesDisponiveis() {
+    const limite = ano < hoje.getFullYear() ? 12 : ano === hoje.getFullYear() ? hoje.getMonth() + 1 : 0;
+    setMesesParaGerar(Array.from({ length: limite }, (_, i) => i + 1));
+  }
+
   async function previsualizarGeracao() {
+    const selecionados = [...mesesParaGerar].sort((a, b) => a - b);
+    if (selecionados.length === 0) {
+      setErro("Selecione pelo menos um mês para gerar.");
+      return;
+    }
+
     setErro("");
     setMsg("");
     setAbrindoPrevia(true);
+    setPrevias([]);
 
     try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({
-          acao: "previsualizar",
-          ano,
-          mes,
-          socio_ids: sel,
-        }),
-      });
+      const resultados: PreviaGeracao[] = [];
+      for (const mesGeracao of selecionados) {
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({
+            acao: "previsualizar",
+            ano,
+            mes: mesGeracao,
+          }),
+        });
 
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Não foi possível gerar a prévia.");
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`);
+        resultados.push(d);
+      }
 
-      setPrevia(d);
+      setPrevias(resultados);
     } catch (e) {
       setAbrindoPrevia(false);
-      setPrevia(null);
+      setPrevias([]);
       setErro(e instanceof Error ? e.message : "Erro ao gerar prévia.");
     }
   }
 
   async function confirmarGeracao() {
-    if (!previa || previa.quantidade_nova <= 0) return;
+    if (previas.length === 0) return;
 
     setConfirmandoGeracao(true);
     setErro("");
     setMsg("");
 
     try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({
-          acao: "gerar",
-          ano,
-          mes,
-          socio_ids: sel,
-        }),
-      });
+      let criadasTotal = 0;
+      const resultados: string[] = [];
 
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Não foi possível gerar a competência.");
+      for (const item of previas) {
+        if (item.quantidade_nova <= 0) {
+          resultados.push(`${item.competencia.slice(0, 7)}: nenhuma nova`);
+          continue;
+        }
+
+        const [anoGeracao, mesGeracao] = item.competencia.slice(0, 7).split("-").map(Number);
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({
+            acao: "gerar",
+            ano: anoGeracao,
+            mes: mesGeracao,
+          }),
+        });
+
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar ${mesGeracao}/${anoGeracao}.`);
+        const criadas = Number(d.criadas || item.quantidade_nova || 0);
+        criadasTotal += criadas;
+        resultados.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${criadas} gerada(s)`);
+      }
 
       setAbrindoPrevia(false);
-      setPrevia(null);
-      setMsg(d.message || `${d.criadas || previa.quantidade_nova} mensalidade(s) gerada(s) com sucesso.`);
+      setPrevias([]);
+      setMsg(`Geração concluída: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`);
       setSel([]);
       await carregar();
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao gerar competência.");
+      setErro(e instanceof Error ? e.message : "Erro ao gerar competências.");
     } finally {
       setConfirmandoGeracao(false);
     }
@@ -523,7 +491,7 @@ export default function Page() {
   function fecharPrevia() {
     if (confirmandoGeracao) return;
     setAbrindoPrevia(false);
-    setPrevia(null);
+    setPrevias([]);
   }
 
   function abrirConfiguracao() {
@@ -588,10 +556,9 @@ export default function Page() {
             <div className="flex gap-2">
               <button
                 onClick={() => void previsualizarGeracao()}
-                disabled={!sel.length}
-                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white"
               >
-                Gerar para selecionados ({sel.length})
+                Gerar competência
               </button>
 
               <button
@@ -677,19 +644,51 @@ export default function Page() {
             </button>
           </div>
 
+          <section className="rounded-2xl border bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-black text-[#005a3c]">Meses para gerar</h2>
+                <p className="text-sm text-gray-500">Selecione uma ou várias competências. Cada mês é processado separadamente e registros já existentes não são duplicados.</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={selecionarMesesDisponiveis} className="rounded-lg border px-3 py-2 text-xs font-bold">Selecionar todos disponíveis</button>
+                <button type="button" onClick={() => setMesesParaGerar([])} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Limpar</button>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {[
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+              ].map((nomeMes, i) => {
+                const numero = i + 1;
+                const disponivel = mesDisponivelParaGeracao(numero);
+                const marcado = mesesParaGerar.includes(numero);
+                return (
+                  <label key={nomeMes} className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${marcado ? "border-[#005a3c] bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}>
+                    <input type="checkbox" checked={marcado} disabled={!disponivel} onChange={() => alternarMesGeracao(numero)} />
+                    {nomeMes}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-3 text-sm font-semibold text-gray-600">
+              {mesesParaGerar.length} mês(es) selecionado(s) para geração.
+            </div>
+          </section>
+
           <div className="rounded-2xl border bg-white p-4">
-            <div className="space-y-3">
-              <div className="flex w-full items-center gap-2 rounded-xl border px-3">
-                <Search className="h-4 w-4 shrink-0 text-gray-400" />
+            <div className="flex gap-3">
+              <div className="flex flex-1 items-center gap-2 rounded-xl border px-3">
+                <Search className="h-4 w-4 text-gray-400" />
                 <input
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  placeholder="Digite nome ou matrícula..."
-                  className="min-w-0 w-full py-3 outline-none"
+                  placeholder="Nome ou matrícula..."
+                  className="w-full py-3 outline-none"
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span className="mr-1 text-sm font-bold text-gray-600">
                   Tipo de cobrança:
                 </span>
@@ -734,26 +733,22 @@ export default function Page() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                <span>Exibindo <b>{filtrada.length}</b> de <b>{sociosCobraveis.length}</b> associados elegíveis</span>
-                <button type="button" onClick={todosVisiveisSelecionados ? limparSelecao : selecionarTodos} className="rounded-full border px-3 py-1.5 font-bold text-[#005a3c] hover:bg-[#f4faf7]">
-                  {todosVisiveisSelecionados ? "Desmarcar todos" : "Selecionar todos"}
-                </button>
-                {sel.length > 0 && <button type="button" onClick={limparSelecao} className="rounded-full px-3 py-1.5 font-bold text-gray-500 underline">Desfazer seleção</button>}
+              <div className="mt-3 text-xs text-gray-500">
+                Exibindo <b>{filtrada.length}</b> de <b>{lista.length}</b> mensalidade(s)
               </div>
 
               <button
-                disabled={!mensalidadesSelecionadas.length}
+                disabled={!sel.length}
                 onClick={() =>
                   void post({
                     acao: "baixar",
-                    ids: mensalidadesSelecionadas.map((m) => m.id),
+                    ids: sel,
                     data_pagamento: new Date().toISOString().slice(0, 10),
                   })
                 }
                 className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
               >
-                Baixar selecionadas ({mensalidadesSelecionadas.length})
+                Baixar selecionadas ({sel.length})
               </button>
             </div>
 
@@ -787,12 +782,12 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            checked={sel.includes(String(x.socio_id))}
+                            checked={sel.includes(x.id)}
                             onChange={() =>
                               setSel((s) =>
-                                s.includes(String(x.socio_id))
-                                  ? s.filter((i) => i !== String(x.socio_id))
-                                  : [...s, String(x.socio_id)]
+                                s.includes(x.id)
+                                  ? s.filter((i) => i !== x.id)
+                                  : [...s, x.id]
                               )
                             }
                           />
@@ -801,11 +796,7 @@ export default function Page() {
                         <td className="p-3 font-bold">
                           <button
                             type="button"
-                            onClick={() => {
-                              if (x.socio?.id) {
-                                window.location.href = `/socios?editar=${encodeURIComponent(String(x.socio.id))}`;
-                              }
-                            }}
+                            onClick={() => setSocioSelecionado(x)}
                             className="text-left text-[#005a3c] underline-offset-2 hover:underline"
                           >
                             {x.socio?.nome || "—"}
@@ -821,7 +812,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">
-                          {x.situacao === "nao_gerada" ? "—" : data(x.data_vencimento)}
+                          {data(x.data_vencimento)}
                         </td>
 
                         <td className="p-3 font-bold">
@@ -829,7 +820,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">
-                          {x.situacao === "nao_gerada" ? "—" : moeda(x.tarifa_pagamento)}
+                          {moeda(x.tarifa_pagamento)}
                         </td>
 
                         <td className="p-3">
@@ -837,7 +828,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3 font-black text-[#005a3c]">
-                          {x.situacao === "nao_gerada" ? "—" : moeda(
+                          {moeda(
                             x.total_cobrado ??
                               Number(x.valor_base ?? x.valor) +
                                 Number(x.tarifa_pagamento || 0) +
@@ -849,9 +840,9 @@ export default function Page() {
 
                         <td className="p-3">
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-bold ${x.situacao === "nao_gerada" ? "bg-gray-100 text-gray-600" : st[1]}`}
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${st[1]}`}
                           >
-                            {x.situacao === "nao_gerada" ? "Não gerada" : st[0]}
+                            {st[0]}
                           </span>
                         </td>
 
@@ -942,101 +933,174 @@ export default function Page() {
         </div>
       </main>
 
-      {abrindoPrevia && previa && (
+      {socioSelecionado && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-black text-[#005a3c]">
-                  Prévia da geração — {String(mes).padStart(2, "0")}/{ano}
+                <p className="text-sm text-gray-500">Cadastro do associado</p>
+                <h2 className="text-2xl font-black text-[#005a3c]">
+                  {socioSelecionado.socio?.nome || "Associado"}
                 </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Confira os valores antes de criar os lançamentos.
-                </p>
               </div>
               <button
                 type="button"
-                onClick={fecharPrevia}
-                disabled={confirmandoGeracao}
-                className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"
+                onClick={() => setSocioSelecionado(null)}
+                className="rounded-full p-2 hover:bg-gray-100"
               >
                 <X />
               </button>
             </div>
 
-            <div className="mt-5 rounded-xl bg-[#eef7f2] p-4">
-              <div className="text-xs font-semibold uppercase text-gray-500">
-                Competência
-              </div>
-              <div className="mt-1 text-2xl font-black text-[#005a3c]">
-                {String(mes).padStart(2, "0")}/{ano}
-              </div>
-              <p className="mt-1 text-sm text-gray-600">
-                Nenhum lançamento será criado até você confirmar.
-              </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                ["Matrícula", socioSelecionado.socio?.matricula],
+                ["CPF", socioSelecionado.socio?.cpf],
+                ["Categoria", socioSelecionado.socio?.categoria],
+                [
+                  "Tipo de sócio",
+                  nomes[socioSelecionado.socio?.tipo_socio] ||
+                    socioSelecionado.socio?.tipo_socio,
+                ],
+                ["Situação", socioSelecionado.socio?.situacao],
+                ["Parentesco", socioSelecionado.socio?.parentesco],
+                ["Responsável ID", socioSelecionado.socio?.responsavel_id],
+                ["Telefone", socioSelecionado.socio?.telefone],
+                ["E-mail", socioSelecionado.socio?.email],
+                ["Endereço", socioSelecionado.socio?.endereco],
+              ].map(([label, valor]) => (
+                <div key={label} className="rounded-xl border bg-gray-50 p-3">
+                  <div className="text-xs font-bold uppercase text-gray-500">
+                    {label}
+                  </div>
+                  <div className="mt-1 break-words font-semibold">
+                    {valor || "—"}
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border p-4">
-                <div className="text-sm text-gray-500">Pagadores encontrados</div>
-                <div className="mt-1 text-2xl font-black">{previa.total_cobraveis}</div>
-              </div>
-              <div className="rounded-xl border p-4">
-                <div className="text-sm text-gray-500">Novos lançamentos</div>
-                <div className="mt-1 text-2xl font-black text-[#005a3c]">{previa.quantidade_nova}</div>
-              </div>
-              <div className="rounded-xl border p-4">
-                <div className="text-sm text-gray-500">Já existentes</div>
-                <div className="mt-1 text-2xl font-black">{previa.ja_existentes}</div>
-              </div>
-              <div className="rounded-xl border p-4">
-                <div className="text-sm text-gray-500">Mensalidades base</div>
-                <div className="mt-1 text-xl font-black text-[#005a3c]">{moeda(previa.valor_base)}</div>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-xl border p-4">
-              <h3 className="font-black text-[#005a3c]">Composição da cobrança</h3>
-              <div className="mt-3 space-y-2 text-sm">
-                <div className="flex justify-between gap-4"><span>Mensalidades</span><b>{moeda(previa.valor_base)}</b></div>
-                <div className="flex justify-between gap-4"><span>Tarifas bancárias</span><b>{moeda(previa.tarifa_pagamento)}</b></div>
-                <div className="flex justify-between gap-4"><span>Multa</span><b>{moeda(previa.multa)}</b></div>
-                <div className="flex justify-between gap-4"><span>Juros</span><b>{moeda(previa.juros)}</b></div>
-                <div className="flex justify-between gap-4"><span>Desconto</span><b>- {moeda(previa.desconto)}</b></div>
-                <div className="border-t pt-3 text-base flex justify-between gap-4">
-                  <span className="font-black">Total a cobrar</span>
-                  <b className="text-[#005a3c]">{moeda(previa.total_cobrado)}</b>
+            <div className="mt-5 rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
+              <h3 className="font-black text-[#005a3c]">
+                Mensalidade {String(mes).padStart(2, "0")}/{ano}
+              </h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span className="text-xs text-gray-500">Valor base</span>
+                  <p className="font-bold">
+                    {moeda(
+                      socioSelecionado.valor_base ?? socioSelecionado.valor
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Tipo de cobrança</span>
+                  <p className="font-bold">
+                    {{
+                      banrisul: "Banrisul",
+                      sicredi: "Sicredi",
+                      bb: "Banco do Brasil",
+                      boleto: "Boleto",
+                      pix: "PIX",
+                      sem_pagamento: "Sem pagamento",
+                      debito_em_conta: "Débito em conta",
+                      dinheiro: "Dinheiro",
+                      transferencia: "Transferência",
+                      outro: "Outro",
+                    }[tipoCobranca(socioSelecionado)] || "—"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Tarifa</span>
+                  <p className="font-bold">
+                    {moeda(socioSelecionado.tarifa_pagamento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Total cobrado</span>
+                  <p className="font-black text-[#005a3c]">
+                    {moeda(socioSelecionado.total_cobrado)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Vencimento</span>
+                  <p className="font-bold">
+                    {data(socioSelecionado.data_vencimento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Situação</span>
+                  <p className="font-bold">
+                    {status(socioSelecionado.situacao)[0]}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Data de pagamento</span>
+                  <p className="font-bold">
+                    {data(socioSelecionado.data_pagamento)}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Observações</span>
+                  <p className="font-bold">
+                    {socioSelecionado.motivo ||
+                      socioSelecionado.observacoes ||
+                      "—"}
+                  </p>
                 </div>
               </div>
             </div>
 
-            {previa.quantidade_nova === 0 ? (
-              <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm font-semibold text-gray-700">
-                Não há novos lançamentos para esta competência com os associados selecionados.
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSocioSelecionado(null)}
+                className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abrindoPrevia && previas.length > 0 && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">Prévia da geração — {previas.length} competência(s)</h2>
+                <p className="mt-1 text-sm text-gray-500">Confira todos os meses antes de gravar. Nenhum lançamento foi criado ainda.</p>
               </div>
-            ) : (
-              <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-                Atenção: esta é somente uma prévia. As mensalidades só serão gravadas depois da confirmação.
-              </div>
-            )}
+              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"><X /></button>
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-xl border">
+              <table className="w-full text-sm">
+                <thead className="bg-[#eef7f2]"><tr><th className="p-3 text-left">Competência</th><th className="p-3 text-right">Pagadores</th><th className="p-3 text-right">Novos</th><th className="p-3 text-right">Existentes</th><th className="p-3 text-right">Base</th><th className="p-3 text-right">Total cobrado</th></tr></thead>
+                <tbody className="divide-y">
+                  {previas.map((p) => (
+                    <tr key={p.competencia}>
+                      <td className="p-3 font-bold text-[#005a3c]">{p.competencia.slice(5, 7)}/{p.competencia.slice(0, 4)}</td>
+                      <td className="p-3 text-right">{p.total_cobraveis}</td>
+                      <td className="p-3 text-right font-black text-[#005a3c]">{p.quantidade_nova}</td>
+                      <td className="p-3 text-right">{p.ja_existentes}</td>
+                      <td className="p-3 text-right">{moeda(p.valor_base)}</td>
+                      <td className="p-3 text-right font-black">{moeda(p.total_cobrado)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50">
+                  <tr><td className="p-3 font-black">TOTAL</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.total_cobraveis,0)}</td><td className="p-3 text-right font-black text-[#005a3c]">{previas.reduce((s,p) => s+p.quantidade_nova,0)}</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.ja_existentes,0)}</td><td className="p-3 text-right font-black">{moeda(previas.reduce((s,p) => s+p.valor_base,0))}</td><td className="p-3 text-right font-black text-[#005a3c]">{moeda(previas.reduce((s,p) => s+p.total_cobrado,0))}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">Atenção: a geração será feita mês a mês. Se uma competência já tiver registros, eles não serão duplicados.</div>
 
             <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={fecharPrevia}
-                disabled={confirmandoGeracao}
-                className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => void confirmarGeracao()}
-                disabled={confirmandoGeracao || previa.quantidade_nova === 0}
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
-              >
-                {confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração"}
-              </button>
+              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40">Cancelar</button>
+              <button type="button" onClick={() => void confirmarGeracao()} disabled={confirmandoGeracao || previas.every((p) => p.quantidade_nova === 0)} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração dos meses"}</button>
             </div>
           </div>
         </div>
