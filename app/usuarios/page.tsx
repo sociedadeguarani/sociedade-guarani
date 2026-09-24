@@ -15,7 +15,8 @@ const visual: Record<string, { label: string; desc: string; icon: typeof Crown }
   master: { label: "Administrador Master", desc: "Pode criar e gerenciar usuários do sistema.", icon: Crown },
   administrador: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
   administrador_normal: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
-  funcionario: { label: "Funcionário", desc: "Acesso conforme permissões.", icon: ShieldCheck },
+  funcionario: { label: "Funcionário", desc: "Acesso operacional conforme permissões.", icon: ShieldCheck },
+  funcionario_inventario: { label: "Funcionário — Inventário", desc: "Cadastra itens, controla inventário, empréstimos e devoluções.", icon: ShieldCheck },
   associado: { label: "Associado", desc: "Acesso aos próprios dados.", icon: UserRound },
 };
 
