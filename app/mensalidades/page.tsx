@@ -148,6 +148,7 @@ export default function Page() {
   const [busca, setBusca] = useState("");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
+  const [socios, setSocios] = useState<any[]>([]);
   const [configs, setConfigs] = useState<C[]>([]);
   const [tarifas, setTarifas] = useState<T[]>([]);
   const [contas, setContas] = useState<Conta[]>([]);
@@ -207,6 +208,7 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
 
       setLista(d.mensalidades || []);
+      setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
@@ -306,10 +308,57 @@ export default function Page() {
     return "sem_pagamento";
   }
 
+  const mensalidadesPorSocio = useMemo(() => {
+    const mapa = new Map<string, M>();
+    for (const item of lista) mapa.set(String(item.socio_id), item);
+    return mapa;
+  }, [lista]);
+
+  const sociosCobraveis = useMemo(() => {
+    return (socios || []).filter((s: any) => {
+      if (String(s.situacao || "").toLowerCase() === "inativo" || s.ativo === false) return false;
+      if (!s.responsavel_id) return Boolean(s.possui_mensalidade);
+      const categoria = String(s.categoria || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade") || [
+        "dependente_patrimonial_familiar_mensalidade",
+        "dependente_patrimonial_individual_mensalidade",
+        "dependente_contribuinte_familiar_mensalidade",
+        "dependente_contribuinte_individual_mensalidade",
+      ].includes(String(s.tipo_socio || ""));
+    });
+  }, [socios]);
+
+  const linhas = useMemo(() => {
+    return sociosCobraveis.map((s: any) => {
+      const mensalidade = mensalidadesPorSocio.get(String(s.id));
+      if (mensalidade) return mensalidade;
+      return {
+        id: `socio:${s.id}`,
+        socio_id: String(s.id),
+        competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
+        valor: Number(s.valor_mensalidade || 0),
+        valor_base: Number(s.valor_mensalidade || 0),
+        tarifa_pagamento: null,
+        multa: 0,
+        juros: 0,
+        desconto: 0,
+        total_cobrado: null,
+        data_vencimento: null,
+        situacao: "nao_gerada",
+        data_pagamento: null,
+        tipo_pagamento: s.tipo_pagamento || null,
+        observacoes: null,
+        motivo: null,
+        conta_pagadora_id: s.conta_bancaria_id || null,
+        socio: s,
+      } as M;
+    });
+  }, [sociosCobraveis, mensalidadesPorSocio, ano, mes]);
+
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
 
-    return lista.filter((x) => {
+    return linhas.filter((x) => {
       const bateBusca =
         !q ||
         `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
@@ -323,7 +372,21 @@ export default function Page() {
 
       return bateBusca && bateCobranca;
     });
-  }, [lista, busca, cobrancasSelecionadas, contas]);
+  }, [linhas, busca, cobrancasSelecionadas, contas]);
+
+  const selecionadosVisiveis = filtrada.map((x) => String(x.socio_id));
+  const todosVisiveisSelecionados = selecionadosVisiveis.length > 0 && selecionadosVisiveis.every((id) => sel.includes(id));
+  const mensalidadesSelecionadas = sel
+    .map((socioId) => mensalidadesPorSocio.get(String(socioId)))
+    .filter(Boolean) as M[];
+
+  function selecionarTodos() {
+    setSel((atual) => Array.from(new Set([...atual, ...selecionadosVisiveis])));
+  }
+
+  function limparSelecao() {
+    setSel([]);
+  }
 
   async function post(body: any) {
     setErro("");
@@ -375,7 +438,7 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Não foi possível estornar a baixa.");
 
       setMsg(d.message || "Pagamento estornado com sucesso.");
-      setSel((atual) => atual.filter((id) => id !== item.id));
+      setSel((atual) => atual.filter((id) => id !== item.socio_id));
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
@@ -395,6 +458,7 @@ export default function Page() {
           acao: "previsualizar",
           ano,
           mes,
+          socio_ids: sel,
         }),
       });
 
@@ -424,6 +488,7 @@ export default function Page() {
           acao: "gerar",
           ano,
           mes,
+          socio_ids: sel,
         }),
       });
 
@@ -510,9 +575,10 @@ export default function Page() {
             <div className="flex gap-2">
               <button
                 onClick={() => void previsualizarGeracao()}
-                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white"
+                disabled={!sel.length}
+                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Gerar competência
+                Gerar para selecionados ({sel.length})
               </button>
 
               <button
@@ -655,22 +721,26 @@ export default function Page() {
                 )}
               </div>
 
-              <div className="mt-3 text-xs text-gray-500">
-                Exibindo <b>{filtrada.length}</b> de <b>{lista.length}</b> mensalidade(s)
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <span>Exibindo <b>{filtrada.length}</b> de <b>{sociosCobraveis.length}</b> associados elegíveis</span>
+                <button type="button" onClick={todosVisiveisSelecionados ? limparSelecao : selecionarTodos} className="rounded-full border px-3 py-1.5 font-bold text-[#005a3c] hover:bg-[#f4faf7]">
+                  {todosVisiveisSelecionados ? "Desmarcar todos" : "Selecionar todos"}
+                </button>
+                {sel.length > 0 && <button type="button" onClick={limparSelecao} className="rounded-full px-3 py-1.5 font-bold text-gray-500 underline">Desfazer seleção</button>}
               </div>
 
               <button
-                disabled={!sel.length}
+                disabled={!mensalidadesSelecionadas.length}
                 onClick={() =>
                   void post({
                     acao: "baixar",
-                    ids: sel,
+                    ids: mensalidadesSelecionadas.map((m) => m.id),
                     data_pagamento: new Date().toISOString().slice(0, 10),
                   })
                 }
                 className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
               >
-                Baixar selecionadas ({sel.length})
+                Baixar selecionadas ({mensalidadesSelecionadas.length})
               </button>
             </div>
 
@@ -704,12 +774,12 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            checked={sel.includes(x.id)}
+                            checked={sel.includes(String(x.socio_id))}
                             onChange={() =>
                               setSel((s) =>
-                                s.includes(x.id)
-                                  ? s.filter((i) => i !== x.id)
-                                  : [...s, x.id]
+                                s.includes(String(x.socio_id))
+                                  ? s.filter((i) => i !== String(x.socio_id))
+                                  : [...s, String(x.socio_id)]
                               )
                             }
                           />
@@ -734,7 +804,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">
-                          {data(x.data_vencimento)}
+                          {x.situacao === "nao_gerada" ? "—" : data(x.data_vencimento)}
                         </td>
 
                         <td className="p-3 font-bold">
@@ -742,7 +812,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">
-                          {moeda(x.tarifa_pagamento)}
+                          {x.situacao === "nao_gerada" ? "—" : moeda(x.tarifa_pagamento)}
                         </td>
 
                         <td className="p-3">
@@ -750,7 +820,7 @@ export default function Page() {
                         </td>
 
                         <td className="p-3 font-black text-[#005a3c]">
-                          {moeda(
+                          {x.situacao === "nao_gerada" ? "—" : moeda(
                             x.total_cobrado ??
                               Number(x.valor_base ?? x.valor) +
                                 Number(x.tarifa_pagamento || 0) +
@@ -762,9 +832,9 @@ export default function Page() {
 
                         <td className="p-3">
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-bold ${st[1]}`}
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${x.situacao === "nao_gerada" ? "bg-gray-100 text-gray-600" : st[1]}`}
                           >
-                            {st[0]}
+                            {x.situacao === "nao_gerada" ? "Não gerada" : st[0]}
                           </span>
                         </td>
 
@@ -1056,7 +1126,7 @@ export default function Page() {
 
             {previa.quantidade_nova === 0 ? (
               <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm font-semibold text-gray-700">
-                Não há novos lançamentos para esta competência.
+                Não há novos lançamentos para esta competência com os associados selecionados.
               </div>
             ) : (
               <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
