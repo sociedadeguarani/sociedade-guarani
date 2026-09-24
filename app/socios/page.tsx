@@ -82,7 +82,6 @@ const menus = [
 
 
 const socioInicial: Partial<Socio> = {
-  matricula: null,
   nome: "",
   cpf: "",
   rg: "",
@@ -121,10 +120,6 @@ const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
   {
-    value: "dependente_patrimonial_familiar",
-    label: "Dependente Sócio Patrimonial Familiar sem Mensalidade",
-  },
-  {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
   },
@@ -134,10 +129,6 @@ const TIPOS_SOCIO = [
   },
   { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
   { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
-  {
-    value: "dependente_contribuinte_familiar",
-    label: "Dependente Sócio Contribuinte Familiar sem Mensalidade",
-  },
   {
     value: "dependente_contribuinte_familiar_mensalidade",
     label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
@@ -195,27 +186,14 @@ function podeTerDependentes(tipo?: string | null) {
   ].includes(tipo || "");
 }
 
-function ehDependenteSemMensalidade(socio: Pick<Socio, "responsavel_id" | "possui_mensalidade">) {
-  return Boolean(socio.responsavel_id) && socio.possui_mensalidade !== true;
-}
-
-function ehTipoDependenteSemMensalidade(tipo?: string | null) {
-  return [
-    "dependente_patrimonial_familiar",
-    "dependente_contribuinte_familiar",
-  ].includes(tipo || "");
-}
-
 function tipoDependenteParaResponsavel(tipo?: string | null) {
   switch (tipo) {
     case "patrimonial_familiar":
-    case "dependente_patrimonial_familiar":
     case "dependente_patrimonial_familiar_mensalidade":
-      return "dependente_patrimonial_familiar";
+      return "dependente_patrimonial_familiar_mensalidade";
     case "contribuinte_familiar":
-    case "dependente_contribuinte_familiar":
     case "dependente_contribuinte_familiar_mensalidade":
-      return "dependente_contribuinte_familiar";
+      return "dependente_contribuinte_familiar_mensalidade";
     case "temporada_familiar":
       return "dependente_patrimonial_familiar_mensalidade";
     case "transitorio":
@@ -223,20 +201,6 @@ function tipoDependenteParaResponsavel(tipo?: string | null) {
     default:
       return "dependente_patrimonial_familiar_mensalidade";
   }
-}
-
-function ehDependenteComMensalidadeIndividual(tipo?: string | null) {
-  return [
-    "dependente_patrimonial_individual_mensalidade",
-    "dependente_contribuinte_individual_mensalidade",
-  ].includes(tipo || "");
-}
-
-function ehDependenteComMensalidadeFamiliar(tipo?: string | null) {
-  return [
-    "dependente_patrimonial_familiar_mensalidade",
-    "dependente_contribuinte_familiar_mensalidade",
-  ].includes(tipo || "");
 }
 
 function tipoSocioLabel(tipo?: string | null) {
@@ -249,7 +213,6 @@ function tipoSocioClasse(tipo?: string | null) {
       return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
     case "patrimonial_familiar":
       return "bg-[#cfe7dc] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "dependente_patrimonial_familiar":
     case "dependente_patrimonial_familiar_mensalidade":
       return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
     case "dependente_patrimonial_individual_mensalidade":
@@ -258,7 +221,6 @@ function tipoSocioClasse(tipo?: string | null) {
       return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
     case "contribuinte_familiar":
       return "bg-[#cddff4] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "dependente_contribuinte_familiar":
     case "dependente_contribuinte_familiar_mensalidade":
       return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
     case "dependente_contribuinte_individual_mensalidade":
@@ -298,6 +260,8 @@ export default function Home() {
   const [mensagem, setMensagem] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
+  const [perfilUsuario, setPerfilUsuario] = useState("");
+  const somenteConsulta = perfilUsuario === "funcionario";
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
@@ -323,6 +287,18 @@ export default function Home() {
   const [relatorioFormaPagamento, setRelatorioFormaPagamento] = useState("todas");
   const [relatorioSituacao, setRelatorioSituacao] = useState("todas");
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
+
+  useEffect(() => {
+    try {
+      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+      setPerfilUsuario(
+        perfil === "funcionario" ? "funcionario" :
+        perfil === "master" ? "administrador_master" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil
+      );
+    } catch {}
+  }, []);
 
   useEffect(() => {
     let montado = true;
@@ -741,19 +717,8 @@ export default function Home() {
     void carregarMensalidades(competenciaFinanceiro);
   }, []);
 
-  // Permite que a página /dependentes abra diretamente o cadastro do dependente.
-  useEffect(() => {
-    const idParaEditar = new URLSearchParams(window.location.search).get("editar");
-    if (!idParaEditar || socios.length === 0 || abrirCadastro) return;
-
-    const socio = socios.find((s) => String(s.id) === String(idParaEditar));
-    if (socio) {
-      editarSocio(socio);
-      window.history.replaceState({}, "", "/socios");
-    }
-  }, [socios, abrirCadastro]);
-
   function novoSocio() {
+    if (somenteConsulta) return;
     setSocioEditando(null);
     setBuscaResponsavel("");
     setForm({
@@ -766,6 +731,7 @@ export default function Home() {
   }
 
   function novoDependente(responsavel: Socio) {
+    if (somenteConsulta) return;
     if (!podeTerDependentes(responsavel.tipo_socio)) {
       setMensagem("Este tipo de sócio não possui dependentes.");
       return;
@@ -778,10 +744,7 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      // Novo dependente entra, por padrão, como dependente da família,
-      // sem uma mensalidade própria. Se for um dependente adulto com
-      // cobrança individual, isso pode ser definido no cadastro.
-      possui_mensalidade: false,
+      possui_mensalidade: true,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -791,6 +754,7 @@ export default function Home() {
   }
 
   function editarSocio(socio: Socio) {
+    if (somenteConsulta) return;
     setSocioEditando(socio);
     setBuscaResponsavel(socio.responsavel_id ? (socios.find((p) => p.id === socio.responsavel_id)?.nome || "") : "");
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
@@ -809,7 +773,7 @@ export default function Home() {
 
   function alterarCampo(campo: keyof Socio, valor: string) {
     setForm((atual) => {
-      const proximo: Partial<Socio> = {
+      const proximo = {
         ...atual,
         [campo]:
           campo === "possui_mensalidade"
@@ -826,7 +790,7 @@ export default function Home() {
           "dependente_contribuinte_individual_mensalidade",
         ].includes(tipo);
 
-        if (tipo === "remido" || ehTipoDependenteSemMensalidade(tipo)) {
+        if (tipo === "remido") {
           proximo.possui_mensalidade = false;
           proximo.valor_mensalidade = 0;
         } else if (mensalidadeObrigatoria) {
@@ -839,57 +803,9 @@ export default function Home() {
         }
       }
 
-      // Regra financeira dos dependentes:
-      // - dependente individual com mensalidade = 50% da mensalidade familiar do responsável;
-      // - dependente familiar com mensalidade = valor integral da mensalidade familiar do responsável;
-      // - dependente sem mensalidade = R$ 0,00.
-      const tipoFinal = proximo.tipo_socio || "";
-      const responsavelId = proximo.responsavel_id || "";
-      const responsavel = socios.find((s) => s.id === responsavelId);
-
-      if (responsavel && tipoFinal.startsWith("dependente_")) {
-        // Ao definir/trocar o responsável, o sistema preenche automaticamente
-        // o valor correto. Depois disso, o campo Valor mensal pode ser ajustado
-        // manualmente sem ser sobrescrito a cada tecla.
-        if (campo !== "valor_mensalidade") {
-          if (ehDependenteComMensalidadeIndividual(tipoFinal)) {
-            proximo.possui_mensalidade = true;
-            proximo.valor_mensalidade =
-              Number(responsavel.valor_mensalidade || 0) * 0.5;
-          } else if (ehDependenteComMensalidadeFamiliar(tipoFinal)) {
-            proximo.possui_mensalidade = true;
-            proximo.valor_mensalidade =
-              Number(responsavel.valor_mensalidade || 0);
-          } else if (ehTipoDependenteSemMensalidade(tipoFinal)) {
-            proximo.possui_mensalidade = false;
-            proximo.valor_mensalidade = 0;
-          } else if (proximo.possui_mensalidade !== true) {
-            proximo.valor_mensalidade = 0;
-          }
-        } else if (ehTipoDependenteSemMensalidade(tipoFinal)) {
-          proximo.possui_mensalidade = false;
-          proximo.valor_mensalidade = 0;
-        }
-      }
-
-      // Dependente classificado sem mensalidade nunca recebe cobrança própria.
-      if (
-        campo === "possui_mensalidade" &&
-        ehTipoDependenteSemMensalidade(proximo.tipo_socio)
-      ) {
-        proximo.possui_mensalidade = false;
-        proximo.valor_mensalidade = 0;
-      }
-
-      // Se o usuário desligar a mensalidade manualmente, zera o valor.
-      if (campo === "possui_mensalidade" && valor !== "true") {
-        proximo.valor_mensalidade = 0;
-      }
-
       return proximo;
     });
   }
-
 
   async function salvarSocio() {
     if (!form.nome?.trim()) {
@@ -901,11 +817,6 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
-      ...(form.matricula !== undefined &&
-      form.matricula !== null &&
-      String(form.matricula).trim() !== ""
-        ? { matricula: Number(form.matricula) }
-        : {}),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -1017,6 +928,7 @@ export default function Home() {
   }
 
   async function excluirSocio(socio: Socio) {
+    if (somenteConsulta) return;
     const confirmar = window.confirm(
       `Deseja realmente excluir o sócio "${socio.nome}"?`
     );
@@ -1454,12 +1366,14 @@ function Socios({
           </p>
         </div>
 
-        <button
-          onClick={novoSocio}
-          className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
-        >
-          + Novo Sócio
-        </button>
+        {!somenteConsulta && (
+          <button
+            onClick={novoSocio}
+            className="rounded-xl bg-[#063b28] px-5 py-3 font-bold text-white shadow transition hover:bg-[#003d2b]"
+          >
+            + Novo Sócio
+          </button>
+        )}
 
       </div>
 
@@ -1562,7 +1476,7 @@ function Socios({
                   Situação
                 </th>
 
-                <th className="sticky right-0 z-20 bg-[#e8f3ee] px-5 py-4 text-right shadow-[-5px_0_10px_rgba(0,0,0,0.05)]">
+                <th className="px-5 py-4 text-right">
                   Ações
                 </th>
 
@@ -1696,36 +1610,32 @@ function Socios({
 
                     </td>
 
-                    <td className="sticky right-0 z-10 bg-white px-5 py-4 shadow-[-5px_0_10px_rgba(0,0,0,0.05)]">
-
-                      <div className="flex justify-end gap-2">
-
-                        {podeTerDependentes(socio.tipo_socio) && (
+                    <td className="px-5 py-4">
+                      {!somenteConsulta && (
+                        <div className="flex justify-end gap-2">
+                          {podeTerDependentes(socio.tipo_socio) && (
+                            <button
+                              onClick={() => novoDependente(socio)}
+                              className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
+                              title="Adicionar dependente"
+                            >
+                              👨‍👩‍👧 + Dependente
+                            </button>
+                          )}
                           <button
-                            onClick={() => novoDependente(socio)}
+                            onClick={() => editarSocio(socio)}
                             className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
-                            title="Adicionar dependente"
                           >
-                            👨‍👩‍👧 + Dependente
+                            ✏️ Editar
                           </button>
-                        )}
-
-                        <button
-                          onClick={() => editarSocio(socio)}
-                          className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
-                        >
-                          ✏️ Editar
-                        </button>
-
-                        <button
-                          onClick={() => excluirSocio(socio)}
-                          className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
-                        >
-                          🗑️
-                        </button>
-
-                      </div>
-
+                          <button
+                            onClick={() => excluirSocio(socio)}
+                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      )}
                     </td>
 
                   </tr>
@@ -2561,26 +2471,13 @@ function Dependentes({
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
 }) {
-  // A aba Dependentes mostra somente quem pertence à família de um
-  // responsável e NÃO possui uma mensalidade própria.
-  //
-  // Importante: o vínculo familiar e a unidade de cobrança são coisas
-  // diferentes. Uma pessoa pode ser dependente do próprio pai e, ao
-  // mesmo tempo, ser responsável pela sua própria família.
-  const dependentes = socios.filter(ehDependenteSemMensalidade);
-
+  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
   const responsaveis = socios.filter((s) =>
-    socios.some(
-      (filho) =>
-        filho.responsavel_id === s.id &&
-        ehDependenteSemMensalidade(filho)
-    )
+    socios.some((filho) => filho.responsavel_id === s.id)
   );
 
   function filhosDe(id: string) {
-    return socios.filter(
-      (s) => s.responsavel_id === id && ehDependenteSemMensalidade(s)
-    );
+    return socios.filter((s) => s.responsavel_id === id);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2676,12 +2573,11 @@ function Dependentes({
     );
   }
 
-  // Um responsável pode ter responsavel_id preenchido e ainda assim
-  // possuir sua própria família. Ex.: filho adulto do pai que passou a
-  // ser responsável pela esposa e filhos.
-  // Por isso, a raiz da família é qualquer pessoa que tenha pelo menos
-  // um dependente sem mensalidade própria.
-  const raizes = socios.filter((s) => filhosDe(s.id).length > 0);
+  const raizes = socios.filter(
+    (s) =>
+      !s.responsavel_id &&
+      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
+  );
 
   return (
     <div>
@@ -2999,20 +2895,6 @@ function ModalSocio({
           <FormularioSecao titulo="🏛️ Dados da associação">
 
             <Campo
-              label="Matrícula"
-              type="number"
-              value={form.matricula ?? ""}
-              onChange={(v) => alterarCampo("matricula", v)}
-              placeholder="Ex.: 157"
-            />
-
-            <div className="flex items-end pb-2">
-              <p className="text-xs text-gray-500">
-                Informe a matrícula do associado. Ao editar, a matrícula atual será preservada.
-              </p>
-            </div>
-
-            <Campo
               label="Data de associação"
               type="date"
               value={form.data_associacao}
@@ -3099,15 +2981,9 @@ function ModalSocio({
                 {form.possui_mensalidade ? (
                   <>
                     <Campo
-                      label={
-                        ehDependenteComMensalidadeIndividual(form.tipo_socio)
-                          ? "Valor mensal (50% da familiar)"
-                          : ehDependenteComMensalidadeFamiliar(form.tipo_socio)
-                            ? "Valor mensal (familiar)"
-                            : "Valor mensal"
-                      }
+                      label="Valor mensal"
                       type="number"
-                      value={form.valor_mensalidade ?? ""}
+                      value={form.valor_mensalidade}
                       onChange={(v) => alterarCampo("valor_mensalidade", v)}
                       placeholder="0,00"
                     />
