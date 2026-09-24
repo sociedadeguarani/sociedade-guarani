@@ -439,6 +439,14 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
+      const socioIdsSelecionados = Array.isArray(body.socio_ids)
+        ? new Set(body.socio_ids.map((id: unknown) => String(id)))
+        : null;
+
+      const cobraveisSelecionados = socioIdsSelecionados
+        ? cobraveis.filter((s: any) => socioIdsSelecionados.has(String(s.id)))
+        : cobraveis;
+
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -488,7 +496,7 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
-      const novos = cobraveis
+      const novos = cobraveisSelecionados
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -550,8 +558,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         competencia,
-        total_cobraveis: cobraveis.length,
-        ja_existentes: cobraveis.filter((s: any) =>
+        total_cobraveis: cobraveisSelecionados.length,
+        ja_existentes: cobraveisSelecionados.filter((s: any) =>
           idsExistentes.has(String(s.id))
         ).length,
         quantidade_nova: novos.length,
@@ -653,6 +661,14 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
+      const socioIdsSelecionados = Array.isArray(body.socio_ids)
+        ? new Set(body.socio_ids.map((id: unknown) => String(id)))
+        : null;
+
+      const cobraveisSelecionados = socioIdsSelecionados
+        ? cobraveis.filter((s: any) => socioIdsSelecionados.has(String(s.id)))
+        : cobraveis;
+
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -707,7 +723,7 @@ export async function POST(request: Request) {
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveis
+      const novos = cobraveisSelecionados
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
