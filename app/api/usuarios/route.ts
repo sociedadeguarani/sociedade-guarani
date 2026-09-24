@@ -21,6 +21,8 @@ const TODAS_PERMISSOES = [
 
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
+  administrador_master: TODAS_PERMISSOES,
+  master: TODAS_PERMISSOES,
   administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
