@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getServiceClient } from "@/lib/guaraniAuth";
+import { getServiceClient, normalizarPerfil } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +21,8 @@ const TODAS_PERMISSOES = [
 
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
-  administrador_master: TODAS_PERMISSOES,
-  master: TODAS_PERMISSOES,
+  administrador_master: [],
+  master: [],
   administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
@@ -110,13 +110,9 @@ async function somenteMaster(request: Request) {
     };
   }
 
-  const perfilNormalizado = String(perfil?.codigo || perfil?.nome || "")
-    .trim()
-    .toLowerCase();
+  const perfilNormalizado = normalizarPerfil(perfil?.codigo, perfil?.nome);
 
-  const master =
-    perfilNormalizado === "administrador_master" ||
-    perfilNormalizado === "master";
+  const master = perfilNormalizado === "administrador_master";
 
   if (!master) {
     return {
@@ -245,10 +241,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Usuário Auth criado, mas o cadastro do sistema falhou: ${usuarioError.message}` }, { status: 500 });
     }
 
-    const perfilChave = String(perfil.codigo || perfil.nome || "").toLowerCase();
-    const escolhidas = perfilChave === "administrador" || perfilChave === "administrador_master" || perfilChave === "master"
-      ? TODAS_PERMISSOES
-      : Array.isArray(permissoes)
+    const perfilChave = normalizarPerfil(perfil.codigo, perfil.nome);
+    const escolhidas = perfilChave === "administrador_master"
+      ? []
+      : perfilChave === "administrador_normal"
+        ? TODAS_PERMISSOES
+        : Array.isArray(permissoes)
         ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x))
         : (DEFAULTS[perfilChave] || []);
 
