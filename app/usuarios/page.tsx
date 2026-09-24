@@ -26,7 +26,7 @@ const PERMISSOES = [
 
 const DEFAULT_PERMISSOES: Record<string, string[]> = {
   administrador: PERMISSOES.map(([chave]) => chave),
-  administrador_master: PERMISSOES.map(([chave]) => chave),
+  administrador_master: [],
   administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
@@ -44,6 +44,12 @@ const visual: Record<string, { label: string; desc: string; icon: typeof Crown }
 };
 
 function nomePerfil(nome: string) { return visual[nome]?.label || nome; }
+
+function isMasterPerfil(perfil?: Perfil) {
+  const codigo = String(perfil?.codigo || "").trim().toLowerCase();
+  const nome = String(perfil?.nome || "").trim().toLowerCase();
+  return codigo === "administrador_master" || codigo === "master" || nome === "administrador master" || nome === "master";
+}
 
 export default function UsuariosPage() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -144,7 +150,7 @@ export default function UsuariosPage() {
       <label className="mt-5 block text-sm font-bold">Nome<input required value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="mt-4 block text-sm font-bold">E-mail<input required type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="mt-4 block text-sm font-bold">Senha inicial<input required minLength={6} type="password" value={form.senha} onChange={e=>setForm({...form,senha:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label>
       <div className="mt-4"><span className="text-sm font-bold">Perfil de acesso</span><div className="mt-2 grid gap-2 sm:grid-cols-3">{perfis.map(p=>{const Icon=visual[p.nome]?.icon||UserRound;const ativo=form.perfil_id===p.id;return <button type="button" key={p.id} onClick={()=>{setForm({...form,perfil_id:p.id,socio_id:""});setPermissoesSelecionadas(DEFAULT_PERMISSOES[p.codigo || p.nome] || [])}} className={`rounded-xl border-2 p-3 text-left ${ativo?"border-[#005a3c] bg-[#e8f3ee]":"border-gray-200"}`}><Icon className="h-5 w-5 text-[#005a3c]"/><b className="mt-1 block text-sm">{nomePerfil(p.nome)}</b></button>})}</div></div>
       {perfis.find(p=>p.id===form.perfil_id)?.nome==="associado"&&<label className="mt-4 block text-sm font-bold">Sócio vinculado<select required value={form.socio_id} onChange={e=>setForm({...form,socio_id:e.target.value})} className="mt-1 w-full rounded-xl border bg-white px-3 py-3"><option value="">Selecione o sócio</option>{socios.map(s=><option key={s.id} value={s.id}>{s.matricula?`${s.matricula} · `:""}{s.nome}</option>)}</select></label>}
-      <div className="mt-4 rounded-xl border bg-[#f8faf9] p-4"><div className="text-sm font-bold text-[#003d2b]">Permissões deste usuário</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{PERMISSOES.map(([chave,label])=>{const checked=permissoesSelecionadas.includes(chave);const perfilAtual=perfis.find(p=>p.id===form.perfil_id);const chavePerfil=perfilAtual?.codigo || perfilAtual?.nome || "";const bloqueado=chavePerfil==="administrador_master" || chavePerfil==="master";return <label key={chave} className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm"><input type="checkbox" checked={checked} disabled={bloqueado} onChange={e=>setPermissoesSelecionadas(atual=>e.target.checked?[...atual,chave]:atual.filter(x=>x!==chave))}/>{label}</label>})}</div></div>
+      <div className="mt-4 rounded-xl border bg-[#f8faf9] p-4"><div className="text-sm font-bold text-[#003d2b]">Permissões deste usuário</div>{isMasterPerfil(perfis.find(p=>p.id===form.perfil_id))&&<p className="mt-1 text-xs text-gray-500">O Administrador Master administra apenas usuários e perfis. Ele não recebe permissões dos módulos do sistema.</p>}<div className="mt-3 grid gap-2 sm:grid-cols-2">{PERMISSOES.map(([chave,label])=>{const checked=permissoesSelecionadas.includes(chave);const perfilAtual=perfis.find(p=>p.id===form.perfil_id);const bloqueado=isMasterPerfil(perfilAtual);return <label key={chave} className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm"><input type="checkbox" checked={checked} disabled={bloqueado} onChange={e=>setPermissoesSelecionadas(atual=>e.target.checked?[...atual,chave]:atual.filter(x=>x!==chave))}/>{label}</label>})}</div></div>
       <label className="mt-4 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={form.ativo} onChange={e=>setForm({...form,ativo:e.target.checked})}/>Usuário ativo</label><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={()=>setModal(false)} className="rounded-xl border px-4 py-3 font-bold">Cancelar</button><button disabled={salvando} type="submit" className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white disabled:opacity-50">{salvando?"Criando...":"Criar usuário"}</button></div>
     </form></div>}
   </div>;
