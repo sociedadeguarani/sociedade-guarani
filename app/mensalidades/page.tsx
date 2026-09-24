@@ -211,13 +211,7 @@ export default function Page() {
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
-
-      const { data: contasData } = await supabase
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .order("nome");
-
-      setContas(contasData || []);
+      setContas(d.contas || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
@@ -284,7 +278,9 @@ export default function Page() {
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const conta =
+      m.socio?.conta_bancaria ||
+      contas.find((c) => String(c.id) === String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (
@@ -309,7 +305,9 @@ export default function Page() {
 
   function bancoCobranca(m: M) {
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const conta =
+      m.socio?.conta_bancaria ||
+      contas.find((c) => String(c.id) === String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
