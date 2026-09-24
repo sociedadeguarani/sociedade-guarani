@@ -1,22 +1,45 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
+import { Boxes, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
-type Perfil = { id: string; nome: string; ativo: boolean };
+type Perfil = { id: string; nome: string; codigo?: string | null; ativo: boolean };
 type Socio = { id: string; matricula: string | null; nome: string; cpf: string | null; email: string | null };
 type Usuario = { id: string; nome_exibicao: string | null; socio_id: string | null; funcionario_id: string | null; perfil_id: string; ativo: boolean; email?: string | null; perfil?: { id?: string; nome: string } | null };
+
+const PERMISSOES = [
+  ["socios.consultar", "Consultar sócios"],
+  ["socios.ver_financeiro", "Ver informações financeiras"],
+  ["socios.ver_exame_medico", "Ver exame médico"],
+  ["propria.mensalidade", "Mensalidades próprias"],
+  ["propria.reservas", "Reservas"],
+  ["convites.comprar", "Convites"],
+  ["inventario.consultar", "Consultar inventário"],
+  ["inventario.cadastrar", "Cadastrar itens no inventário"],
+  ["inventario.editar", "Editar itens do inventário"],
+  ["inventario.emprestar", "Registrar empréstimos"],
+  ["inventario.devolver", "Registrar devoluções"],
+] as const;
+
+const DEFAULT_PERMISSOES: Record<string, string[]> = {
+  administrador: PERMISSOES.map(([chave]) => chave),
+  administrador_master: PERMISSOES.map(([chave]) => chave),
+  administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
+  funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
+  funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
+  associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
+};
 
 const visual: Record<string, { label: string; desc: string; icon: typeof Crown }> = {
   administrador_master: { label: "Administrador Master", desc: "Pode criar e gerenciar usuários do sistema.", icon: Crown },
   master: { label: "Administrador Master", desc: "Pode criar e gerenciar usuários do sistema.", icon: Crown },
   administrador: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
   administrador_normal: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
-  funcionario: { label: "Funcionário", desc: "Acesso operacional conforme permissões.", icon: ShieldCheck },
-  funcionario_inventario: { label: "Funcionário — Inventário", desc: "Cadastra itens, controla inventário, empréstimos e devoluções.", icon: ShieldCheck },
+  funcionario: { label: "Funcionário", desc: "Acesso conforme permissões.", icon: ShieldCheck },
+  funcionario_inventario: { label: "Funcionário — Inventário", desc: "Cadastra itens, controla empréstimos e devoluções.", icon: Boxes },
   associado: { label: "Associado", desc: "Acesso aos próprios dados.", icon: UserRound },
 };
 
@@ -34,6 +57,7 @@ export default function UsuariosPage() {
   const [filtroPerfil, setFiltroPerfil] = useState("todos");
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ nome: "", email: "", senha: "", perfil_id: "", socio_id: "", ativo: true });
+  const [permissoesSelecionadas, setPermissoesSelecionadas] = useState<string[]>([]);
 
   async function api(path = "/api/usuarios", init: RequestInit = {}) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -66,7 +90,9 @@ export default function UsuariosPage() {
   function abrirNovo() {
     const inicial = perfis.find((p) => ["administrador", "administrador_normal"].includes(p.nome));
     setErro(""); setMensagem("");
-    setForm({ nome: "", email: "", senha: "", perfil_id: inicial?.id || perfis[0]?.id || "", socio_id: "", ativo: true });
+    const perfilInicial = inicial || perfis[0];
+    setForm({ nome: "", email: "", senha: "", perfil_id: perfilInicial?.id || "", socio_id: "", ativo: true });
+    setPermissoesSelecionadas(DEFAULT_PERMISSOES[perfilInicial?.codigo || perfilInicial?.nome || ""] || []);
     setModal(true);
   }
 
@@ -79,7 +105,7 @@ export default function UsuariosPage() {
       if (!perfil) throw new Error("Selecione um perfil.");
       if (perfil.nome === "associado" && !form.socio_id) throw new Error("Para usuário associado, selecione o sócio vinculado.");
 
-      const response = await api("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null }) });
+      const response = await api("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, nome: form.nome.trim(), email: form.email.trim().toLowerCase(), socio_id: form.socio_id || null, permissoes: permissoesSelecionadas }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível criar o usuário.");
       setMensagem("Usuário criado com sucesso."); setModal(false); await carregar();
@@ -116,8 +142,9 @@ export default function UsuariosPage() {
     </div></main>
     {modal&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"><form onSubmit={salvar} className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h2 className="text-2xl font-extrabold text-[#005a3c]">Novo usuário</h2><p className="text-sm text-gray-500">O cadastro será criado no Supabase Auth e em usuarios_sistema.</p></div><button type="button" onClick={()=>setModal(false)} className="rounded-lg bg-gray-100 p-2"><X/></button></div>
       <label className="mt-5 block text-sm font-bold">Nome<input required value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="mt-4 block text-sm font-bold">E-mail<input required type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="mt-4 block text-sm font-bold">Senha inicial<input required minLength={6} type="password" value={form.senha} onChange={e=>setForm({...form,senha:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label>
-      <div className="mt-4"><span className="text-sm font-bold">Perfil de acesso</span><div className="mt-2 grid gap-2 sm:grid-cols-3">{perfis.map(p=>{const Icon=visual[p.nome]?.icon||UserRound;const ativo=form.perfil_id===p.id;return <button type="button" key={p.id} onClick={()=>setForm({...form,perfil_id:p.id,socio_id:""})} className={`rounded-xl border-2 p-3 text-left ${ativo?"border-[#005a3c] bg-[#e8f3ee]":"border-gray-200"}`}><Icon className="h-5 w-5 text-[#005a3c]"/><b className="mt-1 block text-sm">{nomePerfil(p.nome)}</b></button>})}</div></div>
+      <div className="mt-4"><span className="text-sm font-bold">Perfil de acesso</span><div className="mt-2 grid gap-2 sm:grid-cols-3">{perfis.map(p=>{const Icon=visual[p.nome]?.icon||UserRound;const ativo=form.perfil_id===p.id;return <button type="button" key={p.id} onClick={()=>{setForm({...form,perfil_id:p.id,socio_id:""});setPermissoesSelecionadas(DEFAULT_PERMISSOES[p.codigo || p.nome] || [])}} className={`rounded-xl border-2 p-3 text-left ${ativo?"border-[#005a3c] bg-[#e8f3ee]":"border-gray-200"}`}><Icon className="h-5 w-5 text-[#005a3c]"/><b className="mt-1 block text-sm">{nomePerfil(p.nome)}</b></button>})}</div></div>
       {perfis.find(p=>p.id===form.perfil_id)?.nome==="associado"&&<label className="mt-4 block text-sm font-bold">Sócio vinculado<select required value={form.socio_id} onChange={e=>setForm({...form,socio_id:e.target.value})} className="mt-1 w-full rounded-xl border bg-white px-3 py-3"><option value="">Selecione o sócio</option>{socios.map(s=><option key={s.id} value={s.id}>{s.matricula?`${s.matricula} · `:""}{s.nome}</option>)}</select></label>}
+      <div className="mt-4 rounded-xl border bg-[#f8faf9] p-4"><div className="text-sm font-bold text-[#003d2b]">Permissões deste usuário</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{PERMISSOES.map(([chave,label])=>{const checked=permissoesSelecionadas.includes(chave);const perfilAtual=perfis.find(p=>p.id===form.perfil_id);const chavePerfil=perfilAtual?.codigo || perfilAtual?.nome || "";const bloqueado=chavePerfil==="administrador_master" || chavePerfil==="master";return <label key={chave} className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm"><input type="checkbox" checked={checked} disabled={bloqueado} onChange={e=>setPermissoesSelecionadas(atual=>e.target.checked?[...atual,chave]:atual.filter(x=>x!==chave))}/>{label}</label>})}</div></div>
       <label className="mt-4 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={form.ativo} onChange={e=>setForm({...form,ativo:e.target.checked})}/>Usuário ativo</label><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={()=>setModal(false)} className="rounded-xl border px-4 py-3 font-bold">Cancelar</button><button disabled={salvando} type="submit" className="rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white disabled:opacity-50">{salvando?"Criando...":"Criar usuário"}</button></div>
     </form></div>}
   </div>;
