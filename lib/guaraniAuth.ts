@@ -1,11 +1,19 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-export function normalizarPerfil(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+export function normalizarPerfil(value: unknown, nome?: unknown) {
+  const codigo = String(value ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const rotulo = String(nome ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // O nome "Administrador Master" deve prevalecer mesmo se uma migração
+  // antiga deixou o código do perfil como "administrador".
+  if (codigo === "administrador_master" || codigo === "master" || rotulo.includes("administrador master") || rotulo === "master") {
+    return "administrador_master";
+  }
+  if (codigo === "administrador" || codigo === "admin" || codigo === "administrador_normal") return "administrador_normal";
+  if (codigo === "funcionario_inventario" || rotulo.includes("funcionario - inventario") || rotulo.includes("funcionario inventario")) return "funcionario_inventario";
+  if (codigo === "funcionario" || codigo === "funcionário") return "funcionario";
+  if (codigo === "associado") return "associado";
+  return codigo || rotulo;
 }
 
 export function getServiceClient(): SupabaseClient {
@@ -34,7 +42,7 @@ export async function usuarioAutenticado(request: Request) {
   if (!usuario.ativo) return { error: "Seu acesso está inativo.", status: 403 as const };
 
   const perfilRaw = Array.isArray(usuario.perfis) ? usuario.perfis[0] : usuario.perfis;
-  const perfil = normalizarPerfil(perfilRaw?.codigo || perfilRaw?.nome);
+  const perfil = normalizarPerfil(perfilRaw?.codigo, perfilRaw?.nome);
   return { supabase, authUser: authData.user, usuario, perfil };
 }
 
