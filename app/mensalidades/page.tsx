@@ -133,6 +133,7 @@ function data(v: string | null) {
 }
 
 function status(s: string | null) {
+  if (s === "nao_gerada") return ["Não gerada", "bg-gray-100 text-gray-600"];
   if (s === "pago") return ["Pago", "bg-green-100 text-green-700"];
   if (s === "isento") return ["Isento", "bg-gray-100 text-gray-600"];
   if (s === "em_atraso")
@@ -335,16 +336,57 @@ export default function Page() {
     return "sem_pagamento";
   }
 
+  const socioPorId = useMemo(() => {
+    const mapa = new Map<string, Socio>();
+    socios.forEach((s) => mapa.set(String(s.id), s));
+    return mapa;
+  }, [socios]);
+
+  const linhasExibicao = useMemo<M[]>(() => {
+    const existentes = new Map<string, M>();
+    lista.forEach((m) => existentes.set(String(m.socio_id), m));
+
+    // Quando a competência ainda não foi gerada, mostramos os associados
+    // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
+    // vazio e o administrador consegue conferir os 329 associados antes de gerar.
+    const virtuais: M[] = sociosElegiveis
+      .filter((s) => !existentes.has(String(s.id)))
+      .map((s) => ({
+        id: `virtual-${s.id}-${ano}-${mes}`,
+        socio_id: String(s.id),
+        competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
+        valor: 0,
+        valor_base: null,
+        tarifa_pagamento: null,
+        multa: 0,
+        juros: 0,
+        desconto: 0,
+        total_cobrado: null,
+        data_vencimento: null,
+        situacao: "nao_gerada",
+        data_pagamento: null,
+        tipo_pagamento: s.tipo_pagamento || null,
+        observacoes: null,
+        motivo: "Mensalidade ainda não gerada",
+        conta_pagadora_id: s.conta_bancaria_id || null,
+        socio: s,
+      }));
+
+    return [...lista, ...virtuais];
+  }, [lista, sociosElegiveis, ano, mes]);
+
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
 
-    return lista.filter((x) => {
+    return linhasExibicao.filter((x) => {
       const bateBusca =
         !q ||
         `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
           .toLowerCase()
           .includes(q);
 
+      // Linhas ainda não geradas não devem desaparecer quando um filtro
+      // de banco é aplicado: o banco/tipo de cobrança vem do cadastro do sócio.
       const cobrancaAtual = tipoCobranca(x);
       const bateCobranca =
         cobrancasSelecionadas.length === 0 ||
@@ -352,7 +394,7 @@ export default function Page() {
 
       return bateBusca && bateCobranca;
     });
-  }, [lista, busca, cobrancasSelecionadas, contas]);
+  }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
 
   async function post(body: any) {
     setErro("");
@@ -734,7 +776,7 @@ export default function Page() {
               </div>
 
               <div className="mt-3 text-xs text-gray-500">
-                Exibindo <b>{filtrada.length}</b> de <b>{lista.length}</b> mensalidade(s)
+                Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
               </div>
 
               <button
@@ -774,14 +816,8 @@ export default function Page() {
                 <tbody className="divide-y">
                   {filtrada.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="p-6">
-                        <div className="rounded-xl border border-dashed bg-[#f7faf8] p-5 text-center">
-                          <p className="font-bold text-[#005a3c]">Nenhuma mensalidade gerada para {String(mes).padStart(2, "0")}/{ano}.</p>
-                          <p className="mt-1 text-sm text-gray-600">
-                            Há <b>{sociosElegiveis.length}</b> associado(s) elegível(is) para geração nesta competência.
-                          </p>
-                          <p className="mt-1 text-xs text-gray-500">Marque os meses acima e clique em “Gerar competência” para criar os lançamentos. Registros já existentes não serão duplicados.</p>
-                        </div>
+                      <td colSpan={12} className="p-6 text-center text-gray-500">
+                        Nenhum associado encontrado com os filtros atuais.
                       </td>
                     </tr>
                   ) : (
@@ -795,6 +831,7 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
+                            disabled={x.situacao === "nao_gerada"}
                             checked={sel.includes(x.id)}
                             onChange={() =>
                               setSel((s) =>
@@ -864,7 +901,9 @@ export default function Page() {
                         </td>
 
                         <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
-                          {x.situacao === "pago" ? (
+                          {x.situacao === "nao_gerada" ? (
+                            <span className="text-xs font-semibold text-gray-400">Gere a competência primeiro</span>
+                          ) : x.situacao === "pago" ? (
                             <button
                               type="button"
                               onClick={() => void estornarBaixa(x)}
