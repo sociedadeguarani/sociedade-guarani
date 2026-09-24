@@ -142,9 +142,6 @@ export default function Page() {
 
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
-  const [anoSelecionado, setAnoSelecionado] = useState(hoje.getFullYear());
-  const [mesSelecionado, setMesSelecionado] = useState(hoje.getMonth() + 1);
-  const [aplicandoCompetencia, setAplicandoCompetencia] = useState(false);
   const [busca, setBusca] = useState("");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
@@ -226,14 +223,6 @@ export default function Page() {
   useEffect(() => {
     void carregar();
   }, [ano, mes]);
-
-  async function aplicarCompetencia() {
-    if (anoSelecionado === ano && mesSelecionado === mes) return;
-    setAplicandoCompetencia(true);
-    setAno(anoSelecionado);
-    setMes(mesSelecionado);
-    setAplicandoCompetencia(false);
-  }
 
   function normalizarPagamento(valor: unknown) {
     return String(valor || "")
@@ -583,66 +572,44 @@ export default function Page() {
             </div>
           )}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="rounded-2xl border bg-white p-4">
-              Ano
-              <select
-                value={anoSelecionado}
-                onChange={(e) => setAnoSelecionado(+e.target.value)}
-                className="mt-2 w-full rounded-xl border p-2"
-              >
-                {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map(
-                  (a) => (
-                    <option key={a}>{a}</option>
-                  )
-                )}
-              </select>
-            </label>
+          <section className="rounded-2xl border bg-white p-4">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <label className="min-w-[240px] flex-1">
+                <span className="text-sm font-bold text-gray-600">Ano</span>
+                <select
+                  value={ano}
+                  onChange={(e) => {
+                    const novoAno = Number(e.target.value);
+                    setAno(novoAno);
+                    setMesesParaGerar((atual) =>
+                      atual.filter((m) => {
+                        const atualAno = hoje.getFullYear();
+                        const atualMes = hoje.getMonth() + 1;
+                        return novoAno < atualAno || (novoAno === atualAno && m <= atualMes);
+                      })
+                    );
+                  }}
+                  className="mt-2 w-full rounded-xl border p-3 font-bold"
+                >
+                  {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="rounded-2xl border bg-white p-4">
-              Competência
-              <select
-                value={mesSelecionado}
-                onChange={(e) => setMesSelecionado(+e.target.value)}
-                className="mt-2 w-full rounded-xl border p-2"
-              >
-                {[
-                  "Janeiro",
-                  "Fevereiro",
-                  "Março",
-                  "Abril",
-                  "Maio",
-                  "Junho",
-                  "Julho",
-                  "Agosto",
-                  "Setembro",
-                  "Outubro",
-                  "Novembro",
-                  "Dezembro",
-                ].map((x, i) => (
-                  <option value={i + 1} key={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="flex items-center justify-end gap-3">
-            <div className="text-sm text-gray-500">
-              {anoSelecionado === ano && mesSelecionado === mes
-                ? `Competência ativa: ${String(mes).padStart(2, "0")}/${ano}`
-                : `Seleção pendente: ${String(mesSelecionado).padStart(2, "0")}/${anoSelecionado}`}
+              <div className="rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
+                <span className="text-gray-500">Visualizando:</span>{" "}
+                <b className="text-[#005a3c]">
+                  {String(mes).padStart(2, "0")}/{ano}
+                </b>
+                <span className="ml-2 text-gray-500">
+                  (carrega automaticamente)
+                </span>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void aplicarCompetencia()}
-              disabled={aplicandoCompetencia || (anoSelecionado === ano && mesSelecionado === mes)}
-              className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {aplicandoCompetencia ? "Aplicando..." : "OK — Abrir competência"}
-            </button>
-          </div>
+          </section>
 
           <section className="rounded-2xl border bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -664,10 +631,36 @@ export default function Page() {
                 const disponivel = mesDisponivelParaGeracao(numero);
                 const marcado = mesesParaGerar.includes(numero);
                 return (
-                  <label key={nomeMes} className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${marcado ? "border-[#005a3c] bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}>
-                    <input type="checkbox" checked={marcado} disabled={!disponivel} onChange={() => alternarMesGeracao(numero)} />
-                    {nomeMes}
-                  </label>
+                  <div
+                    key={nomeMes}
+                    className={`rounded-xl border p-2 ${
+                      mes === numero
+                        ? "border-[#005a3c] bg-[#f1faf5] ring-1 ring-[#005a3c]"
+                        : marcado
+                          ? "border-[#005a3c] bg-[#eef7f2]"
+                          : "bg-white"
+                    } ${!disponivel ? "opacity-40" : ""}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <label className={`flex min-w-0 flex-1 items-center gap-2 text-sm font-bold ${disponivel ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                        <input
+                          type="checkbox"
+                          checked={marcado}
+                          disabled={!disponivel}
+                          onChange={() => alternarMesGeracao(numero)}
+                        />
+                        <span className="truncate">{nomeMes}</span>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!disponivel}
+                        onClick={() => setMes(numero)}
+                        className="rounded-lg border px-2 py-1 text-[11px] font-bold text-[#005a3c] disabled:cursor-not-allowed disabled:text-gray-400"
+                      >
+                        Ver
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
