@@ -11,7 +11,7 @@ function normalizarPerfil(codigo?: string | null, nome?: string | null) {
   // de Administrador Normal quando os nomes exibidos forem iguais.
   const valor = valorCodigo || valorNome;
 
-  if (valor === "administrador_master" || valor === "master") {
+  if (valorCodigo === "administrador_master" || valorCodigo === "master" || valorNome === "administrador master" || valorNome === "master") {
     return "administrador_master";
   }
 
