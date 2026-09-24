@@ -176,7 +176,6 @@ export default function Page() {
   const [previa, setPrevia] = useState<PreviaGeracao | null>(null);
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
-  const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
 
   async function h() {
     const {
@@ -308,6 +307,17 @@ export default function Page() {
     return "sem_pagamento";
   }
 
+  function bancoCobranca(m: M) {
+    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
+
+    if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
+    if (banco.includes("sicredi")) return "sicredi";
+    if (banco === "bb" || banco.includes("banco do brasil") || banco.includes(" bb ")) return "bb";
+    return "";
+  }
+
   const mensalidadesPorSocio = useMemo(() => {
     const mapa = new Map<string, M>();
     for (const item of lista) mapa.set(String(item.socio_id), item);
@@ -365,12 +375,17 @@ export default function Page() {
           .toLowerCase()
           .includes(q);
 
-      const cobrancaAtual = tipoCobranca(x);
-      const bateCobranca =
-        cobrancasSelecionadas.length === 0 ||
-        cobrancasSelecionadas.includes(cobrancaAtual);
+      if (cobrancasSelecionadas.length === 0) return bateBusca;
 
-      return bateBusca && bateCobranca;
+      const banco = bancoCobranca(x);
+      const forma = tipoCobranca(x);
+      const bateFiltro = cobrancasSelecionadas.some((filtro) =>
+        ["banrisul", "sicredi", "bb"].includes(filtro)
+          ? banco === filtro
+          : forma === filtro
+      );
+
+      return bateBusca && bateFiltro;
     });
   }, [linhas, busca, cobrancasSelecionadas, contas]);
 
@@ -665,18 +680,18 @@ export default function Page() {
           </div>
 
           <div className="rounded-2xl border bg-white p-4">
-            <div className="flex gap-3">
-              <div className="flex flex-1 items-center gap-2 rounded-xl border px-3">
-                <Search className="h-4 w-4 text-gray-400" />
+            <div className="space-y-3">
+              <div className="flex w-full items-center gap-2 rounded-xl border px-3">
+                <Search className="h-4 w-4 shrink-0 text-gray-400" />
                 <input
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  placeholder="Nome ou matrícula..."
-                  className="w-full py-3 outline-none"
+                  placeholder="Digite nome ou matrícula..."
+                  className="min-w-0 w-full py-3 outline-none"
                 />
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="mr-1 text-sm font-bold text-gray-600">
                   Tipo de cobrança:
                 </span>
@@ -721,7 +736,7 @@ export default function Page() {
                 )}
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                 <span>Exibindo <b>{filtrada.length}</b> de <b>{sociosCobraveis.length}</b> associados elegíveis</span>
                 <button type="button" onClick={todosVisiveisSelecionados ? limparSelecao : selecionarTodos} className="rounded-full border px-3 py-1.5 font-bold text-[#005a3c] hover:bg-[#f4faf7]">
                   {todosVisiveisSelecionados ? "Desmarcar todos" : "Selecionar todos"}
@@ -788,7 +803,11 @@ export default function Page() {
                         <td className="p-3 font-bold">
                           <button
                             type="button"
-                            onClick={() => setSocioSelecionado(x)}
+                            onClick={() => {
+                              if (x.socio?.id) {
+                                window.location.href = `/socios?editar=${encodeURIComponent(String(x.socio.id))}`;
+                              }
+                            }}
                             className="text-left text-[#005a3c] underline-offset-2 hover:underline"
                           >
                             {x.socio?.nome || "—"}
@@ -924,137 +943,6 @@ export default function Page() {
           </section>
         </div>
       </main>
-
-      {socioSelecionado && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm text-gray-500">Cadastro do associado</p>
-                <h2 className="text-2xl font-black text-[#005a3c]">
-                  {socioSelecionado.socio?.nome || "Associado"}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSocioSelecionado(null)}
-                className="rounded-full p-2 hover:bg-gray-100"
-              >
-                <X />
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {[
-                ["Matrícula", socioSelecionado.socio?.matricula],
-                ["CPF", socioSelecionado.socio?.cpf],
-                ["Categoria", socioSelecionado.socio?.categoria],
-                [
-                  "Tipo de sócio",
-                  nomes[socioSelecionado.socio?.tipo_socio] ||
-                    socioSelecionado.socio?.tipo_socio,
-                ],
-                ["Situação", socioSelecionado.socio?.situacao],
-                ["Parentesco", socioSelecionado.socio?.parentesco],
-                ["Responsável ID", socioSelecionado.socio?.responsavel_id],
-                ["Telefone", socioSelecionado.socio?.telefone],
-                ["E-mail", socioSelecionado.socio?.email],
-                ["Endereço", socioSelecionado.socio?.endereco],
-              ].map(([label, valor]) => (
-                <div key={label} className="rounded-xl border bg-gray-50 p-3">
-                  <div className="text-xs font-bold uppercase text-gray-500">
-                    {label}
-                  </div>
-                  <div className="mt-1 break-words font-semibold">
-                    {valor || "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
-              <h3 className="font-black text-[#005a3c]">
-                Mensalidade {String(mes).padStart(2, "0")}/{ano}
-              </h3>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <span className="text-xs text-gray-500">Valor base</span>
-                  <p className="font-bold">
-                    {moeda(
-                      socioSelecionado.valor_base ?? socioSelecionado.valor
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Tipo de cobrança</span>
-                  <p className="font-bold">
-                    {{
-                      banrisul: "Banrisul",
-                      sicredi: "Sicredi",
-                      bb: "Banco do Brasil",
-                      boleto: "Boleto",
-                      pix: "PIX",
-                      sem_pagamento: "Sem pagamento",
-                      debito_em_conta: "Débito em conta",
-                      dinheiro: "Dinheiro",
-                      transferencia: "Transferência",
-                      outro: "Outro",
-                    }[tipoCobranca(socioSelecionado)] || "—"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Tarifa</span>
-                  <p className="font-bold">
-                    {moeda(socioSelecionado.tarifa_pagamento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Total cobrado</span>
-                  <p className="font-black text-[#005a3c]">
-                    {moeda(socioSelecionado.total_cobrado)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Vencimento</span>
-                  <p className="font-bold">
-                    {data(socioSelecionado.data_vencimento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Situação</span>
-                  <p className="font-bold">
-                    {status(socioSelecionado.situacao)[0]}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Data de pagamento</span>
-                  <p className="font-bold">
-                    {data(socioSelecionado.data_pagamento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Observações</span>
-                  <p className="font-bold">
-                    {socioSelecionado.motivo ||
-                      socioSelecionado.observacoes ||
-                      "—"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSocioSelecionado(null)}
-                className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {abrindoPrevia && previa && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
