@@ -23,6 +23,10 @@ function normalizarPerfil(codigo?: string | null, nome?: string | null) {
     return "administrador_normal";
   }
 
+  if (valor === "funcionario_inventario" || valor === "funcionario-inventario") {
+    return "funcionario_inventario";
+  }
+
   if (valor === "funcionario" || valor === "funcionário") {
     return "funcionario";
   }
@@ -42,6 +46,9 @@ function normalizarPerfil(codigo?: string | null, nome?: string | null) {
       valorNome === "administrador_normal"
     ) {
       return "administrador_normal";
+    }
+    if (valorNome === "funcionario_inventario" || valorNome === "funcionario-inventario") {
+      return "funcionario_inventario";
     }
     if (valorNome === "funcionario" || valorNome === "funcionário") {
       return "funcionario";
