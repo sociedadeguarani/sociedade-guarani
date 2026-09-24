@@ -71,6 +71,9 @@ export default function DependentesPage() {
   const [sucesso, setSucesso] = useState("");
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
+  const [perfilUsuario, setPerfilUsuario] = useState("");
+
+  const somenteConsulta = perfilUsuario === "funcionario";
 
   type FormDependente = {
     socio_id: string;
@@ -247,9 +250,21 @@ export default function DependentesPage() {
     setCarregando(false);
   }
 
-  useEffect(() => { carregarDados(); }, []);
+  useEffect(() => {
+    try {
+      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+      setPerfilUsuario(
+        perfil === "funcionario" ? "funcionario" :
+        perfil === "master" ? "administrador_master" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil
+      );
+    } catch {}
+    carregarDados();
+  }, []);
 
   function abrirNovo() {
+    if (somenteConsulta) return;
     setEditando(null);
     setForm({
       socio_id: filtroSocio,
@@ -272,6 +287,7 @@ export default function DependentesPage() {
   }
 
   function abrirEdicao(d: Dependente) {
+    if (somenteConsulta) return;
     setEditando(d);
     setForm({
       socio_id: d.socio_id,
@@ -302,6 +318,8 @@ export default function DependentesPage() {
 
   async function salvarDependente(e: React.FormEvent) {
     e.preventDefault();
+    if (somenteConsulta) return;
+
     setErro("");
     setSucesso("");
 
@@ -381,6 +399,7 @@ export default function DependentesPage() {
   }
 
   async function excluirDependente(d: Dependente) {
+    if (somenteConsulta) return;
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
     const { error } = d.source === "socios"
@@ -396,6 +415,7 @@ export default function DependentesPage() {
   }
 
   async function alternarStatus(d: Dependente) {
+    if (somenteConsulta) return;
     setErro("");
     const { error } = d.source === "socios"
       ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
@@ -501,7 +521,14 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
                             <td className="px-5 py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
                             <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
-                            <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button><button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button></div></td>
+                            <td className="px-5 py-4">
+                              {!somenteConsulta && (
+                                <div className="flex justify-end gap-2">
+                                  <button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button>
+                                  <button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button>
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -515,7 +542,7 @@ export default function DependentesPage() {
         </section>
       </div>
 
-      {modalAberto && (
+      {modalAberto && !somenteConsulta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
           <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
