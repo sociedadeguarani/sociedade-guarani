@@ -85,7 +85,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "funcionario"]);
+    const auth = await requireRoles(request, ["administrador", "funcionario", "funcionario_inventario"]);
     if ("response" in auth) return auth.response;
     if (body.acao !== "devolver" || !body.id) return NextResponse.json({ error: "Informe o empréstimo a devolver." }, { status: 400 });
     const supabase = admin();
