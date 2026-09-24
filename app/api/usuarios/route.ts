@@ -15,16 +15,16 @@ const TODAS_PERMISSOES = [
   "inventario.consultar",
   "inventario.emprestar",
   "inventario.devolver",
+  "inventario.cadastrar",
+  "inventario.editar",
 ];
-
-const PERFIL_INVENTARIO = "funcionario_inventario";
 
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
   administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
-  funcionario_inventario: ["inventario.consultar", "inventario.emprestar", "inventario.devolver"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
+  funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
 };
 
 async function somenteMaster(request: Request) {
@@ -95,7 +95,7 @@ async function somenteMaster(request: Request) {
 
   const { data: perfil, error: perfilError } = await db
     .from("perfis")
-    .select("id,nome")
+    .select("id,nome,codigo")
     .eq("id", usuario.perfil_id)
     .maybeSingle();
 
@@ -108,7 +108,7 @@ async function somenteMaster(request: Request) {
     };
   }
 
-  const perfilNormalizado = String(perfil?.nome || "")
+  const perfilNormalizado = String(perfil?.codigo || perfil?.nome || "")
     .trim()
     .toLowerCase();
 
@@ -134,26 +134,9 @@ async function somenteMaster(request: Request) {
   };
 }
 
-async function garantirPerfilInventario(db: ReturnType<typeof getServiceClient>) {
-  const { data: existente, error: buscaError } = await db.from("perfis").select("id,nome,ativo,codigo").eq("codigo", PERFIL_INVENTARIO).maybeSingle();
-  if (buscaError) throw new Error(`Erro ao consultar perfil de inventário: ${buscaError.message}`);
-  if (existente) {
-    if (existente.ativo === false) {
-      const { data, error } = await db.from("perfis").update({ ativo: true, nome: "Funcionário — Inventário" }).eq("id", existente.id).select("id,nome,ativo,codigo").single();
-      if (error) throw new Error(`Erro ao ativar perfil de inventário: ${error.message}`);
-      return data;
-    }
-    return existente;
-  }
-  const { data, error } = await db.from("perfis").insert({ nome: "Funcionário — Inventário", codigo: PERFIL_INVENTARIO, ativo: true }).select("id,nome,ativo,codigo").single();
-  if (error) throw new Error(`Não foi possível criar o perfil Funcionário — Inventário: ${error.message}`);
-  return data;
-}
-
 async function carregarDados(db: ReturnType<typeof getServiceClient>) {
-  await garantirPerfilInventario(db);
   const [p, u, s, a, perm] = await Promise.all([
-    db.from("perfis").select("id,nome,ativo,codigo").eq("ativo", true).order("nome"),
+    db.from("perfis").select("id,nome,codigo,ativo").order("nome"),
     db.from("usuarios_sistema").select("id,nome_exibicao,socio_id,funcionario_id,perfil_id,ativo").order("nome_exibicao"),
     db.from("socios").select("id,matricula,nome,cpf,email").order("nome"),
     db.auth.admin.listUsers({ page: 1, perPage: 1000 }),
@@ -161,12 +144,40 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
   ]);
 
   if (p.error) throw new Error(`Erro ao carregar perfis: ${p.error.message}`);
+
+  // Garante os perfis padrão sem apagar ou recriar os que já existem.
+  // Isso também recupera instalações em que a tabela de perfis ficou sem
+  // os registros usados pela tela de Usuários.
+  const perfisAtuais = [...(p.data || [])] as any[];
+  const perfisPadrao = [
+    { codigo: "administrador_master", nome: "Administrador Master" },
+    { codigo: "administrador_normal", nome: "Administrador" },
+    { codigo: "funcionario", nome: "Funcionário" },
+    { codigo: "funcionario_inventario", nome: "Funcionário — Inventário" },
+    { codigo: "associado", nome: "Associado" },
+  ];
+
+  for (const padrao of perfisPadrao) {
+    const existe = perfisAtuais.some((x: any) =>
+      String(x.codigo || "").trim().toLowerCase() === padrao.codigo ||
+      String(x.nome || "").trim().toLowerCase() === padrao.nome.toLowerCase()
+    );
+    if (existe) continue;
+
+    const { data: novoPerfil, error: novoPerfilError } = await db
+      .from("perfis")
+      .insert({ nome: padrao.nome, codigo: padrao.codigo, ativo: true })
+      .select("id,nome,codigo,ativo")
+      .single();
+
+    if (!novoPerfilError && novoPerfil) perfisAtuais.push(novoPerfil);
+  }
   if (u.error) throw new Error(`Erro ao carregar usuários: ${u.error.message}`);
   if (s.error) throw new Error(`Erro ao carregar sócios: ${s.error.message}`);
   if (a.error) throw new Error(`Erro ao carregar acessos: ${a.error.message}`);
   if (perm.error) throw new Error(`Execute primeiro o SQL de permissões: ${perm.error.message}`);
 
-  const perfilMap = new Map((p.data || []).map((x) => [x.id, x]));
+  const perfilMap = new Map(perfisAtuais.map((x) => [x.id, x]));
   const emailMap = new Map((a.data?.users || []).map((x) => [x.id, x.email || ""]));
   const permMap = new Map<string, string[]>();
   for (const x of perm.data || []) {
@@ -175,7 +186,7 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
   }
 
   return {
-    perfis: p.data || [],
+    perfis: perfisAtuais,
     socios: s.data || [],
     usuarios: (u.data || []).map((x) => ({
       ...x,
@@ -207,7 +218,7 @@ export async function POST(request: Request) {
     if (String(senha).length < 6) return NextResponse.json({ error: "A senha precisa ter pelo menos 6 caracteres." }, { status: 400 });
 
     const db = getServiceClient();
-    const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,ativo,codigo").eq("id", perfil_id).eq("ativo", true).single();
+    const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,codigo,ativo").eq("id", perfil_id).eq("ativo", true).single();
     if (perfilError || !perfil) return NextResponse.json({ error: "Perfil não encontrado ou inativo." }, { status: 400 });
     if (perfil.nome === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
 
@@ -232,11 +243,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Usuário Auth criado, mas o cadastro do sistema falhou: ${usuarioError.message}` }, { status: 500 });
     }
 
-    const escolhidas = perfil.nome === "administrador" || perfil.nome === "administrador_master"
+    const perfilChave = String(perfil.codigo || perfil.nome || "").toLowerCase();
+    const escolhidas = perfilChave === "administrador" || perfilChave === "administrador_master" || perfilChave === "master"
       ? TODAS_PERMISSOES
       : Array.isArray(permissoes)
         ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x))
-        : (DEFAULTS[perfil.nome] || []);
+        : (DEFAULTS[perfilChave] || []);
 
     if (escolhidas.length) {
       const { error: permError } = await db.from("permissoes_usuario").insert(escolhidas.map((chave) => ({ usuario_id: authData.user.id, chave, permitido: true })));
