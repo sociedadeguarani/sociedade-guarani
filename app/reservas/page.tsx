@@ -600,7 +600,11 @@ export default function ReservasPage() {
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-[#005a3c]">{moeda(valor)}</span>
                 </div>
                 <div className="mt-3 rounded-xl bg-white p-3 text-sm"><div className="text-xs text-gray-500">Chave PIX</div><div className="font-bold break-all">{pix.chave_pix || "—"}</div></div>
-                <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
+                <div className="mt-3 rounded-xl bg-white p-3">
+                  <div className="text-xs font-bold uppercase text-gray-500">PIX copia e cola</div>
+                  <textarea readOnly value={pix.copia_e_cola || ""} rows={4} className="mt-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-700 outline-none" aria-label="PIX copia e cola" />
+                  <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-2 w-full rounded-xl bg-[#005a3c] px-4 py-2.5 font-bold text-white">{copiado ? "✓ PIX copia e cola copiado" : "📋 Copiar PIX copia e cola"}</button>
+                </div>
                 <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
                 {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo: {arquivoComprovante.name}</div>}
               </div>
