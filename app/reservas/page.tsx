@@ -232,16 +232,22 @@ export default function ReservasPage() {
   async function registrarAvisoAdministrativo(titulo: string, mensagem: string) {
     try {
       const { data: sessao } = await supabase.auth.getSession();
-      await supabase.from("avisos").insert({
-        titulo,
-        mensagem,
-        tipo: "informacao",
-        prioridade: "alta",
-        fixado: false,
-        ativo: true,
-        publico: "administradores",
-        criado_por: sessao.session?.user?.id || null,
+      const token = sessao.session?.access_token;
+      if (!token) return;
+
+      const resposta = await fetch("/api/avisos-internos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ titulo, mensagem }),
       });
+
+      if (!resposta.ok) {
+        const detalhe = await resposta.json().catch(() => ({}));
+        console.warn("Aviso administrativo não registrado:", detalhe?.error || resposta.statusText);
+      }
     } catch (e) {
       console.warn("Não foi possível registrar aviso administrativo:", e);
     }
