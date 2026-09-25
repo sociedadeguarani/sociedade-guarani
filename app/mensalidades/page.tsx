@@ -606,16 +606,16 @@ export default function Page() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
+    <div className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#17382c]">
       <CabecalhoPadrao />
       <MenuLateralPadrao />
 
       <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
         <div className="mx-auto max-w-[1400px] space-y-6">
-          <div className="flex items-end justify-between gap-4">
+          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-end">
             <div>
               <p className="text-sm text-gray-500">Financeiro</p>
-              <h1 className="text-3xl font-black text-[#005a3c]">
+              <h1 className="text-2xl font-black text-[#005a3c] sm:text-3xl">
                 Mensalidades
               </h1>
               <p className="text-sm text-gray-500">
@@ -623,17 +623,17 @@ export default function Page() {
               </p>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <button
                 onClick={() => void previsualizarGeracao()}
-                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white"
+                className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
                 Gerar competência
               </button>
 
               <button
                 onClick={abrirConfiguracao}
-                className="rounded-xl border bg-white px-4 py-3 font-bold"
+                className="w-full rounded-xl border bg-white px-4 py-3 text-center font-bold sm:w-auto"
               >
                 <Settings2 className="mr-2 inline h-4 w-4" />
                 Configuração
@@ -653,7 +653,7 @@ export default function Page() {
             </div>
           )}
 
-          <section className="rounded-2xl border bg-white p-4">
+          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <label className="min-w-[260px] flex-1">
                 <span className="text-sm font-bold text-gray-600">Ano</span>
@@ -686,13 +686,13 @@ export default function Page() {
             </div>
           </section>
 
-          <section className="rounded-2xl border bg-white p-4">
+          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-black text-[#005a3c]">Meses para gerar</h2>
                 <p className="text-sm text-gray-500">Selecione uma ou várias competências. Cada mês é processado separadamente e registros já existentes não são duplicados.</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 <button type="button" onClick={selecionarMesesDisponiveis} className="rounded-lg border px-3 py-2 text-xs font-bold">Selecionar todos disponíveis</button>
                 <button type="button" onClick={() => setMesesParaGerar([])} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Limpar</button>
               </div>
@@ -718,8 +718,8 @@ export default function Page() {
             </div>
           </section>
 
-          <div className="rounded-2xl border bg-white p-4">
-            <div className="flex gap-3">
+          <div className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <div className="flex flex-1 items-center gap-2 rounded-xl border px-3">
                 <Search className="h-4 w-4 text-gray-400" />
                 <input
@@ -924,7 +924,7 @@ export default function Page() {
             </div>
           </div>
 
-          <section className="rounded-2xl border bg-white p-5">
+          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-5">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="font-black text-xl text-[#005a3c]">
