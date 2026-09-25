@@ -523,16 +523,43 @@ export default function ReservasPage() {
 
           {(publico || aba === "reservar") && etapa === "confirmacao" && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><button onClick={() => setEtapa("selecao")} className="mb-4 font-bold text-gray-500"><ArrowLeft className="mr-1 inline h-4 w-4" />Voltar</button><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f3ee] text-[#005a3c]"><ShieldCheck /></div><h2 className="text-2xl font-extrabold text-[#005a3c]">Confirmar reserva</h2><div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm"><div className="flex justify-between"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div><div className="flex justify-between"><span>Espaço</span><b>{espaco?.nome}</b></div><div className="flex justify-between"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between"><span>Horário</span><b>{horario}</b></div><div className="flex justify-between"><span>Responsável</span><b>{nome}</b></div><div className="flex justify-between"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
-            {valor > 0 && pix?.copia_e_cola && (
+            {valor > 0 && (
               <div className="mt-5 rounded-2xl border border-[#b9dcca] bg-[#e8f3ee] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div><b className="text-[#005a3c]">Pagamento via PIX</b><p className="mt-1 text-xs text-gray-600">Faça o pagamento e, se quiser, anexe o comprovante abaixo.</p></div>
+                  <div><b className="text-[#005a3c]">Pagamento via PIX</b><p className="mt-1 text-xs text-gray-600">Pague o valor da reserva e, se desejar, envie o comprovante.</p></div>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-[#005a3c]">{moeda(valor)}</span>
                 </div>
-                <div className="mt-3 rounded-xl bg-white p-3 text-sm"><div className="text-xs text-gray-500">Chave PIX</div><div className="font-bold break-all">{pix.chave_pix || "—"}</div></div>
-                <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
-                <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
-                {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo: {arquivoComprovante.name}</div>}
+
+                {pix?.copia_e_cola ? (
+                  <>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-[170px_1fr] sm:items-center">
+                      <div className="rounded-xl bg-white p-3 text-center shadow-sm">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(pix.copia_e_cola)}`}
+                          alt="QR Code para pagamento PIX"
+                          className="mx-auto h-[150px] w-[150px] rounded-lg"
+                        />
+                        <div className="mt-2 text-[11px] font-bold text-gray-500">Aponte a câmera do celular</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="rounded-xl bg-white p-3 text-sm">
+                          <div className="text-xs text-gray-500">Chave PIX</div>
+                          <div className="font-bold break-all">{pix.chave_pix || "Configurada via PIX copia e cola"}</div>
+                          {pix.nome_recebedor && <div className="mt-2 text-xs text-gray-500">Recebedor: <b className="text-gray-700">{pix.nome_recebedor}</b></div>}
+                          {pix.cidade && <div className="text-xs text-gray-500">Cidade: {pix.cidade}</div>}
+                        </div>
+                        <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] bg-white px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
+                      </div>
+                    </div>
+                    <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
+                    {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo selecionado: {arquivoComprovante.name}</div>}
+                  </>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    <b>⚠️ PIX ainda não configurado.</b>
+                    <div className="mt-1 text-xs">A administração precisa cadastrar o PIX completo (copia e cola) para liberar o QR Code e o pagamento nesta reserva.</div>
+                  </div>
+                )}
               </div>
             )}
             <div className="mt-5 flex gap-2"><button onClick={copiar} className="flex-1 rounded-xl border px-4 py-3 font-bold">{copiado ? <><Check className="mr-1 inline h-4 w-4" />Copiado</> : <><Copy className="mr-1 inline h-4 w-4" />Copiar resumo</>}</button><button onClick={confirmar} disabled={enviandoComprovante} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:opacity-50">{enviandoComprovante ? "Enviando..." : valor > 0 && pix?.copia_e_cola ? "Confirmar reserva" : "Confirmar"}</button></div></div></div>
