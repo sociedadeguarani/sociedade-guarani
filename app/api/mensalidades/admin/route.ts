@@ -331,29 +331,8 @@ export async function GET(request: Request) {
 
     if (erroCobrancas) throw erroCobrancas;
 
-    // As contas bancárias precisam vir pelo endpoint administrativo,
-    // porque a página de mensalidades não deve depender de RLS do
-    // navegador para descobrir o banco de cada associado.
-    const { data: contasBancarias, error: erroContasBancarias } = await db
-      .from("contas_bancarias")
-      .select("id,nome,banco")
-      .order("nome");
-
-    if (erroContasBancarias) throw erroContasBancarias;
-
-    const mapaContasBancarias = new Map<string, any>(
-      (contasBancarias || []).map((c: any) => [String(c.id), c])
-    );
-
-    const sociosComConta = (socios || []).map((s: any) => ({
-      ...s,
-      conta_bancaria: s.conta_bancaria_id
-        ? mapaContasBancarias.get(String(s.conta_bancaria_id)) || null
-        : null,
-    }));
-
     const mapaSocios = new Map<string, any>(
-      sociosComConta.map((s: any) => [String(s.id), s])
+      (socios || []).map((s: any) => [String(s.id), s])
     );
 
     const mensalidadesComSocio = (mensalidades || []).map((m: any) => ({
@@ -362,9 +341,8 @@ export async function GET(request: Request) {
     }));
 
     return NextResponse.json({
-      socios: sociosComConta,
+      socios: socios || [],
       mensalidades: mensalidadesComSocio,
-      contas: contasBancarias || [],
       configuracoes: configuracoes || [],
       tarifas: tarifas || [],
       cobranca: cobrancas?.[0] || null,
@@ -461,14 +439,6 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
-      const socioIdsSelecionados = Array.isArray(body.socio_ids)
-        ? new Set(body.socio_ids.map((id: unknown) => String(id)))
-        : null;
-
-      const cobraveisSelecionados = socioIdsSelecionados
-        ? cobraveis.filter((s: any) => socioIdsSelecionados.has(String(s.id)))
-        : cobraveis;
-
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -518,7 +488,7 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
-      const novos = cobraveisSelecionados
+      const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -580,8 +550,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         competencia,
-        total_cobraveis: cobraveisSelecionados.length,
-        ja_existentes: cobraveisSelecionados.filter((s: any) =>
+        total_cobraveis: cobraveis.length,
+        ja_existentes: cobraveis.filter((s: any) =>
           idsExistentes.has(String(s.id))
         ).length,
         quantidade_nova: novos.length,
@@ -683,14 +653,6 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
-      const socioIdsSelecionados = Array.isArray(body.socio_ids)
-        ? new Set(body.socio_ids.map((id: unknown) => String(id)))
-        : null;
-
-      const cobraveisSelecionados = socioIdsSelecionados
-        ? cobraveis.filter((s: any) => socioIdsSelecionados.has(String(s.id)))
-        : cobraveis;
-
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -745,7 +707,7 @@ export async function POST(request: Request) {
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveisSelecionados
+      const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -1029,6 +991,11 @@ export async function POST(request: Request) {
             tipo: "entrada",
             categoria: "Mensalidade",
             descricao: `Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
+            // A receita da Sociedade é sempre o valor da mensalidade,
+            // sem somar a tarifa cobrada do associado pelo banco.
+            // Ex.: mensalidade R$ 60,00 + tarifa R$ 2,50 =
+            // associado paga R$ 62,50, mas a Sociedade registra
+            // R$ 60,00 como receita.
             valor: Number(valorBase || 0),
             data_movimentacao: dataPagamento,
             forma_pagamento: formaPagamento,
@@ -1041,6 +1008,10 @@ export async function POST(request: Request) {
             data_conciliacao: null,
             observacoes: body.observacoes || null,
           });
+
+        // A tarifa cobrada do associado não é uma despesa da Sociedade.
+        // Ela permanece registrada em mensalidades.tarifa_pagamento e
+        // total_cobrado, mas não gera saída no caixa.
 
         if (erroEntrada) {
           // Se a entrada falhar, desfaz a marcação como paga para não
