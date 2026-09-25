@@ -19,10 +19,83 @@
   }
 }
 
+html {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+/* Base mobile: evita que componentes largos criem uma segunda largura de página.
+   Tabelas continuam podendo usar overflow-x-auto quando precisarem preservar colunas. */
+.overflow-x-auto {
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 767px) {
+  body {
+    font-size: 15px;
+  }
+
+  h1, h2, h3, h4 {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  /* Campos com pelo menos 16px evitam zoom automático em navegadores móveis. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Tabelas preservam todas as colunas dentro de um contêiner rolável,
+     mas ficam mais compactas no celular. */
+  .overflow-x-auto table th,
+  .overflow-x-auto table td {
+    padding: 0.65rem !important;
+  }
+
+  .overflow-x-auto table {
+    font-size: 0.8125rem;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 .label { display:block; margin-bottom:0.375rem; font-size:0.875rem; font-weight:700; color:#334155; }
