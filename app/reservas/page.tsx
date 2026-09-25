@@ -49,6 +49,8 @@ type Reserva = {
   valor: number;
   status: "confirmada" | "pendente" | "cancelada";
   pagamento: "pix" | "dinheiro" | "transferencia" | "pendente";
+  comprovante_url?: string | null;
+  comprovante_nome?: string | null;
 };
 
 const INICIAIS: Espaco[] = [
@@ -105,6 +107,9 @@ export default function ReservasPage() {
   const [filtroStatus, setFiltroStatus] = useState<"todos" | Reserva["status"]>("todos");
   const [filtroData, setFiltroData] = useState("");
   const [copiado, setCopiado] = useState(false);
+  const [pix, setPix] = useState<{ chave_pix?: string; nome_recebedor?: string; cidade?: string; copia_e_cola?: string } | null>(null);
+  const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
+  const [enviandoComprovante, setEnviandoComprovante] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -120,6 +125,16 @@ export default function ReservasPage() {
     } catch {
       // Mantém os valores iniciais.
     }
+
+    void (async () => {
+      try {
+        const resposta = await fetch("/api/configuracao-pix", { cache: "no-store" });
+        const resultado = await resposta.json().catch(() => ({}));
+        if (resposta.ok && resultado?.config) setPix(resultado.config);
+      } catch {
+        setPix(null);
+      }
+    })();
 
     if (!modoPublico) {
       void (async () => {
@@ -204,36 +219,77 @@ export default function ReservasPage() {
     setEtapa("confirmacao");
   }
 
-  function confirmar() {
+  async function confirmar() {
     if (!espaco) return;
     if (tipoPessoa === "nao_socio" && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio)) {
       return alert("Este espaço não está liberado para não sócios.");
     }
 
-    setReservas((v) => [
-      {
-        id: crypto.randomUUID(),
-        espacoId,
-        data,
-        horario,
-        nome: nome.trim(),
-        socioId: socioId || undefined,
-        matricula: matriculaResponsavel,
-        tipoPessoa,
-        valor,
-        status: "confirmada",
-        pagamento: "pendente",
-      },
-      ...v,
-    ]);
-    setEtapa("selecao");
-    setAba("reservas");
-    setNome("");
-    setSocioId("");
-    setMatriculaResponsavel(null);
-    setBuscaSocio("");
-    setData("");
-    alert("Reserva registrada com sucesso.");
+    setEnviandoComprovante(true);
+    try {
+      let comprovanteUrl: string | null = null;
+
+      if (arquivoComprovante) {
+        const permitido = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+        if (!permitido.includes(arquivoComprovante.type)) {
+          alert("Envie o comprovante em JPG, PNG, WEBP ou PDF.");
+          return;
+        }
+        if (arquivoComprovante.size > 8 * 1024 * 1024) {
+          alert("O comprovante deve ter no máximo 8 MB.");
+          return;
+        }
+
+        const extensao = arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
+        const caminho = `reservas/${crypto.randomUUID()}.${extensao}`;
+        const upload = await supabase.storage
+          .from("comprovantes-financeiro")
+          .upload(caminho, arquivoComprovante, {
+            upsert: false,
+            contentType: arquivoComprovante.type,
+          });
+
+        if (upload.error) throw upload.error;
+        comprovanteUrl = caminho;
+      }
+
+      const pagamento = valor > 0 && pix?.copia_e_cola ? "pix" : "pendente";
+      setReservas((v) => [
+        {
+          id: crypto.randomUUID(),
+          espacoId,
+          data,
+          horario,
+          nome: nome.trim(),
+          socioId: socioId || undefined,
+          matricula: matriculaResponsavel,
+          tipoPessoa,
+          valor,
+          status: pagamento === "pix" ? "pendente" : "confirmada",
+          pagamento,
+          comprovante_url: comprovanteUrl,
+          comprovante_nome: arquivoComprovante?.name || null,
+        },
+        ...v,
+      ]);
+
+      setEtapa("selecao");
+      setAba("reservas");
+      setNome("");
+      setSocioId("");
+      setMatriculaResponsavel(null);
+      setBuscaSocio("");
+      setData("");
+      setArquivoComprovante(null);
+      alert(pagamento === "pix"
+        ? "Reserva registrada e enviada para conferência do pagamento PIX."
+        : "Reserva registrada com sucesso.");
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível enviar o comprovante. Você pode confirmar a reserva sem anexar o arquivo.");
+    } finally {
+      setEnviandoComprovante(false);
+    }
   }
 
   function copiar() {
@@ -242,6 +298,18 @@ export default function ReservasPage() {
     );
     setCopiado(true);
     setTimeout(() => setCopiado(false), 1500);
+  }
+
+  async function abrirComprovante(path: string | null | undefined) {
+    if (!path) return;
+    const { data, error } = await supabase.storage
+      .from("comprovantes-financeiro")
+      .createSignedUrl(path, 60 * 10);
+    if (error || !data?.signedUrl) {
+      alert("Não foi possível abrir o comprovante.");
+      return;
+    }
+    window.open(data.signedUrl, "_blank");
   }
 
   function cancelar(id: string) {
@@ -433,7 +501,7 @@ export default function ReservasPage() {
                   </div>
                 </div>
                 {(busca || filtroStatus !== "todos" || filtroData) && <div className="mt-3 flex items-center justify-between text-xs text-gray-500"><span>{filtradas.length} reserva(s) encontrada(s)</span><button onClick={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }} className="font-bold text-[#005a3c]">Limpar filtros</button></div>}
-              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.status}</td><td className="p-3">{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
+              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.pagamento === "pix" ? <span className="font-semibold text-[#005a3c]">PIX {r.comprovante_url ? "· Comprovante" : "· Aguardando"}</span> : r.pagamento}</td><td className="p-3">{r.status}</td><td className="p-3">{r.comprovante_url && <button onClick={() => abrirComprovante(r.comprovante_url)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
                </div>
             </section>
           )}
@@ -454,7 +522,20 @@ export default function ReservasPage() {
           )}
 
           {(publico || aba === "reservar") && etapa === "confirmacao" && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><button onClick={() => setEtapa("selecao")} className="mb-4 font-bold text-gray-500"><ArrowLeft className="mr-1 inline h-4 w-4" />Voltar</button><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f3ee] text-[#005a3c]"><ShieldCheck /></div><h2 className="text-2xl font-extrabold text-[#005a3c]">Confirmar reserva</h2><div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm"><div className="flex justify-between"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div><div className="flex justify-between"><span>Espaço</span><b>{espaco?.nome}</b></div><div className="flex justify-between"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between"><span>Horário</span><b>{horario}</b></div><div className="flex justify-between"><span>Responsável</span><b>{nome}</b></div><div className="flex justify-between"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div><div className="mt-5 flex gap-2"><button onClick={copiar} className="flex-1 rounded-xl border px-4 py-3 font-bold">{copiado ? <><Check className="mr-1 inline h-4 w-4" />Copiado</> : <><Copy className="mr-1 inline h-4 w-4" />Copiar resumo</>}</button><button onClick={confirmar} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white">Confirmar</button></div></div></div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><button onClick={() => setEtapa("selecao")} className="mb-4 font-bold text-gray-500"><ArrowLeft className="mr-1 inline h-4 w-4" />Voltar</button><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f3ee] text-[#005a3c]"><ShieldCheck /></div><h2 className="text-2xl font-extrabold text-[#005a3c]">Confirmar reserva</h2><div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm"><div className="flex justify-between"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div><div className="flex justify-between"><span>Espaço</span><b>{espaco?.nome}</b></div><div className="flex justify-between"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between"><span>Horário</span><b>{horario}</b></div><div className="flex justify-between"><span>Responsável</span><b>{nome}</b></div><div className="flex justify-between"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
+            {valor > 0 && pix?.copia_e_cola && (
+              <div className="mt-5 rounded-2xl border border-[#b9dcca] bg-[#e8f3ee] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div><b className="text-[#005a3c]">Pagamento via PIX</b><p className="mt-1 text-xs text-gray-600">Faça o pagamento e, se quiser, anexe o comprovante abaixo.</p></div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-[#005a3c]">{moeda(valor)}</span>
+                </div>
+                <div className="mt-3 rounded-xl bg-white p-3 text-sm"><div className="text-xs text-gray-500">Chave PIX</div><div className="font-bold break-all">{pix.chave_pix || "—"}</div></div>
+                <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
+                <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
+                {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo: {arquivoComprovante.name}</div>}
+              </div>
+            )}
+            <div className="mt-5 flex gap-2"><button onClick={copiar} className="flex-1 rounded-xl border px-4 py-3 font-bold">{copiado ? <><Check className="mr-1 inline h-4 w-4" />Copiado</> : <><Copy className="mr-1 inline h-4 w-4" />Copiar resumo</>}</button><button onClick={confirmar} disabled={enviandoComprovante} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:opacity-50">{enviandoComprovante ? "Enviando..." : valor > 0 && pix?.copia_e_cola ? "Confirmar reserva" : "Confirmar"}</button></div></div></div>
           )}
 
           {!publico && <div className="rounded-2xl bg-[#003d2b] p-5 text-white"><b><Clock3 className="mr-2 inline h-4 w-4" />Controle de disponibilidade</b><div className="mt-1 text-sm text-white/75">R$ 0,00 para não sócio sempre significa bloqueado. A administração controla a liberação.</div></div>}
