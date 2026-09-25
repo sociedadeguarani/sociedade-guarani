@@ -122,15 +122,17 @@ export default function ReservasPage() {
     }
 
     if (!modoPublico) {
-      try {
-        const { data } = await supabase
-          .from("socios")
-          .select("id,matricula,nome,cpf")
-          .order("nome", { ascending: true });
-        setSocios(data || []);
-      } catch {
-        setSocios([]);
-      }
+      void (async () => {
+        try {
+          const { data } = await supabase
+            .from("socios")
+            .select("id,matricula,nome,cpf")
+            .order("nome", { ascending: true });
+          setSocios(data || []);
+        } catch {
+          setSocios([]);
+        }
+      })();
     }
   }, []);
 
