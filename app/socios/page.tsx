@@ -960,7 +960,10 @@ export default function Home() {
         !termo ||
         socio.nome?.toLowerCase().includes(termo) ||
         socio.cpf?.toLowerCase().includes(termo) ||
-        String(socio.matricula || "").includes(termo);
+        String(socio.matricula || "").includes(termo) ||
+        String(socio.whatsapp || "").toLowerCase().includes(termo) ||
+        String(socio.telefone || "").toLowerCase().includes(termo) ||
+        String(socio.categoria || "").toLowerCase().includes(termo);
 
       const correspondeTipo =
         !mostrarSomenteDependentes ||
@@ -1350,6 +1353,12 @@ function Socios({
   setMostrarSomenteDependentes: (valor: boolean) => void;
   somenteConsulta: boolean;
 }) {
+  const [filtroSituacao, setFiltroSituacao] = useState<"todos" | "ativo" | "inativo">("todos");
+  const sociosExibidos = socios.filter((socio) => {
+    if (filtroSituacao === "todos") return true;
+    return String(socio.situacao || "").toLowerCase() === filtroSituacao;
+  });
+
   return (
     <div>
 
@@ -1416,7 +1425,7 @@ function Socios({
 
       <div className="mb-5 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:p-4">
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 
           <span className="text-xl">
             🔎
@@ -1425,11 +1434,25 @@ function Socios({
           <input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por nome, CPF ou matrícula..."
+            placeholder="Buscar por nome, CPF, matrícula, WhatsApp ou categoria..."
             className="w-full min-w-0 bg-transparent py-2 text-sm outline-none sm:text-base"
           />
 
+          <select
+            value={filtroSituacao}
+            onChange={(e) => setFiltroSituacao(e.target.value as "todos" | "ativo" | "inativo")}
+            className="w-full rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#173d2e] outline-none sm:w-auto sm:min-w-[170px]"
+          >
+            <option value="todos">Todos os status</option>
+            <option value="ativo">Somente ativos</option>
+            <option value="inativo">Somente inativos</option>
+          </select>
+
         </div>
+
+        <p className="mt-2 px-1 text-xs text-gray-500">
+          {sociosExibidos.length} {sociosExibidos.length === 1 ? "registro encontrado" : "registros encontrados"}
+        </p>
 
       </div>
 
@@ -1500,7 +1523,7 @@ function Socios({
                 </tr>
               )}
 
-              {!carregando && socios.length === 0 && (
+              {!carregando && sociosExibidos.length === 0 && (
                 <tr>
                   <td
                     colSpan={10}
@@ -1529,7 +1552,7 @@ function Socios({
               )}
 
               {!carregando &&
-                socios.map((socio) => (
+                sociosExibidos.map((socio) => (
                   <tr
                     key={socio.id}
                     className="transition hover:bg-[#fafcfb]"
