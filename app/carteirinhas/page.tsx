@@ -34,6 +34,9 @@ type Socio = {
   inicio_temporada: string | null;
   fim_temporada: string | null;
   exame_medico_validade: string | null;
+  responsavel_id?: string | null;
+  parentesco?: string | null;
+  possui_mensalidade?: boolean | null;
   financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
   dias_atraso?: number;
 };
@@ -161,6 +164,43 @@ export default function CarteirinhasPage() {
     const q = busca.toLowerCase().trim();
     return !q || d.nome.toLowerCase().includes(q) || String(d.titular_matricula || "").includes(q) || String(d.titular_nome || "").toLowerCase().includes(q);
   }), [dependentes, busca]);
+
+  // Quando um associado é selecionado, mostra somente o grupo familiar dele.
+  // A árvore é tratada como uma rede: responsável -> dependente e também
+  // dependente -> responsável, permitindo abrir a mesma família ao clicar
+  // no titular, no cônjuge ou em qualquer filho.
+  const familiaSelecionada = useMemo(() => {
+    if (!selecionado) return [] as Socio[];
+
+    const familia = new Set<string>([String(selecionado.id)]);
+    let mudou = true;
+
+    while (mudou) {
+      mudou = false;
+      for (const membro of socios) {
+        const id = String(membro.id);
+        const responsavel = membro.responsavel_id ? String(membro.responsavel_id) : "";
+        const estaNaFamilia = familia.has(id) || (responsavel && familia.has(responsavel));
+
+        if (estaNaFamilia && !familia.has(id)) {
+          familia.add(id);
+          mudou = true;
+        }
+
+        // Se o responsável está na família, o membro entra; se o membro já
+        // está na família, o responsável também entra.
+        if (responsavel && familia.has(id) && !familia.has(responsavel)) {
+          familia.add(responsavel);
+          mudou = true;
+        }
+      }
+    }
+
+    return socios
+      .filter((s) => familia.has(String(s.id)) && String(s.id) !== String(selecionado.id))
+      .filter((s) => String(s.situacao || "").toLowerCase() !== "inativo")
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+  }, [socios, selecionado]);
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
@@ -311,7 +351,29 @@ export default function CarteirinhasPage() {
                   </button>
                 ))}
 
-                {dependentesLista.length > 0 && (
+                {selecionado && familiaSelecionada.length > 0 && (
+                  <div className="pt-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-black uppercase tracking-wide text-gray-400">Grupo familiar</div>
+                      <div className="text-xs font-semibold text-gray-400">{familiaSelecionada.length + 1} pessoa(s)</div>
+                    </div>
+                    <div className="rounded-xl bg-[#f4f7f5] p-3 text-xs text-gray-600">
+                      Selecionado: <b>{selecionado.nome}</b>. Abaixo aparecem cônjuge, filhos e demais integrantes vinculados à mesma família.
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      {familiaSelecionada.map((membro) => (
+                        <button key={membro.id} onClick={() => setSelecionado(membro)} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{membro.nome}</b>
+                          <div className="text-xs text-gray-500">
+                            Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!selecionado && dependentesLista.length > 0 && (
                   <div className="pt-3">
                     <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-400">Dependentes da família</div>
                     <div className="space-y-2">
