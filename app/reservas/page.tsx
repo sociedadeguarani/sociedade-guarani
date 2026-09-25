@@ -1,79 +1,400 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { CalendarDays, Check, Copy, CreditCard, LockKeyhole, Settings, Trash2, UserRound, UserRoundCheck, Users, QrCode } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Check,
+  Clock3,
+  Copy,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+  UserRoundCheck,
+  Users,
+} from "lucide-react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type TipoPessoa = "socio" | "nao_socio";
-type Espaco = { id:string; nome:string; categoria:string; cobranca:"hora"|"diaria"; precoSocio:number; precoNaoSocio:number; permiteNaoSocio:boolean; capacidade?:string };
-type Socio = { id:string; matricula:string|null; nome:string; cpf:string|null };
-type Reserva = { id:string; espacoId:string; socioId:string|null; data:string; horario:string; nome:string; tipoPessoa:TipoPessoa; valor:number; status:"confirmada"|"cancelada"; pagamento:"pendente"|"pix"; comprovante_url?:string|null; comprovante_status?:string|null };
-type PixConfig = { id:string; chave_pix:string|null; nome_recebedor:string; cidade:string; copia_e_cola:string; ativo:boolean };
+type Categoria = "esporte" | "lazer" | "eventos";
 
-const INICIAIS:Espaco[]=[
- {id:"fut",nome:"Quadra de Futebol",categoria:"Esporte",cobranca:"hora",precoSocio:100,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"volei",nome:"Quadra de Vôlei",categoria:"Esporte",cobranca:"hora",precoSocio:50,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"areia",nome:"Quadra de Areia",categoria:"Esporte",cobranca:"hora",precoSocio:30,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"q48",nome:"Quadra 48",categoria:"Esporte",cobranca:"hora",precoSocio:20,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"q1",nome:"Quiosque 1",categoria:"Lazer",cobranca:"diaria",precoSocio:80,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"q2",nome:"Quiosque 2",categoria:"Lazer",cobranca:"diaria",precoSocio:80,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"q3",nome:"Quiosque 3",categoria:"Lazer",cobranca:"diaria",precoSocio:80,precoNaoSocio:0,permiteNaoSocio:false},
- {id:"salao_p",nome:"Salão Pequeno de Vidro",categoria:"Eventos",cobranca:"diaria",precoSocio:300,precoNaoSocio:600,permiteNaoSocio:true,capacidade:"50 pessoas"},
- {id:"salao_g",nome:"Salão Social Grande",categoria:"Eventos",cobranca:"diaria",precoSocio:900,precoNaoSocio:1800,permiteNaoSocio:true,capacidade:"300 pessoas"},
- {id:"ctg",nome:"Salão CTG",categoria:"Eventos",cobranca:"diaria",precoSocio:80,precoNaoSocio:0,permiteNaoSocio:false,capacidade:"150 pessoas"},
+type Espaco = {
+  id: string;
+  nome: string;
+  categoria: Categoria;
+  cobranca: "hora" | "diaria";
+  precoSocio: number;
+  precoNaoSocio: number;
+  permiteNaoSocio: boolean;
+  capacidade?: string;
+};
+
+type Reserva = {
+  id: string;
+  espacoId: string;
+  data: string;
+  horario: string;
+  nome: string;
+  tipoPessoa: TipoPessoa;
+  valor: number;
+  status: "confirmada" | "pendente" | "cancelada";
+  pagamento: "pix" | "dinheiro" | "transferencia" | "pendente";
+};
+
+const INICIAIS: Espaco[] = [
+  { id: "fut", nome: "Quadra de Futebol", categoria: "esporte", cobranca: "hora", precoSocio: 100, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "volei", nome: "Quadra de Vôlei", categoria: "esporte", cobranca: "hora", precoSocio: 50, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "areia", nome: "Quadra de Areia", categoria: "esporte", cobranca: "hora", precoSocio: 30, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "q48", nome: "Quadra 48", categoria: "esporte", cobranca: "hora", precoSocio: 20, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "q1", nome: "Quiosque 1", categoria: "lazer", cobranca: "diaria", precoSocio: 80, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "q2", nome: "Quiosque 2", categoria: "lazer", cobranca: "diaria", precoSocio: 80, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "q3", nome: "Quiosque 3", categoria: "lazer", cobranca: "diaria", precoSocio: 80, precoNaoSocio: 0, permiteNaoSocio: false },
+  { id: "salao_p", nome: "Salão Pequeno de Vidro", categoria: "eventos", cobranca: "diaria", precoSocio: 300, precoNaoSocio: 600, permiteNaoSocio: true, capacidade: "50 pessoas" },
+  { id: "salao_g", nome: "Salão Social Grande", categoria: "eventos", cobranca: "diaria", precoSocio: 900, precoNaoSocio: 1800, permiteNaoSocio: true, capacidade: "300 pessoas" },
+  { id: "ctg", nome: "Salão CTG", categoria: "eventos", cobranca: "diaria", precoSocio: 80, precoNaoSocio: 0, permiteNaoSocio: false, capacidade: "150 pessoas" },
 ];
-const HORARIOS=["08:00 - 09:00","09:00 - 10:00","10:00 - 11:00","18:00 - 19:00","19:00 - 20:00","20:00 - 21:00","21:00 - 22:00"];
-const moeda=(v:number)=>v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const dataBR=(v:string)=>v?v.split("-").reverse().join("/"):"—";
 
-export default function ReservasPage(){
- const [publico,setPublico]=useState(false); const [aba,setAba]=useState<"reservar"|"reservas"|"admin">("reservar");
- const [espacos,setEspacos]=useState<Espaco[]>(INICIAIS); const [socios,setSocios]=useState<Socio[]>([]); const [reservas,setReservas]=useState<Reserva[]>([]);
- const [espacoId,setEspacoId]=useState(INICIAIS[0].id); const [socioId,setSocioId]=useState(""); const [nomeNaoSocio,setNomeNaoSocio]=useState("");
- const [data,setData]=useState(""); const [horario,setHorario]=useState(HORARIOS[0]); const [tipoPessoa,setTipoPessoa]=useState<TipoPessoa>("socio");
- const [etapa,setEtapa]=useState<"selecao"|"pagamento">("selecao"); const [ultimaReserva,setUltimaReserva]=useState<Reserva|null>(null); const [pix,setPix]=useState<PixConfig|null>(null);
- const [perfilUsuario,setPerfilUsuario]=useState("");
- const [pixForm,setPixForm]=useState({chave_pix:"89.649.164/0001-58",nome_recebedor:"SOCIEDADE GUARANI",cidade:"AUGUSTO PESTANA",copia_e_cola:""}); const [enviandoComprovante,setEnviandoComprovante]=useState<string|null>(null); const [salvandoPix,setSalvandoPix]=useState(false); const [msg,setMsg]=useState(""); const [erro,setErro]=useState(""); const [busca,setBusca]=useState(""); const [buscaSocio,setBuscaSocio]=useState("");
- useEffect(()=>{const p=new URLSearchParams(window.location.search); const pub=p.get("publico")==="1"; setPublico(pub); if(pub)setTipoPessoa("nao_socio"); try{const e=localStorage.getItem("guarani_espacos_reservas");if(e)setEspacos(JSON.parse(e));}catch{} void carregarPerfil(); void carregarSocios(); void carregarPix(); if(!pub) void carregarReservas(); else { try{const r=localStorage.getItem("guarani_reservas");if(r)setReservas(JSON.parse(r));}catch{} }},[]);
- useEffect(()=>{localStorage.setItem("guarani_espacos_reservas",JSON.stringify(espacos));},[espacos]);
- useEffect(()=>{if(publico)localStorage.setItem("guarani_reservas",JSON.stringify(reservas));},[reservas,publico]);
- async function carregarPerfil(){try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";if(!token)return;const r=await fetch("/api/login/perfil",{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});if(!r.ok)return;const j=await r.json();const perfil=String(j.usuario?.perfil||"").toLowerCase();setPerfilUsuario(perfil);if(perfil==="associado"&&j.usuario?.socio_id){setTipoPessoa("socio");setSocioId(j.usuario.socio_id);if(j.usuario.socio){setSocios(v=>[j.usuario.socio,...v.filter((x:any)=>x.id!==j.usuario.socio.id)]);}}}catch{}}
- async function carregarSocios(){try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";if(!token)return;const r=await fetch("/api/socios",{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});if(r.ok){const j=await r.json();setSocios((j.socios||[]).map((x:any)=>({id:x.id,matricula:x.matricula??null,nome:x.nome,cpf:x.cpf??null})));}}catch{}}
- async function carregarReservas(){try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";if(!token)return;const r=await fetch("/api/reservas",{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});if(r.ok){const j=await r.json();setReservas(j.reservas||[]);}}catch{}}
- async function carregarPix(){const r=await fetch("/api/configuracao-pix",{cache:"no-store"});const d=await r.json();if(r.ok&&d.config){setPix(d.config);setPixForm({chave_pix:d.config.chave_pix||"",nome_recebedor:d.config.nome_recebedor,cidade:d.config.cidade,copia_e_cola:d.config.copia_e_cola});}}
- const disponiveis=useMemo(()=>tipoPessoa==="nao_socio"?espacos.filter(e=>e.permiteNaoSocio&&e.precoNaoSocio>0):espacos,[espacos,tipoPessoa]);
- useEffect(()=>{if(!disponiveis.some(e=>e.id===espacoId)&&disponiveis[0])setEspacoId(disponiveis[0].id)},[disponiveis,espacoId]);
- const espaco=espacos.find(e=>e.id===espacoId); const socioSelecionado=socios.find(s=>s.id===socioId); const valor=espaco?(tipoPessoa==="socio"?espaco.precoSocio:espaco.precoNaoSocio):0;
- const ocupados=useMemo(()=>reservas.filter(r=>r.status!=="cancelada"&&r.espacoId===espacoId&&r.data===data).map(r=>r.horario),[reservas,espacoId,data]);
- const sociosFiltrados=socios.filter(s=>`${s.nome} ${s.matricula||""} ${s.cpf||""}`.toLowerCase().includes(buscaSocio.toLowerCase()));
- const reservasFiltradas=reservas.filter(r=>`${r.nome} ${espacos.find(e=>e.id===r.espacoId)?.nome||""}`.toLowerCase().includes(busca.toLowerCase()));
- function continuar(){if(!espaco)return alert("Selecione um espaço.");if(perfilUsuario==="associado"&&tipoPessoa!=="socio")return alert("Associados devem realizar a reserva em seu próprio cadastro.");if(tipoPessoa==="nao_socio"&&(espaco.precoNaoSocio<=0||!espaco.permiteNaoSocio))return alert("Este espaço não pode ser alugado por não sócios.");if(tipoPessoa==="socio"&&!socioSelecionado)return alert("Selecione um sócio cadastrado como responsável.");if(tipoPessoa==="nao_socio"&&!nomeNaoSocio.trim())return alert("Informe o nome do responsável não sócio.");if(!data)return alert("Selecione a data.");if(ocupados.includes(horario))return alert("Este horário já está ocupado.");setEtapa("pagamento");}
- async function confirmar(){if(!espaco)return;const nome=tipoPessoa==="socio"?socioSelecionado!.nome:nomeNaoSocio.trim();const pagamento="pix";if(publico){const nova:Reserva={id:crypto.randomUUID(),espacoId,socioId:tipoPessoa==="socio"?socioId:null,data,horario,nome,tipoPessoa,valor,status:"confirmada",pagamento};setReservas(v=>[nova,...v]);setUltimaReserva(nova);}else{try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";const r=await fetch("/api/reservas",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},body:JSON.stringify({espaco_id:espacoId,socio_id:tipoPessoa==="socio"?socioId:null,data,horario,nome,tipo_pessoa:tipoPessoa,valor,pagamento})});const j=await r.json();if(!r.ok)throw new Error(j.error||"Não foi possível registrar a reserva.");setReservas(v=>[j.reserva,...v]);setUltimaReserva(j.reserva);}catch(e){setErro(e instanceof Error?e.message:"Erro ao registrar reserva.");return;}}setNomeNaoSocio("");setSocioId("");setEtapa("pagamento");setMsg("Reserva registrada. Faça o pagamento via PIX e envie o comprovante.");}
- async function enviarComprovante(reserva:Reserva, arquivo:File){setEnviandoComprovante(reserva.id);setErro("");try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";const fd=new FormData();fd.append("origem_tipo","reserva");fd.append("origem_id",reserva.id);fd.append("arquivo",arquivo);const r=await fetch("/api/reservas/comprovante",{method:"POST",headers:{Authorization:`Bearer ${token}`},body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error||"Não foi possível enviar o comprovante.");setReservas(v=>v.map(x=>x.id===reserva.id?{...x,comprovante_url:j.url,comprovante_status:"pendente"}:x));setMsg("Comprovante enviado. Aguardando aprovação da administração.");}catch(e){setErro(e instanceof Error?e.message:"Erro ao enviar comprovante.");}finally{setEnviandoComprovante(null);}}
- async function cancelar(id:string){if(!confirm("Cancelar esta reserva?"))return;try{const {data:session}=await supabase.auth.getSession();const token=session.session?.access_token||"";const r=await fetch("/api/reservas",{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},body:JSON.stringify({id,status:"cancelada"})});const j=await r.json();if(!r.ok)throw new Error(j.error||"Não foi possível cancelar a reserva.");setReservas(v=>v.map(x=>x.id===id?j.reserva:x));setMsg("Reserva cancelada.");}catch(e){setErro(e instanceof Error?e.message:"Erro ao cancelar reserva.");}}
- function alterarPreco(id:string,campo:"precoSocio"|"precoNaoSocio",v:number){setEspacos(a=>a.map(e=>e.id===id?{...e,[campo]:Math.max(0,v),...(campo==="precoNaoSocio"?{permiteNaoSocio:v>0}: {})}:e));}
- function alternarNaoSocio(id:string){setEspacos(a=>a.map(e=>e.id===id?{...e,permiteNaoSocio:!e.permiteNaoSocio&&e.precoNaoSocio>0}:e));}
- async function salvarPix(){setSalvandoPix(true);setErro("");setMsg("");try{const {data}=await supabase.auth.getSession();const token=data.session?.access_token;if(!token)throw new Error("Sessão administrativa não encontrada.");const r=await fetch("/api/configuracao-pix",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},body:JSON.stringify(pixForm)});const d=await r.json();if(!r.ok)throw new Error(d.error||"Erro ao salvar PIX.");setPix(d.config);setMsg("PIX da Sociedade atualizado com sucesso.");}catch(e){setErro(e instanceof Error?e.message:"Erro ao salvar PIX.");}finally{setSalvandoPix(false);}}
- async function copiarChavePix(){
- const chave=(pix?.chave_pix||pixForm.chave_pix||"89.649.164/0001-58").replace(/\s+/g,"");
- try{await navigator.clipboard.writeText(chave);setMsg("Chave PIX copiada.");}
- catch{const ta=document.createElement("textarea");ta.value=chave;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.focus();ta.select();document.execCommand("copy");ta.remove();setMsg("Chave PIX copiada.");}
+const HORARIOS = [
+  "08:00 - 09:00",
+  "09:00 - 10:00",
+  "10:00 - 11:00",
+  "18:00 - 19:00",
+  "19:00 - 20:00",
+  "20:00 - 21:00",
+  "21:00 - 22:00",
+];
+
+const moeda = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const dataBR = (v: string) => (v ? v.split("-").reverse().join("/") : "—");
+
+function normalizarEspacos(lista: Espaco[]): Espaco[] {
+  return lista.map((e) => ({
+    ...e,
+    permiteNaoSocio: e.permiteNaoSocio ?? e.precoNaoSocio > 0,
+  }));
 }
- return <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">{!publico&&<><CabecalhoPadrao/><MenuLateralPadrao/></>}<main className={`min-h-screen px-4 py-6 lg:px-7 lg:py-8 ${publico?"":"lg:ml-[220px]"}`}><div className="mx-auto max-w-[1400px] space-y-6">
- {publico&&<div className="flex items-center justify-between rounded-2xl border bg-white p-4 shadow-sm"><div><b className="text-[#005a3c]">SOCIEDADE GUARANI</b><div className="text-xs text-gray-500">Reserva para não sócios</div></div><button onClick={()=>window.location.href="/login"} className="rounded-xl border px-4 py-2 font-bold">Voltar ao login</button></div>}
- <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-sm text-gray-500">{publico?"Reserva online":"Administração"}</p><h1 className="text-3xl font-extrabold text-[#005a3c]">Reservas</h1><p className="text-sm text-gray-500">Quadras, quiosques e salões.</p></div>{!publico&&<div className="flex flex-wrap gap-2"><button onClick={()=>setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba==="reservar"?"bg-[#005a3c] text-white":"bg-white"}`}>Nova reserva</button><button onClick={()=>setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba==="reservas"?"bg-[#005a3c] text-white":"bg-white"}`}>Reservas</button>{perfilUsuario!=="associado"&&<button onClick={()=>setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba==="admin"?"bg-[#005a3c] text-white":"bg-white"}`}><Settings className="mr-1 inline h-4 w-4"/>Configurações</button>}</div>}</div>
- {msg&&<div className="rounded-xl border border-green-200 bg-green-50 p-3 font-semibold text-green-700">{msg}</div>}{erro&&<div className="rounded-xl border border-red-200 bg-red-50 p-3 font-semibold text-red-700">{erro}</div>}
- {(publico||aba==="reservar")&&<section className="grid gap-6 lg:grid-cols-[1fr_390px]"><div className="space-y-5">
- <div className="rounded-2xl border bg-white p-5 shadow-sm"><h2 className="text-xl font-extrabold text-[#005a3c]">1. Quem está fazendo a reserva?</h2><div className="mt-4 grid gap-3 sm:grid-cols-2"><button onClick={()=>{if(!publico)setTipoPessoa("socio")}} disabled={publico} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa==="socio"?"border-[#005a3c] bg-[#e8f3ee]":"border-gray-200"} ${publico?"cursor-not-allowed opacity-50":""}`}><UserRoundCheck className="h-7 w-7 text-[#005a3c]"/><b className="mt-2 block">Sou sócio</b><span className="text-xs text-gray-500">Valor de associado.</span></button><button onClick={()=>setTipoPessoa("nao_socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa==="nao_socio"?"border-[#f4b400] bg-[#fff8df]":"border-gray-200"}`}><UserRound className="h-7 w-7 text-[#8a6700]"/><b className="mt-2 block">Não sou sócio</b><span className="text-xs text-gray-500">Somente espaços liberados.</span></button></div></div>
- <div className="rounded-2xl border bg-white p-5 shadow-sm"><h2 className="text-xl font-extrabold text-[#005a3c]">2. Responsável</h2>{tipoPessoa==="socio"?<><input value={buscaSocio} onChange={e=>setBuscaSocio(e.target.value)} placeholder="Pesquisar sócio por nome ou matrícula..." className="mt-4 w-full rounded-xl border px-3 py-3"/><select value={socioId} onChange={e=>setSocioId(e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-3"><option value="">Selecione um sócio cadastrado</option>{sociosFiltrados.map(s=><option key={s.id} value={s.id}>{s.matricula?`${s.matricula} · `:""}{s.nome}</option>)}</select>{socioSelecionado&&<div className="mt-3 rounded-xl bg-[#e8f3ee] p-3 text-sm"><b>{socioSelecionado.nome}</b>{socioSelecionado.matricula&&<span> · Matrícula {socioSelecionado.matricula}</span>}</div>}</>:<input value={nomeNaoSocio} onChange={e=>setNomeNaoSocio(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3"/>}</div>
- <div className="rounded-2xl border bg-white p-5 shadow-sm"><h2 className="text-xl font-extrabold text-[#005a3c]">3. Escolha o espaço</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{disponiveis.map(e=><button key={e.id} onClick={()=>setEspacoId(e.id)} className={`rounded-2xl border p-4 text-left ${e.id===espacoId?"border-[#005a3c] bg-[#e8f3ee]":"border-gray-200"}`}><b>{e.nome}</b><div className="mt-2 text-xs text-gray-500">{e.cobranca==="hora"?"Por hora":"Por diária"}{e.capacidade?` · ${e.capacidade}`:""}</div><div className="mt-2 font-extrabold text-[#005a3c]">{moeda(tipoPessoa==="socio"?e.precoSocio:e.precoNaoSocio)}</div></button>)}{disponiveis.length===0&&<div className="col-span-full rounded-xl bg-yellow-50 p-5 text-sm">Nenhum espaço está liberado para não sócios no momento.</div>}</div></div>
- </div><aside className="h-fit rounded-2xl border bg-white p-5 shadow-sm lg:sticky lg:top-6"><h2 className="text-xl font-extrabold text-[#005a3c]">4. Data e horário</h2><label className="mt-4 block text-xs font-bold uppercase text-gray-500">Data<input type="date" value={data} onChange={e=>setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3"/></label>{espaco?.cobranca==="hora"&&<label className="mt-4 block text-xs font-bold uppercase text-gray-500">Horário<select value={horario} onChange={e=>setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map(h=><option key={h} disabled={ocupados.includes(h)}>{h}{ocupados.includes(h)?" — ocupado":""}</option>)}</select></label>}<div className="mt-4 rounded-xl bg-[#e8f3ee] p-4"><div className="text-xs text-gray-500">Total</div><div className="text-2xl font-extrabold text-[#005a3c]">{moeda(valor)}</div><div className="mt-1 text-xs">{tipoPessoa==="socio"?"Sócio":"Não sócio"} · {espaco?.nome||"—"}</div></div><button onClick={continuar} className="mt-4 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white">Continuar</button></aside></section>}
- {!publico&&aba==="reservas"&&<section className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="text-xl font-extrabold text-[#005a3c]">Reservas cadastradas</h2><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar..." className="rounded-xl border px-3 py-2"/></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#e8f3ee] text-xs font-bold uppercase"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Ação</th></tr></thead><tbody>{reservasFiltradas.map(r=><tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}<div className="text-xs text-gray-500">{r.horario}</div></td><td className="p-3">{espacos.find(e=>e.id===r.espacoId)?.nome}</td><td className="p-3 font-bold">{r.nome}</td><td className="p-3">{r.tipoPessoa==="socio"?"Sócio":"Não sócio"}</td><td className="p-3 font-bold text-[#005a3c]">{moeda(r.valor)}</td><td className="p-3">{r.comprovante_url?<a href={r.comprovante_url} target="_blank" rel="noreferrer" className="font-bold text-[#005a3c] underline">Ver comprovante</a>:r.pagamento==="pix"&&r.status!=="cancelada"?<label className="cursor-pointer rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-bold text-white">{enviandoComprovante===r.id?"Enviando...":"Subir comprovante"}<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoComprovante===r.id} onChange={e=>{const f=e.target.files?.[0];if(f)void enviarComprovante(r,f);e.currentTarget.value="";}}/></label>:"—"}</td><td className="p-3">{perfilUsuario!=="associado"&&r.status!=="cancelada"&&<button onClick={()=>void cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4"/></button>}</td></tr>)}</tbody></table></div></section>}
- {!publico&&aba==="admin"&&<section className="space-y-5"><div className="rounded-2xl border bg-white p-5 shadow-sm"><h2 className="text-xl font-extrabold text-[#005a3c]">Permissão e valores para não sócios</h2><p className="mt-1 text-sm text-gray-500">Regra: valor de não sócio igual a R$ 0,00 significa bloqueado.</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee] text-xs font-bold uppercase"><tr><th className="p-3">Espaço</th><th className="p-3">Sócio</th><th className="p-3">Não sócio</th><th className="p-3">Permissão</th></tr></thead><tbody>{espacos.map(e=><tr key={e.id} className="border-b"><td className="p-3 font-bold">{e.nome}</td><td className="p-3"><input type="number" value={e.precoSocio} onChange={x=>alterarPreco(e.id,"precoSocio",Number(x.target.value))} className="w-28 rounded-lg border px-2 py-2"/></td><td className="p-3"><input type="number" value={e.precoNaoSocio} onChange={x=>alterarPreco(e.id,"precoNaoSocio",Number(x.target.value))} className="w-28 rounded-lg border px-2 py-2"/></td><td className="p-3"><button onClick={()=>alternarNaoSocio(e.id)} disabled={e.precoNaoSocio<=0} className={`rounded-full px-3 py-2 text-xs font-extrabold ${e.precoNaoSocio<=0||!e.permiteNaoSocio?"bg-red-100 text-red-700":"bg-green-100 text-green-700"}`}>{e.precoNaoSocio<=0||!e.permiteNaoSocio?"🔒 Bloqueado":"🟢 Liberado"}</button></td></tr>)}</tbody></table></div></div>
- <div className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><QrCode className="text-[#005a3c]"/><div><h2 className="text-xl font-extrabold text-[#005a3c]">PIX para reservas</h2><p className="text-sm text-gray-500">Chave PIX da Sociedade para pagamento das reservas.</p></div></div><div className="mt-5 grid gap-4 md:grid-cols-2"><label className="text-xs font-bold uppercase text-gray-500">Chave PIX<input value={pixForm.chave_pix || "89.649.164/0001-58"} onChange={e=>setPixForm({...pixForm,chave_pix:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="text-xs font-bold uppercase text-gray-500">Nome do recebedor<input value={pixForm.nome_recebedor} onChange={e=>setPixForm({...pixForm,nome_recebedor:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="text-xs font-bold uppercase text-gray-500">Cidade<input value={pixForm.cidade} onChange={e=>setPixForm({...pixForm,cidade:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3"/></label><label className="text-xs font-bold uppercase text-gray-500 md:col-span-2">PIX copia e cola<input value={pixForm.copia_e_cola} onChange={e=>setPixForm({...pixForm,copia_e_cola:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-3" placeholder="Cole aqui o código PIX"/></label></div><button onClick={salvarPix} disabled={salvandoPix} className="mt-4 rounded-xl bg-[#005a3c] px-5 py-3 font-extrabold text-white">{salvandoPix?"Salvando...":"Salvar PIX da administração"}</button></div></section>}
- {etapa==="pagamento"&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><h2 className="text-2xl font-extrabold text-[#005a3c]">{ultimaReserva?"Reserva registrada":"Confirmar reserva"}</h2>{!ultimaReserva&&<div className="mt-4 rounded-xl bg-[#f8faf9] p-4 text-sm space-y-2"><div><b>Responsável:</b> {tipoPessoa==="socio"?socioSelecionado?.nome:nomeNaoSocio}</div><div><b>Espaço:</b> {espaco?.nome}</div><div><b>Data:</b> {dataBR(data)} · {horario}</div><div><b>Total:</b> {moeda(valor)}</div></div>}{!ultimaReserva?<button onClick={confirmar} className="mt-5 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white">Confirmar reserva</button>:<><div className="mt-4 rounded-2xl bg-[#f0f7f3] p-4"><div className="font-extrabold text-[#005a3c]">Pagamento via PIX</div><div className="mt-2 text-sm font-bold">PIX — CNPJ: 89.649.164/0001-58</div><button onClick={()=>void copiarChavePix()} className="mt-3 w-full rounded-xl border bg-white px-4 py-3 font-bold text-[#005a3c]"><Copy className="mr-2 inline h-4 w-4"/>Copiar chave PIX</button><p className="mt-2 text-xs text-gray-500">Pague o valor da reserva e envie o comprovante para aprovação.</p><label className="mt-3 block cursor-pointer rounded-xl bg-[#005a3c] px-4 py-3 text-center font-extrabold text-white">{enviandoComprovante===ultimaReserva.id?"Enviando comprovante...":ultimaReserva.comprovante_status==="pendente"?"Comprovante enviado — aguardando aprovação":"Enviar comprovante"}<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={enviandoComprovante===ultimaReserva.id||ultimaReserva.comprovante_status==="pendente"} onChange={e=>{const f=e.target.files?.[0];if(f)void enviarComprovante(ultimaReserva,f);e.currentTarget.value="";}}/></label>{ultimaReserva.comprovante_url&&<a href={ultimaReserva.comprovante_url} target="_blank" rel="noreferrer" className="mt-2 block text-center text-sm font-bold text-[#005a3c] underline">Ver comprovante enviado</a>}</div><button onClick={()=>{setEtapa("selecao");setUltimaReserva(null);setAba(publico?"reservar":"reservas");}} className="mt-3 w-full rounded-xl border px-4 py-3 font-bold">Fechar</button></>}</div></div>}
- </div></main></div>;
+
+export default function ReservasPage() {
+  const [publico, setPublico] = useState(false);
+  const [aba, setAba] = useState<"reservar" | "reservas" | "admin">("reservar");
+  const [espacos, setEspacos] = useState<Espaco[]>(INICIAIS);
+  const [reservas, setReservas] = useState<Reserva[]>([]);
+  const [espacoId, setEspacoId] = useState(INICIAIS[0].id);
+  const [data, setData] = useState("");
+  const [horario, setHorario] = useState(HORARIOS[0]);
+  const [nome, setNome] = useState("");
+  const [tipoPessoa, setTipoPessoa] = useState<TipoPessoa>("socio");
+  const [etapa, setEtapa] = useState<"selecao" | "confirmacao">("selecao");
+  const [busca, setBusca] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | Reserva["status"]>("todos");
+  const [filtroData, setFiltroData] = useState("");
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const modoPublico = p.get("publico") === "1";
+    setPublico(modoPublico);
+    if (modoPublico) setTipoPessoa("nao_socio");
+
+    try {
+      const e = localStorage.getItem("guarani_espacos_reservas");
+      const r = localStorage.getItem("guarani_reservas");
+      if (e) setEspacos(normalizarEspacos(JSON.parse(e)));
+      if (r) setReservas(JSON.parse(r));
+    } catch {
+      // Mantém os valores iniciais.
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("guarani_espacos_reservas", JSON.stringify(espacos));
+  }, [espacos]);
+
+  useEffect(() => {
+    localStorage.setItem("guarani_reservas", JSON.stringify(reservas));
+  }, [reservas]);
+
+  const espacosDisponiveis = useMemo(
+    () =>
+      tipoPessoa === "nao_socio"
+        ? espacos.filter((e) => e.permiteNaoSocio && e.precoNaoSocio > 0)
+        : espacos,
+    [espacos, tipoPessoa],
+  );
+
+  useEffect(() => {
+    if (!espacosDisponiveis.some((e) => e.id === espacoId) && espacosDisponiveis[0]) {
+      setEspacoId(espacosDisponiveis[0].id);
+    }
+  }, [espacosDisponiveis, espacoId]);
+
+  const espaco = espacos.find((x) => x.id === espacoId);
+  const bloqueadoNaoSocio = !!espaco && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio);
+  const valor = espaco ? (tipoPessoa === "socio" ? espaco.precoSocio : espaco.precoNaoSocio) : 0;
+
+  const ocupados = useMemo(
+    () =>
+      reservas
+        .filter(
+          (r) =>
+            r.status !== "cancelada" &&
+            r.espacoId === espacoId &&
+            r.data === data,
+        )
+        .map((r) => r.horario),
+    [reservas, espacoId, data],
+  );
+
+  const filtradas = reservas.filter((r) => {
+    const texto = `${r.nome} ${espacos.find((e) => e.id === r.espacoId)?.nome || ""}`.toLowerCase();
+    const correspondeBusca = texto.includes(busca.toLowerCase().trim());
+    const correspondeStatus = filtroStatus === "todos" || r.status === filtroStatus;
+    const correspondeData = !filtroData || r.data === filtroData;
+    return correspondeBusca && correspondeStatus && correspondeData;
+  });
+
+  const reservasHoje = reservas.filter((r) => r.data === new Date().toISOString().slice(0, 10) && r.status !== "cancelada").length;
+  const confirmadas = reservas.filter((r) => r.status === "confirmada").length;
+  const pendentes = reservas.filter((r) => r.status === "pendente").length;
+  const canceladas = reservas.filter((r) => r.status === "cancelada").length;
+
+  function mudarTipo(tipo: TipoPessoa) {
+    setTipoPessoa(tipo);
+    setEtapa("selecao");
+  }
+
+  function continuar() {
+    if (!espaco) return alert("Selecione um espaço disponível.");
+    if (tipoPessoa === "nao_socio" && bloqueadoNaoSocio) {
+      return alert("Este espaço não pode ser alugado por não sócios.");
+    }
+    if (!data) return alert("Selecione a data da reserva.");
+    if (!nome.trim()) return alert("Informe o nome do responsável pela reserva.");
+    if (ocupados.includes(horario)) return alert("Este horário já está reservado para este espaço.");
+    setEtapa("confirmacao");
+  }
+
+  function confirmar() {
+    if (!espaco) return;
+    if (tipoPessoa === "nao_socio" && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio)) {
+      return alert("Este espaço não está liberado para não sócios.");
+    }
+
+    setReservas((v) => [
+      {
+        id: crypto.randomUUID(),
+        espacoId,
+        data,
+        horario,
+        nome: nome.trim(),
+        tipoPessoa,
+        valor,
+        status: "confirmada",
+        pagamento: "pendente",
+      },
+      ...v,
+    ]);
+    setEtapa("selecao");
+    setAba("reservas");
+    setNome("");
+    setData("");
+    alert("Reserva registrada com sucesso.");
+  }
+
+  function copiar() {
+    navigator.clipboard.writeText(
+      `Sociedade Guarani\nEspaço: ${espaco?.nome}\nData: ${dataBR(data)}\nHorário: ${horario}\nResponsável: ${nome}\nTipo: ${tipoPessoa === "socio" ? "Sócio" : "Não sócio"}\nValor: ${moeda(valor)}`,
+    );
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 1500);
+  }
+
+  function cancelar(id: string) {
+    if (confirm("Deseja realmente cancelar esta reserva?")) {
+      setReservas((v) => v.map((r) => (r.id === id ? { ...r, status: "cancelada" } : r)));
+    }
+  }
+
+  function alterarPreco(id: string, campo: "precoSocio" | "precoNaoSocio", v: number) {
+    const novoValor = Math.max(0, v);
+    setEspacos((a) =>
+      a.map((e) => {
+        if (e.id !== id) return e;
+        return {
+          ...e,
+          [campo]: novoValor,
+          ...(campo === "precoNaoSocio" && novoValor === 0
+            ? { permiteNaoSocio: false }
+            : {}),
+        };
+      }),
+    );
+  }
+
+  function alternarNaoSocio(id: string) {
+    setEspacos((a) =>
+      a.map((e) => {
+        if (e.id !== id) return e;
+        if (e.precoNaoSocio <= 0) {
+          return { ...e, permiteNaoSocio: false };
+        }
+        return { ...e, permiteNaoSocio: !e.permiteNaoSocio };
+      }),
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
+      {!publico && <><CabecalhoPadrao /><MenuLateralPadrao /></>}
+
+      <main className={`min-h-screen px-4 py-6 lg:px-7 lg:py-8 ${publico ? "" : "lg:ml-[220px]"}`}>
+        <div className="mx-auto max-w-[1400px] space-y-6">
+          {publico && (
+            <div className="flex items-center justify-between rounded-2xl border bg-white px-5 py-4 shadow-sm">
+              <div className="flex items-center gap-3">
+                <img src="/logo-guarani.png" className="h-12 w-12 object-contain" alt="Sociedade Guarani" />
+                <div><b className="text-[#005a3c]">SOCIEDADE GUARANI</b><div className="text-xs text-gray-500">Reserva de espaços</div></div>
+              </div>
+              <button onClick={() => (window.location.href = "/login")} className="rounded-xl border px-4 py-2 text-sm font-bold">Voltar ao login</button>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm text-gray-500">{publico ? "Reserva online" : "Administração"}</p>
+              <h1 className="text-3xl font-extrabold text-[#005a3c]">Reservas</h1>
+              <p className="mt-1 text-sm text-gray-500">Agendamento de quadras, quiosques e salões.</p>
+            </div>
+            {!publico && (
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservar" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Nova reserva</button>
+                <button onClick={() => setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservas" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Reservas</button>
+                <button onClick={() => setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "admin" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}><Settings className="mr-2 inline h-4 w-4" />Configurar espaços</button>
+              </div>
+            )}
+          </div>
+
+          {(publico || aba === "reservar") && (
+            <section className="grid gap-6 lg:grid-cols-[1fr_380px]">
+              <div className="space-y-4">
+                <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                  <h2 className="text-xl font-extrabold text-[#005a3c]">1. Quem está fazendo a reserva?</h2>
+                  <p className="mt-1 text-sm text-gray-500">O sistema aplica automaticamente a tarifa e as regras de acesso.</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <button onClick={() => mudarTipo("socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa === "socio" ? "border-[#005a3c] bg-[#e8f3ee]" : "border-[#dfe7e2]"}`}>
+                      <UserRoundCheck className="h-8 w-8 text-[#005a3c]" />
+                      <b className="mt-3 block text-lg">Sou sócio</b>
+                      <span className="text-sm text-gray-500">Acesso aos espaços liberados para associados.</span>
+                    </button>
+                    <button onClick={() => mudarTipo("nao_socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa === "nao_socio" ? "border-[#f4b400] bg-[#fff8df]" : "border-[#dfe7e2]"}`}>
+                      <UserRound className="h-8 w-8 text-[#8a6700]" />
+                      <b className="mt-3 block text-lg">Não sou sócio</b>
+                      <span className="text-sm text-gray-500">Somente espaços liberados pela administração.</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div><h2 className="text-xl font-extrabold text-[#005a3c]">2. Escolha o espaço</h2><p className="mt-1 text-sm text-gray-500">Espaços com não sócio bloqueado não aparecem nesta lista.</p></div>
+                    <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-bold text-[#005a3c]">{espacosDisponiveis.length} disponíveis</span>
+                  </div>
+                  {espacosDisponiveis.length === 0 ? (
+                    <div className="mt-5 rounded-xl border border-yellow-200 bg-yellow-50 p-5 text-center text-sm font-semibold text-yellow-800">Nenhum espaço está liberado para não sócios no momento.</div>
+                  ) : (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {espacosDisponiveis.map((e) => (
+                        <button key={e.id} onClick={() => setEspacoId(e.id)} className={`rounded-2xl border p-4 text-left ${e.id === espacoId ? "border-[#005a3c] bg-[#e8f3ee]" : "border-[#dfe7e2]"}`}>
+                          <span className="text-[10px] font-extrabold uppercase text-[#005a3c]">{e.categoria}</span>
+                          <h3 className="mt-2 font-extrabold">{e.nome}</h3>
+                          <div className="mt-3 flex justify-between border-t pt-3 text-sm"><span>{e.cobranca === "hora" ? "Por hora" : "Por diária"}</span><b className="text-[#005a3c]">{moeda(tipoPessoa === "socio" ? e.precoSocio : e.precoNaoSocio)}</b></div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                  <h2 className="text-xl font-extrabold text-[#005a3c]">3. Responsável</h2>
+                  <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" />
+                </section>
+              </div>
+
+              <aside className="h-fit rounded-2xl border bg-white p-5 shadow-sm lg:sticky lg:top-6">
+                <h2 className="text-xl font-extrabold text-[#005a3c]">4. Data e horário</h2>
+                {tipoPessoa === "nao_socio" && bloqueadoNaoSocio && <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">🔒 Este espaço está bloqueado para não sócios.</div>}
+                <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Data</span><input type="date" value={data} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
+                {espaco?.cobranca === "hora" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Horário</span><select value={horario} onChange={(e) => setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map((h) => <option key={h} value={h} disabled={ocupados.includes(h)}>{h}{ocupados.includes(h) ? " — ocupado" : ""}</option>)}</select></label>}
+                <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}>
+                  <div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>
+                  <div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div>
+                  <div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div>
+                  <div className="flex justify-between text-sm"><span>Horário</span><b>{horario}</b></div>
+                  <div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div>
+                </div>
+                <button disabled={!espaco || (tipoPessoa === "nao_socio" && bloqueadoNaoSocio)} onClick={continuar} className="mt-4 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">Continuar</button>
+              </aside>
+            </section>
+          )}
+
+          {!publico && aba === "reservas" && (
+            <section className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["Hoje", reservasHoje, "bg-[#e8f3ee]"],
+                  ["Confirmadas", confirmadas, "bg-blue-50"],
+                  ["Pendentes", pendentes, "bg-yellow-50"],
+                  ["Canceladas", canceladas, "bg-red-50"],
+                ].map(([label, valorCard, fundo]) => (
+                  <div key={String(label)} className={`rounded-2xl border bg-white p-4 shadow-sm`}>
+                    <div className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ${fundo}`}>{label}</div>
+                    <div className="mt-2 text-2xl font-extrabold text-[#005a3c]">{valorCard}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div><h2 className="text-xl font-extrabold text-[#005a3c]">Reservas cadastradas</h2><p className="text-sm text-gray-500">Consulte, filtre e acompanhe as reservas.</p></div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="flex items-center gap-2 rounded-xl border px-3"><Users className="h-4 w-4" /><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar responsável ou espaço..." className="w-full min-w-0 py-2 outline-none" /></div>
+                    <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value as typeof filtroStatus)} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold">
+                      <option value="todos">Todos os status</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option>
+                    </select>
+                    <input type="date" value={filtroData} onChange={(e) => setFiltroData(e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                {(busca || filtroStatus !== "todos" || filtroData) && <div className="mt-3 flex items-center justify-between text-xs text-gray-500"><span>{filtradas.length} reserva(s) encontrada(s)</span><button onClick={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }} className="font-bold text-[#005a3c]">Limpar filtros</button></div>}
+              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.status}</td><td className="p-3">{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
+            </section>
+          )}
+
+          {!publico && aba === "admin" && (
+            <section className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div><h2 className="text-xl font-extrabold text-[#005a3c]">Configuração dos espaços</h2><p className="text-sm text-gray-500">Regra: <b>Não sócio = R$ 0,00</b> significa automaticamente bloqueado.</p></div>
+              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[950px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Espaço</th><th className="p-3">Sócio</th><th className="p-3">Não sócio</th><th className="p-3">Permissão</th></tr></thead><tbody>
+                {espacos.map((e) => { const liberado = e.permiteNaoSocio && e.precoNaoSocio > 0; return <tr key={e.id} className="border-b">
+                  <td className="p-3 font-bold">{e.nome}</td>
+                  <td className="p-3"><input type="number" min="0" value={e.precoSocio} onChange={(x) => alterarPreco(e.id, "precoSocio", Number(x.target.value))} className="w-28 rounded-lg border p-2" /></td>
+                  <td className="p-3"><input type="number" min="0" value={e.precoNaoSocio} onChange={(x) => alterarPreco(e.id, "precoNaoSocio", Number(x.target.value))} className="w-28 rounded-lg border p-2" /></td>
+                  <td className="p-3"><button onClick={() => alternarNaoSocio(e.id)} disabled={e.precoNaoSocio <= 0} className={`rounded-full px-4 py-2 text-xs font-extrabold ${liberado ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{liberado ? "🟢 Liberado" : "🔒 Bloqueado"}</button>{e.precoNaoSocio <= 0 && <div className="mt-1 text-xs font-semibold text-red-600">R$ 0 = não pode alugar</div>}</td>
+                </tr>; })}
+              </tbody></table></div>
+              <div className="mt-4 rounded-xl bg-[#fff8df] p-4 text-sm font-semibold text-[#6b5600]">Para liberar um espaço para não sócio, coloque um valor maior que R$ 0,00. Depois clique em <b>Liberado</b>. Se voltar para R$ 0, o sistema bloqueia novamente.</div>
+            </section>
+          )}
+
+          {(publico || aba === "reservar") && etapa === "confirmacao" && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><button onClick={() => setEtapa("selecao")} className="mb-4 font-bold text-gray-500"><ArrowLeft className="mr-1 inline h-4 w-4" />Voltar</button><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f3ee] text-[#005a3c]"><ShieldCheck /></div><h2 className="text-2xl font-extrabold text-[#005a3c]">Confirmar reserva</h2><div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm"><div className="flex justify-between"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div><div className="flex justify-between"><span>Espaço</span><b>{espaco?.nome}</b></div><div className="flex justify-between"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between"><span>Horário</span><b>{horario}</b></div><div className="flex justify-between"><span>Responsável</span><b>{nome}</b></div><div className="flex justify-between"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div><div className="mt-5 flex gap-2"><button onClick={copiar} className="flex-1 rounded-xl border px-4 py-3 font-bold">{copiado ? <><Check className="mr-1 inline h-4 w-4" />Copiado</> : <><Copy className="mr-1 inline h-4 w-4" />Copiar resumo</>}</button><button onClick={confirmar} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white">Confirmar</button></div></div></div>
+          )}
+
+          {!publico && <div className="rounded-2xl bg-[#003d2b] p-5 text-white"><b><Clock3 className="mr-2 inline h-4 w-4" />Controle de disponibilidade</b><div className="mt-1 text-sm text-white/75">R$ 0,00 para não sócio sempre significa bloqueado. A administração controla a liberação.</div></div>}
+        </div>
+      </main>
+    </div>
+  );
 }
