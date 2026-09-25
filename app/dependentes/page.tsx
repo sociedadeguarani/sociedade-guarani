@@ -434,12 +434,12 @@ export default function DependentesPage() {
   return (
     <main className="min-h-screen bg-[#F8FAF9] text-slate-800">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
-        <div className="flex min-h-[76px] items-center justify-between px-6 lg:px-10">
+        <div className="flex min-h-[68px] items-center justify-between gap-3 px-3 sm:min-h-[76px] sm:px-6 lg:px-10">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005A3C] text-xl">🏛️</div>
             <div>
-              <div className="text-lg font-extrabold tracking-tight text-[#003D2B]">SOCIEDADE GUARANI</div>
-              <div className="text-xs text-slate-500">Sociedade Recreativa Guarani — S.R.G.</div>
+              <div className="text-sm font-extrabold tracking-tight text-[#003D2B] sm:text-lg">SOCIEDADE GUARANI</div>
+              <div className="hidden text-xs text-slate-500 sm:block">Sociedade Recreativa Guarani — S.R.G.</div>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -447,39 +447,39 @@ export default function DependentesPage() {
               <div className="text-xs text-slate-500">Área Administrativa</div>
               <div className="font-bold text-[#005A3C]">Gestão</div>
             </div>
-            <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">Sair</button>
+            <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:px-4">Sair</button>
           </div>
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-76px)]">
+      <div className="flex min-h-[calc(100vh-76px)] min-w-0">
         <MenuLateralPadrao />
 
-        <section className="min-w-0 flex-1 p-5 lg:ml-[220px] lg:p-8">
+        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:ml-[220px] lg:p-8">
           <div className="mx-auto max-w-[1400px]">
-            <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-7 md:flex-row md:items-end">
               <div>
                 <div className="mb-1 text-sm font-medium text-slate-500">Administração</div>
-                <h1 className="text-3xl font-black tracking-tight text-[#005A3C]">Dependentes</h1>
+                <h1 className="text-2xl font-black tracking-tight text-[#005A3C] sm:text-3xl">Dependentes</h1>
                 <p className="mt-1 text-slate-500">Cadastro e gerenciamento dos dependentes dos associados.</p>
               </div>
-              <button onClick={abrirNovo} className="rounded-xl bg-[#005A3C] px-5 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B]">+ Novo Dependente</button>
+              <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
             </div>
 
             {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
             {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
 
-            <div className="mb-5 grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Dependentes ativos</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{totalAtivos}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="text-sm text-slate-500">Dependentes inativos</div><div className="mt-1 text-3xl font-black text-slate-600">{totalInativos}</div></div>
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes ativos</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{totalAtivos}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes inativos</div><div className="mt-1 text-3xl font-black text-slate-600">{totalInativos}</div></div>
             </div>
 
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="grid gap-3 lg:grid-cols-[1fr_300px_180px]">
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
                 <div className="flex items-center rounded-xl border border-slate-200 px-4">
                   <span className="mr-3 text-xl">🔎</span>
-                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full bg-transparent py-3 text-sm outline-none" />
+                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
                 </div>
                 <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
                   <option value="">Todos os responsáveis</option>
@@ -493,15 +493,15 @@ export default function DependentesPage() {
 
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               {carregando ? (
-                <div className="p-10 text-center text-sm text-slate-500">Carregando dependentes...</div>
+                <div className="p-8 text-center text-sm text-slate-500 sm:p-10">Carregando dependentes...</div>
               ) : dependentesFiltrados.length === 0 ? (
-                <div className="p-12 text-center"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
+                <div className="p-8 text-center sm:p-12"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1250px] text-left">
+                  <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-5 py-4">Nome</th><th className="px-5 py-4">Parentesco</th><th className="px-5 py-4">Nascimento</th><th className="px-5 py-4">CPF</th><th className="px-5 py-4">Responsável</th><th className="px-5 py-4">Telefone</th><th className="px-5 py-4">Mensalidade</th><th className="px-5 py-4">Financeiro</th><th className="px-5 py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -512,16 +512,16 @@ export default function DependentesPage() {
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-5 py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
                             <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
-                            <td className="px-5 py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
-                            <td className="px-5 py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
-                            <td className="px-5 py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
-                            <td className="px-5 py-4">
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4">
                               {!somenteConsulta && (
                                 <div className="flex justify-end gap-2">
                                   <button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button>
