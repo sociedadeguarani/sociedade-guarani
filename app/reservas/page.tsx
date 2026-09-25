@@ -114,6 +114,7 @@ export default function ReservasPage() {
   const [enviandoComprovante, setEnviandoComprovante] = useState(false);
   const [recibo, setRecibo] = useState<Recibo | null>(null);
   const [formaPagamentoReserva, setFormaPagamentoReserva] = useState<"pix" | "dinheiro">("pix");
+  const [editandoReservaId, setEditandoReservaId] = useState<string | null>(null);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -228,6 +229,39 @@ export default function ReservasPage() {
   function imprimirRecibo(r:Recibo){const w=window.open("","_blank","width=720,height=900");if(!w)return;w.document.write(`<!doctype html><html><head><title>${r.numero} - Recibo</title><style>body{font-family:Arial,sans-serif;padding:40px;color:#173d2e}h1{color:#005a3c;margin-bottom:4px}h2{font-size:18px;color:#005a3c}.box{border:1px solid #cfe3d8;border-radius:14px;padding:20px;margin-top:20px}p{margin:8px 0}.total{font-size:22px;font-weight:800;color:#005a3c}.rodape{margin-top:32px;font-size:12px;color:#667}@media print{body{padding:20px}}</style></head><body><h1>SOCIEDADE RECREATIVA GUARANI</h1><div>S.R.G.</div><h2>RECIBO Nº ${r.numero}</h2><div class="box"><p><b>Tipo:</b> ${r.tipo}</p><p><b>Responsável:</b> ${r.nome}${r.matricula?` — Matrícula ${r.matricula}`:""}</p><p><b>${r.detalhe.split(":")[0]}:</b> ${r.detalhe.split(":").slice(1).join(":").trim()}</p><p><b>Data/Horário:</b> ${r.periodo}</p><p class="total">Valor: ${moeda(r.valor)}</p><p><b>Pagamento:</b> ${r.pagamento}</p><p><b>Status:</b> ${r.status}</p><p><b>Atendido por:</b> ${r.operador}</p><p><b>Data/hora:</b> ${r.dataHora}</p></div><div class="rodape">Documento gerado pelo Sistema Guarani.</div><script>window.onload=()=>window.print()</script></body></html>`);w.document.close()}
   async function enviarRecibo(r:Recibo){const t=textoRecibo(r);try{if(navigator.share){await navigator.share({title:`Recibo ${r.numero} - Sociedade Guarani`,text:t})}else{await navigator.clipboard.writeText(t);alert("Recibo copiado. Cole no WhatsApp, e-mail ou outro aplicativo para enviar.")}}catch{}}
 
+  async function registrarAvisoAdministrativo(titulo: string, mensagem: string) {
+    try {
+      const { data: sessao } = await supabase.auth.getSession();
+      await supabase.from("avisos").insert({
+        titulo,
+        mensagem,
+        tipo: "informacao",
+        prioridade: "alta",
+        fixado: false,
+        ativo: true,
+        publico: "administradores",
+        criado_por: sessao.session?.user?.id || null,
+      });
+    } catch (e) {
+      console.warn("Não foi possível registrar aviso administrativo:", e);
+    }
+  }
+
+  function editarReserva(r: Reserva) {
+    setEditandoReservaId(r.id);
+    setEspacoId(r.espacoId);
+    setData(r.data);
+    setHorario(r.horario);
+    setNome(r.nome);
+    setSocioId(r.socioId || "");
+    setMatriculaResponsavel(r.matricula ?? null);
+    setTipoPessoa(r.tipoPessoa);
+    setFormaPagamentoReserva(r.pagamento === "dinheiro" ? "dinheiro" : "pix");
+    setEtapa("selecao");
+    setAba("reservar");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function confirmar() {
     if (!espaco) return;
     if (tipoPessoa === "nao_socio" && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio)) {
@@ -282,7 +316,19 @@ export default function ReservasPage() {
         comprovante_url: comprovanteUrl,
         comprovante_nome: arquivoComprovante?.name || null,
       };
-      setReservas((v) => [novaReserva, ...v]);
+      if (editandoReservaId) {
+        setReservas((v) => v.map((r) => r.id === editandoReservaId ? { ...r, ...novaReserva, id: editandoReservaId, comprovante_url: novaReserva.comprovante_url ?? r.comprovante_url ?? null, comprovante_nome: novaReserva.comprovante_nome ?? r.comprovante_nome ?? null } : r));
+        await registrarAvisoAdministrativo(
+          "✏️ Reserva alterada na portaria",
+          `A reserva de ${novaReserva.nome} foi alterada por ${await operadorAtual()}. Espaço: ${espaco.nome}. Data: ${dataBR(data)} ${horario}. Valor: ${moeda(valor)}. Pagamento: ${pagamento === "pix" ? "PIX" : "Dinheiro"}.`
+        );
+      } else {
+        setReservas((v) => [novaReserva, ...v]);
+        await registrarAvisoAdministrativo(
+          "📅 Reserva realizada na portaria",
+          `${novaReserva.nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} realizou uma reserva na portaria. Espaço: ${espaco.nome}. Data: ${dataBR(data)} ${horario}. Valor: ${moeda(valor)}. Pagamento: ${pagamento === "pix" ? "PIX" : "Dinheiro"}.`
+        );
+      }
       const operador = await operadorAtual();
       setRecibo({id:novaReserva.id,numero:`RS-${Date.now().toString().slice(-6)}`,tipo:"Reserva de espaço",nome:novaReserva.nome,matricula:matriculaResponsavel,detalhe:`Espaço: ${espaco.nome}`,periodo:`${dataBR(data)} — ${horario}`,valor, pagamento:pagamento==="pix"?"PIX":pagamento==="pendente"?"Pendente":"Dinheiro",operador,status:pagamento==="pix"?"Aguardando conferência":"Pago",dataHora:new Date().toLocaleString("pt-BR")});
 
@@ -295,6 +341,7 @@ export default function ReservasPage() {
       setData("");
       setArquivoComprovante(null);
       setFormaPagamentoReserva("pix");
+      setEditandoReservaId(null);
       alert(pagamento === "pix"
         ? "Reserva registrada e enviada para conferência do pagamento PIX."
         : "Reserva registrada com sucesso.");
@@ -515,7 +562,7 @@ export default function ReservasPage() {
                   </div>
                 </div>
                 {(busca || filtroStatus !== "todos" || filtroData) && <div className="mt-3 flex items-center justify-between text-xs text-gray-500"><span>{filtradas.length} reserva(s) encontrada(s)</span><button onClick={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }} className="font-bold text-[#005a3c]">Limpar filtros</button></div>}
-              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.pagamento === "pix" ? <span className="font-semibold text-[#005a3c]">PIX {r.comprovante_url ? "· Comprovante" : "· Aguardando"}</span> : r.pagamento}</td><td className="p-3">{r.status}</td><td className="p-3">{r.comprovante_url && <button onClick={() => abrirComprovante(r.comprovante_url)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}<button onClick={async()=>{const operador=await operadorAtual();setRecibo({id:r.id,numero:`RS-${r.id.slice(0,6).toUpperCase()}`,tipo:"Reserva de espaço",nome:r.nome,matricula:r.matricula||null,detalhe:`Espaço: ${espacos.find(e=>e.id===r.espacoId)?.nome||"—"}`,periodo:`${dataBR(r.data)} — ${r.horario}`,valor:Number(r.valor||0),pagamento:r.pagamento==="pix"?"PIX":r.pagamento==="dinheiro"?"Dinheiro":r.pagamento,status:r.status==="confirmada"?"Pago":r.status==="pendente"?"Pendente":"Cancelado",operador,dataHora:new Date().toLocaleString("pt-BR")})}} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Recibo</button>{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
+              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.pagamento === "pix" ? <span className="font-semibold text-[#005a3c]">PIX {r.comprovante_url ? "· Comprovante" : "· Aguardando"}</span> : r.pagamento}</td><td className="p-3">{r.status}</td><td className="p-3">{r.comprovante_url && <button onClick={() => abrirComprovante(r.comprovante_url)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}<button onClick={() => editarReserva(r)} className="mr-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">Editar</button><button onClick={async()=>{const operador=await operadorAtual();setRecibo({id:r.id,numero:`RS-${r.id.slice(0,6).toUpperCase()}`,tipo:"Reserva de espaço",nome:r.nome,matricula:r.matricula||null,detalhe:`Espaço: ${espacos.find(e=>e.id===r.espacoId)?.nome||"—"}`,periodo:`${dataBR(r.data)} — ${r.horario}`,valor:Number(r.valor||0),pagamento:r.pagamento==="pix"?"PIX":r.pagamento==="dinheiro"?"Dinheiro":r.pagamento,status:r.status==="confirmada"?"Pago":r.status==="pendente"?"Pendente":"Cancelado",operador,dataHora:new Date().toLocaleString("pt-BR")})}} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Recibo</button>{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
                </div>
             </section>
           )}
