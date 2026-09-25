@@ -135,9 +135,20 @@ export default function CarteirinhasPage() {
     return () => { ativo = false; };
   }, []);
 
+  const normalizarBusca = (valor: unknown) =>
+    String(valor ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
   const lista = useMemo(() => socios.filter((s) => {
-    const q = busca.toLowerCase().trim();
-    const correspondeBusca = !q || s.nome.toLowerCase().includes(q) || String(s.matricula || "").includes(q) || String(s.cpf || "").replace(/\D/g, "").includes(q.replace(/\D/g, ""));
+    const q = normalizarBusca(busca);
+    const qCpf = q.replace(/\D/g, "");
+    const nome = normalizarBusca(s.nome);
+    const matricula = normalizarBusca(s.matricula);
+    const cpf = String(s.cpf || "").replace(/\D/g, "");
+    const correspondeBusca = !q || nome.includes(q) || matricula.includes(q) || (qCpf.length > 0 && cpf.includes(qCpf));
     if (!correspondeBusca) return false;
     const ativo = String(s.situacao || "").toLowerCase() !== "inativo";
     if (filtroStatus === "ativos") return ativo;
