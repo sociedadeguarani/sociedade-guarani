@@ -11,11 +11,9 @@ function admin() {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master", "funcionario"]);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
-    const administradorCompleto = ["administrador", "administrador_normal", "administrador_master", "admin", "master"].includes(perfil);
-    const funcionarioInventario = perfil === "funcionario_inventario";
     const supabase = admin();
     const [{ data: itens, error: itensError }, { data: socios, error: sociosError }, { data: emprestimos, error: empError }] = await Promise.all([
       supabase.from("inventario_itens").select("*").eq("ativo", true).order("nome"),
@@ -35,15 +33,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master", "funcionario"]);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
-    const administradorCompleto = ["administrador", "administrador_normal", "administrador_master", "admin", "master"].includes(perfil);
-    const funcionarioInventario = perfil === "funcionario_inventario";
     const supabase = admin();
 
     if (body.acao === "criar_item" || body.acao === "editar_item") {
-      if (!administradorCompleto && !funcionarioInventario) return NextResponse.json({ error: "Você não tem permissão para cadastrar ou editar itens." }, { status: 403 });
+      if (perfil !== "administrador") return NextResponse.json({ error: "Funcionário não pode criar ou editar itens." }, { status: 403 });
       if (!body.nome?.trim()) return NextResponse.json({ error: "Informe o nome do item." }, { status: 400 });
       const quantidade = Math.max(1, Number(body.quantidade_total || 1));
       const payload = {
@@ -89,7 +85,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "administrador_normal", "funcionario", "funcionario_inventario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master", "funcionario"]);
     if ("response" in auth) return auth.response;
     if (body.acao !== "devolver" || !body.id) return NextResponse.json({ error: "Informe o empréstimo a devolver." }, { status: 400 });
     const supabase = admin();
