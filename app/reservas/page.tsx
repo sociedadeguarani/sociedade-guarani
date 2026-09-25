@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   ArrowLeft,
   CalendarDays,
@@ -16,6 +17,11 @@ import {
 } from "lucide-react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type TipoPessoa = "socio" | "nao_socio";
 type Categoria = "esporte" | "lazer" | "eventos";
@@ -37,6 +43,8 @@ type Reserva = {
   data: string;
   horario: string;
   nome: string;
+  socioId?: string;
+  matricula?: number | string | null;
   tipoPessoa: TipoPessoa;
   valor: number;
   status: "confirmada" | "pendente" | "cancelada";
@@ -87,6 +95,10 @@ export default function ReservasPage() {
   const [data, setData] = useState("");
   const [horario, setHorario] = useState(HORARIOS[0]);
   const [nome, setNome] = useState("");
+  const [socioId, setSocioId] = useState("");
+  const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
+  const [socios, setSocios] = useState<Array<{ id: string; matricula: number | null; nome: string; cpf: string | null }>>([]);
+  const [buscaSocio, setBuscaSocio] = useState("");
   const [tipoPessoa, setTipoPessoa] = useState<TipoPessoa>("socio");
   const [etapa, setEtapa] = useState<"selecao" | "confirmacao">("selecao");
   const [busca, setBusca] = useState("");
@@ -107,6 +119,18 @@ export default function ReservasPage() {
       if (r) setReservas(JSON.parse(r));
     } catch {
       // Mantém os valores iniciais.
+    }
+
+    if (!modoPublico) {
+      try {
+        const { data } = await supabase
+          .from("socios")
+          .select("id,matricula,nome,cpf")
+          .order("nome", { ascending: true });
+        setSocios(data || []);
+      } catch {
+        setSocios([]);
+      }
     }
   }, []);
 
@@ -191,6 +215,8 @@ export default function ReservasPage() {
         data,
         horario,
         nome: nome.trim(),
+        socioId: socioId || undefined,
+        matricula: matriculaResponsavel,
         tipoPessoa,
         valor,
         status: "confirmada",
@@ -201,6 +227,9 @@ export default function ReservasPage() {
     setEtapa("selecao");
     setAba("reservas");
     setNome("");
+    setSocioId("");
+    setMatriculaResponsavel(null);
+    setBuscaSocio("");
     setData("");
     alert("Reserva registrada com sucesso.");
   }
@@ -218,6 +247,14 @@ export default function ReservasPage() {
       setReservas((v) => v.map((r) => (r.id === id ? { ...r, status: "cancelada" } : r)));
     }
   }
+
+  const sociosFiltrados = useMemo(() => {
+    const termo = buscaSocio.trim().toLowerCase();
+    if (!termo) return socios.slice(0, 12);
+    return socios
+      .filter((s) => `${s.nome} ${s.matricula ?? ""} ${s.cpf ?? ""}`.toLowerCase().includes(termo))
+      .slice(0, 12);
+  }, [socios, buscaSocio]);
 
   function alterarPreco(id: string, campo: "precoSocio" | "precoNaoSocio", v: number) {
     const novoValor = Math.max(0, v);
@@ -320,7 +357,32 @@ export default function ReservasPage() {
 
                 <section className="rounded-2xl border bg-white p-5 shadow-sm">
                   <h2 className="text-xl font-extrabold text-[#005a3c]">3. Responsável</h2>
-                  <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" />
+                  {tipoPessoa === "socio" && !publico ? (
+                    <div className="relative mt-4">
+                      <div className="flex items-center gap-2 rounded-xl border px-3 py-3 focus-within:border-[#005a3c]">
+                        <Users className="h-5 w-5 text-gray-400" />
+                        <input
+                          value={buscaSocio}
+                          onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setMatriculaResponsavel(null); setNome(""); }}
+                          placeholder="Buscar sócio por nome ou matrícula..."
+                          className="w-full outline-none"
+                        />
+                      </div>
+                      {buscaSocio && !socioId && (
+                        <div className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
+                          {sociosFiltrados.length ? sociosFiltrados.map((s) => (
+                            <button key={s.id} type="button" onClick={() => { setSocioId(s.id); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }} className="block w-full border-b px-4 py-3 text-left hover:bg-[#e8f3ee]">
+                              <b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span>
+                            </button>
+                          )) : <div className="p-4 text-sm text-gray-500">Nenhum sócio encontrado.</div>}
+                        </div>
+                      )}
+                      {socioId && <div className="mt-3 flex items-center justify-between rounded-xl bg-[#e8f3ee] p-3 text-sm"><span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}</span><button type="button" onClick={() => { setSocioId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button></div>}
+                    </div>
+                  ) : (
+                    <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" />
+                  )}
+                  {tipoPessoa === "socio" && !publico && <p className="mt-2 text-xs text-gray-500">Digite o nome ou a matrícula e selecione o sócio. Isso evita duplicidade no histórico.</p>}
                 </section>
               </div>
 
@@ -330,7 +392,7 @@ export default function ReservasPage() {
                 <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Data</span><input type="date" value={data} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
                 {espaco?.cobranca === "hora" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Horário</span><select value={horario} onChange={(e) => setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map((h) => <option key={h} value={h} disabled={ocupados.includes(h)}>{h}{ocupados.includes(h) ? " — ocupado" : ""}</option>)}</select></label>}
                 <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}>
-                  <div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>
+                  <div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}
                   <div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div>
                   <div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div>
                   <div className="flex justify-between text-sm"><span>Horário</span><b>{horario}</b></div>
