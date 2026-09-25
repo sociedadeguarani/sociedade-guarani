@@ -16,7 +16,7 @@ function mensagemErro(error: unknown, fallback: string) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireRoles(request, ["administrador", "funcionario"]);
+  const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
   try {
     const supabase = getServiceClient();
@@ -140,7 +140,7 @@ async function avisarAdministradoresInadimplencia(
 }
 
 export async function POST(request: Request) {
-  const auth = await requireRoles(request, ["administrador", "funcionario"]);
+  const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
 
   let etapa = "iniciando";
