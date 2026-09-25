@@ -10,7 +10,7 @@ type Item = { id: string; nome: string; categoria: string; quantidade_total: num
 type Socio = { id: string; nome: string; matricula: string | null };
 type Categoria = { id: string; nome: string; codigo: string; ativo: boolean };
 type Localizacao = { id: string; nome: string; ativo: boolean };
-type Emprestimo = { id: string; item_id: string; socio_id: string; quantidade: number; data_emprestimo: string; data_prevista_devolucao: string | null; data_devolucao: string | null; status: string; responsavel_emprestimo: string | null; responsavel_devolucao: string | null; observacoes: string | null; item?: { nome: string } | null; socio?: { nome: string; matricula: string | null } | null };
+type Emprestimo = { id: string; item_id: string; socio_id: string; quantidade: number; data_emprestimo: string; data_prevista_devolucao: string | null; data_devolucao: string | null; status: string; responsavel_emprestimo: string | null; responsavel_devolucao: string | null; observacoes: string | null; item?: { nome: string; numero_patrimonio?: string | null; localizacao?: string | null } | null; socio?: { nome: string; matricula: string | null } | null };
 
 const estadoOpcoes = ["Novo", "Excelente", "Bom", "Regular", "Danificado"];
 
