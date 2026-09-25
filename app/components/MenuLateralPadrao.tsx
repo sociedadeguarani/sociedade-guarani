@@ -33,7 +33,7 @@ const ITENS_MENU = [
   { nome: "Dependentes", rota: "/dependentes", icone: UsersRound, perfis: ["funcionario", "administrador_normal", "administrador_master", ] },
   { nome: "Mensalidades", rota: "/mensalidades", icone: Wallet, perfis: ["administrador_normal", "administrador_master", ] },
   { nome: "Financeiro", rota: "/financeiro", icone: Wallet, perfis: ["administrador_normal", "administrador_master", ] },
-  { nome: "Inventário", rota: "/inventario", icone: Boxes, perfis: ["funcionario", "funcionario_inventario", "administrador_normal", ] },
+  { nome: "Inventário", rota: "/inventario", icone: Boxes, perfis: ["funcionario", "funcionario_inventario", "administrador_normal", "administrador_master", ] },
   { nome: "Acessos", rota: "/acessos", icone: DoorOpen, perfis: ["funcionario", "administrador_normal", "administrador_master", ] },
   { nome: "Relatórios", rota: "/relatorios", icone: BarChart3, perfis: ["administrador_normal", "administrador_master", ] },
   { nome: "Usuários", rota: "/usuarios", icone: UserCog, perfis: ["administrador_master"] },
