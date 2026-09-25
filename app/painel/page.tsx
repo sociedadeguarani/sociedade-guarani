@@ -42,6 +42,8 @@ export default function PainelPage() {
   const [nome, setNome] = useState("Usuário");
   const [perfil, setPerfil] = useState("");
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
+  const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
+  const [sociosInativos, setSociosInativos] = useState<number | null>(null);
 
   useEffect(() => {
     setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
@@ -57,7 +59,12 @@ export default function PainelPage() {
           cache: "no-store",
         });
         const j = await r.json().catch(() => ({}));
-        if (r.ok) setTotalSocios(Array.isArray(j.socios) ? j.socios.length : 0);
+        if (r.ok) {
+          const lista = Array.isArray(j.socios) ? j.socios : [];
+          setTotalSocios(lista.length);
+          setSociosAtivos(lista.filter((s: any) => s.ativo !== false && String(s.situacao || "ativo").toLowerCase() !== "inativo").length);
+          setSociosInativos(lista.filter((s: any) => s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo").length);
+        }
       } catch {}
     })();
   }, []);
@@ -120,20 +127,34 @@ export default function PainelPage() {
             <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
               <p className="text-sm text-slate-500">Associados cadastrados</p>
               <p className="mt-1 text-3xl font-black text-[#005a3c]">{totalSocios === null ? "—" : totalSocios}</p>
+              <p className="mt-1 text-xs text-slate-400">Total de cadastros</p>
+            </div>
+            <div className="rounded-2xl border border-[#dceee4] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Associados ativos</p>
+              <p className="mt-1 text-3xl font-black text-[#16834f]">{sociosAtivos === null ? "—" : sociosAtivos}</p>
+              <p className="mt-1 text-xs text-slate-400">Cadastros liberados</p>
+            </div>
+            <div className="rounded-2xl border border-[#f0e3cf] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Associados inativos</p>
+              <p className="mt-1 text-3xl font-black text-[#b56a12]">{sociosInativos === null ? "—" : sociosInativos}</p>
+              <p className="mt-1 text-xs text-slate-400">Requerem conferência</p>
             </div>
             <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Perfil atual</p>
+              <p className="text-sm text-slate-500">Perfil e acesso</p>
               <p className="mt-1 text-xl font-black text-[#005a3c]">{nomeDoPerfil}</p>
-            </div>
-            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Área</p>
-              <p className="mt-1 text-xl font-black text-[#005a3c]">Sociedade Guarani</p>
-            </div>
-            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Acesso</p>
-              <p className="mt-1 text-xl font-black text-[#005a3c]">{master || admin ? "Administrativo" : funcionario ? "Operacional" : "Associado"}</p>
+              <p className="mt-1 text-xs text-slate-400">{master || admin ? "Acesso administrativo" : funcionario ? "Acesso operacional" : "Área do associado"}</p>
             </div>
           </div>
+
+          {(master || admin) && sociosInativos !== null && sociosInativos > 0 && (
+            <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-[#f1dfbd] bg-[#fffaf0] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-black text-[#7b4b0b]">⚠️ Atenção cadastral</p>
+                <p className="mt-1 text-sm text-[#8c6a35]">Existem {sociosInativos} associado(s) marcado(s) como inativo(s).</p>
+              </div>
+              <a href="/socios" className="rounded-xl border border-[#d9c18f] bg-white px-4 py-2 text-center text-sm font-bold text-[#7b4b0b]">Ver sócios</a>
+            </div>
+          )}
 
           <div className="mt-8">
             <h2 className="text-2xl font-black text-[#005a3c]">Acesso rápido</h2>
