@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
 type Socio = {
   id: string;
@@ -97,7 +96,21 @@ type MovimentoFinanceiro = {
   observacoes: string | null;
 };
 
-
+const MENU = [
+  ["Início", "🏠", "/painel"],
+  ["Avisos", "📢", "/avisos"],
+  ["Reservas", "📅", "/reservas"],
+  ["Eventos", "🎉", "/eventos"],
+  ["Convites", "🎟️", "/convites"],
+  ["Carteirinhas", "🎫", "/carteirinhas"],
+  ["Sócios", "👥", "/socios"],
+  ["Dependentes", "👨‍👩‍👧‍👦", "/dependentes"],
+  ["Mensalidades", "💳", "/mensalidades"],
+  ["Financeiro", "💰", "/financeiro"],
+  ["Inventário", "📦", "/inventario"],
+  ["Acessos", "🚪", "/acessos"],
+  ["Relatórios", "📊", "/relatorios"],
+] as const;
 
 const FORMAS = [
   ["pix", "PIX"],
@@ -158,14 +171,14 @@ function situacaoClasse(situacao: string | null | undefined) {
 }
 
 function nivelAtraso(meses: number) {
-  if (meses >= 5) {
+  if (meses >= 3) {
     return {
-      texto: "5+ meses",
+      texto: "3+ meses",
       classe: "bg-red-100 text-red-700 ring-1 ring-red-200",
       ponto: "bg-red-500",
     };
   }
-  if (meses >= 3) {
+  if (meses >= 1) {
     return {
       texto: `${meses} ${meses === 1 ? "mês" : "meses"}`,
       classe: "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200",
@@ -173,7 +186,7 @@ function nivelAtraso(meses: number) {
     };
   }
   return {
-    texto: "Até 2 meses",
+    texto: "Em dia",
     classe: "bg-green-100 text-green-700 ring-1 ring-green-200",
     ponto: "bg-green-500",
   };
@@ -429,12 +442,12 @@ export default function FinanceiroPage() {
         meses: historicoPorPessoa.get(p.chave) || 0,
         nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0),
       }))
-      .filter((x) => x.meses >= 3);
+      .filter((x) => x.meses > 0);
   }, [pessoas, historicoPorPessoa]);
 
   const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.meses >= 3 && x.meses <= 4).length;
-  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 5).length;
+  const amarelos = atrasoPessoas.filter((x) => x.meses <= 2).length;
+  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
 
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -516,10 +529,10 @@ export default function FinanceiroPage() {
 
       const meses = historicoPorPessoa.get(pessoa.chave) || 0;
 
-      if (filtroAtraso === "atrasados") return meses >= 3;
-      if (filtroAtraso === "verde") return meses <= 2;
-      if (filtroAtraso === "amarelo") return meses >= 3 && meses <= 4;
-      return meses >= 5;
+      if (filtroAtraso === "atrasados") return meses > 0;
+      if (filtroAtraso === "verde") return meses === 0;
+      if (filtroAtraso === "amarelo") return meses >= 1 && meses <= 2;
+      return meses >= 3;
     });
   }, [
     mensalidadesCompetencia,
@@ -1269,10 +1282,10 @@ export default function FinanceiroPage() {
   async function abrirPagamentoComConta(item: Mensalidade) { setContaPagamentoId(""); await abrirPagamento(item); }
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+    <main className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#173d2e]">
       <header className="sticky top-0 z-40 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-          <div className="flex items-center gap-4">
+        <div className="flex min-h-16 items-center justify-between gap-3 px-3 py-2 sm:h-20 sm:px-7 sm:py-0">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5">
               <img
                 src="/logo-guarani.png"
@@ -1281,7 +1294,7 @@ export default function FinanceiroPage() {
               />
             </div>
             <div>
-              <h1 className="text-lg font-extrabold text-[#123c2b]">
+              <h1 className="truncate text-sm font-extrabold text-[#123c2b] sm:text-lg">
                 SOCIEDADE GUARANI
               </h1>
               <p className="text-xs font-medium text-[#6b7d74]">
@@ -1295,11 +1308,64 @@ export default function FinanceiroPage() {
         </div>
       </header>
 
-      <div className="min-h-[calc(100vh-80px)]">
-        <MenuLateralPadrao />
+      <div className="flex min-h-[calc(100vh-80px)]">
+        <aside className="hidden w-64 shrink-0 border-r border-[#dfe9e3] bg-[#f7faf8] p-3 md:block">
+          <p className="mb-3 px-3 pt-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#91a099]">
+            Menu principal
+          </p>
 
-                <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
-          <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <nav className="space-y-2">
+            {MENU.map(([nome, icone, rota]) => (
+              <button
+                key={nome}
+                onClick={() => {
+                  if (rota !== "/financeiro") window.location.href = rota;
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${
+                  nome === "Financeiro"
+                    ? "bg-[#005a3c] text-white shadow-sm"
+                    : "text-[#50625a] hover:bg-[#e8f3ee] hover:text-[#005a3c]"
+                }`}
+              >
+                <span className="text-xl">{icone}</span>
+                {nome}
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-10 rounded-2xl bg-[#f7edbd] p-4">
+            <p className="text-xs font-bold text-[#705c00]">
+              SOCIEDADE GUARANI
+            </p>
+            <p className="mt-1 text-sm text-[#574900]">
+              Sistema integrado de gestão
+            </p>
+          </div>
+        </aside>
+
+        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:p-8">
+          <div className="mb-6 md:hidden">
+            <div className="grid grid-cols-2 gap-2">
+              {MENU.map(([nome, icone, rota]) => (
+                <button
+                  key={nome}
+                  onClick={() => {
+                    if (rota !== "/financeiro") window.location.href = rota;
+                  }}
+                  className={`rounded-xl p-3 text-left text-xs font-bold ${
+                    nome === "Financeiro"
+                      ? "bg-[#005a3c] text-white"
+                      : "bg-white text-gray-700 shadow-sm"
+                  }`}
+                >
+                  <span className="mr-2 text-lg">{icone}</span>
+                  {nome}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-5 flex flex-col justify-between gap-3 sm:gap-4 lg:flex-row lg:items-end">
             <div>
               <p className="text-sm font-medium text-gray-500">Administração</p>
               <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
@@ -1356,8 +1422,8 @@ export default function FinanceiroPage() {
             />
           </div>
 
-          <div className="mb-6 border-b border-[#dfe9e3]">
-            <div className="flex flex-wrap gap-1 overflow-x-auto">
+          <div className="mb-5 border-b border-[#dfe9e3]">
+            <div className="flex flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]">
               {[
                 ["aluguéis", "🏠", "Aluguéis"],
                 ["entradas", "💵", "Entradas"],
@@ -1404,12 +1470,12 @@ export default function FinanceiroPage() {
                   subtitulo="Sócios e dependentes"
                 />
                 <Resumo
-                  titulo="3 ou 4 meses"
+                  titulo="1 ou 2 meses"
                   valor={String(amarelos)}
                   subtitulo="Atenção"
                 />
                 <Resumo
-                  titulo="5+ meses"
+                  titulo="3+ meses"
                   valor={String(vermelhos)}
                   subtitulo="Inadimplência crítica"
                 />
@@ -1436,7 +1502,7 @@ export default function FinanceiroPage() {
                         : "✓ Nenhum sócio em atraso"}
                     </p>
                     <p className="mt-1 text-sm text-gray-600">
-                      🟢 Até 2 meses · 🟡 3–4 meses · 🔴 5 meses ou mais.
+                      🟡 1–2 meses em atraso · 🔴 3 meses ou mais.
                     </p>
                   </div>
                   <button
@@ -1450,7 +1516,7 @@ export default function FinanceiroPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <div className="min-w-0 rounded-2xl border border-[#e2ebe6] bg-white p-3 shadow-sm sm:p-5">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-lg font-extrabold text-[#003d2b]">
@@ -1473,10 +1539,10 @@ export default function FinanceiroPage() {
                     🟢 Em dia: não aparece nesta lista
                   </span>
                   <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 3–4 meses: {amarelos}
+                    🟡 1–2 meses: {amarelos}
                   </span>
                   <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 5+ meses: {vermelhos}
+                    🔴 3+ meses: {vermelhos}
                   </span>
                 </div>
 
@@ -1491,7 +1557,7 @@ export default function FinanceiroPage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
                     <table className="w-full min-w-[900px]">
                       <thead className="bg-[#e8f3ee]">
                         <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
@@ -1564,7 +1630,7 @@ export default function FinanceiroPage() {
               </div>
 
               {abaFinanceira === "contas" && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+                <div className="min-w-0 rounded-2xl border border-[#e2ebe6] bg-white p-3 shadow-sm sm:p-5">
                   <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
                     <div className="flex gap-2"><button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
@@ -1574,7 +1640,7 @@ export default function FinanceiroPage() {
               )}
 
               {["fluxo", "entradas", "saidas", "aluguéis"].includes(abaFinanceira) && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+                <div className="min-w-0 rounded-2xl border border-[#e2ebe6] bg-white p-3 shadow-sm sm:p-5">
                   <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <h3 className="text-lg font-extrabold text-[#003d2b]">
@@ -1669,8 +1735,8 @@ export default function FinanceiroPage() {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px]">
+                  <div className="overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                    <table className="w-full min-w-[850px] text-sm sm:min-w-[1050px]">
                       <thead className="bg-[#e8f3ee]">
                         <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                           <th className="px-4 py-3">Data</th>
@@ -2132,7 +2198,7 @@ function Resumo({
   }
 
   return (
-    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+    <div className="min-w-0 rounded-2xl border border-[#e2ebe6] bg-white p-3 shadow-sm sm:p-5">
       <p className="text-sm text-gray-500">{titulo}</p>
       <p className="mt-1 text-2xl font-bold text-[#005a3c]">{valor}</p>
       {subtitulo && <p className="mt-1 text-xs text-gray-500">{subtitulo}</p>}
