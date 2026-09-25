@@ -27,18 +27,20 @@ export async function GET(request: Request) {
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
     const supabase = admin();
-    const [{ data: itens, error: itensError }, { data: socios, error: sociosError }, { data: emprestimos, error: empError }, { data: categorias, error: categoriasError }] = await Promise.all([
+    const [{ data: itens, error: itensError }, { data: socios, error: sociosError }, { data: emprestimos, error: empError }, { data: categorias, error: categoriasError }, { data: localizacoes, error: localizacoesError }] = await Promise.all([
       supabase.from("inventario_itens").select("*").eq("ativo", true).order("nome"),
       supabase.from("socios").select("id,nome,matricula").order("nome"),
       supabase.from("inventario_emprestimos").select("id,item_id,socio_id,quantidade,data_emprestimo,data_prevista_devolucao,data_devolucao,status,responsavel_emprestimo,responsavel_devolucao,observacoes,item:inventario_itens(nome),socio:socios(nome,matricula)").order("data_emprestimo", { ascending: false }),
       supabase.from("inventario_categorias").select("nome,codigo").eq("ativo", true).order("nome"),
+      supabase.from("inventario_localizacoes").select("nome").eq("ativo", true).order("nome"),
     ]);
     if (itensError) throw new Error(itensError.message);
     const itensVisiveis = perfil === "funcionario" ? (itens || []).filter((item: any) => item.acesso_funcionario === true) : (itens || []);
     if (sociosError) throw new Error(sociosError.message);
     if (empError) throw new Error(empError.message);
     if (categoriasError) throw new Error(categoriasError.message);
-    return NextResponse.json({ itens: itensVisiveis, socios: socios || [], emprestimos: emprestimos || [], categorias: (categorias || []).map((c: any) => c.nome), perfil });
+    if (localizacoesError) throw new Error(localizacoesError.message);
+    return NextResponse.json({ itens: itensVisiveis, socios: socios || [], emprestimos: emprestimos || [], categorias: (categorias || []).map((c: any) => c.nome), localizacoes: (localizacoes || []).map((l: any) => l.nome), perfil });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar inventário." }, { status: 500 });
   }
@@ -67,6 +69,18 @@ export async function POST(request: Request) {
       const { data: categoria, error } = await supabase.from("inventario_categorias").insert({ nome, codigo }).select("id,nome,codigo").single();
       if (error) throw new Error(error.message);
       return NextResponse.json({ ok: true, categoria });
+    }
+
+    if (body.acao === "criar_localizacao") {
+      if (!ehAdministrador(perfil)) return NextResponse.json({ error: "Somente administradores podem cadastrar localizações." }, { status: 403 });
+      const nome = String(body.nome || "").trim();
+      if (!nome) return NextResponse.json({ error: "Informe o nome da localização." }, { status: 400 });
+      const { data: existentes, error: existentesError } = await supabase.from("inventario_localizacoes").select("nome").eq("ativo", true);
+      if (existentesError) throw new Error(existentesError.message);
+      if ((existentes || []).some((l: any) => String(l.nome).trim().toLowerCase() === nome.toLowerCase())) return NextResponse.json({ error: "Esta localização já está cadastrada." }, { status: 409 });
+      const { data: localizacao, error } = await supabase.from("inventario_localizacoes").insert({ nome }).select("id,nome").single();
+      if (error) throw new Error(error.message);
+      return NextResponse.json({ ok: true, localizacao });
     }
 
     if (body.acao === "criar_item" || body.acao === "editar_item") {
