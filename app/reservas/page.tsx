@@ -37,6 +37,8 @@ type Espaco = {
   capacidade?: string;
 };
 
+type Recibo={id:string;numero:string;tipo:string;nome:string;matricula:number|string|null;detalhe:string;periodo:string;valor:number;pagamento:string;operador:string;dataHora:string;status:string};
+
 type Reserva = {
   id: string;
   espacoId: string;
@@ -110,6 +112,8 @@ export default function ReservasPage() {
   const [pix, setPix] = useState<{ chave_pix?: string; nome_recebedor?: string; cidade?: string; copia_e_cola?: string } | null>(null);
   const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
   const [enviandoComprovante, setEnviandoComprovante] = useState(false);
+  const [recibo, setRecibo] = useState<Recibo | null>(null);
+  const [formaPagamentoReserva, setFormaPagamentoReserva] = useState<"pix" | "dinheiro">("pix");
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -219,6 +223,11 @@ export default function ReservasPage() {
     setEtapa("confirmacao");
   }
 
+  async function operadorAtual(){try{const {data}=await supabase.auth.getSession();return data.session?.user?.user_metadata?.nome_exibicao||data.session?.user?.email||"Funcionário da portaria"}catch{return "Funcionário da portaria"}}
+  function textoRecibo(r:Recibo){return `SOCIEDADE RECREATIVA GUARANI — S.R.G.\nRECIBO Nº ${r.numero}\n\nTipo: ${r.tipo}\nResponsável: ${r.nome}${r.matricula?` — Matrícula ${r.matricula}`:""}\n${r.detalhe}\nData/Horário: ${r.periodo}\nValor: ${moeda(r.valor)}\nPagamento: ${r.pagamento}\nStatus: ${r.status}\nAtendido por: ${r.operador}\nData/hora: ${r.dataHora}\n\nDocumento gerado pelo Sistema Guarani.`}
+  function imprimirRecibo(r:Recibo){const w=window.open("","_blank","width=720,height=900");if(!w)return;w.document.write(`<!doctype html><html><head><title>${r.numero} - Recibo</title><style>body{font-family:Arial,sans-serif;padding:40px;color:#173d2e}h1{color:#005a3c;margin-bottom:4px}h2{font-size:18px;color:#005a3c}.box{border:1px solid #cfe3d8;border-radius:14px;padding:20px;margin-top:20px}p{margin:8px 0}.total{font-size:22px;font-weight:800;color:#005a3c}.rodape{margin-top:32px;font-size:12px;color:#667}@media print{body{padding:20px}}</style></head><body><h1>SOCIEDADE RECREATIVA GUARANI</h1><div>S.R.G.</div><h2>RECIBO Nº ${r.numero}</h2><div class="box"><p><b>Tipo:</b> ${r.tipo}</p><p><b>Responsável:</b> ${r.nome}${r.matricula?` — Matrícula ${r.matricula}`:""}</p><p><b>${r.detalhe.split(":")[0]}:</b> ${r.detalhe.split(":").slice(1).join(":").trim()}</p><p><b>Data/Horário:</b> ${r.periodo}</p><p class="total">Valor: ${moeda(r.valor)}</p><p><b>Pagamento:</b> ${r.pagamento}</p><p><b>Status:</b> ${r.status}</p><p><b>Atendido por:</b> ${r.operador}</p><p><b>Data/hora:</b> ${r.dataHora}</p></div><div class="rodape">Documento gerado pelo Sistema Guarani.</div><script>window.onload=()=>window.print()</script></body></html>`);w.document.close()}
+  async function enviarRecibo(r:Recibo){const t=textoRecibo(r);try{if(navigator.share){await navigator.share({title:`Recibo ${r.numero} - Sociedade Guarani`,text:t})}else{await navigator.clipboard.writeText(t);alert("Recibo copiado. Cole no WhatsApp, e-mail ou outro aplicativo para enviar.")}}catch{}}
+
   async function confirmar() {
     if (!espaco) return;
     if (tipoPessoa === "nao_socio" && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio)) {
@@ -253,25 +262,29 @@ export default function ReservasPage() {
         comprovanteUrl = caminho;
       }
 
-      const pagamento = valor > 0 && pix?.copia_e_cola ? "pix" : "pendente";
-      setReservas((v) => [
-        {
-          id: crypto.randomUUID(),
-          espacoId,
-          data,
-          horario,
-          nome: nome.trim(),
-          socioId: socioId || undefined,
-          matricula: matriculaResponsavel,
-          tipoPessoa,
-          valor,
-          status: pagamento === "pix" ? "pendente" : "confirmada",
-          pagamento,
-          comprovante_url: comprovanteUrl,
-          comprovante_nome: arquivoComprovante?.name || null,
-        },
-        ...v,
-      ]);
+      if (valor > 0 && formaPagamentoReserva === "pix" && !pix?.copia_e_cola) {
+        alert("O PIX da Sociedade ainda não está configurado. Para atendimento na portaria, selecione pagamento em dinheiro ou configure o PIX.");
+        return;
+      }
+      const pagamento = valor > 0 ? formaPagamentoReserva : "pendente";
+      const novaReserva: Reserva = {
+        id: crypto.randomUUID(),
+        espacoId,
+        data,
+        horario,
+        nome: nome.trim(),
+        socioId: socioId || undefined,
+        matricula: matriculaResponsavel,
+        tipoPessoa,
+        valor,
+        status: pagamento === "pix" ? "pendente" : "confirmada",
+        pagamento,
+        comprovante_url: comprovanteUrl,
+        comprovante_nome: arquivoComprovante?.name || null,
+      };
+      setReservas((v) => [novaReserva, ...v]);
+      const operador = await operadorAtual();
+      setRecibo({id:novaReserva.id,numero:`RS-${Date.now().toString().slice(-6)}`,tipo:"Reserva de espaço",nome:novaReserva.nome,matricula:matriculaResponsavel,detalhe:`Espaço: ${espaco.nome}`,periodo:`${dataBR(data)} — ${horario}`,valor, pagamento:pagamento==="pix"?"PIX":pagamento==="pendente"?"Pendente":"Dinheiro",operador,status:pagamento==="pix"?"Aguardando conferência":"Pago",dataHora:new Date().toLocaleString("pt-BR")});
 
       setEtapa("selecao");
       setAba("reservas");
@@ -281,6 +294,7 @@ export default function ReservasPage() {
       setBuscaSocio("");
       setData("");
       setArquivoComprovante(null);
+      setFormaPagamentoReserva("pix");
       alert(pagamento === "pix"
         ? "Reserva registrada e enviada para conferência do pagamento PIX."
         : "Reserva registrada com sucesso.");
@@ -501,7 +515,7 @@ export default function ReservasPage() {
                   </div>
                 </div>
                 {(busca || filtroStatus !== "todos" || filtroData) && <div className="mt-3 flex items-center justify-between text-xs text-gray-500"><span>{filtradas.length} reserva(s) encontrada(s)</span><button onClick={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }} className="font-bold text-[#005a3c]">Limpar filtros</button></div>}
-              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.pagamento === "pix" ? <span className="font-semibold text-[#005a3c]">PIX {r.comprovante_url ? "· Comprovante" : "· Aguardando"}</span> : r.pagamento}</td><td className="p-3">{r.status}</td><td className="p-3">{r.comprovante_url && <button onClick={() => abrirComprovante(r.comprovante_url)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
+              <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#e8f3ee]"><tr><th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th><th className="p-3">Status</th><th className="p-3">Ação</th></tr></thead><tbody>{filtradas.map((r) => <tr key={r.id} className="border-b"><td className="p-3">{dataBR(r.data)}</td><td className="p-3">{espacos.find((e) => e.id === r.espacoId)?.nome}</td><td className="p-3">{r.nome}</td><td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td><td className="p-3 font-bold">{moeda(r.valor)}</td><td className="p-3">{r.pagamento === "pix" ? <span className="font-semibold text-[#005a3c]">PIX {r.comprovante_url ? "· Comprovante" : "· Aguardando"}</span> : r.pagamento}</td><td className="p-3">{r.status}</td><td className="p-3">{r.comprovante_url && <button onClick={() => abrirComprovante(r.comprovante_url)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}<button onClick={async()=>{const operador=await operadorAtual();setRecibo({id:r.id,numero:`RS-${r.id.slice(0,6).toUpperCase()}`,tipo:"Reserva de espaço",nome:r.nome,matricula:r.matricula||null,detalhe:`Espaço: ${espacos.find(e=>e.id===r.espacoId)?.nome||"—"}`,periodo:`${dataBR(r.data)} — ${r.horario}`,valor:Number(r.valor||0),pagamento:r.pagamento==="pix"?"PIX":r.pagamento==="dinheiro"?"Dinheiro":r.pagamento,status:r.status==="confirmada"?"Pago":r.status==="pendente"?"Pendente":"Cancelado",operador,dataHora:new Date().toLocaleString("pt-BR")})}} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Recibo</button>{r.status !== "cancelada" && <button onClick={() => cancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600"><Trash2 className="h-4 w-4" /></button>}</td></tr>)}</tbody></table>{!filtradas.length && <div className="py-10 text-center text-sm text-gray-500">Nenhuma reserva encontrada.</div>}</div>
                </div>
             </section>
           )}
@@ -523,47 +537,31 @@ export default function ReservasPage() {
 
           {(publico || aba === "reservar") && etapa === "confirmacao" && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><button onClick={() => setEtapa("selecao")} className="mb-4 font-bold text-gray-500"><ArrowLeft className="mr-1 inline h-4 w-4" />Voltar</button><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f3ee] text-[#005a3c]"><ShieldCheck /></div><h2 className="text-2xl font-extrabold text-[#005a3c]">Confirmar reserva</h2><div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm"><div className="flex justify-between"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div><div className="flex justify-between"><span>Espaço</span><b>{espaco?.nome}</b></div><div className="flex justify-between"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between"><span>Horário</span><b>{horario}</b></div><div className="flex justify-between"><span>Responsável</span><b>{nome}</b></div><div className="flex justify-between"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
-            {valor > 0 && (
+            {valor > 0 && !publico && (
+              <div className="mt-5 rounded-2xl border border-[#cfe3d8] bg-white p-4">
+                <b className="text-[#005a3c]">Forma de pagamento</b>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={()=>setFormaPagamentoReserva("pix")} className={`rounded-xl border px-4 py-3 text-sm font-extrabold ${formaPagamentoReserva==="pix"?"border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]":"bg-white text-gray-600"}`}>PIX</button>
+                  <button type="button" onClick={()=>setFormaPagamentoReserva("dinheiro")} className={`rounded-xl border px-4 py-3 text-sm font-extrabold ${formaPagamentoReserva==="dinheiro"?"border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]":"bg-white text-gray-600"}`}>Dinheiro</button>
+                </div>
+              </div>
+            )}
+            {valor > 0 && formaPagamentoReserva === "pix" && pix?.copia_e_cola && (
               <div className="mt-5 rounded-2xl border border-[#b9dcca] bg-[#e8f3ee] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div><b className="text-[#005a3c]">Pagamento via PIX</b><p className="mt-1 text-xs text-gray-600">Pague o valor da reserva e, se desejar, envie o comprovante.</p></div>
+                  <div><b className="text-[#005a3c]">Pagamento via PIX</b><p className="mt-1 text-xs text-gray-600">Faça o pagamento e, se quiser, anexe o comprovante abaixo.</p></div>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-[#005a3c]">{moeda(valor)}</span>
                 </div>
-
-                {pix?.copia_e_cola ? (
-                  <>
-                    <div className="mt-4 grid gap-4 sm:grid-cols-[170px_1fr] sm:items-center">
-                      <div className="rounded-xl bg-white p-3 text-center shadow-sm">
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(pix.copia_e_cola)}`}
-                          alt="QR Code para pagamento PIX"
-                          className="mx-auto h-[150px] w-[150px] rounded-lg"
-                        />
-                        <div className="mt-2 text-[11px] font-bold text-gray-500">Aponte a câmera do celular</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="rounded-xl bg-white p-3 text-sm">
-                          <div className="text-xs text-gray-500">Chave PIX</div>
-                          <div className="font-bold break-all">{pix.chave_pix || "Configurada via PIX copia e cola"}</div>
-                          {pix.nome_recebedor && <div className="mt-2 text-xs text-gray-500">Recebedor: <b className="text-gray-700">{pix.nome_recebedor}</b></div>}
-                          {pix.cidade && <div className="text-xs text-gray-500">Cidade: {pix.cidade}</div>}
-                        </div>
-                        <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] bg-white px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
-                      </div>
-                    </div>
-                    <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
-                    {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo selecionado: {arquivoComprovante.name}</div>}
-                  </>
-                ) : (
-                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                    <b>⚠️ PIX ainda não configurado.</b>
-                    <div className="mt-1 text-xs">A administração precisa cadastrar o PIX completo (copia e cola) para liberar o QR Code e o pagamento nesta reserva.</div>
-                  </div>
-                )}
+                <div className="mt-3 rounded-xl bg-white p-3 text-sm"><div className="text-xs text-gray-500">Chave PIX</div><div className="font-bold break-all">{pix.chave_pix || "—"}</div></div>
+                <button type="button" onClick={() => { navigator.clipboard.writeText(pix.copia_e_cola || ""); setCopiado(true); setTimeout(() => setCopiado(false), 1500); }} className="mt-3 w-full rounded-xl border border-[#005a3c] px-4 py-2.5 font-bold text-[#005a3c]">{copiado ? "PIX copia e cola copiado" : "Copiar PIX copia e cola"}</button>
+                <label className="mt-3 block cursor-pointer rounded-xl border-2 border-dashed border-[#9cc8b1] bg-white p-4 text-center"><span className="block text-sm font-bold text-[#005a3c]">📎 Anexar comprovante</span><span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 w-full text-sm" onChange={(e) => setArquivoComprovante(e.target.files?.[0] || null)} /></label>
+                {arquivoComprovante && <div className="mt-2 text-xs font-semibold text-[#005a3c]">Arquivo: {arquivoComprovante.name}</div>}
               </div>
             )}
             <div className="mt-5 flex gap-2"><button onClick={copiar} className="flex-1 rounded-xl border px-4 py-3 font-bold">{copiado ? <><Check className="mr-1 inline h-4 w-4" />Copiado</> : <><Copy className="mr-1 inline h-4 w-4" />Copiar resumo</>}</button><button onClick={confirmar} disabled={enviandoComprovante} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:opacity-50">{enviandoComprovante ? "Enviando..." : valor > 0 && pix?.copia_e_cola ? "Confirmar reserva" : "Confirmar"}</button></div></div></div>
           )}
+
+          {recibo&&<div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/60 p-4"><div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-sm font-semibold text-gray-500">Sociedade Recreativa Guarani</p><h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Recibo {recibo.numero}</h2></div><button onClick={()=>setRecibo(null)} className="rounded-full bg-gray-100 px-3 py-2">✕</button></div><div className="mt-5 rounded-2xl border border-[#cfe3d8] bg-[#f8faf9] p-5 text-sm"><p><b>Tipo:</b> {recibo.tipo}</p><p className="mt-2"><b>Responsável:</b> {recibo.nome}{recibo.matricula?` — Matrícula ${recibo.matricula}`:""}</p><p className="mt-2"><b>{recibo.detalhe.split(":")[0]}:</b> {recibo.detalhe.split(":").slice(1).join(":").trim()}</p><p className="mt-2"><b>Data/Horário:</b> {recibo.periodo}</p><p className="mt-3 text-2xl font-extrabold text-[#005a3c]">{moeda(recibo.valor)}</p><p className="mt-2"><b>Pagamento:</b> {recibo.pagamento}</p><p className="mt-2"><b>Status:</b> {recibo.status}</p><p className="mt-2"><b>Atendido por:</b> {recibo.operador}</p><p className="mt-2 text-xs text-gray-500">{recibo.dataHora}</p></div><div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3"><button onClick={()=>imprimirRecibo(recibo)} className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white">🖨 Imprimir / PDF</button><button onClick={()=>void enviarRecibo(recibo)} className="rounded-xl border border-[#005a3c] px-4 py-3 font-bold text-[#005a3c]">📤 Enviar</button><button onClick={()=>void navigator.clipboard?.writeText(textoRecibo(recibo))} className="rounded-xl border px-4 py-3 font-bold">📋 Copiar</button></div><p className="mt-3 text-center text-xs text-gray-500">Em Imprimir, escolha “Salvar como PDF” para guardar o recibo.</p></div></div>}
 
           {!publico && <div className="rounded-2xl bg-[#003d2b] p-5 text-white"><b><Clock3 className="mr-2 inline h-4 w-4" />Controle de disponibilidade</b><div className="mt-1 text-sm text-white/75">R$ 0,00 para não sócio sempre significa bloqueado. A administração controla a liberação.</div></div>}
         </div>
