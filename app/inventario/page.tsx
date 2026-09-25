@@ -38,7 +38,6 @@ export default function InventarioPage() {
   const [empForm, setEmpForm] = useState({ item_id: "", socio_id: "", quantidade: 1, data_prevista_devolucao: "", observacoes: "" });
   const [buscaAssociado, setBuscaAssociado] = useState("");
   const [buscaItemEmprestimo, setBuscaItemEmprestimo] = useState("");
-  const [buscaItemEmprestimo, setBuscaItemEmprestimo] = useState("");
   const [buscaHistorico, setBuscaHistorico] = useState("");
 
   async function authHeaders(json = true) {
@@ -71,20 +70,13 @@ export default function InventarioPage() {
   function abrirItem() { setErro(""); setItemEditando(null); setItemForm({ nome: "", categoria: "Esportes", quantidade_total: 1, unidade: "unidade", estado_conservacao: "Bom", localizacao: "", numero_patrimonio: "", emprestimo_permitido: true, acesso_funcionario: false, observacoes: "", foto_url: "" }); setFotoArquivo(null); setModalItem(true); }
   function editarItem(item: Item) { if (!administrador) return; setErro(""); setItemEditando(item); setItemForm({ nome: item.nome || "", categoria: item.categoria || "Geral", quantidade_total: Number(item.quantidade_total || 1), unidade: item.unidade || "unidade", estado_conservacao: item.estado_conservacao || "Bom", localizacao: item.localizacao || "", numero_patrimonio: item.numero_patrimonio || "", emprestimo_permitido: item.emprestimo_permitido !== false, acesso_funcionario: item.acesso_funcionario === true, foto_url: item.foto_url || "", observacoes: item.observacoes || "" }); setFotoArquivo(null); setModalItem(true); }
   async function excluirItem(item: Item) { if (!administrador) return; if (!confirm(`Excluir o item "${item.nome}"?`)) return; const r = await fetch("/api/inventario", { method: "DELETE", headers: await authHeaders(), body: JSON.stringify({ id: item.id }) }); const data = await r.json(); if (!r.ok) setErro(data?.error || "Não foi possível excluir o item."); else { setMensagem("Item excluído com sucesso."); await carregar(); } }
-  function abrirEmprestimo() { setErro(""); setBuscaAssociado(""); setBuscaItemEmprestimo(""); setBuscaItemEmprestimo(""); setEmpForm({ item_id: itens.find((i) => i.emprestimo_permitido && i.quantidade_disponivel > 0)?.id || "", socio_id: "", quantidade: 1, data_prevista_devolucao: "", observacoes: "" }); setModalEmprestimo(true); }
+  function abrirEmprestimo() { setErro(""); setBuscaAssociado(""); setBuscaItemEmprestimo(""); setEmpForm({ item_id: itens.find((i) => i.emprestimo_permitido && i.quantidade_disponivel > 0)?.id || "", socio_id: "", quantidade: 1, data_prevista_devolucao: "", observacoes: "" }); setModalEmprestimo(true); }
 
   const itensDisponiveisEmprestimo = useMemo(() => {
     const termo = buscaItemEmprestimo.trim().toLowerCase();
     const disponiveis = itens.filter((i) => i.emprestimo_permitido && i.quantidade_disponivel > 0);
     if (!termo) return disponiveis;
     return disponiveis.filter((i) => `${i.nome} ${i.categoria} ${i.localizacao || ""} ${i.numero_patrimonio || ""}`.toLowerCase().includes(termo));
-  }, [itens, buscaItemEmprestimo]);
-
-  const itensDisponiveisEmprestimo = useMemo(() => {
-    const termo = buscaItemEmprestimo.trim().toLowerCase();
-    const base = itens.filter((i) => i.emprestimo_permitido && i.quantidade_disponivel > 0);
-    if (!termo) return base;
-    return base.filter((i) => `${i.nome} ${i.categoria || ""} ${i.localizacao || ""} ${i.numero_patrimonio || ""}`.toLowerCase().includes(termo));
   }, [itens, buscaItemEmprestimo]);
 
   const sociosFiltradosEmprestimo = useMemo(() => {
