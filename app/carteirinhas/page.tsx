@@ -82,6 +82,7 @@ export default function CarteirinhasPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [busca, setBusca] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | "ativos" | "inativos" | "exame_vencido">("todos");
   const [selecionado, setSelecionado] = useState<Socio | null>(null);
   const [dependenteSelecionado, setDependenteSelecionado] = useState<Dependente | null>(null);
   const [erro, setErro] = useState("");
@@ -136,8 +137,14 @@ export default function CarteirinhasPage() {
 
   const lista = useMemo(() => socios.filter((s) => {
     const q = busca.toLowerCase().trim();
-    return !q || s.nome.toLowerCase().includes(q) || String(s.matricula || "").includes(q);
-  }), [socios, busca]);
+    const correspondeBusca = !q || s.nome.toLowerCase().includes(q) || String(s.matricula || "").includes(q) || String(s.cpf || "").replace(/\D/g, "").includes(q.replace(/\D/g, ""));
+    if (!correspondeBusca) return false;
+    const ativo = String(s.situacao || "").toLowerCase() !== "inativo";
+    if (filtroStatus === "ativos") return ativo;
+    if (filtroStatus === "inativos") return !ativo;
+    if (filtroStatus === "exame_vencido") return Boolean(s.exame_medico_validade) && new Date(`${String(s.exame_medico_validade).slice(0,10)}T00:00:00`) < new Date(new Date().toISOString().slice(0,10) + "T00:00:00");
+    return true;
+  }), [socios, busca, filtroStatus]);
 
   const dependentesLista = useMemo(() => dependentes.filter((d) => {
     const q = busca.toLowerCase().trim();
@@ -270,8 +277,21 @@ export default function CarteirinhasPage() {
             {!modoQr && <section className="rounded-2xl border bg-white p-5 shadow-sm">
               <div className="flex items-center gap-2 rounded-xl border px-3">
                 <Search className="h-4 w-4 text-gray-400" />
-                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou matrícula..." className="w-full py-3 outline-none" />
+                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula ou CPF..." className="w-full py-3 outline-none" />
               </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  ["todos", `Todos (${socios.length})`],
+                  ["ativos", `Ativos (${socios.filter((s) => String(s.situacao || "").toLowerCase() !== "inativo").length})`],
+                  ["inativos", `Inativos (${socios.filter((s) => String(s.situacao || "").toLowerCase() === "inativo").length})`],
+                  ["exame_vencido", `Exame vencido (${socios.filter((s) => { if (!s.exame_medico_validade) return false; const d = new Date(`${String(s.exame_medico_validade).slice(0,10)}T00:00:00`); return !Number.isNaN(d.getTime()) && d < new Date(new Date().toISOString().slice(0,10) + "T00:00:00"); }).length})`],
+                ].map(([valor, rotulo]) => (
+                  <button key={valor} type="button" onClick={() => setFiltroStatus(valor as typeof filtroStatus)} className={`rounded-lg border px-2 py-2 text-xs font-bold ${filtroStatus === valor ? "border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 text-xs font-semibold text-gray-500">{lista.length} associado(s) encontrado(s)</div>
               <div className="mt-4 space-y-2">
                 {lista.map((s) => (
                   <button key={s.id} onClick={() => { setSelecionado(s); setDependenteSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
