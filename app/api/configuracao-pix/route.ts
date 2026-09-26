@@ -64,47 +64,70 @@ function gerarCopiaECola(chave: string, nome: string, cidade: string, valor: num
 }
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const valor = Number(url.searchParams.get("valor") || 0);
+
+  // A mesma chave PIX já utilizada em Convites.
+  // O PIX de Reservas não depende mais de uma configuração prévia no banco:
+  // ele funciona imediatamente e monta o copia e cola com o valor da reserva.
+  let config: {
+    id: string | null;
+    chave_pix: string;
+    nome_recebedor: string;
+    cidade: string;
+    ativo: boolean;
+  } = {
+    id: null,
+    chave_pix: CHAVE_PIX_PADRAO,
+    nome_recebedor: NOME_PADRAO,
+    cidade: CIDADE_PADRAO,
+    ativo: true,
+  };
+
+  // Se houver uma configuração salva no banco, ela continua tendo prioridade.
+  // Se a tabela/configuração ainda não existir, usamos a chave padrão acima.
   try {
-    const url = new URL(request.url);
-    const valor = Number(url.searchParams.get("valor") || 0);
-    const supabase = adminClient();
-    const { data, error } = await supabase
-      .from("configuracao_pix")
-      .select("id,chave_pix,nome_recebedor,cidade,ativo")
-      .eq("ativo", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (serviceKey && supabaseUrl) {
+      const supabase = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const { data } = await supabase
+        .from("configuracao_pix")
+        .select("id,chave_pix,nome_recebedor,cidade,ativo")
+        .eq("ativo", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (error) throw new Error(error.message);
-
-    const config = data || {
-      id: null,
-      chave_pix: CHAVE_PIX_PADRAO,
-      nome_recebedor: NOME_PADRAO,
-      cidade: CIDADE_PADRAO,
-      ativo: true,
-    };
-
-    const copia_e_cola = gerarCopiaECola(
-      String(config.chave_pix || CHAVE_PIX_PADRAO),
-      String(config.nome_recebedor || NOME_PADRAO),
-      String(config.cidade || CIDADE_PADRAO),
-      valor,
-    );
-
-    return NextResponse.json({
-      config: {
-        ...config,
-        copia_e_cola,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar PIX." },
-      { status: 500 },
-    );
+      if (data?.chave_pix) {
+        config = {
+          id: data.id ?? null,
+          chave_pix: String(data.chave_pix),
+          nome_recebedor: String(data.nome_recebedor || NOME_PADRAO),
+          cidade: String(data.cidade || CIDADE_PADRAO),
+          ativo: data.ativo !== false,
+        };
+      }
+    }
+  } catch {
+    // Mantém a configuração PIX padrão para não bloquear a reserva.
   }
+
+  const copia_e_cola = gerarCopiaECola(
+    config.chave_pix,
+    config.nome_recebedor,
+    config.cidade,
+    valor,
+  );
+
+  return NextResponse.json({
+    config: {
+      ...config,
+      copia_e_cola,
+    },
+  });
 }
 
 async function exigirAdministrador(request: Request) {
