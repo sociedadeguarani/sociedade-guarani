@@ -241,7 +241,7 @@ export default function ReservasPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ titulo, mensagem }),
+        body: JSON.stringify({ titulo, mensagem, interno: true }),
       });
 
       if (!resposta.ok) {
