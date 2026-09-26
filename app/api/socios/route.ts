@@ -6,10 +6,10 @@ export const dynamic = "force-dynamic";
 const COLUNAS_BASE = [
   "matricula", "nome", "cpf", "rg", "data_nascimento", "telefone", "whatsapp", "email",
   "endereco", "numero", "bairro", "cidade", "estado", "cep", "data_associacao", "categoria",
-  "situacao", "observacoes",
+  "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade",
 ];
 const COLUNAS_EXTRAS = [
-  "foto_url", "tipo_socio", "responsavel_id", "parentesco", "possui_mensalidade", "valor_mensalidade",
+  "foto_url", "parentesco", "valor_mensalidade",
   "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "modalidade_temporada", "inicio_temporada", "fim_temporada",
   "situacao_financeira", "data_ultimo_pagamento",
 ];
@@ -46,19 +46,23 @@ export async function POST(request: Request) {
     const auth = await autenticarAdmin(request);
     if ("response" in auth) return auth.response;
     const body = await request.json() as Record<string, unknown>;
-    const matricula = String(body.matricula ?? "").replace(/\D/g, "");
+    const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
-    if (!matricula) return NextResponse.json({ error: "Informe a matrícula do associado." }, { status: 400 });
+    const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
+    const responsavelId = String(body.responsavel_id || "").trim();
+    if (!matricula && !(responsavelId && !possuiMensalidade)) {
+      return NextResponse.json({ error: "Informe a matrícula-base do associado. Dependentes sem mensalidade recebem a matrícula automaticamente." }, { status: 400 });
+    }
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
-    const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
+    const base = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
     if (error) {
       if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
       return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
     }
-    const extras = limparObjeto({ ...body, matricula: Number(matricula), cpf: body.cpf || null }, COLUNAS_EXTRAS);
+    const extras = limparObjeto({ ...body, matricula: matricula || null, cpf: body.cpf || null }, COLUNAS_EXTRAS);
     const avisos: string[] = [];
     for (const [campo, valor] of Object.entries(extras)) {
       if (campo === "foto_url" && !valor) continue;
@@ -79,11 +83,11 @@ export async function PUT(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const id = String(body.id ?? "").trim();
     if (!id) return NextResponse.json({ error: "Sócio não informado." }, { status: 400 });
-    const matricula = String(body.matricula ?? "").replace(/\D/g, "");
+    const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
-    if (!matricula || !nome) return NextResponse.json({ error: "Matrícula e nome são obrigatórios." }, { status: 400 });
-    const base = limparObjeto({ ...body, matricula: Number(matricula), nome, cpf: body.cpf || null }, COLUNAS_BASE);
+    if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
+    const base = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, COLUNAS_BASE);
     const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
     if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
     const extras = limparObjeto(body, COLUNAS_EXTRAS);
