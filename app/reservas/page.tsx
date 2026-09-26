@@ -131,16 +131,6 @@ export default function ReservasPage() {
       // Mantém os valores iniciais.
     }
 
-    void (async () => {
-      try {
-        const resposta = await fetch("/api/configuracao-pix", { cache: "no-store" });
-        const resultado = await resposta.json().catch(() => ({}));
-        if (resposta.ok && resultado?.config) setPix(resultado.config);
-      } catch {
-        setPix(null);
-      }
-    })();
-
     if (!modoPublico) {
       void (async () => {
         try {
@@ -181,6 +171,27 @@ export default function ReservasPage() {
   const espaco = espacos.find((x) => x.id === espacoId);
   const bloqueadoNaoSocio = !!espaco && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio);
   const valor = espaco ? (tipoPessoa === "socio" ? espaco.precoSocio : espaco.precoNaoSocio) : 0;
+
+  useEffect(() => {
+    let ativo = true;
+    if (valor <= 0) {
+      setPix(null);
+      return () => { ativo = false; };
+    }
+
+    void (async () => {
+      try {
+        const resposta = await fetch(`/api/configuracao-pix?valor=${encodeURIComponent(valor.toFixed(2))}`, { cache: "no-store" });
+        const resultado = await resposta.json().catch(() => ({}));
+        if (ativo && resposta.ok && resultado?.config) setPix(resultado.config);
+        else if (ativo) setPix(null);
+      } catch {
+        if (ativo) setPix(null);
+      }
+    })();
+
+    return () => { ativo = false; };
+  }, [valor]);
 
   const ocupados = useMemo(
     () =>
@@ -235,7 +246,7 @@ export default function ReservasPage() {
       const token = sessao.session?.access_token;
       if (!token) return;
 
-      const resposta = await fetch("/api/avisos-internos", {
+      const resposta = await fetch("/api/avisos", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
