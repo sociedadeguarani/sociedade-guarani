@@ -10,6 +10,8 @@ type Socio = {
   id: string;
   nome: string;
   matricula?: string | number | null;
+  numero_titulo?: number | null;
+  numero_debitos_referencia?: number | null;
   cpf?: string | null;
   categoria?: string | null;
   tipo_socio?: string | null;
@@ -795,12 +797,13 @@ export default function Page() {
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[1200px] text-sm">
+              <table className="w-full min-w-[1280px] text-sm">
                 <thead className="bg-[#e8f3ee]">
                   <tr>
                     <th className="p-3">✓</th>
                     <th className="p-3 text-left">Associado</th>
                     <th className="p-3 text-left">Matrícula</th>
+                    <th className="p-3 text-left">Nº débitos</th>
                     <th className="p-3 text-left">Tipo</th>
                     <th className="p-3 text-left">Vencimento</th>
                     <th className="p-3 text-left">Base</th>
@@ -854,6 +857,10 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">{x.socio?.matricula || "—"}</td>
+
+                        <td className="p-3 font-semibold text-gray-600">
+                          {x.socio?.numero_debitos_referencia ?? "—"}
+                        </td>
 
                         <td className="p-3">
                           {nomes[x.socio?.tipo_socio] ||
