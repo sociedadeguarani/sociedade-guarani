@@ -7,7 +7,7 @@ import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Resultado = {
-  socio?: { id: string; matricula: number | string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean };
   mensalidade?: { texto: string; cor: string } | null;
@@ -129,7 +129,7 @@ export default function AcessosPage() {
                 <div><h2 className="text-xl font-black">Consultar por matrícula</h2><p className="text-sm text-gray-500">Digite o número da carteirinha.</p></div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); if (matricula.trim()) validar({ matricula }); }} className="mt-5 flex gap-2">
-                <input value={matricula} onChange={(e) => setMatricula(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Ex.: 00125" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
+                <input value={matricula} onChange={(e) => setMatricula(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} placeholder="Ex.: SP0134A" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
                 <button disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
               </form>
             </div>
