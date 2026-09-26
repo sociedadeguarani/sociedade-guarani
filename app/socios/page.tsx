@@ -2998,28 +2998,18 @@ function ModalSocio({
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
 
-            {socioEditando ? (
-              <div className="rounded-xl border border-[#dce8e2] bg-[#f4f8f6] p-3">
-                <div className="text-xs font-bold uppercase tracking-wide text-gray-500">Matrícula familiar</div>
-                <div className="mt-1 text-xl font-black tracking-wide text-[#005a3c]">
-                  {form.matricula || "Será gerada automaticamente"}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">A matrícula existente é preservada automaticamente e não deve ser alterada manualmente.</p>
-              </div>
-            ) : (
-              <div>
-                <Campo
-                  label={form.responsavel_id && form.possui_mensalidade ? "Matrícula-base do novo núcleo" : "Matrícula-base"}
-                  type="text"
-                  value={form.responsavel_id && !form.possui_mensalidade ? "" : (form.matricula ?? "")}
-                  onChange={(v) => alterarCampo("matricula", v.replace(/\D/g, "").slice(0, 4))}
-                  placeholder="Ex.: 24 ou 134"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  O sistema transforma automaticamente em matrícula familiar, por exemplo <b>134 → SP0134A</b> ou <b>24 → SD0024A</b>. Dependentes sem mensalidade recebem B, C, D... automaticamente.
-                </p>
-              </div>
-            )}
+            <div>
+              <Campo
+                label={form.responsavel_id && form.possui_mensalidade ? "Matrícula-base do novo núcleo" : "Matrícula"}
+                type="text"
+                value={form.matricula ?? ""}
+                onChange={(v) => alterarCampo("matricula", v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7))}
+                placeholder="Ex.: 24, 0134 ou SP0134A"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Automático: informe 24 ou 134 e o sistema completa <b>SD0024A</b>/<b>SP0134A</b>. Para corrigir manualmente, informe a matrícula completa no padrão <b>XX0000A</b>. Dependentes sem mensalidade recebem B, C, D... automaticamente.
+              </p>
+            </div>
 
             <Campo
               label="Data de associação"
