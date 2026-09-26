@@ -823,8 +823,8 @@ export default function Home() {
 
     const dadosBase = {
       matricula: String(form.matricula || "").trim().toUpperCase() || null,
-      numero_titulo: form.numero_titulo == null || form.numero_titulo === "" ? null : Number(form.numero_titulo),
-      numero_debitos_referencia: form.numero_debitos_referencia == null || form.numero_debitos_referencia === "" ? null : Number(form.numero_debitos_referencia),
+      numero_titulo: form.numero_titulo == null ? null : Number(form.numero_titulo),
+      numero_debitos_referencia: form.numero_debitos_referencia == null ? null : Number(form.numero_debitos_referencia),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
