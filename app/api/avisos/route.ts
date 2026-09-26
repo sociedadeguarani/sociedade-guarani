@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exigirAdministrador, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, requireRoles, usuarioAutenticado } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -7,9 +7,17 @@ export async function GET(request: Request) {
   try {
     const resultado = await usuarioAutenticado(request);
     if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
-    let query = resultado.supabase.from("avisos").select("*").eq("ativo", true).order("fixado", { ascending: false }).order("data_publicacao", { ascending: false });
+
+    let query = resultado.supabase
+      .from("avisos")
+      .select("*")
+      .eq("ativo", true)
+      .order("fixado", { ascending: false })
+      .order("data_publicacao", { ascending: false });
+
     if (resultado.perfil === "associado") query = query.in("publico", ["todos", "associados"]);
     if (resultado.perfil === "funcionario") query = query.in("publico", ["todos", "funcionarios"]);
+
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     return NextResponse.json({ avisos: data || [], perfil: resultado.perfil });
@@ -20,9 +28,50 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const resultado = await exigirAdministrador(request);
+    const body = await request.json().catch(() => ({}));
+    const interno = body?.interno === true;
+
+    if (interno) {
+      const auth = await requireRoles(request, [
+        "administrador",
+        "administrador_normal",
+        "administrador_master",
+        "funcionario",
+      ]);
+      if ("response" in auth) return auth.response;
+
+      const titulo = String(body.titulo || "").trim();
+      const mensagem = String(body.mensagem || "").trim();
+      if (!titulo || !mensagem) {
+        return NextResponse.json({ error: "Título e mensagem são obrigatórios." }, { status: 400 });
+      }
+
+      const supabase = getServiceClient();
+      const { data, error } = await supabase
+        .from("avisos")
+        .insert({
+          titulo,
+          mensagem,
+          tipo: "informacao",
+          prioridade: "alta",
+          fixado: false,
+          ativo: true,
+          publico: "administradores",
+          criado_por: auth.usuario.id || null,
+        })
+        .select("*")
+        .single();
+
+      if (error) throw new Error(error.message);
+      return NextResponse.json({ ok: true, aviso: data });
+    }
+
+    const resultado = await usuarioAutenticado(request);
     if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
-    const body = await request.json();
+    if (!["administrador", "administrador_normal", "administrador_master"].includes(resultado.perfil)) {
+      return NextResponse.json({ error: "Somente administradores podem realizar esta operação." }, { status: 403 });
+    }
+
     const titulo = String(body.titulo || "").trim();
     const mensagem = String(body.mensagem || "").trim();
     if (!titulo || !mensagem) return NextResponse.json({ error: "Título e mensagem são obrigatórios." }, { status: 400 });
@@ -40,6 +89,7 @@ export async function POST(request: Request) {
       data_fim: String(body.data_fim || "").trim() || null,
       criado_por: resultado.usuario.id,
     };
+
     const { data, error } = await resultado.supabase.from("avisos").insert(payload).select("*").single();
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true, aviso: data });
@@ -50,15 +100,16 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const resultado = await exigirAdministrador(request);
-    if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
+    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master"]);
+    if ("response" in auth) return auth.response;
     const body = await request.json();
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o aviso." }, { status: 400 });
     const campos = ["titulo", "mensagem", "imagem_url", "tipo", "prioridade", "fixado", "ativo", "publico", "data_inicio", "data_fim"];
     const update: Record<string, unknown> = {};
     for (const campo of campos) if (Object.prototype.hasOwnProperty.call(body, campo)) update[campo] = body[campo] === "" ? null : body[campo];
-    const { data, error } = await resultado.supabase.from("avisos").update(update).eq("id", id).select("*").single();
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from("avisos").update(update).eq("id", id).select("*").single();
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true, aviso: data });
   } catch (error) {
@@ -68,12 +119,13 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const resultado = await exigirAdministrador(request);
-    if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
+    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master"]);
+    if ("response" in auth) return auth.response;
     const body = await request.json();
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o aviso." }, { status: 400 });
-    const { error } = await resultado.supabase.from("avisos").delete().eq("id", id);
+    const supabase = getServiceClient();
+    const { error } = await supabase.from("avisos").delete().eq("id", id);
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true });
   } catch (error) {
