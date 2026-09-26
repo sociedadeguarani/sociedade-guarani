@@ -24,7 +24,7 @@ export default function LoginPage() {
     try {
       const identificadorLimpo = identificador.trim();
       let emailLimpo = identificadorLimpo.toLowerCase();
-      if (/^\d+$/.test(identificadorLimpo)) {
+      if (/^(?:[A-Z]{2}\d{4}[A-Z]|\d{1,4})$/i.test(identificadorLimpo)) {
         const r = await fetch("/api/login/associado", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ matricula: identificadorLimpo }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.email) { setErro(j.error || "Matrícula não encontrada."); return; }
