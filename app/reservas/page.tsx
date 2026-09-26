@@ -144,7 +144,7 @@ export default function ReservasPage() {
         }
       })();
     }
-  }, [valor]);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("guarani_espacos_reservas", JSON.stringify(espacos));
