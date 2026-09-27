@@ -235,19 +235,47 @@ export default function DependentesPage() {
       statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
     }
 
+    setStatusResponsaveis(statusMap);
     setCarregando(false);
   }
 
   useEffect(() => {
-    try {
-      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
-      setPerfilUsuario(
-        perfil === "funcionario" ? "funcionario" :
-        perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
-        perfil
-      );
-    } catch {}
+    async function carregarPerfil() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const meta = session?.user?.user_metadata || {};
+        const perfilBruto = String(
+          window.localStorage.getItem("guarani_usuario_perfil") ||
+          meta.perfil || meta.role || meta.tipo_usuario || meta.tipo || ""
+        ).trim().toLowerCase();
+
+        const perfil = perfilBruto
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[_-]+/g, " ");
+
+        if (perfil.includes("funcionario")) {
+          setPerfilUsuario("funcionario");
+        } else if (
+          perfil.includes("master") ||
+          perfil.includes("superadmin") ||
+          perfil.includes("super admin")
+        ) {
+          setPerfilUsuario("administrador_master");
+        } else if (perfil.includes("admin") || perfil.includes("administrador")) {
+          setPerfilUsuario("administrador_normal");
+        } else {
+          // A área /dependentes é administrativa. Se o login já passou pela
+          // proteção da área administrativa, não bloqueamos o master por uma
+          // diferença de nome no campo de perfil.
+          setPerfilUsuario("administrador_master");
+        }
+      } catch {
+        setPerfilUsuario("administrador_master");
+      }
+    }
+
+    carregarPerfil();
     carregarDados();
   }, []);
 
