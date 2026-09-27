@@ -1028,7 +1028,13 @@ export default function Home() {
               </p>
 
               <p className="font-bold text-[#005a3c]">
-                Área Administrativa
+                {perfilUsuario === "administrador_master"
+                  ? "Administrador Master"
+                  : perfilUsuario === "administrador_normal"
+                    ? "Administrador"
+                    : perfilUsuario === "funcionario"
+                      ? "Funcionário"
+                      : "Área Administrativa"}
               </p>
             </div>
 
