@@ -14,6 +14,7 @@ type Socio = {
 
 type Dependente = {
   id: string;
+  matricula: string | null;
   socio_id: string;
   nome: string;
   cpf: string | null;
@@ -76,6 +77,7 @@ export default function DependentesPage() {
   const somenteConsulta = perfilUsuario === "funcionario";
 
   type FormDependente = {
+    matricula: string;
     socio_id: string;
     nome: string;
     cpf: string;
@@ -92,6 +94,7 @@ export default function DependentesPage() {
   };
 
   const [form, setForm] = useState<FormDependente>({
+    matricula: "",
     socio_id: "",
     nome: "",
     cpf: "",
@@ -117,7 +120,7 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
+      const texto = [d.matricula || "", d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
         socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
@@ -142,59 +145,32 @@ export default function DependentesPage() {
       return;
     }
 
-    const { data: sociosDataRaw, error: sociosError } = await supabase
-      .from("socios")
-      .select("id, matricula, nome, situacao, situacao_financeira")
-      .order("nome")
-      .range(0, 9999);
+    const [sociosResult, dependentesResult] = await Promise.all([
+      supabase.from("socios").select("*").order("nome"),
+      supabase.from("dependentes")
+        .select("id, matricula, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .order("nome"),
+    ]);
 
-    if (sociosError) {
-      setErro(`Erro ao carregar sócios: ${sociosError.message}`);
-    }
+    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
 
-    // A tabela public.dependentes é agora a fonte oficial.
-    // Carregamos em páginas para não depender do limite padrão da API.
-    const todosDependentes: any[] = [];
-    let inicio = 0;
-    const tamanhoPagina = 500;
-    let erroDependentes = "";
-
-    while (true) {
-      const { data, error } = await supabase
-        .from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
-        .order("nome")
-        .range(inicio, inicio + tamanhoPagina - 1);
-
-      if (error) {
-        erroDependentes = error.message;
-        break;
-      }
-
-      todosDependentes.push(...(data || []));
-      if (!data || data.length < tamanhoPagina) break;
-      inicio += tamanhoPagina;
-    }
-
-    if (erroDependentes) {
-      setErro(`Erro ao carregar dependentes: ${erroDependentes}`);
-    }
-
-    const sociosData = (sociosDataRaw || []) as any[];
+    const sociosData = (sociosResult.data || []) as any[];
     const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
 
-    const dependentesData: Dependente[] = todosDependentes.map((d: any) => ({
+    const dependentesData: Dependente[] = (dependentesResult.data || []).map((d: any) => ({
       id: String(d.id),
+      matricula: d.matricula == null ? null : String(d.matricula),
       socio_id: String(d.socio_id),
       nome: d.nome,
       cpf: d.cpf ?? null,
       data_nascimento: d.data_nascimento ?? null,
       parentesco: d.parentesco ?? null,
       telefone: d.telefone ?? null,
-      ativo: d.ativo !== false,
+      ativo: d.ativo === true,
       created_at: d.created_at ?? null,
       possui_mensalidade: Boolean(d.possui_mensalidade),
-      valor_mensalidade: d.valor_mensalidade == null ? null : Number(d.valor_mensalidade),
+      valor_mensalidade: Number(d.valor_mensalidade || 0),
       dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
       tipo_pagamento: d.tipo_pagamento ?? null,
       situacao_financeira: d.situacao_financeira ?? null,
@@ -257,7 +233,6 @@ export default function DependentesPage() {
       statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
     }
 
-    setStatusResponsaveis(statusMap);
     setCarregando(false);
   }
 
@@ -278,6 +253,7 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     setEditando(null);
     setForm({
+      matricula: "",
       socio_id: filtroSocio,
       nome: "",
       cpf: "",
@@ -301,6 +277,7 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     setEditando(d);
     setForm({
+      matricula: d.matricula || "",
       socio_id: d.socio_id,
       nome: d.nome || "",
       cpf: d.cpf || "",
@@ -336,10 +313,12 @@ export default function DependentesPage() {
 
     if (!form.socio_id) return setErro("Selecione o sócio responsável.");
     if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
+    if (form.matricula && !/^[A-Z]{2}\d+[B-Z]$/.test(form.matricula.trim().toUpperCase())) return setErro("Matrícula inválida. Use o padrão do titular + B, C, D... (ex.: SC0002B).");
 
     setSalvando(true);
 
     const dados = {
+      matricula: form.matricula.trim().toUpperCase() || null,
       socio_id: form.socio_id,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
@@ -355,17 +334,12 @@ export default function DependentesPage() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    if (!socioResponsavel) {
-      setErro("Selecione um sócio responsável válido.");
-      setSalvando(false);
-      return;
+    let resultado;
+    if (editando) {
+      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+    } else {
+      resultado = await supabase.from("dependentes").insert(dados);
     }
-
-    // Dependentes são gravados exclusivamente na tabela public.dependentes.
-    const resultado = editando
-      ? await supabase.from("dependentes").update(dados).eq("id", editando.id)
-      : await supabase.from("dependentes").insert(dados);
 
     if (resultado.error) {
       setErro(`Não foi possível salvar: ${resultado.error.message}`);
@@ -387,9 +361,7 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
-    const { error } = d.source === "socios"
-      ? await supabase.from("socios").update({ situacao: "inativo" }).eq("id", d.id)
-      : await supabase.from("dependentes").delete().eq("id", d.id);
+    const { error } = await supabase.from("dependentes").update({ ativo: false }).eq("id", d.id);
     if (error) {
       setErro(`Não foi possível excluir: ${error.message}`);
       return;
@@ -402,9 +374,7 @@ export default function DependentesPage() {
   async function alternarStatus(d: Dependente) {
     if (somenteConsulta) return;
     setErro("");
-    const { error } = d.source === "socios"
-      ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
-      : await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
+    const { error } = await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
     if (error) {
       setErro(`Não foi possível alterar a situação: ${error.message}`);
       return;
@@ -486,7 +456,7 @@ export default function DependentesPage() {
                   <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -497,7 +467,7 @@ export default function DependentesPage() {
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="rounded-lg bg-[#E8F3EE] px-2.5 py-1 text-xs font-black text-[#005A3C]">{d.matricula || "—"}</span></td><td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
                             <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
@@ -548,6 +518,7 @@ export default function DependentesPage() {
                       {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — Matrícula ${s.matricula}` : ""}</option>)}
                     </select>
                   </label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Matrícula</span><input value={form.matricula} onChange={(e) => setForm({ ...form, matricula: e.target.value.toUpperCase().replace(/\s/g, "") })} placeholder="Ex.: SC0002B" maxLength={20} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 uppercase outline-none focus:border-[#005A3C]" /><span className="mt-1 block text-xs text-slate-500">Titular + B, C, D...</span></label>
                   <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Nome completo *</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo do dependente" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">CPF</span><input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} inputMode="numeric" placeholder="Somente números" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
