@@ -73,6 +73,7 @@ export default function DependentesPage() {
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
+  const [emailUsuario, setEmailUsuario] = useState("");
 
   const somenteConsulta = perfilUsuario === "funcionario";
 
@@ -244,6 +245,7 @@ export default function DependentesPage() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const meta = session?.user?.user_metadata || {};
+        setEmailUsuario(session?.user?.email || String(meta.email || ""));
         const perfilBruto = String(
           window.localStorage.getItem("guarani_usuario_perfil") ||
           meta.perfil || meta.role || meta.tipo_usuario || meta.tipo || ""
@@ -459,8 +461,8 @@ export default function DependentesPage() {
           </div>
           <div className="flex items-center gap-4">
             <div className="hidden text-right sm:block">
-              <div className="text-xs text-slate-500">Área Administrativa</div>
-              <div className="font-bold text-[#005A3C]">Gestão</div>
+              <div className="text-xs text-slate-500">{emailUsuario || "Usuário autenticado"}</div>
+              <div className="font-bold text-[#005A3C]">{perfilUsuario === "administrador_master" ? "Administrador Master" : perfilUsuario === "administrador_normal" ? "Administrador" : perfilUsuario === "funcionario" ? "Funcionário" : "Área Administrativa"}</div>
             </div>
             <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:px-4">Sair</button>
           </div>
