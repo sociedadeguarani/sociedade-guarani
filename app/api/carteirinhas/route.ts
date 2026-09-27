@@ -123,8 +123,7 @@ export async function GET(request: Request) {
 
     let mensalidades: any[] = [];
 
-    // IMPORTANTE: não usar .in() com todos os IDs de uma vez.
-    // Isso pode gerar Bad Request quando há muitos associados.
+    // Não usar .in() com todos os IDs de uma vez.
     for (const lote of emLotes(ids, 100)) {
       const { data, error } = await supabase
         .from("mensalidades")
@@ -132,7 +131,6 @@ export async function GET(request: Request) {
         .in("socio_id", lote);
 
       if (error) throw error;
-
       mensalidades.push(...(data || []));
     }
 
@@ -141,38 +139,51 @@ export async function GET(request: Request) {
       ...calcularStatus(mensalidades, s.id, s.responsavel_id),
     }));
 
-    // Dependentes reais são os registros de socios ligados por
-    // responsavel_id e sem mensalidade própria.
-    const dependentes = resultado
-      .filter(
-        (s) =>
-          Boolean(s.responsavel_id) &&
-          !Boolean(s.possui_mensalidade)
-      )
-      .map((d) => {
-        const titular = resultado.find(
-          (s) => String(s.id) === String(d.responsavel_id)
-        );
+    // Os dependentes familiares agora ficam na tabela public.dependentes.
+    // A tabela socios contém somente quem possui matrícula própria.
+    let dependentesQuery = supabase
+      .from("dependentes")
+      .select("id,socio_id,matricula,nome,cpf,parentesco,ativo,foto_url,situacao_financeira")
+      .eq("ativo", true)
+      .order("nome");
 
-        return {
-          id: d.id,
-          socio_id: d.responsavel_id,
-          nome: d.nome,
-          cpf: d.cpf,
-          parentesco: d.parentesco,
-          ativo: d.situacao !== "inativo",
-          foto_url: d.foto_url,
-          titular_nome: titular?.nome || null,
-          titular_matricula: titular?.matricula || null,
-          financeiro_status:
-            titular?.financeiro_status || "em_dia",
-          dias_atraso: titular?.dias_atraso || 0,
-          situacao: d.situacao || null,
-          responsavel_id: d.responsavel_id,
-          possui_mensalidade: false,
-        };
-      })
-      .filter((d) => d.ativo !== false);
+    // Associado comum vê somente sua família. Administradores e funcionários
+    // podem consultar todos os dependentes.
+    if (auth.usuario.perfil === "associado") {
+      dependentesQuery = dependentesQuery.eq("socio_id", auth.usuario.socio_id);
+    }
+
+    const { data: dependentesDb, error: dependentesError } = await dependentesQuery;
+    if (dependentesError) throw dependentesError;
+
+    const dependentes = (dependentesDb || []).map((d: any) => {
+      const titular = resultado.find((s) => String(s.id) === String(d.socio_id));
+      const titularId = String(d.socio_id || "");
+      const status = titular
+        ? {
+            financeiro_status: titular.financeiro_status || "em_dia",
+            dias_atraso: titular.dias_atraso || 0,
+          }
+        : { financeiro_status: "em_dia", dias_atraso: 0 };
+
+      return {
+        id: String(d.id),
+        socio_id: titularId,
+        matricula: d.matricula || null,
+        nome: d.nome,
+        cpf: d.cpf || null,
+        parentesco: d.parentesco || null,
+        ativo: d.ativo !== false,
+        foto_url: d.foto_url || null,
+        titular_nome: titular?.nome || null,
+        titular_matricula: titular?.matricula || null,
+        financeiro_status: status.financeiro_status,
+        dias_atraso: status.dias_atraso,
+        situacao: d.situacao_financeira || "isento",
+        responsavel_id: titularId,
+        possui_mensalidade: false,
+      };
+    });
 
     return NextResponse.json({
       socios: resultado,
