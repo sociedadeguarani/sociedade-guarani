@@ -142,55 +142,65 @@ export default function DependentesPage() {
       return;
     }
 
-    const [sociosResult, dependentesResult] = await Promise.all([
-      supabase.from("socios").select("*").order("nome"),
-      supabase.from("dependentes")
+    const { data: sociosDataRaw, error: sociosError } = await supabase
+      .from("socios")
+      .select("id, matricula, nome, situacao, situacao_financeira")
+      .order("nome")
+      .range(0, 9999);
+
+    if (sociosError) {
+      setErro(`Erro ao carregar sócios: ${sociosError.message}`);
+    }
+
+    // A tabela public.dependentes é agora a fonte oficial.
+    // Carregamos em páginas para não depender do limite padrão da API.
+    const todosDependentes: any[] = [];
+    let inicio = 0;
+    const tamanhoPagina = 500;
+    let erroDependentes = "";
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("dependentes")
         .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
-        .order("nome"),
-    ]);
+        .order("nome")
+        .range(inicio, inicio + tamanhoPagina - 1);
 
-    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
-    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
+      if (error) {
+        erroDependentes = error.message;
+        break;
+      }
 
-    const sociosData = (sociosResult.data || []) as any[];
+      todosDependentes.push(...(data || []));
+      if (!data || data.length < tamanhoPagina) break;
+      inicio += tamanhoPagina;
+    }
+
+    if (erroDependentes) {
+      setErro(`Erro ao carregar dependentes: ${erroDependentes}`);
+    }
+
+    const sociosData = (sociosDataRaw || []) as any[];
     const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
 
-    // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
-    // A tabela dependentes fica apenas como legado para não perder registros
-    // que ainda não tenham sido migrados.
-    const dependentesAtuais: Dependente[] = sociosData
-      .filter((s) => s.responsavel_id)
-      .map((s) => ({
-        id: String(s.id),
-        socio_id: String(s.responsavel_id),
-        nome: s.nome,
-        cpf: s.cpf ?? null,
-        data_nascimento: s.data_nascimento ?? null,
-        parentesco: s.parentesco ?? null,
-        telefone: s.telefone ?? s.whatsapp ?? null,
-        ativo: String(s.situacao || "").toLowerCase() !== "inativo",
-        created_at: s.created_at ?? null,
-        possui_mensalidade: Boolean(s.possui_mensalidade),
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
-        tipo_pagamento: s.tipo_pagamento ?? null,
-        situacao_financeira: s.situacao_financeira ?? null,
-        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
-        source: "socios",
-      }));
-
-    const chavesAtuais = new Set(
-      dependentesAtuais.map((d) => `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${d.nome.trim().toLowerCase()}`)
-    );
-
-    const dependentesLegados: Dependente[] = (dependentesResult.data || [])
-      .map((d: any) => ({ ...d, source: "dependentes" as const }))
-      .filter((d: any) => {
-        const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
-        return !chavesAtuais.has(chave);
-      });
-
-    const dependentesData = [...dependentesAtuais, ...dependentesLegados];
+    const dependentesData: Dependente[] = todosDependentes.map((d: any) => ({
+      id: String(d.id),
+      socio_id: String(d.socio_id),
+      nome: d.nome,
+      cpf: d.cpf ?? null,
+      data_nascimento: d.data_nascimento ?? null,
+      parentesco: d.parentesco ?? null,
+      telefone: d.telefone ?? null,
+      ativo: d.ativo !== false,
+      created_at: d.created_at ?? null,
+      possui_mensalidade: Boolean(d.possui_mensalidade),
+      valor_mensalidade: d.valor_mensalidade == null ? null : Number(d.valor_mensalidade),
+      dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
+      tipo_pagamento: d.tipo_pagamento ?? null,
+      situacao_financeira: d.situacao_financeira ?? null,
+      data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
+      source: "dependentes",
+    }));
 
     setSocios(sociosData.map((s) => ({
       id: String(s.id),
@@ -247,6 +257,7 @@ export default function DependentesPage() {
       statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
     }
 
+    setStatusResponsaveis(statusMap);
     setCarregando(false);
   }
 
@@ -345,42 +356,16 @@ export default function DependentesPage() {
     };
 
     const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    const { data: responsavelCompleto } = await supabase.from("socios").select("tipo_socio").eq("id", form.socio_id).maybeSingle();
-    const dadosSocio = {
-      nome: dados.nome,
-      cpf: dados.cpf,
-      data_nascimento: dados.data_nascimento,
-      parentesco: dados.parentesco,
-      telefone: dados.telefone,
-      situacao: dados.ativo ? "ativo" : "inativo",
-      categoria: "Dependente",
-      tipo_socio: (() => {
-        const contribuinte = String(responsavelCompleto?.tipo_socio || "").toLowerCase().includes("contribuinte");
-        if (dados.possui_mensalidade) return contribuinte ? "dependente_contribuinte_familiar_mensalidade" : "dependente_patrimonial_familiar_mensalidade";
-        return contribuinte ? "dependente_contribuinte" : "dependente_patrimonial";
-      })(),
-      responsavel_id: dados.socio_id,
-      possui_mensalidade: dados.possui_mensalidade,
-      valor_mensalidade: dados.valor_mensalidade,
-      dia_vencimento: dados.dia_vencimento,
-      tipo_pagamento: dados.tipo_pagamento,
-      situacao_financeira: dados.situacao_financeira,
-      data_ultimo_pagamento: dados.data_ultimo_pagamento,
-    };
-
-    let resultado;
-    if (editando?.source === "socios" || !editando) {
-      if (!socioResponsavel) {
-        setErro("Selecione um sócio responsável válido.");
-        setSalvando(false);
-        return;
-      }
-      resultado = editando
-        ? await supabase.from("socios").update(dadosSocio).eq("id", editando.id)
-        : await supabase.from("socios").insert(dadosSocio);
-    } else {
-      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+    if (!socioResponsavel) {
+      setErro("Selecione um sócio responsável válido.");
+      setSalvando(false);
+      return;
     }
+
+    // Dependentes são gravados exclusivamente na tabela public.dependentes.
+    const resultado = editando
+      ? await supabase.from("dependentes").update(dados).eq("id", editando.id)
+      : await supabase.from("dependentes").insert(dados);
 
     if (resultado.error) {
       setErro(`Não foi possível salvar: ${resultado.error.message}`);
