@@ -14,8 +14,8 @@ type Socio = {
 
 type Dependente = {
   id: string;
-  matricula: string | null;
   socio_id: string;
+  matricula: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -77,8 +77,8 @@ export default function DependentesPage() {
   const somenteConsulta = perfilUsuario === "funcionario";
 
   type FormDependente = {
-    matricula: string;
     socio_id: string;
+    matricula: string;
     nome: string;
     cpf: string;
     data_nascimento: string;
@@ -94,8 +94,8 @@ export default function DependentesPage() {
   };
 
   const [form, setForm] = useState<FormDependente>({
-    matricula: "",
     socio_id: "",
+    matricula: "",
     nome: "",
     cpf: "",
     data_nascimento: "",
@@ -120,7 +120,7 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [d.matricula || "", d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
+      const texto = [d.nome, d.matricula || "", d.cpf || "", d.parentesco || "", d.telefone || "",
         socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
@@ -148,29 +148,31 @@ export default function DependentesPage() {
     const [sociosResult, dependentesResult] = await Promise.all([
       supabase.from("socios").select("*").order("nome"),
       supabase.from("dependentes")
-        .select("id, matricula, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .select("id, socio_id, matricula, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
         .order("nome"),
     ]);
 
     if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
-    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes: ${dependentesResult.error.message}`);
 
     const sociosData = (sociosResult.data || []) as any[];
     const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
 
+    // A tabela public.dependentes é a única fonte dos dependentes.
+    // Os antigos registros B/C/D já foram migrados para cá.
     const dependentesData: Dependente[] = (dependentesResult.data || []).map((d: any) => ({
       id: String(d.id),
-      matricula: d.matricula == null ? null : String(d.matricula),
       socio_id: String(d.socio_id),
+      matricula: d.matricula == null ? null : String(d.matricula),
       nome: d.nome,
       cpf: d.cpf ?? null,
       data_nascimento: d.data_nascimento ?? null,
       parentesco: d.parentesco ?? null,
-      telefone: d.telefone ?? null,
-      ativo: d.ativo === true,
+      telefone: d.telefone ?? d.whatsapp ?? null,
+      ativo: d.ativo !== false,
       created_at: d.created_at ?? null,
-      possui_mensalidade: Boolean(d.possui_mensalidade),
-      valor_mensalidade: Number(d.valor_mensalidade || 0),
+      possui_mensalidade: d.possui_mensalidade === true,
+      valor_mensalidade: d.valor_mensalidade == null ? null : Number(d.valor_mensalidade),
       dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
       tipo_pagamento: d.tipo_pagamento ?? null,
       situacao_financeira: d.situacao_financeira ?? null,
@@ -253,8 +255,8 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     setEditando(null);
     setForm({
-      matricula: "",
       socio_id: filtroSocio,
+      matricula: "",
       nome: "",
       cpf: "",
       data_nascimento: "",
@@ -277,8 +279,8 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     setEditando(d);
     setForm({
-      matricula: d.matricula || "",
       socio_id: d.socio_id,
+      matricula: d.matricula || "",
       nome: d.nome || "",
       cpf: d.cpf || "",
       data_nascimento: d.data_nascimento || "",
@@ -313,13 +315,40 @@ export default function DependentesPage() {
 
     if (!form.socio_id) return setErro("Selecione o sócio responsável.");
     if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
-    if (form.matricula && !/^[A-Z]{2}\d+[B-Z]$/.test(form.matricula.trim().toUpperCase())) return setErro("Matrícula inválida. Use o padrão do titular + B, C, D... (ex.: SC0002B).");
 
     setSalvando(true);
 
+    let matriculaFinal = form.matricula.trim().toUpperCase() || null;
+
+    if (!editando && !matriculaFinal) {
+      const { data: existentes } = await supabase
+        .from("dependentes")
+        .select("matricula")
+        .eq("socio_id", form.socio_id)
+        .not("matricula", "is", null);
+
+      const responsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+      const base = responsavel?.matricula ? responsavel.matricula.replace(/A$/, "") : "";
+      const usadas = new Set(
+        (existentes || [])
+          .map((x: any) => String(x.matricula || "").toUpperCase())
+          .filter(Boolean)
+      );
+
+      if (base) {
+        for (let codigo = 66; codigo <= 90; codigo++) {
+          const candidata = base + String.fromCharCode(codigo);
+          if (!usadas.has(candidata)) {
+            matriculaFinal = candidata;
+            break;
+          }
+        }
+      }
+    }
+
     const dados = {
-      matricula: form.matricula.trim().toUpperCase() || null,
       socio_id: form.socio_id,
+      matricula: matriculaFinal,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
@@ -334,12 +363,9 @@ export default function DependentesPage() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    let resultado;
-    if (editando) {
-      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
-    } else {
-      resultado = await supabase.from("dependentes").insert(dados);
-    }
+    const resultado = editando
+      ? await supabase.from("dependentes").update(dados).eq("id", editando.id)
+      : await supabase.from("dependentes").insert(dados);
 
     if (resultado.error) {
       setErro(`Não foi possível salvar: ${resultado.error.message}`);
@@ -361,7 +387,10 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
-    const { error } = await supabase.from("dependentes").update({ ativo: false }).eq("id", d.id);
+    const { error } = await supabase
+      .from("dependentes")
+      .update({ ativo: false, updated_at: new Date().toISOString() })
+      .eq("id", d.id);
     if (error) {
       setErro(`Não foi possível excluir: ${error.message}`);
       return;
@@ -374,7 +403,10 @@ export default function DependentesPage() {
   async function alternarStatus(d: Dependente) {
     if (somenteConsulta) return;
     setErro("");
-    const { error } = await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
+    const { error } = await supabase
+      .from("dependentes")
+      .update({ ativo: d.ativo !== true, updated_at: new Date().toISOString() })
+      .eq("id", d.id);
     if (error) {
       setErro(`Não foi possível alterar a situação: ${error.message}`);
       return;
@@ -453,7 +485,7 @@ export default function DependentesPage() {
                 <div className="p-8 text-center sm:p-12"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-left text-sm">
+                  <table className="w-full min-w-[1020px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
                         <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
@@ -467,7 +499,8 @@ export default function DependentesPage() {
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="rounded-lg bg-[#E8F3EE] px-2.5 py-1 text-xs font-black text-[#005A3C]">{d.matricula || "—"}</span></td><td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-black text-[#005A3C]">{d.matricula || "—"}</div></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
                             <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
@@ -518,7 +551,11 @@ export default function DependentesPage() {
                       {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — Matrícula ${s.matricula}` : ""}</option>)}
                     </select>
                   </label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Matrícula</span><input value={form.matricula} onChange={(e) => setForm({ ...form, matricula: e.target.value.toUpperCase().replace(/\s/g, "") })} placeholder="Ex.: SC0002B" maxLength={20} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 uppercase outline-none focus:border-[#005A3C]" /><span className="mt-1 block text-xs text-slate-500">Titular + B, C, D...</span></label>
+                  <label>
+                    <span className="mb-1 block text-sm font-bold text-slate-700">Matrícula</span>
+                    <input value={form.matricula} onChange={(e) => setForm({ ...form, matricula: e.target.value.toUpperCase().replace(/\s/g, "") })} placeholder="Ex.: SC0002B" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-bold uppercase outline-none focus:border-[#005A3C]" />
+                  </label>
+                  <div />
                   <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Nome completo *</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo do dependente" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">CPF</span><input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} inputMode="numeric" placeholder="Somente números" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
