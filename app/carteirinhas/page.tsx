@@ -15,6 +15,7 @@ type Dependente = {
   ativo?: boolean | null;
   titular_nome?: string | null;
   titular_matricula?: number | string | null;
+  matricula?: number | string | null;
   foto_url?: string | null;
   situacao?: string | null;
   financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
@@ -162,7 +163,8 @@ export default function CarteirinhasPage() {
 
   const dependentesLista = useMemo(() => dependentes.filter((d) => {
     const q = busca.toLowerCase().trim();
-    return !q || d.nome.toLowerCase().includes(q) || String(d.titular_matricula || "").includes(q) || String(d.titular_nome || "").toLowerCase().includes(q);
+    const matricula = String(d.matricula || "").toLowerCase();
+    return !q || d.nome.toLowerCase().includes(q) || matricula.includes(q) || String(d.titular_matricula || "").includes(q) || String(d.titular_nome || "").toLowerCase().includes(q);
   }), [dependentes, busca]);
 
   // Quando um associado é selecionado, mostra somente o grupo familiar dele.
@@ -187,8 +189,6 @@ export default function CarteirinhasPage() {
           mudou = true;
         }
 
-        // Se o responsável está na família, o membro entra; se o membro já
-        // está na família, o responsável também entra.
         if (responsavel && familia.has(id) && !familia.has(responsavel)) {
           familia.add(responsavel);
           mudou = true;
@@ -201,6 +201,13 @@ export default function CarteirinhasPage() {
       .filter((s) => String(s.situacao || "").toLowerCase() !== "inativo")
       .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
   }, [socios, selecionado]);
+
+  const dependentesFamiliaSelecionada = useMemo(() => {
+    if (!selecionado) return [] as Dependente[];
+    return dependentes
+      .filter((d) => String(d.socio_id) === String(selecionado.id) && d.ativo !== false)
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+  }, [dependentes, selecionado]);
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
@@ -351,11 +358,11 @@ export default function CarteirinhasPage() {
                   </button>
                 ))}
 
-                {selecionado && familiaSelecionada.length > 0 && (
+                {selecionado && (familiaSelecionada.length > 0 || dependentesFamiliaSelecionada.length > 0) && (
                   <div className="pt-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="text-xs font-black uppercase tracking-wide text-gray-400">Grupo familiar</div>
-                      <div className="text-xs font-semibold text-gray-400">{familiaSelecionada.length + 1} pessoa(s)</div>
+                      <div className="text-xs font-semibold text-gray-400">{familiaSelecionada.length + dependentesFamiliaSelecionada.length + 1} pessoa(s)</div>
                     </div>
                     <div className="rounded-xl bg-[#f4f7f5] p-3 text-xs text-gray-600">
                       Selecionado: <b>{selecionado.nome}</b>. Abaixo aparecem cônjuge, filhos e demais integrantes vinculados à mesma família.
@@ -367,6 +374,12 @@ export default function CarteirinhasPage() {
                           <div className="text-xs text-gray-500">
                             Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}
                           </div>
+                        </button>
+                      ))}
+                      {dependentesFamiliaSelecionada.map((d) => (
+                        <button key={`dep-${d.id}`} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); }} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{d.nome}</b>
+                          <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
                         </button>
                       ))}
                     </div>
@@ -400,7 +413,7 @@ export default function CarteirinhasPage() {
                   <div className="p-6">
                     <div className="flex gap-4"><div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
                         {dependenteSelecionado.foto_url ? <img src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
-                      </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
+                      </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
                     <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div><div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "3–4 MESES" : "5+ MESES"}</div></div></div></div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
                   </div>
                 </div>
@@ -514,7 +527,7 @@ export default function CarteirinhasPage() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
           <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
             <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
-            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div><div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "3–4 MESES" : "5+ MESES"}</div></div><div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div><div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "3–4 MESES" : "5+ MESES"}</div></div><div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
           </div>
         </div>
       )}
