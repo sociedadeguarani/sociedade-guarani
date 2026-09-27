@@ -1,227 +1,87 @@
-import { NextRequest, NextResponse } from "next/server";
-import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
+import { NextResponse } from "next/server";
+import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
-function tipoDependenteMigrado(responsavel: any, antigo: any) {
-  const contribuinte = String(responsavel?.tipo_socio || "")
-    .toLowerCase()
-    .includes("contribuinte");
+const ROLES = [
+  "administrador",
+  "administrador_normal",
+  "administrador_master",
+  "funcionario",
+];
 
-  const possuiMensalidade = Boolean(antigo?.possui_mensalidade);
-  const valor = Number(antigo?.valor_mensalidade || 0);
+export async function GET(request: Request) {
+  const auth = await requireRoles(request, ROLES);
+  if ("response" in auth) return auth.response;
 
-  // Se o dependente não possuía mensalidade no sistema antigo,
-  // mantém o dependente como isento de mensalidade.
-  if (!possuiMensalidade) {
-    return contribuinte
-      ? "dependente_contribuinte"
-      : "dependente_patrimonial";
-  }
+  try {
+    const supabase = getServiceClient();
 
-  // Mantém a modalidade que já existia no sistema antigo.
-  if (contribuinte) {
-    if (valor === 35) {
-      return "dependente_contribuinte_individual_mensalidade";
-    }
-
-    return "dependente_contribuinte_familiar_mensalidade";
-  }
-
-  if (valor === 30) {
-    return "dependente_patrimonial_individual_mensalidade";
-  }
-
-  return "dependente_patrimonial_familiar_mensalidade";
-}
-
-export async function POST(request: NextRequest) {
-  const auth = await exigirAdministrador(request);
-  if (auth.error) {
-    return NextResponse.json(
-      { error: auth.error },
-      { status: auth.status }
-    );
-  }
-
-  const db = getServiceClient();
-
-  const { data: antigos, error: antigosError } = await db
-    .from("dependentes")
-    .select("*")
-    .order("nome");
-
-  if (antigosError) {
-    return NextResponse.json(
-      { error: antigosError.message },
-      { status: 500 }
-    );
-  }
-
-  if (!antigos?.length) {
-    return NextResponse.json({
-      migrados: 0,
-      ignorados: 0,
-      mensagem: "Nenhum dependente legado para migrar.",
-    });
-  }
-
-  const { data: socios, error: sociosError } = await db
-    .from("socios")
-    .select("id,nome,tipo_socio,matricula,responsavel_id");
-
-  if (sociosError) {
-    return NextResponse.json(
-      { error: sociosError.message },
-      { status: 500 }
-    );
-  }
-
-  const porNome = new Map(
-    (socios || []).map((s: any) => [
-      String(s.nome || "").trim().toLowerCase(),
-      s,
-    ])
-  );
-
-  let migrados = 0;
-  let ignorados = 0;
-  const erros: string[] = [];
-
-  for (const antigo of antigos) {
-    const nome = String(antigo.nome || "").trim();
-
-    if (!nome || !antigo.socio_id) {
-      ignorados++;
-      continue;
-    }
-
-    const responsavel = (socios || []).find(
-      (s: any) => s.id === antigo.socio_id
-    );
-
-    if (!responsavel) {
-      ignorados++;
-      erros.push(`${nome}: responsável não encontrado`);
-      continue;
-    }
-
-    const tipoDependente = tipoDependenteMigrado(
-      responsavel,
-      antigo
-    );
-
-    const possuiMensalidade = Boolean(antigo.possui_mensalidade);
-    const valorMensalidade = Number(
-      antigo.valor_mensalidade || 0
-    );
-
-    const candidato = porNome.get(nome.toLowerCase());
-
-    const cpfAntigo = String(antigo.cpf || "").replace(/\D/g, "");
-
-    const existente =
-      candidato &&
-      (
-        candidato.responsavel_id === antigo.socio_id ||
-        (
-          !candidato.responsavel_id &&
-          cpfAntigo &&
-          String((candidato as any).cpf || "").replace(/\D/g, "") ===
-            cpfAntigo
-        )
-      )
-        ? candidato
-        : null;
-
-    // Se já existe como dependente do mesmo responsável,
-    // não cria outro registro.
-    if (existente?.responsavel_id === antigo.socio_id) {
-      ignorados++;
-      continue;
-    }
-
-    // Corrige um sócio que já existe pelo CPF/nome, mas ainda não
-    // estava vinculado ao responsável.
-    if (existente && !existente.responsavel_id) {
-      const { error } = await db
+    const [sociosResult, dependentesResult] = await Promise.all([
+      supabase
         .from("socios")
-        .update({
-          responsavel_id: antigo.socio_id,
-          parentesco: antigo.parentesco || null,
-          tipo_socio: tipoDependente,
-          categoria: "Dependente",
-          possui_mensalidade: possuiMensalidade,
-          valor_mensalidade: possuiMensalidade
-            ? valorMensalidade
-            : 0,
-          dia_vencimento: Number(
-            antigo.dia_vencimento || 10
-          ),
-          tipo_pagamento: antigo.tipo_pagamento || "pix",
-          situacao_financeira:
-            antigo.situacao_financeira ||
-            (possuiMensalidade ? "em_dia" : "isento"),
-          data_ultimo_pagamento:
-            antigo.data_ultimo_pagamento || null,
-          situacao:
-            antigo.ativo === false ? "inativo" : "ativo",
-        })
-        .eq("id", existente.id);
+        .select("id,matricula,nome,situacao,situacao_financeira")
+        .order("nome"),
+      supabase
+        .from("dependentes")
+        .select("id,socio_id,matricula,nome,cpf,data_nascimento,parentesco,telefone,whatsapp,ativo,created_at,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao_financeira,data_ultimo_pagamento")
+        .order("nome"),
+    ]);
 
-      if (error) {
-        erros.push(`${nome}: ${error.message}`);
-        continue;
+    if (sociosResult.error) throw sociosResult.error;
+    if (dependentesResult.error) throw dependentesResult.error;
+
+    const socios = sociosResult.data || [];
+    const dependentes = dependentesResult.data || [];
+
+    // O status financeiro exibido para dependentes familiares acompanha o titular.
+    const ids = socios.map((s: any) => String(s.id)).filter(Boolean);
+    const statusResponsaveis: Record<string, string> = {};
+    const hoje = new Date();
+    const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+    for (let i = 0; i < ids.length; i += 100) {
+      const lote = ids.slice(i, i + 100);
+      const { data: mensalidades, error } = await supabase
+        .from("mensalidades")
+        .select("socio_id,competencia,data_vencimento,situacao")
+        .in("socio_id", lote);
+
+      if (error) throw error;
+
+      for (const id of lote) {
+        const itens = (mensalidades || []).filter((m: any) => String(m.socio_id) === id);
+        const pendencias = new Set<string>();
+
+        for (const m of itens) {
+          const situacao = String(m.situacao || "").trim().toLowerCase();
+          if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) continue;
+
+          const base = m.competencia || m.data_vencimento;
+          if (!base) continue;
+          const texto = String(base).slice(0, 10);
+          const partes = texto.split("-").map(Number);
+          if (partes.length < 2 || !partes[0] || !partes[1]) continue;
+
+          const mes = new Date(partes[0], partes[1] - 1, 1);
+          if (mes < inicioMesAtual) {
+            pendencias.add(`${partes[0]}-${String(partes[1]).padStart(2, "0")}`);
+          }
+        }
+
+        const atraso = pendencias.size;
+        statusResponsaveis[id] = atraso <= 2 ? "em_dia" : atraso <= 4 ? "atrasado" : "muito_atrasado";
       }
-
-      migrados++;
-      continue;
     }
 
-    const { data: novo, error } = await db
-      .from("socios")
-      .insert({
-        nome,
-        cpf: antigo.cpf || null,
-        data_nascimento: antigo.data_nascimento || null,
-        telefone: antigo.telefone || null,
-        data_associacao: new Date().toISOString().slice(0, 10),
-        categoria: "Dependente",
-        situacao:
-          antigo.ativo === false ? "inativo" : "ativo",
-        tipo_socio: tipoDependente,
-        responsavel_id: antigo.socio_id,
-        parentesco: antigo.parentesco || null,
-        possui_mensalidade: possuiMensalidade,
-        valor_mensalidade: possuiMensalidade
-          ? valorMensalidade
-          : 0,
-        dia_vencimento: Number(
-          antigo.dia_vencimento || 10
-        ),
-        tipo_pagamento: antigo.tipo_pagamento || "pix",
-        situacao_financeira:
-          antigo.situacao_financeira ||
-          (possuiMensalidade ? "em_dia" : "isento"),
-        data_ultimo_pagamento:
-          antigo.data_ultimo_pagamento || null,
-      })
-      .select("id,nome,responsavel_id")
-      .single();
-
-    if (error) {
-      erros.push(`${nome}: ${error.message}`);
-      continue;
-    }
-
-    if (novo) {
-      porNome.set(nome.toLowerCase(), novo as any);
-    }
-
-    migrados++;
+    return NextResponse.json({
+      socios,
+      dependentes,
+      statusResponsaveis,
+    });
+  } catch (error) {
+    console.error("GET /api/dependentes:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro ao carregar dependentes." },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({
-    migrados,
-    ignorados,
-    erros,
-  });
 }
