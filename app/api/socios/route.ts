@@ -56,21 +56,13 @@ export async function POST(request: Request) {
     }
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
-    const base = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, COLUNAS_BASE);
-    const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
+    const dados = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, [...COLUNAS_BASE, ...COLUNAS_EXTRAS]);
+    const { data, error } = await auth.supabase.from("socios").insert(dados).select("*").single();
     if (error) {
       if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
       return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
     }
-    const extras = limparObjeto({ ...body, matricula: matricula || null, cpf: body.cpf || null }, COLUNAS_EXTRAS);
-    const avisos: string[] = [];
-    for (const [campo, valor] of Object.entries(extras)) {
-      if (campo === "foto_url" && !valor) continue;
-      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", data.id);
-      if (extraError) avisos.push(`${campo}: ${erroBanco(extraError)}`);
-    }
-    const { data: final } = await auth.supabase.from("socios").select("*").eq("id", data.id).single();
-    return NextResponse.json({ socio: final || data, avisos });
+    return NextResponse.json({ socio: data, avisos: [] });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
   }
@@ -87,14 +79,12 @@ export async function PUT(request: Request) {
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
-    const base = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, COLUNAS_BASE);
-    const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
+    const dados = limparObjeto(body, [...COLUNAS_BASE, ...COLUNAS_EXTRAS]);
+    dados.matricula = matricula || null;
+    dados.nome = nome;
+    dados.cpf = body.cpf || null;
+    const { error } = await auth.supabase.from("socios").update(dados).eq("id", id);
     if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
-    const extras = limparObjeto(body, COLUNAS_EXTRAS);
-    for (const [campo, valor] of Object.entries(extras)) {
-      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", id);
-      if (extraError) console.error(`Erro no campo ${campo}:`, extraError);
-    }
     const { data } = await auth.supabase.from("socios").select("*").eq("id", id).single();
     return NextResponse.json({ socio: data });
   } catch (error) {
