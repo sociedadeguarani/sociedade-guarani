@@ -54,16 +54,17 @@ export default function PainelPage() {
         let { data: { session } } = await supabase.auth.getSession();
         if (!session) session = (await supabase.auth.refreshSession()).data.session;
         if (!session?.access_token) return;
-        const r = await fetch("/api/socios", {
+
+        const r = await fetch("/api/socios?resumo=1", {
           headers: { Authorization: `Bearer ${session.access_token}` },
           cache: "no-store",
         });
         const j = await r.json().catch(() => ({}));
+
         if (r.ok) {
-          const lista = Array.isArray(j.socios) ? j.socios : [];
-          setTotalSocios(lista.length);
-          setSociosAtivos(lista.filter((s: any) => s.ativo !== false && String(s.situacao || "ativo").toLowerCase() !== "inativo").length);
-          setSociosInativos(lista.filter((s: any) => s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo").length);
+          setTotalSocios(Number(j.total) || 0);
+          setSociosAtivos(Number(j.ativos) || 0);
+          setSociosInativos(Number(j.inativos) || 0);
         }
       } catch {}
     })();
