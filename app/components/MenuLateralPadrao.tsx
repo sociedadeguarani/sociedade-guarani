@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Home,
@@ -31,10 +31,10 @@ type ItemMenu = {
   nome: string;
   rota: string;
   icone: typeof Home;
-  perfis: Perfil[];
+  perfis: readonly Perfil[];
 };
 
-const ITENS_MENU: ItemMenu[] = [
+const ITENS_MENU: readonly ItemMenu[] = [
   {
     nome: "Início",
     rota: "/painel",
@@ -51,12 +51,7 @@ const ITENS_MENU: ItemMenu[] = [
     nome: "Avisos",
     rota: "/avisos",
     icone: Megaphone,
-    perfis: [
-      "associado",
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Minhas mensalidades",
@@ -68,83 +63,49 @@ const ITENS_MENU: ItemMenu[] = [
     nome: "Reservas",
     rota: "/reservas",
     icone: CalendarDays,
-    perfis: [
-      "associado",
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Eventos",
     rota: "/eventos",
     icone: PartyPopper,
-    perfis: [
-      "associado",
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Convites",
     rota: "/convites",
     icone: Ticket,
-    perfis: [
-      "associado",
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Carteirinhas",
     rota: "/carteirinhas",
     icone: CreditCard,
-    perfis: [
-      "associado",
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Sócios",
     rota: "/socios",
     icone: Users,
-    perfis: [
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Dependentes",
     rota: "/dependentes",
     icone: UsersRound,
-    perfis: [
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Mensalidades",
     rota: "/mensalidades",
     icone: Wallet,
-    perfis: [
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Financeiro",
     rota: "/financeiro",
     icone: Wallet,
-    perfis: [
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Inventário",
@@ -161,20 +122,13 @@ const ITENS_MENU: ItemMenu[] = [
     nome: "Acessos",
     rota: "/acessos",
     icone: DoorOpen,
-    perfis: [
-      "funcionario",
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Relatórios",
     rota: "/relatorios",
     icone: BarChart3,
-    perfis: [
-      "administrador",
-      "administrador_master",
-    ],
+    perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Usuários",
@@ -182,33 +136,32 @@ const ITENS_MENU: ItemMenu[] = [
     icone: UserCog,
     perfis: ["administrador_master"],
   },
-];
+] as const;
 
-function normalizarPerfil(perfil: string): Perfil {
-  const valor = perfil.trim().toLowerCase();
+function normalizarPerfil(value: unknown): Perfil {
+  const perfil = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
-  if (
-    valor === "administrador_master" ||
-    valor === "master"
-  ) {
+  if (perfil === "administrador_master" || perfil === "master") {
     return "administrador_master";
   }
 
   if (
-    valor === "administrador" ||
-    valor === "admin"
+    perfil === "administrador" ||
+    perfil === "admin" ||
+    perfil === "administrador_normal"
   ) {
     return "administrador";
   }
 
-  if (valor === "funcionario_inventario") {
+  if (perfil === "funcionario_inventario") {
     return "funcionario_inventario";
   }
 
-  if (
-    valor === "funcionario" ||
-    valor === "funcionário"
-  ) {
+  if (perfil === "funcionario") {
     return "funcionario";
   }
 
@@ -217,17 +170,15 @@ function normalizarPerfil(perfil: string): Perfil {
 
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
-  const [perfil, setPerfil] = useState("");
+  const [perfil, setPerfil] = useState<Perfil>("associado");
   const [abertoMobile, setAbertoMobile] = useState(false);
 
   useEffect(() => {
     try {
-      const perfilSalvo =
-        window.localStorage.getItem("guarani_usuario_perfil") || "";
-
-      setPerfil(perfilSalvo);
+      const valor = window.localStorage.getItem("guarani_usuario_perfil");
+      setPerfil(normalizarPerfil(valor));
     } catch {
-      setPerfil("");
+      setPerfil("associado");
     }
   }, []);
 
@@ -235,14 +186,13 @@ export default function MenuLateralPadrao() {
     setAbertoMobile(false);
   }, [pathname]);
 
-  const perfilNormalizado = normalizarPerfil(perfil);
-
-  const itensVisiveis =
-    perfilNormalizado === "administrador_master"
-      ? ITENS_MENU
-      : ITENS_MENU.filter((item) =>
-          item.perfis.includes(perfilNormalizado)
-        );
+  const itensVisiveis = useMemo(
+    () =>
+      ITENS_MENU.filter((item) =>
+        item.perfis.includes(perfil)
+      ),
+    [perfil]
+  );
 
   function irPara(rota: string) {
     if (pathname !== rota) {
@@ -276,7 +226,7 @@ export default function MenuLateralPadrao() {
               }`}
             >
               <Icone className="h-[18px] w-[18px] shrink-0" />
-              {item.nome}
+              <span className="min-w-0 truncate">{item.nome}</span>
             </button>
           );
         })}
@@ -287,7 +237,6 @@ export default function MenuLateralPadrao() {
           <p className="text-[11px] font-bold text-[#705c00]">
             SOCIEDADE GUARANI
           </p>
-
           <p className="mt-1 text-xs text-[#574900]">
             Tradição que une pessoas!
           </p>
