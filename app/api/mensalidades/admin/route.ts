@@ -280,6 +280,7 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
+    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -301,6 +302,10 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
+    }
+
+    if (socioId) {
+      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
