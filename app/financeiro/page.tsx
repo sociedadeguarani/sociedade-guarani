@@ -138,12 +138,6 @@ function vencimentoCompetencia(competencia: string, dia: number) {
   return `${competencia}-${String(seguro).padStart(2, "0")}`;
 }
 
-function diferencaMeses(inicio: string, fim: string) {
-  const [a1, m1] = inicio.slice(0, 7).split("-").map(Number);
-  const [a2, m2] = fim.slice(0, 7).split("-").map(Number);
-  return (a2 - a1) * 12 + (m2 - m1);
-}
-
 function situacaoRotulo(situacao: string | null | undefined) {
   if (situacao === "pago") return "Pago";
   if (situacao === "isento") return "Isento";
@@ -261,7 +255,15 @@ export default function FinanceiroPage() {
   const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map<string, string>(socios.map((s) => [s.id, s.nome] as [string, string]));
+    const responsaveis = new Map<string, Socio>(
+      socios.map((s) => [s.id, s] as [string, Socio])
+    );
+    const cpfsSociosDependentes = new Set(
+      socios
+        .filter((s) => Boolean(s.responsavel_id) && s.cpf)
+        .map((s) => s.cpf!.replace(/\D/g, ""))
+        .filter(Boolean)
+    );
     const resultado: PessoaFinanceira[] = [];
 
     for (const s of socios) {
@@ -277,7 +279,7 @@ export default function FinanceiroPage() {
         cpf: s.cpf,
         foto_url: s.foto_url,
         responsavel_nome: s.responsavel_id
-          ? responsaveis.get(s.responsavel_id) || null
+          ? responsaveis.get(s.responsavel_id)?.nome || null
           : null,
         possui_mensalidade: true,
         valor_mensalidade: Number(s.valor_mensalidade || 0),
@@ -289,17 +291,14 @@ export default function FinanceiroPage() {
     for (const d of dependentes) {
       if (d.ativo === false || !d.possui_mensalidade) continue;
 
-      const responsavel = socios.find((s) => s.id === d.socio_id);
+      const responsavel = responsaveis.get(d.socio_id);
 
       // Evita duplicação quando o mesmo dependente já estiver
       // cadastrado também na tabela socios com a mesma pessoa.
-      const duplicado = socios.some(
-        (s) =>
-          s.id !== d.socio_id &&
-          Boolean(s.responsavel_id) &&
-          d.cpf &&
-          s.cpf &&
-          s.cpf.replace(/\D/g, "") === d.cpf.replace(/\D/g, "")
+      const cpfDependente = d.cpf?.replace(/\D/g, "");
+      const duplicado = Boolean(
+        cpfDependente &&
+          cpfsSociosDependentes.has(cpfDependente)
       );
 
       if (duplicado) continue;
@@ -400,28 +399,36 @@ export default function FinanceiroPage() {
     [mensalidades, competencia]
   );
 
-  const historicoPorPessoa = useMemo(() => {
-    const map = new Map<string, number>();
-
+  const lancamentosPorPessoa = useMemo(() => {
+    const map = new Map<string, Mensalidade[]>();
     for (const m of mensalidades) {
-      if (m.situacao === "pago" || m.situacao === "isento") continue;
-
-      const vencida =
-        m.situacao === "em_atraso" ||
-        (m.data_vencimento &&
-          m.data_vencimento.slice(0, 10) < new Date().toISOString().slice(0, 10));
-
-      if (!vencida) continue;
-
       const chave = m.dependente_id
         ? `dependente:${m.dependente_id}`
         : `socio:${m.socio_id}`;
+      const lista = map.get(chave);
+      if (lista) lista.push(m);
+      else map.set(chave, [m]);
+    }
+    return map;
+  }, [mensalidades]);
 
-      map.set(chave, (map.get(chave) || 0) + 1);
+  const historicoPorPessoa = useMemo(() => {
+    const map = new Map<string, number>();
+    const hojeIso = new Date().toISOString().slice(0, 10);
+
+    for (const [chave, lancamentos] of lancamentosPorPessoa) {
+      const atrasadas = lancamentos.filter((m) => {
+        if (m.situacao === "pago" || m.situacao === "isento") return false;
+        return Boolean(
+          m.situacao === "em_atraso" ||
+            (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso)
+        );
+      }).length;
+      if (atrasadas > 0) map.set(chave, atrasadas);
     }
 
     return map;
-  }, [mensalidades]);
+  }, [lancamentosPorPessoa]);
 
   const atrasoPessoas = useMemo(() => {
     return pessoas
@@ -442,24 +449,14 @@ export default function FinanceiroPage() {
 
     return atrasoPessoas
       .map((x) => {
-        const lancamentos = mensalidades
+        const hojeIso = new Date().toISOString().slice(0, 10);
+        const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || [])
           .filter((m) => {
-            const chave = m.dependente_id
-              ? `dependente:${m.dependente_id}`
-              : `socio:${m.socio_id}`;
-
-            if (chave !== x.pessoa.chave) return false;
             if (m.situacao === "pago" || m.situacao === "isento") return false;
-
-            const vencida =
+            return Boolean(
               m.situacao === "em_atraso" ||
-              Boolean(
-                m.data_vencimento &&
-                  m.data_vencimento.slice(0, 10) <
-                    new Date().toISOString().slice(0, 10)
-              );
-
-            return vencida;
+                (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso)
+            );
           })
           .sort((a, b) =>
             String(b.competencia || "").localeCompare(
@@ -491,7 +488,7 @@ export default function FinanceiroPage() {
         };
       })
       .filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, mensalidades, busca]);
+  }, [atrasoPessoas, busca, lancamentosPorPessoa]);
 
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -527,7 +524,6 @@ export default function FinanceiroPage() {
     busca,
     filtroAtraso,
     historicoPorPessoa,
-    pessoas,
   ]);
 
   const totalLancado = mensalidadesCompetencia.reduce(
@@ -655,8 +651,9 @@ export default function FinanceiroPage() {
       return;
     }
 
+    const idsSet = new Set(ids);
     setMensalidades((lista) =>
-      lista.map((m) => (ids.includes(m.id) ? { ...m, situacao: "em_atraso" } : m))
+      lista.map((m) => (idsSet.has(m.id) ? { ...m, situacao: "em_atraso" } : m))
     );
   }
 
@@ -1132,23 +1129,46 @@ export default function FinanceiroPage() {
     window.open(data.signedUrl, "_blank");
   }
 
-  const saldoConta = (conta: ContaBancaria) => {
-    const movimentos = movimentosFinanceiros.filter((m) => m.conta_bancaria_id === conta.id);
-    let saldo = Number(conta.saldo_inicial || 0);
-    for (const m of movimentos) {
-      if (m.tipo === "entrada") saldo += Number(m.valor || 0);
-      else if (m.tipo === "saida") saldo -= Number(m.valor || 0);
-      else if (m.tipo === "transferencia") {
-        saldo -= Number(m.valor || 0);
+  const saldosPorConta = useMemo(() => {
+    const saldos = new Map<string, number>(
+      contasBancarias.map((c) => [c.id, Number(c.saldo_inicial || 0)])
+    );
+
+    for (const m of movimentosFinanceiros) {
+      const valor = Number(m.valor || 0);
+      if (m.tipo === "transferencia") {
+        saldos.set(
+          m.conta_bancaria_id,
+          (saldos.get(m.conta_bancaria_id) || 0) - valor
+        );
+        if (m.conta_destino_id) {
+          saldos.set(
+            m.conta_destino_id,
+            (saldos.get(m.conta_destino_id) || 0) + valor
+          );
+        }
+      } else if (m.tipo === "entrada") {
+        saldos.set(
+          m.conta_bancaria_id,
+          (saldos.get(m.conta_bancaria_id) || 0) + valor
+        );
+      } else if (m.tipo === "saida") {
+        saldos.set(
+          m.conta_bancaria_id,
+          (saldos.get(m.conta_bancaria_id) || 0) - valor
+        );
       }
     }
-    saldo += movimentosFinanceiros
-      .filter((m) => m.tipo === "transferencia" && m.conta_destino_id === conta.id)
-      .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-    return saldo;
-  };
 
-  const saldoTotalBancos = contasBancarias.reduce((sum, c) => sum + saldoConta(c), 0);
+    return saldos;
+  }, [contasBancarias, movimentosFinanceiros]);
+
+  const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
+
+  const saldoTotalBancos = useMemo(
+    () => Array.from(saldosPorConta.values()).reduce((sum: number, saldo: number) => sum + saldo, 0),
+    [saldosPorConta]
+  );
 
   const movimentosFluxo = useMemo(() => {
     return movimentosFinanceiros.filter((m) => {
