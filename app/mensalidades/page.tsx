@@ -871,6 +871,24 @@ const selecionadasBaixa = useMemo(
                 </select>
               </label>
 
+              <label className="min-w-[220px] flex-1">
+                <span className="text-sm font-bold text-gray-600">Mês da competência exibida</span>
+                <select
+                  value={mes}
+                  onChange={(e) => setMes(Number(e.target.value))}
+                  className="mt-2 w-full rounded-xl border p-3 font-bold"
+                >
+                  {[
+                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+                  ].map((nomeMes, i) => (
+                    <option key={nomeMes} value={i + 1}>
+                      {String(i + 1).padStart(2, "0")} — {nomeMes}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <div className="rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
                 <span className="text-gray-500">Visualizando:</span>{" "}
                 <b className="text-[#005a3c]">
@@ -901,9 +919,21 @@ const selecionadasBaixa = useMemo(
                 const disponivel = mesDisponivelParaGeracao(numero);
                 const marcado = mesesParaGerar.includes(numero);
                 return (
-                  <label key={nomeMes} className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${marcado ? "border-[#005a3c] bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}>
-                    <input type="checkbox" checked={marcado} disabled={!disponivel} onChange={() => alternarMesGeracao(numero)} />
-                    {nomeMes}
+                  <label
+                    key={nomeMes}
+                    onClick={() => setMes(numero)}
+                    title={`Clique para visualizar ${nomeMes} ${ano}. A caixa de seleção serve para gerar.`}
+                    className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${mes === numero ? "border-[#005a3c] ring-2 ring-[#005a3c]/20" : ""} ${marcado ? "bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={marcado}
+                      disabled={!disponivel}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => alternarMesGeracao(numero)}
+                    />
+                    <span className="flex-1">{nomeMes}</span>
+                    {mes === numero && <span className="text-[10px] uppercase tracking-wide text-[#005a3c]">Exibindo</span>}
                   </label>
                 );
               })}
