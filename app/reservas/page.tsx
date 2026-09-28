@@ -157,7 +157,16 @@ export default function ReservasPage() {
           // A mesma fonte usada pelas Carteirinhas. Isso evita que uma RLS
           // ou diferença de consulta esconda os dependentes nesta página.
           try {
-            const resposta = await fetch("/api/carteirinhas", { cache: "no-store" });
+            // A API das carteirinhas valida o perfil pelo token do Supabase.
+            // Enviamos o token aqui para que Master e Funcionário tenham a
+            // mesma consulta privilegiada que o Administrador.
+            const { data: { session } } = await supabase.auth.getSession();
+            const resposta = await fetch("/api/carteirinhas", {
+              cache: "no-store",
+              headers: session?.access_token
+                ? { Authorization: `Bearer ${session.access_token}` }
+                : undefined,
+            });
             const dados = await resposta.json().catch(() => ({}));
             if (resposta.ok && Array.isArray(dados?.dependentes)) {
               const dependentesApi = dados.dependentes
