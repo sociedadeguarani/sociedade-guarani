@@ -148,12 +148,16 @@ export default function ReservasPage() {
         try {
           const [sociosResult, dependentesResult] = await Promise.all([
             supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
-            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").eq("ativo", true).order("nome", { ascending: true }),
+            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").order("nome", { ascending: true }),
           ]);
+          if (sociosResult.error) throw sociosResult.error;
+          if (dependentesResult.error) throw dependentesResult.error;
           setSocios(sociosResult.data || []);
-          setDependentes((dependentesResult.data || []) as DependenteReserva[]);
-        } catch {
+          setDependentes((dependentesResult.data || []).filter((d: DependenteReserva) => d.ativo !== false) as DependenteReserva[]);
+        } catch (error) {
+          console.error("Erro ao carregar titulares/dependentes para reservas:", error);
           setSocios([]);
+          setDependentes([]);
         }
       })();
     }
@@ -449,10 +453,33 @@ export default function ReservasPage() {
       .slice(0, 12);
   }, [socios, buscaSocio]);
 
-  const dependentesDoSocio = useMemo(
-    () => dependentes.filter((d) => String(d.socio_id) === String(socioId)),
-    [dependentes, socioId]
-  );
+  const dependentesDoSocio = useMemo(() => {
+    if (!socioId) return [];
+
+    const titular = socios.find((s) => String(s.id) === String(socioId));
+    const matricula = String(titular?.matricula ?? "").trim().toUpperCase();
+    const baseFamiliar = matricula.endsWith("A") ? matricula.slice(0, -1) : matricula;
+
+    // Primeiro usa o vínculo direto pelo socio_id.
+    const diretos = dependentes.filter((d) => String(d.socio_id) === String(socioId));
+
+    // Fallback importante: as matrículas familiares seguem A/B/C/D...
+    // Assim, mesmo que algum vínculo antigo esteja diferente, SD0056B/C/D
+    // continua aparecendo para o titular SD0056A.
+    const porMatricula = baseFamiliar
+      ? dependentes.filter((d) => {
+          const m = String(d.matricula ?? "").trim().toUpperCase();
+          return m.startsWith(baseFamiliar) && m !== matricula && /[A-Z]$/.test(m);
+        })
+      : [];
+
+    const unicos = new Map<string, DependenteReserva>();
+    [...diretos, ...porMatricula].forEach((d) => unicos.set(String(d.id), d));
+
+    return Array.from(unicos.values()).sort((a, b) =>
+      String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true })
+    );
+  }, [dependentes, socios, socioId]);
 
   function selecionarDependente(id: string) {
     setDependenteId(id);
@@ -594,8 +621,7 @@ export default function ReservasPage() {
                             <span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}{dependenteId ? " · Dependente" : " · Titular"}</span>
                             <button type="button" onClick={() => { setSocioId(""); setDependenteId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button>
                           </div>
-                          {dependentesDoSocio.length > 0 && (
-                            <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-white p-3">
+                          <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-white p-3">
                               <label className="block text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">Reservar para</label>
                               <select
                                 value={dependenteId}
@@ -609,9 +635,12 @@ export default function ReservasPage() {
                                   </option>
                                 ))}
                               </select>
-                              <p className="mt-2 text-xs text-gray-500">A reserva continua vinculada ao titular da família, mas fica registrada no nome e na matrícula da pessoa escolhida.</p>
+                              {dependentesDoSocio.length > 0 ? (
+                                <p className="mt-2 text-xs text-gray-500">A reserva continua vinculada ao titular da família, mas fica registrada no nome e na matrícula da pessoa escolhida.</p>
+                              ) : (
+                                <p className="mt-2 text-xs text-gray-500">Nenhum dependente ativo foi encontrado para esta família.</p>
+                              )}
                             </div>
-                          )}
                         </>
                       )}
                     </div>
