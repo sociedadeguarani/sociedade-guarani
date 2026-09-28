@@ -206,9 +206,8 @@ export default function DependentesPage() {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
-        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil === "admin" ? "administrador" :
         perfil
       );
     } catch {}
