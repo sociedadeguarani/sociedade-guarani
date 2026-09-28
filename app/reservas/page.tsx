@@ -160,19 +160,24 @@ export default function ReservasPage() {
             const resposta = await fetch("/api/carteirinhas", { cache: "no-store" });
             const dados = await resposta.json().catch(() => ({}));
             if (resposta.ok && Array.isArray(dados?.dependentes)) {
-              setDependentes(
-                dados.dependentes
-                  .filter((d: DependenteReserva) => d.ativo !== false)
-                  .map((d: any) => ({
-                    id: String(d.id),
-                    socio_id: String(d.socio_id),
-                    matricula: d.matricula ?? null,
-                    nome: d.nome,
-                    parentesco: d.parentesco ?? null,
-                    ativo: d.ativo !== false,
-                  }))
-              );
-              return;
+              const dependentesApi = dados.dependentes
+                .filter((d: DependenteReserva) => d.ativo !== false)
+                .map((d: any) => ({
+                  id: String(d.id),
+                  socio_id: String(d.socio_id),
+                  matricula: d.matricula ?? null,
+                  nome: d.nome,
+                  parentesco: d.parentesco ?? null,
+                  ativo: d.ativo !== false,
+                }));
+
+              // Só encerra aqui quando a API realmente trouxe dependentes.
+              // Se vier vazia, consulta a tabela diretamente para evitar que
+              // uma resposta vazia da API esconda a família na Reserva.
+              if (dependentesApi.length > 0) {
+                setDependentes(dependentesApi);
+                return;
+              }
             }
           } catch (apiError) {
             console.warn("Não foi possível carregar dependentes pela API das carteirinhas:", apiError);
@@ -499,28 +504,43 @@ export default function ReservasPage() {
   const dependentesDoSocio = useMemo(() => {
     if (!socioId) return [];
 
-    const titular = socios.find((s) => String(s.id) === String(socioId));
-    const matricula = String(titular?.matricula ?? "").trim().toUpperCase();
-    const baseFamiliar = matricula.endsWith("A") ? matricula.slice(0, -1) : matricula;
+    const socioSelecionado = socios.find((s) => String(s.id) === String(socioId));
+    const matriculaSelecionada = String(socioSelecionado?.matricula ?? "").trim().toUpperCase();
 
-    // Primeiro usa o vínculo direto pelo socio_id.
-    const diretos = dependentes.filter((d) => String(d.socio_id) === String(socioId));
+    // A família é definida pela matrícula: A = responsável da família,
+    // B/C/D... = familiares. Isso também funciona quando o sócio selecionado
+    // é um SD...A que possui como responsável outro sócio (ex.: SP0134A).
+    const baseFamiliar = matriculaSelecionada
+      ? matriculaSelecionada.replace(/[A-Z]$/, "")
+      : "";
 
-    // Fallback importante: as matrículas familiares seguem A/B/C/D...
-    // Assim, mesmo que algum vínculo antigo esteja diferente, SD0056B/C/D
-    // continua aparecendo para o titular SD0056A.
     const porMatricula = baseFamiliar
       ? dependentes.filter((d) => {
-          const m = String(d.matricula ?? "").trim().toUpperCase();
-          return m.startsWith(baseFamiliar) && m !== matricula && /[A-Z]$/.test(m);
+          const matriculaDependente = String(d.matricula ?? "").trim().toUpperCase();
+          return (
+            matriculaDependente.startsWith(baseFamiliar) &&
+            matriculaDependente !== matriculaSelecionada &&
+            /^[A-Z]$/.test(matriculaDependente.slice(-1))
+          );
         })
       : [];
 
+    // Também inclui vínculo direto pelo socio_id, caso exista.
+    const diretos = dependentes.filter(
+      (d) => String(d.socio_id) === String(socioId)
+    );
+
     const unicos = new Map<string, DependenteReserva>();
-    [...diretos, ...porMatricula].forEach((d) => unicos.set(String(d.id), d));
+    [...diretos, ...porMatricula].forEach((d) =>
+      unicos.set(String(d.id), d)
+    );
 
     return Array.from(unicos.values()).sort((a, b) =>
-      String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true })
+      String(a.matricula ?? a.nome).localeCompare(
+        String(b.matricula ?? b.nome),
+        "pt-BR",
+        { numeric: true }
+      )
     );
   }, [dependentes, socios, socioId]);
 
