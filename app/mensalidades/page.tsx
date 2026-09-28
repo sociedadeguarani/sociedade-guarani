@@ -192,6 +192,55 @@ export default function Page() {
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
+  const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
+
+  const selecionadasBaixa = useMemo(
+    () =>
+      linhasExibicao.filter(
+        (item) =>
+          sel.includes(item.id) &&
+          item.situacao !== "pago" &&
+          item.situacao !== "nao_gerada"
+      ),
+    [linhasExibicao, sel]
+  );
+
+  const resumoBaixa = useMemo(() => {
+    const porConta = new Map<string, { nome: string; banco?: string | null; quantidade: number; valor: number }>();
+    let receita = 0;
+    let tarifas = 0;
+    let totalCobrado = 0;
+
+    for (const item of selecionadasBaixa) {
+      const socio = socioPorId.get(String(item.socio_id));
+      const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id || "";
+      const conta = contas.find((c) => String(c.id) === String(contaId));
+      const nomeConta = conta?.nome || "Conta não identificada";
+      const chave = String(contaId || nomeConta);
+
+      receita += Number(item.valor_base ?? item.valor ?? 0);
+      tarifas += Number(item.tarifa_pagamento ?? 0);
+      totalCobrado += Number(item.total_cobrado ?? item.valor_base ?? item.valor ?? 0);
+
+      const atual = porConta.get(chave) || {
+        nome: nomeConta,
+        banco: conta?.banco,
+        quantidade: 0,
+        valor: 0,
+      };
+      atual.quantidade += 1;
+      atual.valor += Number(item.valor_base ?? item.valor ?? 0);
+      porConta.set(chave, atual);
+    }
+
+    return {
+      quantidade: selecionadasBaixa.length,
+      receita,
+      tarifas,
+      totalCobrado,
+      contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
+    };
+  }, [selecionadasBaixa, socioPorId, contas]);
 
   async function h() {
     const {
@@ -396,6 +445,21 @@ export default function Page() {
       return bateBusca && bateCobranca;
     });
   }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
+
+  async function confirmarBaixaSelecionadas() {
+    if (selecionadasBaixa.length === 0) {
+      setErro("Selecione ao menos uma mensalidade em aberto para baixar.");
+      return;
+    }
+
+    setAbrirConfirmacaoBaixa(false);
+
+    await post({
+      acao: "baixar",
+      ids: selecionadasBaixa.map((item) => item.id),
+      data_pagamento: new Date().toISOString().slice(0, 10),
+    });
+  }
 
   async function post(body: any) {
     setErro("");
@@ -857,17 +921,11 @@ export default function Page() {
 
                 <button
                   type="button"
-                  disabled={!sel.length}
-                  onClick={() =>
-                    void post({
-                      acao: "baixar",
-                      ids: sel,
-                      data_pagamento: new Date().toISOString().slice(0, 10),
-                    })
-                  }
+                  disabled={!selecionadasBaixa.length}
+                  onClick={() => setAbrirConfirmacaoBaixa(true)}
                   className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
                 >
-                  💰 Baixar selecionadas ({sel.length})
+                  💰 Baixar selecionadas ({selecionadasBaixa.length})
                 </button>
               </div>
             </div>
@@ -877,14 +935,15 @@ export default function Page() {
                 {selGeracao.length > 0 && (
                   <span>⚡ {selGeracao.length} para gerar</span>
                 )}
-                {sel.length > 0 && (
-                  <span>💰 {sel.length} para baixar</span>
+                {selecionadasBaixa.length > 0 && (
+                  <span>💰 {selecionadasBaixa.length} para baixar</span>
                 )}
                 <button
                   type="button"
                   onClick={() => {
                     setSel([]);
                     setSelGeracao([]);
+                    setAbrirConfirmacaoBaixa(false);
                   }}
                   className="ml-auto text-xs font-bold underline"
                 >
@@ -930,16 +989,21 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
+                            disabled={x.situacao === "pago"}
                             checked={
                               x.situacao === "nao_gerada"
                                 ? selGeracao.includes(String(x.socio_id))
-                                : sel.includes(x.id)
+                                : x.situacao === "pago"
+                                  ? false
+                                  : sel.includes(x.id)
                             }
                             onChange={() => {
                               if (x.situacao === "nao_gerada") {
                                 alternarGeracaoSocio(String(x.socio_id));
                                 return;
                               }
+
+                              if (x.situacao === "pago") return;
 
                               setSel((s) =>
                                 s.includes(x.id)
@@ -1261,6 +1325,120 @@ export default function Page() {
             <div className="mt-5 flex justify-end gap-3">
               <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40">Cancelar</button>
               <button type="button" onClick={() => void confirmarGeracao()} disabled={confirmandoGeracao || previas.every((p) => p.quantidade_nova === 0)} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração dos meses"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abrirConfirmacaoBaixa && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAbrirConfirmacaoBaixa(false);
+          }}
+        >
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b p-5">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">
+                  Confirmar baixa
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Confira os lançamentos antes de registrar no Financeiro.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAbrirConfirmacaoBaixa(false)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl bg-[#eef7f2] p-3">
+                  <p className="text-xs font-bold text-gray-500">Mensalidades</p>
+                  <p className="mt-1 text-xl font-black text-[#005a3c]">{resumoBaixa.quantidade}</p>
+                </div>
+                <div className="rounded-xl bg-[#eef7f2] p-3">
+                  <p className="text-xs font-bold text-gray-500">Receita</p>
+                  <p className="mt-1 text-lg font-black text-[#005a3c]">{moeda(resumoBaixa.receita)}</p>
+                </div>
+                <div className="rounded-xl bg-[#fff8e6] p-3">
+                  <p className="text-xs font-bold text-gray-500">Tarifas</p>
+                  <p className="mt-1 text-lg font-black text-amber-700">{moeda(resumoBaixa.tarifas)}</p>
+                </div>
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-xs font-bold text-gray-500">Total cobrado</p>
+                  <p className="mt-1 text-lg font-black text-gray-800">{moeda(resumoBaixa.totalCobrado)}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border">
+                <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Contas de destino</div>
+                <div className="divide-y">
+                  {resumoBaixa.contas.map((conta) => (
+                    <div key={`${conta.nome}-${conta.banco || ""}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                      <div>
+                        <p className="font-bold">{conta.nome}</p>
+                        {conta.banco && <p className="text-xs text-gray-500">{conta.banco}</p>}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-black text-[#005a3c]">{moeda(conta.valor)}</p>
+                        <p className="text-xs text-gray-500">{conta.quantidade} mensalidade(s)</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto rounded-xl border">
+                <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Associados selecionados</div>
+                <div className="divide-y">
+                  {selecionadasBaixa.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-bold">
+                          {item.socio?.nome || socioPorId.get(String(item.socio_id))?.nome || "Associado"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {item.socio?.matricula || socioPorId.get(String(item.socio_id))?.matricula || "Sem matrícula"}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-black">
+                        {moeda(Number(item.valor_base ?? item.valor ?? 0))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800">
+                A baixa registra a receita da mensalidade no Financeiro e,
+                quando houver, a tarifa bancária separadamente. Mensalidades
+                já pagas não entram nesta operação.
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t bg-gray-50 p-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setAbrirConfirmacaoBaixa(false)}
+                className="rounded-xl border bg-white px-5 py-3 font-bold text-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!selecionadasBaixa.length}
+                onClick={() => void confirmarBaixaSelecionadas()}
+                className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-40"
+              >
+                Confirmar baixa no Financeiro
+              </button>
             </div>
           </div>
         </div>
