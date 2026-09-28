@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,9 +11,7 @@ const supabase = createClient(
 
 type Socio = {
   id: string;
-  matricula: string | null;
-  numero_titulo: number | null;
-  numero_debitos_referencia: number | null;
+  matricula: number | null;
   nome: string;
   cpf: string | null;
   rg: string | null;
@@ -103,9 +100,6 @@ const socioInicial: Partial<Socio> = {
   situacao: "ativo",
   observacoes: "",
   foto_url: "",
-  matricula: "",
-  numero_titulo: null,
-  numero_debitos_referencia: null,
 
   tipo_socio: "patrimonial_individual",
   responsavel_id: null,
@@ -251,6 +245,7 @@ function tipoSocioClasse(tipo?: string | null) {
 export default function Home() {
   const [menu, setMenu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
+  const [usuarioEmail, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
@@ -267,25 +262,6 @@ export default function Home() {
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
   const [perfilUsuario, setPerfilUsuario] = useState("");
   const somenteConsulta = perfilUsuario === "funcionario";
-
-  const sociosPorId = useMemo(() => {
-    const mapa = new Map<string, Socio>();
-    socios.forEach((socio) => mapa.set(socio.id, socio));
-    return mapa;
-  }, [socios]);
-
-  const filhosPorResponsavel = useMemo(() => {
-    const mapa = new Map<string, Socio[]>();
-    socios.forEach((socio) => {
-      if (!socio.responsavel_id) return;
-      const lista = mapa.get(socio.responsavel_id) || [];
-      lista.push(socio);
-      mapa.set(socio.responsavel_id, lista);
-    });
-    return mapa;
-  }, [socios]);
-
-  const responsaveisIds = useMemo(() => new Set(filhosPorResponsavel.keys()), [filhosPorResponsavel]);
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
@@ -316,9 +292,8 @@ export default function Home() {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
-        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil === "admin" ? "administrador" :
         perfil
       );
     } catch {}
@@ -338,6 +313,7 @@ export default function Home() {
       }
 
       if (montado) {
+        setUsuarioEmail(session.user.email || "");
         setVerificandoLogin(false);
       }
     }
@@ -350,6 +326,7 @@ export default function Home() {
       if (!session) {
         window.location.replace("/login");
       } else if (montado) {
+        setUsuarioEmail(session.user.email || "");
       }
     });
 
@@ -358,6 +335,11 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
+
+  async function sair() {
+    await supabase.auth.signOut();
+    window.location.replace("/login");
+  }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
@@ -385,7 +367,6 @@ export default function Home() {
             item.data_vencimento < hoje
         )
         .map((item) => item.id);
-      const idsParaAtrasoSet = new Set(idsParaAtraso);
 
       if (idsParaAtraso.length > 0) {
         await supabase
@@ -394,7 +375,7 @@ export default function Home() {
           .in("id", idsParaAtraso);
 
         itens.forEach((item) => {
-          if (idsParaAtrasoSet.has(item.id)) item.situacao = "em_atraso";
+          if (idsParaAtraso.includes(item.id)) item.situacao = "em_atraso";
         });
       }
 
@@ -774,7 +755,7 @@ export default function Home() {
   function editarSocio(socio: Socio) {
     if (somenteConsulta) return;
     setSocioEditando(socio);
-    setBuscaResponsavel(socio.responsavel_id ? (sociosPorId.get(socio.responsavel_id)?.nome || "") : "");
+    setBuscaResponsavel(socio.responsavel_id ? (socios.find((p) => p.id === socio.responsavel_id)?.nome || "") : "");
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
     setFotoArquivo(null);
     setAbrirCadastro(true);
@@ -835,9 +816,6 @@ export default function Home() {
     setMensagem("");
 
     const dadosBase = {
-      matricula: String(form.matricula || "").trim().toUpperCase() || null,
-      numero_titulo: form.numero_titulo == null ? null : Number(form.numero_titulo),
-      numero_debitos_referencia: form.numero_debitos_referencia == null ? null : Number(form.numero_debitos_referencia),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -1008,7 +986,54 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
-      <CabecalhoPadrao />
+      {/* CABEÇALHO */}
+      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
+        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
+
+          <div className="flex items-center gap-4">
+
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
+              <img
+                src="/logo-guarani.png"
+                alt="Sociedade Guarani"
+                className="h-full w-full object-contain"
+              />
+            </div>
+
+            <div>
+              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
+                SOCIEDADE GUARANI
+              </h1>
+
+              <p className="text-xs font-medium text-[#6b7d74]">
+                Sociedade Recreativa Guarani — S.R.G.
+              </p>
+            </div>
+
+          </div>
+
+          <div className="hidden items-center gap-4 sm:flex">
+            <div className="text-right">
+              <p className="text-xs text-gray-500">
+                {usuarioEmail || "Usuário autenticado"}
+              </p>
+
+              <p className="font-bold text-[#005a3c]">
+                Área Administrativa
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={sair}
+              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
+            >
+              Sair
+            </button>
+          </div>
+
+        </div>
+      </header>
 
       <div className="flex min-h-[calc(100vh-80px)]">
 
@@ -1036,7 +1061,6 @@ export default function Home() {
               setBusca={setBusca}
               novoSocio={novoSocio}
               novoDependente={novoDependente}
-              sociosPorId={sociosPorId}
               editarSocio={editarSocio}
               excluirSocio={excluirSocio}
               carregando={carregando}
@@ -1120,7 +1144,7 @@ export default function Home() {
 
       {abrirPagamento && mensalidadePagamento && (
         <ModalPagamentoGuarani
-          socio={sociosPorId.get(mensalidadePagamento.socio_id) || null}
+          socio={socios.find((s) => s.id === mensalidadePagamento.socio_id) || null}
           mensalidade={mensalidadePagamento}
           form={pagamentoForm}
           setForm={setPagamentoForm}
@@ -1138,7 +1162,7 @@ export default function Home() {
 
       {reciboMensalidade && (
         <ReciboPagamentoGuarani
-          socio={sociosPorId.get(reciboMensalidade.socio_id) || null}
+          socio={socios.find((s) => s.id === reciboMensalidade.socio_id) || null}
           mensalidade={reciboMensalidade}
           fechar={() => setReciboMensalidade(null)}
         />
@@ -1305,7 +1329,6 @@ function Socios({
   setBusca,
   novoSocio,
   novoDependente,
-  sociosPorId,
   editarSocio,
   excluirSocio,
   carregando,
@@ -1319,7 +1342,6 @@ function Socios({
   setBusca: (valor: string) => void;
   novoSocio: () => void;
   novoDependente: (responsavel: Socio) => void;
-  sociosPorId: Map<string, Socio>;
   editarSocio: (socio: Socio) => void;
   excluirSocio: (socio: Socio) => void;
   carregando: boolean;
@@ -1414,7 +1436,7 @@ function Socios({
 
         <div className="overflow-x-auto">
 
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
 
             <thead className="bg-[#e8f3ee]">
 
@@ -1426,10 +1448,6 @@ function Socios({
 
                 <th className="px-3 py-3 sm:px-5 sm:py-4">
                   Matrícula
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Nº débitos
                 </th>
 
                 <th className="px-3 py-3 sm:px-5 sm:py-4">
@@ -1534,10 +1552,6 @@ function Socios({
                       {socio.matricula || "-"}
                     </td>
 
-                    <td className="px-5 py-4 text-sm font-semibold text-gray-600">
-                      {socio.numero_debitos_referencia ?? "—"}
-                    </td>
-
                     <td className="px-3 py-3 sm:px-5 sm:py-4">
 
                       <div className="font-semibold">
@@ -1566,7 +1580,7 @@ function Socios({
 
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {socio.responsavel_id
-                        ? sociosPorId.get(socio.responsavel_id)?.nome || "Responsável"
+                        ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
                         : "—"}
                     </td>
 
@@ -1733,10 +1747,9 @@ function Financeiro({
   emitirRecibo: (item: Mensalidade) => void;
 }) {
   const termo = busca.toLowerCase().trim();
-  const sociosPorId = useMemo(() => new Map(socios.map((socio) => [socio.id, socio])), [socios]);
 
   const filtradas = mensalidades.filter((item) => {
-    const socio = sociosPorId.get(item.socio_id);
+    const socio = socios.find((s) => s.id === item.socio_id);
     return (
       !termo ||
       socio?.nome?.toLowerCase().includes(termo) ||
@@ -1871,7 +1884,7 @@ function Financeiro({
 
               {!carregando &&
                 filtradas.map((item) => {
-                  const socio = sociosPorId.get(item.socio_id);
+                  const socio = socios.find((s) => s.id === item.socio_id);
 
                   return (
                     <tr key={item.id} className="transition hover:bg-[#fafcfb]">
@@ -2461,20 +2474,12 @@ function Dependentes({
   editarSocio: (socio: Socio) => void;
 }) {
   const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
-  const filhosPorResponsavel = useMemo(() => {
-    const mapa = new Map<string, Socio[]>();
-    socios.forEach((socio) => {
-      if (!socio.responsavel_id) return;
-      const lista = mapa.get(socio.responsavel_id) || [];
-      lista.push(socio);
-      mapa.set(socio.responsavel_id, lista);
-    });
-    return mapa;
-  }, [socios]);
-  const responsaveis = socios.filter((s) => filhosPorResponsavel.has(s.id));
+  const responsaveis = socios.filter((s) =>
+    socios.some((filho) => filho.responsavel_id === s.id)
+  );
 
   function filhosDe(id: string) {
-    return filhosPorResponsavel.get(id) || [];
+    return socios.filter((s) => s.responsavel_id === id);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2890,29 +2895,6 @@ function ModalSocio({
 
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
-
-            <Campo
-              label="Matrícula"
-              value={form.matricula}
-              onChange={(v) => alterarCampo("matricula", v.toUpperCase())}
-              placeholder="Ex.: SC0128A"
-            />
-
-            <Campo
-              label="Nº título original"
-              type="number"
-              value={form.numero_titulo}
-              onChange={(v) => alterarCampo("numero_titulo", v)}
-              placeholder="Ex.: 128"
-            />
-
-            <Campo
-              label="Nº débitos (planilha)"
-              type="number"
-              value={form.numero_debitos_referencia}
-              onChange={(v) => alterarCampo("numero_debitos_referencia", v)}
-              placeholder="Ex.: 12"
-            />
 
             <Campo
               label="Data de associação"
@@ -3337,8 +3319,7 @@ function RelatoriosFinanceiros({
     const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
     return { codigo, label, qtd: itens.length, valor: soma(itens) };
   }).filter((x) => x.qtd > 0);
-  const sociosPorId = useMemo(() => new Map(socios.map((socio) => [socio.id, socio])), [socios]);
-  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: sociosPorId.get(m.socio_id) }));
+  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
 
   return (
     <div className="relatorio-area">
@@ -3366,7 +3347,7 @@ function RelatoriosFinanceiros({
           <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
         </div>
         <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = sociosPorId.get(m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
       </>}
     </div>
   );
