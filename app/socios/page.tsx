@@ -1036,6 +1036,7 @@ export default function Home() {
               setBusca={setBusca}
               novoSocio={novoSocio}
               novoDependente={novoDependente}
+              sociosPorId={sociosPorId}
               editarSocio={editarSocio}
               excluirSocio={excluirSocio}
               carregando={carregando}
@@ -1304,6 +1305,7 @@ function Socios({
   setBusca,
   novoSocio,
   novoDependente,
+  sociosPorId,
   editarSocio,
   excluirSocio,
   carregando,
@@ -1317,6 +1319,7 @@ function Socios({
   setBusca: (valor: string) => void;
   novoSocio: () => void;
   novoDependente: (responsavel: Socio) => void;
+  sociosPorId: Map<string, Socio>;
   editarSocio: (socio: Socio) => void;
   excluirSocio: (socio: Socio) => void;
   carregando: boolean;
