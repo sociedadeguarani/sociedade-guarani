@@ -1,42 +1,264 @@
 import { NextResponse } from "next/server";
-import { normalizarPerfil, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
-const ALIASES: Record<string,string[]> = {
-  fut: ["Quadra de Futebol", "Quadra Futebol 7", "Futebol", "Futebol 7"],
-  volei: ["Quadra de Vôlei", "Quadra de Volei", "Quadra Vôlei", "Quadra Volei", "Vôlei", "Volei"],
-  areia: ["Quadra de Areia", "Areia"],
-  q48: ["Quadra 48", "Cancha 48", "Cancha48"],
-  q1: ["Quiosque 1", "Quiosque 01", "Quiosque A"],
-  q2: ["Quiosque 2", "Quiosque 02", "Quiosque B"],
-  q3: ["Quiosque 3", "Quiosque 03", "Quiosque C"],
-  salao_p: ["Salão Pequeno de Vidro", "Salao Pequeno de Vidro", "Salão Social Pequeno", "Salao Social Pequeno", "Salão Pequeno", "Salao Pequeno"],
-  salao_g: ["Salão Social Grande", "Salao Social Grande", "Salão Grande", "Salao Grande"],
-  ctg: ["Salão CTG", "Salao CTG", "CTG"],
-};
-function norm(v: unknown){return String(v??"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
-function compact(v: unknown){return norm(v).replace(/[^a-z0-9]/g,"");}
-function uuid(v: unknown){return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v??""));}
-function findSpace(list:any[], value:string){
-  if(uuid(value)) return list.find(x=>x.id===value)||null;
-  const aliases=ALIASES[value]||[value]; const a=aliases.map(norm), c=aliases.map(compact);
-  return list.find(x=>{const n=norm(x.nome), nc=compact(x.nome); return a.includes(n)||c.includes(nc)||c.some(z=>z.length>=5&&(nc.includes(z)||z.includes(nc)));})||null;
+function erroBanco(error: any) {
+  return [error?.message, error?.details, error?.hint, error?.code ? `Código ${error.code}` : ""]
+    .filter(Boolean)
+    .join(" — ");
 }
-function parseHorario(v:unknown){const m=String(v??"").replace(/\s+—\s+ocupado$/i,"").trim().match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/); return m?{inicio:m[1],fim:m[2]}:null;}
-function mapReserva(row:any){
-  const e=Array.isArray(row.espacos)?row.espacos[0]:row.espacos; const s=Array.isArray(row.socios)?row.socios[0]:row.socios;
-  return {id:row.id,espacoId:row.espaco_id,socioId:row.socio_id||null,data:row.data_reserva,horario:`${String(row.hora_inicio||"").slice(0,5)} - ${String(row.hora_fim||"").slice(0,5)}`,nome:row.responsavel_nome||s?.nome||"",tipoPessoa:row.socio_id?"socio":"nao_socio",valor:Number(row.valor||0),status:row.situacao==="cancelada"?"cancelada":"confirmada",pagamento:row.tipo_pagamento||"pix",comprovante_url:row.comprovante_url||null,comprovante_status:row.comprovante_status||"nenhum",motivo_recusa:row.motivo_recusa||null,situacao:row.situacao||null,espaco_nome:e?.nome||null};
+
+async function assinaturaComprovante(db: any, path: string | null) {
+  if (!path) return null;
+  const { data } = await db.storage
+    .from("comprovantes-financeiro")
+    .createSignedUrl(path, 60 * 60);
+  return data?.signedUrl || null;
 }
-async function authz(request:Request){const a=await usuarioAutenticado(request); if("error" in a)return {error:NextResponse.json({error:a.error},{status:a.status})}; const p=normalizarPerfil(a.perfil); if(!["administrador","funcionario","associado"].includes(p))return {error:NextResponse.json({error:"Sem permissão para acessar reservas."},{status:403})}; return {auth:a,perfil:p};}
-export async function GET(request:Request){try{const r=await authz(request);if(r.error)return r.error;const {auth,perfil}=r;let q=auth.supabase.from("reservas").select("*,espacos:espaco_id(id,nome),socios:socio_id(id,nome,matricula)").order("data_reserva",{ascending:false}).order("created_at",{ascending:false});if(perfil==="associado"){if(!auth.usuario.socio_id)return NextResponse.json({reservas:[]});q=q.eq("socio_id",auth.usuario.socio_id);}const {data,error}=await q;if(error)return NextResponse.json({error:error.message},{status:500});return NextResponse.json({reservas:(data||[]).map(mapReserva)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Erro ao carregar reservas."},{status:500});}}
-export async function POST(request:Request){try{const r=await authz(request);if(r.error)return r.error;const {auth,perfil}=r;const b=await request.json();const espacoInput=String(b.espaco_id||b.espaco_nome||"").trim();const {data:espacos,error:ee}=await auth.supabase.from("espacos").select("id,nome,ativo,permite_reserva,preco_hora,preco_diaria").eq("ativo",true);if(ee)return NextResponse.json({error:ee.message},{status:500});const e=findSpace(espacos||[],espacoInput);if(!e)return NextResponse.json({error:`Espaço não encontrado no cadastro da Sociedade. Cadastros encontrados: ${(espacos||[]).map((x:any)=>x.nome).join(", ")||"nenhum"}.`},{status:400});if(e.permite_reserva===false)return NextResponse.json({error:"Este espaço não está liberado para reservas."},{status:400});
- let socioId=b.socio_id||null,nome=String(b.nome||"").trim();const tipo=String(b.tipo_pessoa||"socio")==="nao_socio"?"nao_socio":"socio";
- if(perfil==="associado"){if(!auth.usuario.socio_id)return NextResponse.json({error:"Seu usuário não está vinculado a um sócio."},{status:403});socioId=auth.usuario.socio_id;const {data:s}=await auth.supabase.from("socios").select("id,nome").eq("id",socioId).maybeSingle();if(!s)return NextResponse.json({error:"Sócio vinculado não encontrado."},{status:404});nome=s.nome;}
- else if(tipo==="socio"){if(!socioId||!uuid(socioId))return NextResponse.json({error:"Selecione um sócio válido como responsável."},{status:400});const {data:s,error:se}=await auth.supabase.from("socios").select("id,nome").eq("id",socioId).maybeSingle();if(se)return NextResponse.json({error:se.message},{status:500});if(!s)return NextResponse.json({error:"Sócio não encontrado."},{status:404});nome=s.nome;}
- else {if(!["administrador","funcionario"].includes(perfil))return NextResponse.json({error:"Somente administração ou funcionário pode registrar reserva de não sócio."},{status:403});socioId=null;if(!nome)return NextResponse.json({error:"Informe o responsável não sócio."},{status:400});}
- const data=String(b.data||b.data_reserva||"");const h=parseHorario(b.horario);if(!/^\d{4}-\d{2}-\d{2}$/.test(data)||!h)return NextResponse.json({error:"Informe data e horário válidos."},{status:400});
- const {data:exist,error:ce}=await auth.supabase.from("reservas").select("id,hora_inicio,hora_fim,situacao").eq("espaco_id",e.id).eq("data_reserva",data).neq("situacao","cancelada");if(ce)return NextResponse.json({error:ce.message},{status:500});if((exist||[]).some((x:any)=>String(x.hora_inicio).slice(0,5)<h.fim&&String(x.hora_fim).slice(0,5)>h.inicio))return NextResponse.json({error:"Este espaço já está reservado para o horário selecionado."},{status:409});
- const valor=Number(b.valor||0);if(!Number.isFinite(valor)||valor<0)return NextResponse.json({error:"Valor da reserva inválido."},{status:400});
- const {data:row,error}=await auth.supabase.from("reservas").insert({espaco_id:e.id,socio_id:socioId,dependente_id:null,responsavel_nome:nome,responsavel_telefone:null,responsavel_whatsapp:null,data_reserva:data,hora_inicio:h.inicio,hora_fim:h.fim,finalidade:"Reserva de espaço",quantidade_pessoas:null,valor,situacao:"solicitada",tipo_pagamento:"pix",data_pagamento:null,codigo_transacao:null,comprovante_url:null,prazo_pagamento:null,observacoes:null,comprovante_status:"nenhum",motivo_recusa:null}).select("*,espacos:espaco_id(id,nome),socios:socio_id(id,nome,matricula)").single();if(error)return NextResponse.json({error:error.message},{status:500});return NextResponse.json({ok:true,reserva:mapReserva(row)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Erro ao registrar reserva."},{status:500});}}
-export async function PATCH(request:Request){try{const r=await authz(request);if(r.error)return r.error;const {auth,perfil}=r;if(perfil==="associado")return NextResponse.json({error:"Somente administração pode alterar o status da reserva."},{status:403});const b=await request.json();const id=String(b.id||"");if(!id)return NextResponse.json({error:"Reserva não informada."},{status:400});const s=String(b.status||b.situacao||"confirmada").toLowerCase();const situacao=s==="cancelada"||s==="cancelar"?"cancelada":s;const {data,error}=await auth.supabase.from("reservas").update({situacao,cancelada_em:situacao==="cancelada"?new Date().toISOString():null,cancelada_por:situacao==="cancelada"?auth.usuario.id:null}).eq("id",id).select("*,espacos:espaco_id(id,nome),socios:socio_id(id,nome,matricula)").single();if(error)return NextResponse.json({error:error.message},{status:500});return NextResponse.json({ok:true,reserva:mapReserva(data)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Erro ao atualizar reserva."},{status:500});}}
+
+export async function GET(request: Request) {
+  const auth = await requireRoles(request, ["funcionario", "administrador", "administrador_master"]);
+  if ("response" in auth) return auth.response;
+
+  try {
+    const url = new URL(request.url);
+    const status = String(url.searchParams.get("status") || "").trim();
+    const db = getServiceClient();
+
+    let query = db
+      .from("reservas")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (status) query = query.eq("status", status);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const reservas = await Promise.all(
+      (data || []).map(async (r: any) => ({
+        ...r,
+        comprovante_url: await assinaturaComprovante(db, r.comprovante_url || null),
+      })),
+    );
+
+    const { data: contas } = await db
+      .from("contas_bancarias")
+      .select("id,nome,banco,ativo")
+      .eq("ativo", true)
+      .order("nome");
+
+    return NextResponse.json({ reservas, contas_bancarias: contas || [] });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : erroBanco(error) || "Erro ao carregar reservas." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await requireRoles(request, ["funcionario", "administrador", "administrador_master"]);
+  if ("response" in auth) return auth.response;
+
+  try {
+    const body = await request.json();
+    const db = getServiceClient();
+
+    const espacoId = String(body.espaco_id || "").trim();
+    const espacoNome = String(body.espaco_nome || "").trim();
+    const data = String(body.data || "").trim();
+    const horario = String(body.horario || "").trim();
+    const nome = String(body.nome || "").trim();
+    const pagamento = String(body.pagamento || "").trim();
+    const status = String(body.status || "").trim() || (pagamento === "pix" ? "pendente" : "confirmada");
+
+    if (!espacoId || !espacoNome || !data || !horario || !nome) {
+      return NextResponse.json({ error: "Espaço, data, horário e nome são obrigatórios." }, { status: 400 });
+    }
+    if (!["pix", "dinheiro", "transferencia", "pendente"].includes(pagamento)) {
+      return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
+    }
+
+    const contaBancariaId = body.conta_bancaria_id ? String(body.conta_bancaria_id) : null;
+    if (status === "confirmada" && Number(body.valor || 0) > 0 && pagamento !== "pendente" && !contaBancariaId) {
+      return NextResponse.json({ error: "Cadastre ou selecione uma conta bancária para registrar o pagamento no Financeiro." }, { status: 400 });
+    }
+
+    const dados = {
+      espaco_id: espacoId,
+      espaco_nome: espacoNome,
+      data,
+      horario,
+      nome,
+      socio_id: body.socio_id || null,
+      dependente_id: body.dependente_id || null,
+      matricula: body.matricula == null ? null : String(body.matricula),
+      tipo_pessoa: body.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
+      valor: Number(body.valor || 0),
+      status: status === "pendente" ? "pendente" : "confirmada",
+      pagamento,
+      comprovante_url: body.comprovante_url || null,
+      comprovante_nome: body.comprovante_nome || null,
+      conta_bancaria_id: contaBancariaId,
+      confirmado_em: status === "confirmada" ? new Date().toISOString() : null,
+      confirmado_por: status === "confirmada" ? auth.usuario.id : null,
+    };
+
+    const { data: reserva, error } = await db
+      .from("reservas")
+      .insert(dados)
+      .select("*")
+      .single();
+
+    if (error) {
+      if (String(error.code) === "23505") {
+        return NextResponse.json({ error: "Este espaço e horário já estão reservados." }, { status: 409 });
+      }
+      throw error;
+    }
+
+    if (dados.status === "confirmada" && Number(dados.valor) > 0 && dados.pagamento !== "pendente") {
+      await registrarFinanceiro(db, reserva, dados.conta_bancaria_id, auth.usuario.id);
+    }
+
+    return NextResponse.json({ reserva });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : erroBanco(error) || "Erro ao criar reserva." },
+      { status: 500 },
+    );
+  }
+}
+
+async function registrarFinanceiro(db: any, reserva: any, contaBancariaId: string | null, usuarioId: string) {
+  if (!contaBancariaId) {
+    throw new Error("Informe a conta bancária que recebeu o pagamento.");
+  }
+
+  const { data: existente, error: erroExistente } = await db
+    .from("movimentacoes_financeiras")
+    .select("id")
+    .eq("origem_tipo", "reserva")
+    .eq("origem_id", reserva.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (erroExistente) throw erroExistente;
+  if (existente) return existente;
+
+  const { data: movimento, error } = await db
+    .from("movimentacoes_financeiras")
+    .insert({
+      conta_bancaria_id: contaBancariaId,
+      tipo: "entrada",
+      categoria: "Reserva de espaço",
+      descricao: `Reserva de espaço — ${reserva.espaco_nome} — ${reserva.nome}`,
+      valor: Number(reserva.valor || 0),
+      data_movimentacao: reserva.data,
+      forma_pagamento: reserva.pagamento === "pix" ? "pix" : reserva.pagamento,
+      origem_tipo: "reserva",
+      origem_id: reserva.id,
+      socio_id: reserva.socio_id || null,
+      dependente_id: reserva.dependente_id || null,
+      comprovante_url: reserva.comprovante_url || null,
+      conciliado: false,
+      created_by: usuarioId,
+      observacoes: `Reserva ${reserva.id}.`,
+    })
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return movimento;
+}
+
+export async function PATCH(request: Request) {
+  const auth = await exigirAdministrador(request);
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  try {
+    const body = await request.json();
+    const id = String(body.id || "").trim();
+    const acao = String(body.acao || "").trim();
+    if (!id) return NextResponse.json({ error: "Reserva não informada." }, { status: 400 });
+
+    const db = getServiceClient();
+    const { data: reserva, error: erroBusca } = await db
+      .from("reservas")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (erroBusca) throw erroBusca;
+    if (!reserva) return NextResponse.json({ error: "Reserva não encontrada." }, { status: 404 });
+
+    if (acao === "confirmar_pix") {
+      if (reserva.status !== "pendente") {
+        return NextResponse.json({ error: "Esta reserva não está pendente de conferência." }, { status: 409 });
+      }
+      if (reserva.pagamento !== "pix") {
+        return NextResponse.json({ error: "Esta reserva não é PIX." }, { status: 400 });
+      }
+      if (!reserva.comprovante_url) {
+        return NextResponse.json({ error: "A reserva não possui comprovante." }, { status: 400 });
+      }
+
+      const contaBancariaId = String(body.conta_bancaria_id || "").trim();
+      if (!contaBancariaId) {
+        return NextResponse.json({ error: "Informe a conta bancária que recebeu o PIX." }, { status: 400 });
+      }
+
+      await registrarFinanceiro(db, reserva, contaBancariaId, auth.usuario.id);
+
+      const { data: atualizada, error } = await db
+        .from("reservas")
+        .update({
+          status: "confirmada",
+          conta_bancaria_id: contaBancariaId,
+          confirmado_em: new Date().toISOString(),
+          confirmado_por: auth.usuario.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("status", "pendente")
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      return NextResponse.json({ reserva: atualizada, message: "PIX confirmado e lançamento criado no Financeiro." });
+    }
+
+    if (acao === "cancelar") {
+      if (reserva.status === "cancelada") {
+        return NextResponse.json({ ok: true, message: "Reserva já estava cancelada." });
+      }
+
+      const { data: atualizada, error } = await db
+        .from("reservas")
+        .update({
+          status: "cancelada",
+          motivo_cancelamento: String(body.motivo || "Pagamento PIX não confirmado."),
+          cancelado_em: new Date().toISOString(),
+          cancelado_por: auth.usuario.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("status", "pendente")
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      return NextResponse.json({ reserva: atualizada, message: "Reserva cancelada. O horário voltou a ficar disponível." });
+    }
+
+    return NextResponse.json({ error: "Ação de reserva inválida." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : erroBanco(error) || "Erro ao atualizar reserva." },
+      { status: 500 },
+    );
+  }
+}
