@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
 
     const { data: usuario, error: usuarioError } = await supabaseAdmin
       .from("usuarios_sistema")
-      .select("id, perfil_id, socio_id, ativo, nome_exibicao")
+      .select("id, perfil_id, socio_id, dependente_id, ativo, nome_exibicao")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -130,6 +130,16 @@ export async function GET(request: NextRequest) {
         { error: "Seu usuário ainda não foi cadastrado no sistema." },
         { status: 403 }
       );
+    }
+
+    let socioIdEfetivo = usuario.socio_id;
+    if (!socioIdEfetivo && usuario.dependente_id) {
+      const { data: dependente } = await supabaseAdmin
+        .from("dependentes")
+        .select("socio_id")
+        .eq("id", usuario.dependente_id)
+        .maybeSingle();
+      socioIdEfetivo = dependente?.socio_id || null;
     }
 
     if (!usuario.ativo) {
@@ -179,7 +189,8 @@ export async function GET(request: NextRequest) {
         perfil: perfilCanonico,
         perfil_nome: perfil.nome,
         perfil_codigo: perfil.codigo,
-        socio_id: usuario.socio_id,
+        socio_id: socioIdEfetivo,
+        dependente_id: usuario.dependente_id || null,
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
         email: user.email,
