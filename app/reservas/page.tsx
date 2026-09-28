@@ -206,18 +206,41 @@ export default function ReservasPage() {
     [reservas, espacoId, data],
   );
 
-  const filtradas = reservas.filter((r) => {
-    const texto = `${r.nome} ${espacos.find((e) => e.id === r.espacoId)?.nome || ""}`.toLowerCase();
-    const correspondeBusca = texto.includes(busca.toLowerCase().trim());
-    const correspondeStatus = filtroStatus === "todos" || r.status === filtroStatus;
-    const correspondeData = !filtroData || r.data === filtroData;
-    return correspondeBusca && correspondeStatus && correspondeData;
-  });
+  const espacosPorId = useMemo(() => {
+    const mapa = new Map<string, Espaco>();
+    for (const item of espacos) mapa.set(item.id, item);
+    return mapa;
+  }, [espacos]);
 
-  const reservasHoje = reservas.filter((r) => r.data === new Date().toISOString().slice(0, 10) && r.status !== "cancelada").length;
-  const confirmadas = reservas.filter((r) => r.status === "confirmada").length;
-  const pendentes = reservas.filter((r) => r.status === "pendente").length;
-  const canceladas = reservas.filter((r) => r.status === "cancelada").length;
+  const filtradas = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    return reservas.filter((r) => {
+      const texto = `${r.nome} ${espacosPorId.get(r.espacoId)?.nome || ""}`.toLowerCase();
+      const correspondeBusca = !termo || texto.includes(termo);
+      const correspondeStatus = filtroStatus === "todos" || r.status === filtroStatus;
+      const correspondeData = !filtroData || r.data === filtroData;
+      return correspondeBusca && correspondeStatus && correspondeData;
+    });
+  }, [reservas, espacosPorId, busca, filtroStatus, filtroData]);
+
+  const estatisticasReservas = useMemo(() => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    let reservasHoje = 0;
+    let confirmadas = 0;
+    let pendentes = 0;
+    let canceladas = 0;
+
+    for (const r of reservas) {
+      if (r.status === "confirmada") confirmadas++;
+      else if (r.status === "pendente") pendentes++;
+      else if (r.status === "cancelada") canceladas++;
+      if (r.data === hoje && r.status !== "cancelada") reservasHoje++;
+    }
+
+    return { reservasHoje, confirmadas, pendentes, canceladas };
+  }, [reservas]);
+
+  const { reservasHoje, confirmadas, pendentes, canceladas } = estatisticasReservas;
 
   function mudarTipo(tipo: TipoPessoa) {
     setTipoPessoa(tipo);
