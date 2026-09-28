@@ -664,7 +664,10 @@ const selecionadasBaixa = useMemo(
       });
 
       const d = await r.json();
-      if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mes).padStart(2, "0")}/${ano}.`);
+      if (!r.ok) {
+        throw Error(d.error || `Não foi possível gerar a prévia de ${String(mes).padStart(2, "0")}/${ano}.`);
+      }
+
       setPrevias([d]);
     } catch (e) {
       setAbrindoPrevia(false);
@@ -822,10 +825,7 @@ const selecionadasBaixa = useMemo(
                 <span className="text-sm font-bold text-gray-600">Ano</span>
                 <select
                   value={ano}
-                  onChange={(e) => {
-                    const novoAno = Number(e.target.value);
-                    setAno(novoAno);
-                  }}
+                  onChange={(e) => setAno(Number(e.target.value))}
                   className="mt-2 w-full rounded-xl border p-3 font-bold"
                 >
                   {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
@@ -836,7 +836,7 @@ const selecionadasBaixa = useMemo(
                 </select>
               </label>
 
-              <label className="min-w-[220px] flex-1">
+              <label className="min-w-[260px] flex-1">
                 <span className="text-sm font-bold text-gray-600">Mês da competência exibida</span>
                 <select
                   value={mes}
@@ -856,9 +856,7 @@ const selecionadasBaixa = useMemo(
 
               <div className="rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
                 <span className="text-gray-500">Visualizando:</span>{" "}
-                <b className="text-[#005a3c]">
-                  {String(mes).padStart(2, "0")}/{ano}
-                </b>
+                <b className="text-[#005a3c]">{String(mes).padStart(2, "0")}/{ano}</b>
                 <span className="ml-2 text-gray-500">(carrega automaticamente)</span>
               </div>
             </div>
@@ -1289,23 +1287,25 @@ const selecionadasBaixa = useMemo(
                       </div>
 
                       {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
-                        const registro = historicoSocio.find((item) => {
+                        const registrosMes = historicoSocio.filter((item) => {
                           const dataCompetencia = String(item.competencia || "");
                           return Number(dataCompetencia.slice(5, 7)) === numeroMes;
                         });
 
-                        const situacao = registro?.situacao || "nao_gerada";
-                        const motivo = String(registro?.motivo || registro?.observacoes || "").toLowerCase();
-                        const semSaldo =
-                          situacao !== "pago" &&
-                          (motivo.includes("sem saldo") ||
-                            motivo.includes("sem_saldo") ||
-                            motivo === "ss");
+                        const registroSemSaldo = registrosMes.find((item) => {
+                          const motivo = String(item.motivo || item.observacoes || "").toLowerCase();
+                          return motivo.includes("sem saldo") || motivo.includes("sem_saldo") || motivo === "ss" || motivo.includes("s.s");
+                        });
+                        const registroIsento = registrosMes.find((item) => item.situacao === "isento");
+                        const registroPago = registrosMes.find((item) => item.situacao === "pago");
+                        const registro = registroSemSaldo || registroIsento || registroPago || registrosMes[0];
 
-                        const pago = situacao === "pago";
-                        const isento = situacao === "isento";
+                        const situacao = registro?.situacao || "nao_gerada";
+                        const semSaldo = Boolean(registroSemSaldo);
+                        const pago = !semSaldo && situacao === "pago";
+                        const isento = !semSaldo && situacao === "isento";
                         const selecionado = mesHistoricoSelecionado === numeroMes;
-                        const naoGerada = !registro;
+                        const naoGerada = registrosMes.length === 0;
 
                         return (
                           <button
