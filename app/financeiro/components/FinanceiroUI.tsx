@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-function Resumo({
+export function Resumo({
   titulo,
   valor,
   subtitulo,
@@ -32,7 +32,7 @@ function Resumo({
   );
 }
 
-function Info({ titulo, texto }: { titulo: string; texto: string }) {
+export function Info({ titulo, texto }: { titulo: string; texto: string }) {
   return (
     <div className="rounded-xl bg-[#f7faf8] p-4">
       <p className="font-bold text-[#005a3c]">{titulo}</p>
@@ -41,7 +41,7 @@ function Info({ titulo, texto }: { titulo: string; texto: string }) {
   );
 }
 
-function Campo({
+export function Campo({
   label,
   type = "text",
   value,
@@ -67,7 +67,7 @@ function Campo({
   );
 }
 
-function Modal({
+export function Modal({
   titulo,
   fechar,
   children,
@@ -93,4 +93,3 @@ function Modal({
     </div>
   );
 }
-
