@@ -17,6 +17,7 @@ type Dependente = {
   id: string;
   socio_id: string;
   matricula?: string | null;
+  foto_url?: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -74,6 +75,7 @@ export default function DependentesPage() {
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
+  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
 
   const somenteConsulta = perfilUsuario === "funcionario";
 
@@ -164,6 +166,7 @@ export default function DependentesPage() {
           id: String(d.id),
           socio_id: String(d.socio_id),
           matricula: d.matricula == null ? null : String(d.matricula),
+          foto_url: d.foto_url ?? null,
           nome: d.nome ?? "",
           cpf: d.cpf ?? null,
           data_nascimento: d.data_nascimento ?? null,
@@ -215,6 +218,7 @@ export default function DependentesPage() {
   function abrirNovo() {
     if (somenteConsulta) return;
     setEditando(null);
+    setFotoArquivo(null);
     setForm({
       socio_id: filtroSocio,
       nome: "",
@@ -238,6 +242,7 @@ export default function DependentesPage() {
   function abrirEdicao(d: Dependente) {
     if (somenteConsulta) return;
     setEditando(d);
+    setFotoArquivo(null);
     setForm({
       socio_id: d.socio_id,
       nome: d.nome || "",
@@ -304,7 +309,7 @@ export default function DependentesPage() {
     if (editando) {
       resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
     } else {
-      resultado = await supabase.from("dependentes").insert(dados);
+      resultado = await supabase.from("dependentes").insert(dados).select("id").single();
     }
 
     if (resultado.error) {
@@ -313,7 +318,32 @@ export default function DependentesPage() {
       return;
     }
 
+    const dependenteId = editando?.id || (Array.isArray(resultado.data) ? resultado.data[0]?.id : resultado.data?.id);
+    if (fotoArquivo && dependenteId) {
+      try {
+        const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+        const caminho = `dependentes/${dependenteId}.${extensao}`;
+        const upload = await supabase.storage
+          .from("fotos-associados")
+          .upload(caminho, fotoArquivo, {
+            upsert: true,
+            contentType: fotoArquivo.type || "image/jpeg",
+          });
+        if (upload.error) throw upload.error;
+
+        const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+        const fotoUpdate = await supabase
+          .from("dependentes")
+          .update({ foto_url: urlData.publicUrl })
+          .eq("id", dependenteId);
+        if (fotoUpdate.error) throw fotoUpdate.error;
+      } catch (fotoError) {
+        setErro(`Dependente salvo, mas a foto não pôde ser enviada: ${fotoError instanceof Error ? fotoError.message : "erro no upload"}`);
+      }
+    }
+
     setSucesso(editando ? "Dependente atualizado com sucesso." : "Dependente cadastrado com sucesso.");
+    setFotoArquivo(null);
     await carregarDados();
     setSalvando(false);
 
@@ -412,7 +442,19 @@ export default function DependentesPage() {
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td><td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4">
+                              <div className="flex items-center gap-3">
+                                {d.foto_url ? (
+                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
+                                    {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
+                                  </div>
+                                )}
+                                <div className="font-extrabold text-[#003D2B]">{d.nome}</div>
+                              </div>
+                            </td>
                             <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
@@ -468,6 +510,27 @@ export default function DependentesPage() {
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <div className="md:col-span-2 rounded-xl border border-dashed border-[#9fc8b5] bg-white p-4">
+                    <div className="mb-3 text-sm font-bold text-[#005A3C]">📷 Foto do dependente</div>
+                    <div className="flex flex-wrap items-center gap-4">
+                      {(fotoArquivo || editando?.foto_url) && (
+                        <div className="h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                          <img
+                            src={fotoArquivo ? URL.createObjectURL(fotoArquivo) : editando?.foto_url || ""}
+                            alt="Prévia"
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label className="inline-flex cursor-pointer items-center rounded-xl border border-[#cfe3d8] bg-[#E8F3EE] px-4 py-2.5 text-sm font-extrabold text-[#005A3C] hover:bg-[#d9eee4]">
+                          📷 {fotoArquivo ? "Trocar foto" : "Escolher foto"}
+                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setFotoArquivo(e.target.files?.[0] || null)} />
+                        </label>
+                        {fotoArquivo && <p className="mt-2 text-xs text-slate-500">{fotoArquivo.name}</p>}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
