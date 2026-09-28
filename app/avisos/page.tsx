@@ -38,7 +38,7 @@ export default function AvisosPage(){
   const [pagamento,setPagamento]=useState<Notificacao|null>(null);
   const [valorPagamento,setValorPagamento]=useState("");
   const [contaPagamento,setContaPagamento]=useState("");
-  const podeGerenciarAvisos=["administrador","administrador_normal","administrador_master","admin","master"].includes(perfil);
+  const podeGerenciarAvisos=["administrador","administrador_master","admin","master"].includes(perfil);
   const [form,setForm]=useState<any>({
     titulo:"",mensagem:"",imagem_url:"",tipo:"informativo",prioridade:"normal",
     fixado:false,ativo:true,publico:"todos",data_inicio:"",data_fim:""
@@ -71,7 +71,7 @@ export default function AvisosPage(){
       const perfilAtual=String(j.perfil||"").trim().toLowerCase();
       setPerfil(perfilAtual);
 
-      if(["administrador","administrador_normal","administrador_master","admin","master"].includes(perfilAtual)){
+      if(["administrador","administrador_master","admin","master"].includes(perfilAtual)){
         const nr=await fetch("/api/notificacoes/admin?nao_lidas=true&limite=50",{headers,cache:"no-store"});
         const nj=await nr.json().catch(()=>({}));
         if(nr.ok){
@@ -269,40 +269,132 @@ export default function AvisosPage(){
       {erro&&<div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{erro}</div>}
 
       {podeGerenciarAvisos&&<div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-black text-[#005a3c]"><Bell className="h-4 w-4"/> Notificações internas</div>
-            <p className="mt-1 text-xs text-gray-500">Confira o comprovante antes de confirmar qualquer PIX.</p>
+            <div className="flex items-center gap-2 text-sm font-black text-[#005a3c]">
+              <Bell className="h-4 w-4"/> Pendências que precisam de conferência
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Aqui ficam reservas e pagamentos que precisam ser conferidos antes de considerar tudo concluído.
+            </p>
           </div>
-          {notificacoes.length>0&&<button disabled={processando==="todas"} onClick={marcarTodas} className="inline-flex items-center gap-2 rounded-xl border border-[#cfe3d8] px-3 py-2 text-xs font-black text-[#005a3c] disabled:opacity-60"><CheckCheck className="h-4 w-4"/> {processando==="todas"?"Marcando...":"Marcar todas como lidas"}</button>}
+          {notificacoes.length>0&&
+            <button
+              disabled={processando==="todas"}
+              onClick={marcarTodas}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#cfe3d8] px-3 py-2 text-xs font-black text-[#005a3c] disabled:opacity-60"
+            >
+              <CheckCheck className="h-4 w-4"/>
+              {processando==="todas"?"Marcando...":"Marcar todas como lidas"}
+            </button>
+          }
         </div>
 
         {notificacoes.length===0
-          ?<div className="rounded-xl bg-[#f7faf8] px-4 py-4 text-sm text-gray-500">Nenhuma notificação pendente.</div>
-          :<div className="space-y-2">
-            {notificacoes.map(n=>
-              <div key={n.id} className="rounded-xl border border-amber-100 bg-amber-50/50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-black text-[#003d2b]">{n.titulo}</p>
-                    <p className="mt-1 text-sm text-gray-600">{n.mensagem}</p>
-                    {n.tipo==="comprovante_pagamento"&&<div className="mt-3 flex flex-wrap items-center gap-2">
-                      {n.comprovante_url
-                        ?<a href={n.comprovante_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border bg-white px-3 py-2 text-xs font-black text-[#005a3c]"><ExternalLink className="h-3.5 w-3.5"/> Ver comprovante</a>
-                        :<span className="text-xs font-bold text-red-600">Comprovante não encontrado</span>}
-                      {n.valor!=null&&<span className="rounded-lg bg-white px-3 py-2 text-xs font-black text-[#005a3c]">Valor informado: R$ {Number(n.valor).toFixed(2).replace(".",",")}</span>}
-                    </div>}
-                    <p className="mt-2 text-[11px] font-bold text-gray-400">{new Date(n.criado_em).toLocaleString("pt-BR")}</p>
-                  </div>
+          ?<div className="rounded-xl border border-[#dfe7e2] bg-[#f7faf8] px-4 py-4 text-sm text-gray-500">
+              Nenhuma pendência aguardando conferência.
+            </div>
+          :<div className="space-y-3">
+            {notificacoes.map(n=>{
+              const ehPagamento=n.tipo==="comprovante_pagamento";
+              const ehReserva=!ehPagamento && (
+                n.titulo.toLowerCase().includes("reserva") ||
+                n.mensagem.toLowerCase().includes("reserva")
+              );
 
-                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                    {n.tipo==="comprovante_pagamento"&&n.origem_tipo&&n.origem_id&&
-                      <button onClick={()=>abrirPagamento(n)} className="rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Confirmar pagamento</button>}
-                    <button disabled={processando===n.id} onClick={()=>marcarLida(n.id)} className="rounded-lg border bg-white px-2.5 py-1.5 text-xs font-bold text-[#005a3c] disabled:opacity-60">{processando===n.id?"...":"Lida"}</button>
+              return (
+                <div
+                  key={n.id}
+                  className={`rounded-2xl border p-4 ${
+                    ehPagamento
+                      ? "border-amber-200 bg-amber-50/60"
+                      : "border-[#cfe3d8] bg-[#f7faf8]"
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
+                          ehPagamento
+                            ? "bg-amber-200 text-amber-900"
+                            : "bg-[#dceee6] text-[#005a3c]"
+                        }`}>
+                          {ehPagamento ? "Pagamento / PIX" : ehReserva ? "Reserva" : "Pendência"}
+                        </span>
+                        <span className="text-[11px] font-bold text-gray-400">
+                          {new Date(n.criado_em).toLocaleString("pt-BR")}
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-lg font-black text-[#003d2b]">{n.titulo}</p>
+                      <p className="mt-1 text-sm leading-6 text-gray-600">{n.mensagem}</p>
+
+                      {ehPagamento&&(
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-xl bg-white p-3">
+                            <p className="text-[11px] font-bold uppercase text-gray-400">Valor informado</p>
+                            <p className="mt-1 text-base font-black text-[#005a3c]">
+                              {n.valor!=null ? `R$ ${Number(n.valor).toFixed(2).replace(".",",")}` : "Não informado"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl bg-white p-3">
+                            <p className="text-[11px] font-bold uppercase text-gray-400">Conferência</p>
+                            <p className="mt-1 text-sm font-black text-amber-800">
+                              Confira o crédito no banco antes de aprovar.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {ehPagamento && !n.comprovante_url&&(
+                        <p className="mt-3 text-xs font-bold text-red-600">
+                          Comprovante não encontrado.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto lg:min-w-[210px] lg:flex-col">
+                      {ehPagamento && n.comprovante_url&&
+                        <a
+                          href={n.comprovante_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 text-xs font-black text-[#005a3c]"
+                        >
+                          <ExternalLink className="h-4 w-4"/> Ver comprovante
+                        </a>
+                      }
+
+                      {ehPagamento && n.origem_tipo && n.origem_id&&
+                        <button
+                          onClick={()=>abrirPagamento(n)}
+                          className="rounded-xl bg-[#005a3c] px-4 py-3 text-xs font-black text-white shadow-sm hover:bg-[#004b32]"
+                        >
+                          ✓ Conferir e confirmar PIX
+                        </button>
+                      }
+
+                      {ehReserva&&
+                        <a
+                          href="/reservas"
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 text-xs font-black text-[#005a3c]"
+                        >
+                          📅 Abrir reservas
+                        </a>
+                      }
+
+                      <button
+                        disabled={processando===n.id}
+                        onClick={()=>marcarLida(n.id)}
+                        className="rounded-xl border bg-white px-4 py-3 text-xs font-bold text-[#005a3c] disabled:opacity-60"
+                      >
+                        {processando===n.id?"...":"Marcar como lida"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })}
           </div>}
       </div>}
 
