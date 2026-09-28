@@ -28,6 +28,7 @@ export default function AvisosPage(){
   const [notificacoes,setNotificacoes]=useState<Notificacao[]>([]);
   const [contas,setContas]=useState<Conta[]>([]);
   const [perfil,setPerfil]=useState("");
+  const [carregando,setCarregando]=useState(true);
   const [modal,setModal]=useState(false);
   const [edit,setEdit]=useState<Aviso|null>(null);
   const [erro,setErro]=useState("");
@@ -54,32 +55,49 @@ export default function AvisosPage(){
 
   async function carregar(){
     setErro("");
-    const r=await api("/api/avisos");
-    const j=await r.json();
-    if(!r.ok){setErro(j.error||"Erro ao carregar avisos.");return}
-    setAvisos(j.avisos||[]);
-    const perfilAtual=j.perfil||"";
-    setPerfil(perfilAtual);
-
-    if(["administrador","administrador_normal","administrador_master","admin","master"].includes(perfilAtual)){
-      const nr=await api("/api/notificacoes/admin?nao_lidas=true&limite=50");
-      const nj=await nr.json();
-      if(nr.ok){
-        const lista=nj.notificacoes||[];
-        setNotificacoes(lista);
-        const listaContas=nj.contas_bancarias||[];
-        setContas(listaContas);
-        if(!contaPagamento && listaContas.length){
-          const sicredi=listaContas.find((c:Conta)=>
-            `${c.nome} ${c.banco||""}`.toLowerCase().includes("sicredi")
-          );
-          setContaPagamento((sicredi||listaContas[0]).id);
-        }
+    setCarregando(true);
+    try {
+      const t=await getToken();
+      if(!t){
+        window.location.href="/login";
+        return;
       }
+
+      const headers={Authorization:`Bearer ${t}`};
+      const r=await fetch("/api/avisos",{headers,cache:"no-store"});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){setErro(j.error||"Erro ao carregar avisos.");return}
+      setAvisos(Array.isArray(j.avisos)?j.avisos:[]);
+      const perfilAtual=String(j.perfil||"").trim().toLowerCase();
+      setPerfil(perfilAtual);
+
+      if(["administrador","administrador_normal","administrador_master","admin","master"].includes(perfilAtual)){
+        const nr=await fetch("/api/notificacoes/admin?nao_lidas=true&limite=50",{headers,cache:"no-store"});
+        const nj=await nr.json().catch(()=>({}));
+        if(nr.ok){
+          const lista=Array.isArray(nj.notificacoes)?nj.notificacoes:[];
+          setNotificacoes(lista);
+          const listaContas=Array.isArray(nj.contas_bancarias)?nj.contas_bancarias:[];
+          setContas(listaContas);
+          if(listaContas.length){
+            const sicredi=listaContas.find((c:Conta)=>
+              `${c.nome} ${c.banco||""}`.toLowerCase().includes("sicredi")
+            );
+            setContaPagamento((atual)=>atual || (sicredi||listaContas[0]).id);
+          }
+        }
+      } else {
+        setNotificacoes([]);
+        setContas([]);
+      }
+    } catch(e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar avisos.");
+    } finally {
+      setCarregando(false);
     }
   }
 
-  useEffect(()=>{carregar()},[]);
+  useEffect(()=>{void carregar()},[]);
 
   function abrirPagamento(n:Notificacao){
     setErro("");
@@ -225,7 +243,7 @@ export default function AvisosPage(){
     });
     const j=await r.json();
     if(!r.ok)return setErro(j.error||"Erro ao salvar aviso.");
-    setModal(false);setArquivo(null);carregar();
+    setModal(false);setArquivo(null);await carregar();
   }
 
   async function excluir(a:Aviso){
@@ -233,7 +251,7 @@ export default function AvisosPage(){
     const r=await api("/api/avisos",{method:"DELETE",body:JSON.stringify({id:a.id})});
     const j=await r.json();
     if(!r.ok)return setErro(j.error||"Erro ao excluir.");
-    carregar();
+    await carregar();
   }
 
   return <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
@@ -288,6 +306,11 @@ export default function AvisosPage(){
           </div>}
       </div>}
 
+      {carregando ? (
+        <div className="rounded-2xl border border-[#dfe7e2] bg-white p-10 text-center text-sm font-semibold text-gray-500 md:col-span-2 xl:col-span-3">
+          Carregando avisos...
+        </div>
+      ) : (
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {avisos.map(a=>
           <article key={a.id} className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
@@ -302,8 +325,9 @@ export default function AvisosPage(){
           </article>
         )}
       </div>
+      )}
 
-      {avisos.length===0&&<div className="rounded-2xl bg-white p-12 text-center text-gray-500">Nenhum aviso publicado.</div>}
+      {!carregando && avisos.length===0&&<div className="rounded-2xl bg-white p-12 text-center text-gray-500">Nenhum aviso publicado.</div>}
 
       {pagamento&&<div className="fixed inset-0 z-[60] grid place-items-center bg-black/50 p-4">
         <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
