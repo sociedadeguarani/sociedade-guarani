@@ -142,6 +142,17 @@ function status(s: string | null) {
   return ["Em aberto", "bg-yellow-100 text-yellow-700"];
 }
 
+function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
+  if (item.situacao === "pago") return false;
+  const texto = String(item.motivo || item.observacoes || "").toLowerCase();
+  return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
+}
+
+function statusMensalidade(item: M) {
+  if (ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
+  return status(item.situacao);
+}
+
 const cobrancaInicial: Cobranca = {
   nome: "Configuração padrão",
   multa_tipo: "percentual",
@@ -197,6 +208,8 @@ export default function Page() {
   const [historicoSocio, setHistoricoSocio] = useState<M[]>([]);
   const [carregandoHistoricoSocio, setCarregandoHistoricoSocio] = useState(false);
   const [mesHistoricoSelecionado, setMesHistoricoSelecionado] = useState<number | null>(null);
+  const [anoHistoricoSocio, setAnoHistoricoSocio] = useState(hoje.getFullYear());
+  const [tipoBaixaSelecionada, setTipoBaixaSelecionada] = useState<"pago" | "sem_saldo">("pago");
 
 
   async function h() {
@@ -212,7 +225,7 @@ export default function Page() {
     };
   }
 
-  async function carregarHistoricoSocio(item: M | null) {
+  async function carregarHistoricoSocio(item: M | null, anoConsulta = anoHistoricoSocio) {
     if (!item?.socio_id) {
       setHistoricoSocio([]);
       setMesHistoricoSelecionado(null);
@@ -222,7 +235,7 @@ export default function Page() {
     setCarregandoHistoricoSocio(true);
     try {
       const r = await fetch(
-        `/api/mensalidades/admin?ano=${ano}&mes=0&socio_id=${encodeURIComponent(String(item.socio_id))}`,
+        `/api/mensalidades/admin?ano=${anoConsulta}&mes=0&socio_id=${encodeURIComponent(String(item.socio_id))}`,
         {
           headers: await h(),
           cache: "no-store",
@@ -232,11 +245,11 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Não foi possível carregar o histórico.");
 
       setHistoricoSocio(Array.isArray(d.mensalidades) ? d.mensalidades : []);
-      setMesHistoricoSelecionado(mes);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
     } catch (e) {
       console.error(e);
       setHistoricoSocio([]);
-      setMesHistoricoSelecionado(mes);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
     } finally {
       setCarregandoHistoricoSocio(false);
     }
@@ -244,7 +257,16 @@ export default function Page() {
 
   async function abrirDetalhesSocio(item: M) {
     setSocioSelecionado(item);
-    await carregarHistoricoSocio(item);
+    setAnoHistoricoSocio(ano);
+    setTipoBaixaSelecionada("pago");
+    await carregarHistoricoSocio(item, ano);
+  }
+
+  async function trocarAnoHistoricoSocio(novoAno: number) {
+    setAnoHistoricoSocio(novoAno);
+    if (socioSelecionado) {
+      await carregarHistoricoSocio(socioSelecionado, novoAno);
+    }
   }
 
   async function carregar() {
@@ -494,11 +516,23 @@ const selecionadasBaixa = useMemo(
 
     setAbrirConfirmacaoBaixa(false);
 
+    if (tipoBaixaSelecionada === "sem_saldo") {
+      await post({
+        acao: "marcar_sem_saldo",
+        ids: selecionadasBaixa.map((item) => item.id),
+        motivo: "S.S",
+        observacoes: "S.S — Sem saldo",
+      });
+      setTipoBaixaSelecionada("pago");
+      return;
+    }
+
     await post({
       acao: "baixar",
       ids: selecionadasBaixa.map((item) => item.id),
       data_pagamento: new Date().toISOString().slice(0, 10),
     });
+    setTipoBaixaSelecionada("pago");
   }
 
   async function post(body: any) {
@@ -963,7 +997,10 @@ const selecionadasBaixa = useMemo(
                 <button
                   type="button"
                   disabled={!selecionadasBaixa.length}
-                  onClick={() => setAbrirConfirmacaoBaixa(true)}
+                  onClick={() => {
+                    setTipoBaixaSelecionada("pago");
+                    setAbrirConfirmacaoBaixa(true);
+                  }}
                   className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
                 >
                   💰 Baixar selecionadas ({selecionadasBaixa.length})
@@ -1022,7 +1059,7 @@ const selecionadasBaixa = useMemo(
                     </tr>
                   ) : (
                     filtrada.map((x) => {
-                    const st = status(x.situacao);
+                    const st = statusMensalidade(x);
                     const acrescimos =
                       Number(x.multa || 0) + Number(x.juros || 0);
 
@@ -1220,6 +1257,7 @@ const selecionadasBaixa = useMemo(
                   setSocioSelecionado(null);
                   setHistoricoSocio([]);
                   setMesHistoricoSelecionado(null);
+                  setAnoHistoricoSocio(ano);
                 }}
                 className="rounded-full p-2 hover:bg-gray-100"
                 aria-label="Fechar"
@@ -1255,17 +1293,27 @@ const selecionadasBaixa = useMemo(
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <h3 className="text-lg font-black text-[#005a3c]">
-                      Controle de mensalidades — {ano}
+                      Controle de mensalidades — {anoHistoricoSocio}
                     </h3>
                     <p className="mt-1 text-xs text-gray-500">
-                      X = pago · SS = sem saldo · em branco = ainda não pago
+                      X = pago · SS = sem saldo · I = isento · em branco = em aberto
                     </p>
                   </div>
-                  {carregandoHistoricoSocio && (
-                    <span className="text-xs font-bold text-gray-500">
-                      Carregando histórico...
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-gray-500">Ano</label>
+                    <select
+                      value={anoHistoricoSocio}
+                      onChange={(e) => void trocarAnoHistoricoSocio(Number(e.target.value))}
+                      className="rounded-xl border bg-white px-3 py-2 text-sm font-black text-[#005a3c]"
+                    >
+                      {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                    {carregandoHistoricoSocio && (
+                      <span className="text-xs font-bold text-gray-500">Carregando...</span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-4 overflow-x-auto">
@@ -1315,12 +1363,12 @@ const selecionadasBaixa = useMemo(
                             onClick={() => setMesHistoricoSelecionado(numeroMes)}
                             title={
                               pago
-                                ? `${String(numeroMes).padStart(2, "0")}/${ano}: Pago`
+                                ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Pago`
                                 : semSaldo
-                                  ? `${String(numeroMes).padStart(2, "0")}/${ano}: Sem saldo`
+                                  ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Sem saldo`
                                   : naoGerada
-                                    ? `${String(numeroMes).padStart(2, "0")}/${ano}: Não gerada`
-                                    : `${String(numeroMes).padStart(2, "0")}/${ano}: Em aberto`
+                                    ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Não gerada`
+                                    : `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Em aberto`
                             }
                             className={`border-l px-1 py-3 text-center transition ${
                               selecionado ? "bg-[#d9eee2] ring-2 ring-inset ring-[#00704a]" : "hover:bg-gray-50"
@@ -1416,6 +1464,7 @@ const selecionadasBaixa = useMemo(
                   setSocioSelecionado(null);
                   setHistoricoSocio([]);
                   setMesHistoricoSelecionado(null);
+                  setAnoHistoricoSocio(ano);
                 }}
                 className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
               >
@@ -1496,6 +1545,37 @@ const selecionadasBaixa = useMemo(
             </div>
 
             <div className="space-y-4 p-5">
+              <div>
+                <p className="mb-2 text-sm font-black text-[#005a3c]">Como deseja registrar esta baixa?</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setTipoBaixaSelecionada("pago")}
+                    className={`rounded-xl border-2 p-4 text-left transition ${
+                      tipoBaixaSelecionada === "pago"
+                        ? "border-[#005a3c] bg-[#eef7f2]"
+                        : "border-gray-200 bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-black text-[#005a3c]">✓ Pago</div>
+                    <div className="mt-1 text-xs text-gray-500">Registra a entrada no Financeiro e marca X.</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipoBaixaSelecionada("sem_saldo")}
+                    className={`rounded-xl border-2 p-4 text-left transition ${
+                      tipoBaixaSelecionada === "sem_saldo"
+                        ? "border-amber-400 bg-amber-50"
+                        : "border-gray-200 bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-black text-amber-700">SS · Sem saldo</div>
+                    <div className="mt-1 text-xs text-gray-500">Não lança no Financeiro e marca SS no histórico.</div>
+                  </button>
+                </div>
+              </div>
+
+              {tipoBaixaSelecionada === "pago" ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div className="rounded-xl bg-[#eef7f2] p-3">
                   <p className="text-xs font-bold text-gray-500">Mensalidades</p>
@@ -1514,7 +1594,15 @@ const selecionadasBaixa = useMemo(
                   <p className="mt-1 text-lg font-black text-gray-800">{moeda(resumoBaixa.totalCobrado)}</p>
                 </div>
               </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <div className="font-black text-amber-800">SS — Sem saldo</div>
+                  <p className="mt-1">Nenhuma receita, tarifa ou entrada financeira será lançada. O registro ficará em aberto apenas para controle e aparecerá como <b>SS</b> no histórico anual.</p>
+                </div>
+              )}
 
+
+              {tipoBaixaSelecionada === "pago" && (
               <div className="rounded-xl border">
                 <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Contas de destino</div>
                 <div className="divide-y">
@@ -1532,6 +1620,7 @@ const selecionadasBaixa = useMemo(
                   ))}
                 </div>
               </div>
+              )}
 
               <div className="max-h-48 overflow-y-auto rounded-xl border">
                 <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Associados selecionados</div>
@@ -1554,10 +1643,10 @@ const selecionadasBaixa = useMemo(
                 </div>
               </div>
 
-              <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800">
-                A baixa registra a receita da mensalidade no Financeiro e,
-                quando houver, a tarifa bancária separadamente. Mensalidades
-                já pagas não entram nesta operação.
+              <div className={`${tipoBaixaSelecionada === "sem_saldo" ? "rounded-xl bg-amber-50 p-3 text-sm text-amber-800" : "rounded-xl bg-blue-50 p-3 text-sm text-blue-800"}`}>
+                {tipoBaixaSelecionada === "sem_saldo"
+                  ? "S.S significa Sem Saldo. Nenhuma entrada financeira será criada; a mensalidade continuará em aberto e ficará identificada como SS no histórico anual."
+                  : "A baixa registra a receita da mensalidade no Financeiro e, quando houver, a tarifa bancária separadamente. Mensalidades já pagas não entram nesta operação."}
               </div>
             </div>
 
@@ -1573,9 +1662,9 @@ const selecionadasBaixa = useMemo(
                 type="button"
                 disabled={!selecionadasBaixa.length}
                 onClick={() => void confirmarBaixaSelecionadas()}
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-40"
+                className={`rounded-xl px-5 py-3 font-black text-white disabled:opacity-40 ${tipoBaixaSelecionada === "sem_saldo" ? "bg-amber-600" : "bg-[#005a3c]"}`}
               >
-                Confirmar baixa no Financeiro
+                {tipoBaixaSelecionada === "sem_saldo" ? "Confirmar S.S — Sem saldo" : "Confirmar baixa no Financeiro"}
               </button>
             </div>
           </div>
