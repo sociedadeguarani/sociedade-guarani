@@ -200,7 +200,6 @@ export default function Page() {
   const [salvandoConfig, setSalvandoConfig] = useState(false);
 
   const [previas, setPrevias] = useState<PreviaGeracao[]>([]);
-  const [mesesParaGerar, setMesesParaGerar] = useState<number[]>([mes]);
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
@@ -593,26 +592,6 @@ const selecionadasBaixa = useMemo(
     }
   }
 
-  function mesDisponivelParaGeracao(m: number, anoReferencia = ano) {
-    const anoAtual = hoje.getFullYear();
-    const mesAtual = hoje.getMonth() + 1;
-    if (anoReferencia > anoAtual) return false;
-    if (anoReferencia < anoAtual) return true;
-    return m <= mesAtual;
-  }
-
-  function alternarMesGeracao(m: number) {
-    if (!mesDisponivelParaGeracao(m)) return;
-    setMesesParaGerar((atual) =>
-      atual.includes(m) ? atual.filter((x) => x !== m) : [...atual, m].sort((a, b) => a - b)
-    );
-  }
-
-  function selecionarMesesDisponiveis() {
-    const limite = ano < hoje.getFullYear() ? 12 : ano === hoje.getFullYear() ? hoje.getMonth() + 1 : 0;
-    setMesesParaGerar(Array.from({ length: limite }, (_, i) => i + 1));
-  }
-
   function alternarGeracaoSocio(id: string) {
     setSelGeracao((atual) =>
       atual.includes(id)
@@ -668,36 +647,25 @@ const selecionadasBaixa = useMemo(
   }
 
   async function previsualizarGeracao() {
-    const selecionados = [...mesesParaGerar].sort((a, b) => a - b);
-    if (selecionados.length === 0) {
-      setErro("Selecione pelo menos um mês para gerar.");
-      return;
-    }
-
     setErro("");
     setMsg("");
     setAbrindoPrevia(true);
     setPrevias([]);
 
     try {
-      const resultados: PreviaGeracao[] = [];
-      for (const mesGeracao of selecionados) {
-        const r = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers: await h(),
-          body: JSON.stringify({
-            acao: "previsualizar",
-            ano,
-            mes: mesGeracao,
-          }),
-        });
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "previsualizar",
+          ano,
+          mes,
+        }),
+      });
 
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`);
-        resultados.push(d);
-      }
-
-      setPrevias(resultados);
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mes).padStart(2, "0")}/${ano}.`);
+      setPrevias([d]);
     } catch (e) {
       setAbrindoPrevia(false);
       setPrevias([]);
@@ -823,7 +791,7 @@ const selecionadasBaixa = useMemo(
                 onClick={() => void previsualizarGeracao()}
                 className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
-                ⚡ Gerar competência
+                ⚡ Gerar {String(mes).padStart(2, "0")}/{ano}
               </button>
 
               <button
@@ -857,9 +825,6 @@ const selecionadasBaixa = useMemo(
                   onChange={(e) => {
                     const novoAno = Number(e.target.value);
                     setAno(novoAno);
-                    setMesesParaGerar((atual) =>
-                      atual.filter((m) => mesDisponivelParaGeracao(m, novoAno))
-                    );
                   }}
                   className="mt-2 w-full rounded-xl border p-3 font-bold"
                 >
@@ -896,50 +861,6 @@ const selecionadasBaixa = useMemo(
                 </b>
                 <span className="ml-2 text-gray-500">(carrega automaticamente)</span>
               </div>
-            </div>
-          </section>
-
-          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-black text-[#005a3c]">Meses para gerar</h2>
-                <p className="text-sm text-gray-500">Selecione uma ou várias competências. Cada mês é processado separadamente e registros já existentes não são duplicados.</p>
-              </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                <button type="button" onClick={selecionarMesesDisponiveis} className="rounded-lg border px-3 py-2 text-xs font-bold">Selecionar todos disponíveis</button>
-                <button type="button" onClick={() => setMesesParaGerar([])} className="rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Limpar</button>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-              {[
-                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-              ].map((nomeMes, i) => {
-                const numero = i + 1;
-                const disponivel = mesDisponivelParaGeracao(numero);
-                const marcado = mesesParaGerar.includes(numero);
-                return (
-                  <label
-                    key={nomeMes}
-                    onClick={() => setMes(numero)}
-                    title={`Clique para visualizar ${nomeMes} ${ano}. A caixa de seleção serve para gerar.`}
-                    className={`flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm font-bold ${mes === numero ? "border-[#005a3c] ring-2 ring-[#005a3c]/20" : ""} ${marcado ? "bg-[#eef7f2] text-[#005a3c]" : "bg-white"} ${!disponivel ? "cursor-not-allowed opacity-40" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={marcado}
-                      disabled={!disponivel}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => alternarMesGeracao(numero)}
-                    />
-                    <span className="flex-1">{nomeMes}</span>
-                    {mes === numero && <span className="text-[10px] uppercase tracking-wide text-[#005a3c]">Exibindo</span>}
-                  </label>
-                );
-              })}
-            </div>
-            <div className="mt-3 text-sm font-semibold text-gray-600">
-              {mesesParaGerar.length} mês(es) selecionado(s) para geração.
             </div>
           </section>
 
