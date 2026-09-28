@@ -119,6 +119,7 @@ const tiposPagamento = [
   { value: "outro", label: "Outro" },
 ];
 
+
 function moeda(v: number | null | undefined) {
   return Number(v || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -194,53 +195,6 @@ export default function Page() {
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
   const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
 
-  const selecionadasBaixa = useMemo(
-    () =>
-      linhasExibicao.filter(
-        (item) =>
-          sel.includes(item.id) &&
-          item.situacao !== "pago" &&
-          item.situacao !== "nao_gerada"
-      ),
-    [linhasExibicao, sel]
-  );
-
-  const resumoBaixa = useMemo(() => {
-    const porConta = new Map<string, { nome: string; banco?: string | null; quantidade: number; valor: number }>();
-    let receita = 0;
-    let tarifas = 0;
-    let totalCobrado = 0;
-
-    for (const item of selecionadasBaixa) {
-      const socio = socioPorId.get(String(item.socio_id));
-      const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id || "";
-      const conta = contas.find((c) => String(c.id) === String(contaId));
-      const nomeConta = conta?.nome || "Conta não identificada";
-      const chave = String(contaId || nomeConta);
-
-      receita += Number(item.valor_base ?? item.valor ?? 0);
-      tarifas += Number(item.tarifa_pagamento ?? 0);
-      totalCobrado += Number(item.total_cobrado ?? item.valor_base ?? item.valor ?? 0);
-
-      const atual = porConta.get(chave) || {
-        nome: nomeConta,
-        banco: conta?.banco,
-        quantidade: 0,
-        valor: 0,
-      };
-      atual.quantidade += 1;
-      atual.valor += Number(item.valor_base ?? item.valor ?? 0);
-      porConta.set(chave, atual);
-    }
-
-    return {
-      quantidade: selecionadasBaixa.length,
-      receita,
-      tarifas,
-      totalCobrado,
-      contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
-    };
-  }, [selecionadasBaixa, socioPorId, contas]);
 
   async function h() {
     const {
@@ -445,6 +399,54 @@ export default function Page() {
       return bateBusca && bateCobranca;
     });
   }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
+const selecionadasBaixa = useMemo(
+    () =>
+      linhasExibicao.filter(
+        (item) =>
+          sel.includes(item.id) &&
+          item.situacao !== "pago" &&
+          item.situacao !== "nao_gerada"
+      ),
+    [linhasExibicao, sel]
+  );
+
+  const resumoBaixa = useMemo(() => {
+    const porConta = new Map<string, { nome: string; banco?: string | null; quantidade: number; valor: number }>();
+    let receita = 0;
+    let tarifas = 0;
+    let totalCobrado = 0;
+
+    for (const item of selecionadasBaixa) {
+      const socio = socioPorId.get(String(item.socio_id));
+      const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id || "";
+      const conta = contas.find((c) => String(c.id) === String(contaId));
+      const nomeConta = conta?.nome || "Conta não identificada";
+      const chave = String(contaId || nomeConta);
+
+      receita += Number(item.valor_base ?? item.valor ?? 0);
+      tarifas += Number(item.tarifa_pagamento ?? 0);
+      totalCobrado += Number(item.total_cobrado ?? item.valor_base ?? item.valor ?? 0);
+
+      const atual = porConta.get(chave) || {
+        nome: nomeConta,
+        banco: conta?.banco,
+        quantidade: 0,
+        valor: 0,
+      };
+      atual.quantidade += 1;
+      atual.valor += Number(item.valor_base ?? item.valor ?? 0);
+      porConta.set(chave, atual);
+    }
+
+    return {
+      quantidade: selecionadasBaixa.length,
+      receita,
+      tarifas,
+      totalCobrado,
+      contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
+    };
+  }, [selecionadasBaixa, socioPorId, contas]);
+
 
   async function confirmarBaixaSelecionadas() {
     if (selecionadasBaixa.length === 0) {
@@ -840,9 +842,9 @@ export default function Page() {
           </section>
 
           <div className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="flex flex-1 items-center gap-2 rounded-xl border px-3">
-                <Search className="h-4 w-4 text-gray-400" />
+            <div className="space-y-3">
+              <div className="flex w-full items-center gap-2 rounded-xl border px-3">
+                <Search className="h-4 w-4 shrink-0 text-gray-400" />
                 <input
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
@@ -851,7 +853,7 @@ export default function Page() {
                 />
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="mr-1 text-sm font-bold text-gray-600">
                   Tipo de cobrança:
                 </span>
@@ -896,11 +898,12 @@ export default function Page() {
                 )}
               </div>
 
-              <div className="mt-3 text-xs text-gray-500">
-                Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
-              </div>
+              <div className="flex flex-col gap-3 rounded-xl bg-[#f7faf8] p-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="text-xs text-gray-500">
+                  Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
+                </div>
 
-              <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                <div className="flex w-full flex-wrap gap-2 lg:w-auto">
                 <button
                   type="button"
                   onClick={selecionarTodosParaGeracao}
@@ -927,6 +930,7 @@ export default function Page() {
                 >
                   💰 Baixar selecionadas ({selecionadasBaixa.length})
                 </button>
+                </div>
               </div>
             </div>
 
