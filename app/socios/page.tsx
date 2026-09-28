@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -250,7 +251,6 @@ function tipoSocioClasse(tipo?: string | null) {
 export default function Home() {
   const [menu, setMenu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
-  const [usuarioEmail, setUsuarioEmail] = useState("");
 
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
@@ -319,7 +319,6 @@ export default function Home() {
       }
 
       if (montado) {
-        setUsuarioEmail(session.user.email || "");
         setVerificandoLogin(false);
       }
     }
@@ -332,7 +331,6 @@ export default function Home() {
       if (!session) {
         window.location.replace("/login");
       } else if (montado) {
-        setUsuarioEmail(session.user.email || "");
       }
     });
 
@@ -341,11 +339,6 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
-
-  async function sair() {
-    await supabase.auth.signOut();
-    window.location.replace("/login");
-  }
 
   async function carregarMensalidades(referencia = competenciaFinanceiro) {
     setCarregandoFinanceiro(true);
@@ -995,60 +988,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
-      {/* CABEÇALHO */}
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-
-          <div className="flex items-center gap-4">
-
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
-                SOCIEDADE GUARANI
-              </h1>
-
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-
-          </div>
-
-          <div className="hidden items-center gap-4 sm:flex">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">
-                {usuarioEmail || "Usuário autenticado"}
-              </p>
-
-              <p className="font-bold text-[#005a3c]">
-                {perfilUsuario === "administrador_master"
-                  ? "Administrador Master"
-                  : perfilUsuario === "administrador_normal"
-                    ? "Administrador"
-                    : perfilUsuario === "funcionario"
-                      ? "Funcionário"
-                      : "Área Administrativa"}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={sair}
-              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
-            >
-              Sair
-            </button>
-          </div>
-
-        </div>
-      </header>
+      <CabecalhoPadrao />
 
       <div className="flex min-h-[calc(100vh-80px)]">
 
