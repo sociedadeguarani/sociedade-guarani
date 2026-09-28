@@ -194,6 +194,9 @@ export default function Page() {
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
   const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
+  const [historicoSocio, setHistoricoSocio] = useState<M[]>([]);
+  const [carregandoHistoricoSocio, setCarregandoHistoricoSocio] = useState(false);
+  const [mesHistoricoSelecionado, setMesHistoricoSelecionado] = useState<number | null>(null);
 
 
   async function h() {
@@ -207,6 +210,41 @@ export default function Page() {
       Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json",
     };
+  }
+
+  async function carregarHistoricoSocio(item: M | null) {
+    if (!item?.socio_id) {
+      setHistoricoSocio([]);
+      setMesHistoricoSelecionado(null);
+      return;
+    }
+
+    setCarregandoHistoricoSocio(true);
+    try {
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${ano}&mes=0&socio_id=${encodeURIComponent(String(item.socio_id))}`,
+        {
+          headers: await h(),
+          cache: "no-store",
+        }
+      );
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível carregar o histórico.");
+
+      setHistoricoSocio(Array.isArray(d.mensalidades) ? d.mensalidades : []);
+      setMesHistoricoSelecionado(mes);
+    } catch (e) {
+      console.error(e);
+      setHistoricoSocio([]);
+      setMesHistoricoSelecionado(mes);
+    } finally {
+      setCarregandoHistoricoSocio(false);
+    }
+  }
+
+  async function abrirDetalhesSocio(item: M) {
+    setSocioSelecionado(item);
+    await carregarHistoricoSocio(item);
   }
 
   async function carregar() {
@@ -403,7 +441,7 @@ const selecionadasBaixa = useMemo(
     () =>
       linhasExibicao.filter(
         (item) =>
-          sel.includes(String(item.socio_id)) &&
+          sel.includes(item.id) &&
           item.situacao !== "pago" &&
           item.situacao !== "nao_gerada"
       ),
@@ -541,8 +579,8 @@ const selecionadasBaixa = useMemo(
     setMesesParaGerar(Array.from({ length: limite }, (_, i) => i + 1));
   }
 
-  function alternarSelecaoSocio(id: string) {
-    setSel((atual) =>
+  function alternarGeracaoSocio(id: string) {
+    setSelGeracao((atual) =>
       atual.includes(id)
         ? atual.filter((x) => x !== id)
         : [...atual, id]
@@ -550,20 +588,15 @@ const selecionadasBaixa = useMemo(
   }
 
   function selecionarTodosParaGeracao() {
-    const ids = filtrada.map((x) => String(x.socio_id));
-    setSel(ids);
-    setSelGeracao([]);
+    const ids = filtrada
+      .filter((x) => x.situacao === "nao_gerada")
+      .map((x) => String(x.socio_id));
+    setSelGeracao(ids);
   }
 
   async function gerarSelecionados() {
-    const idsGeracao =
-      selGeracao.length > 0
-        ? selGeracao
-        : filtrada
-            .filter((item) => sel.includes(item.id) || sel.includes(String(item.socio_id)))
-            .map((item) => String(item.socio_id));
-    if (idsGeracao.length === 0) {
-      setErro("Selecione ao menos um associado para gerar a mensalidade.");
+    if (selGeracao.length === 0) {
+      setErro("Selecione ao menos um associado sem mensalidade gerada.");
       return;
     }
 
@@ -578,7 +611,7 @@ const selecionadasBaixa = useMemo(
           acao: "gerar",
           ano,
           mes,
-          socio_ids: idsGeracao,
+          socio_ids: selGeracao,
         }),
       });
 
@@ -586,7 +619,6 @@ const selecionadasBaixa = useMemo(
       if (!r.ok) throw Error(d.error || "Não foi possível gerar as mensalidades selecionadas.");
 
       setSelGeracao([]);
-      setSel([]);
       setMsg(
         d.message ||
           `${Number(d.criadas || selGeracao.length)} mensalidade(s) gerada(s) para os associados selecionados.`
@@ -913,19 +945,19 @@ const selecionadasBaixa = useMemo(
                 <button
                   type="button"
                   onClick={selecionarTodosParaGeracao}
-                  disabled={!filtrada.length}
+                  disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
                   className="rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 font-bold text-[#005a3c] disabled:opacity-40"
                 >
-                  Selecionar todos para gerar
+                  Selecionar pendentes
                 </button>
 
                 <button
                   type="button"
-                  disabled={!sel.length}
+                  disabled={!selGeracao.length}
                   onClick={() => void gerarSelecionados()}
                   className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
                 >
-                  ⚡ Gerar selecionadas ({sel.length})
+                  ⚡ Gerar selecionadas ({selGeracao.length})
                 </button>
 
                 <button
@@ -942,14 +974,11 @@ const selecionadasBaixa = useMemo(
 
             {(selGeracao.length > 0 || sel.length > 0) && (
               <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[#eef7f2] p-3 text-sm font-bold text-[#005a3c]">
-                {sel.length > 0 && (
-                  <span>☑ {sel.length} selecionado(s)</span>
+                {selGeracao.length > 0 && (
+                  <span>⚡ {selGeracao.length} para gerar</span>
                 )}
                 {selecionadasBaixa.length > 0 && (
                   <span>💰 {selecionadasBaixa.length} para baixar</span>
-                )}
-                {sel.length > 0 && (
-                  <span className="text-gray-500">⚡ a geração usa os selecionados</span>
                 )}
                 <button
                   type="button"
@@ -1002,15 +1031,35 @@ const selecionadasBaixa = useMemo(
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            checked={sel.includes(String(x.socio_id))}
-                            onChange={() => alternarSelecaoSocio(String(x.socio_id))}
+                            disabled={x.situacao === "pago"}
+                            checked={
+                              x.situacao === "nao_gerada"
+                                ? selGeracao.includes(String(x.socio_id))
+                                : x.situacao === "pago"
+                                  ? false
+                                  : sel.includes(x.id)
+                            }
+                            onChange={() => {
+                              if (x.situacao === "nao_gerada") {
+                                alternarGeracaoSocio(String(x.socio_id));
+                                return;
+                              }
+
+                              if (x.situacao === "pago") return;
+
+                              setSel((s) =>
+                                s.includes(x.id)
+                                  ? s.filter((i) => i !== x.id)
+                                  : [...s, x.id]
+                              );
+                            }}
                           />
                         </td>
 
                         <td className="p-3 font-bold">
                           <button
                             type="button"
-                            onClick={() => setSocioSelecionado(x)}
+                            onClick={() => void abrirDetalhesSocio(x)}
                             className="text-left text-[#005a3c] underline-offset-2 hover:underline"
                           >
                             {x.socio?.nome || "—"}
@@ -1151,127 +1200,223 @@ const selecionadasBaixa = useMemo(
       </main>
 
       {socioSelecionado && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
               <div>
-                <p className="text-sm text-gray-500">Cadastro do associado</p>
-                <h2 className="text-2xl font-black text-[#005a3c]">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500">
+                  Cadastro do associado
+                </p>
+                <h2 className="text-xl font-black text-[#005a3c] sm:text-2xl">
                   {socioSelecionado.socio?.nome || "Associado"}
                 </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Matrícula {socioSelecionado.socio?.matricula || "—"} · {ano}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setSocioSelecionado(null)}
+                onClick={() => {
+                  setSocioSelecionado(null);
+                  setHistoricoSocio([]);
+                  setMesHistoricoSelecionado(null);
+                }}
                 className="rounded-full p-2 hover:bg-gray-100"
+                aria-label="Fechar"
               >
                 <X />
               </button>
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {[
-                ["Matrícula", socioSelecionado.socio?.matricula],
-                ["CPF", socioSelecionado.socio?.cpf],
-                ["Categoria", socioSelecionado.socio?.categoria],
-                [
-                  "Tipo de sócio",
-                  nomes[socioSelecionado.socio?.tipo_socio] ||
-                    socioSelecionado.socio?.tipo_socio,
-                ],
-                ["Situação", socioSelecionado.socio?.situacao],
-                ["Parentesco", socioSelecionado.socio?.parentesco],
-                ["Responsável ID", socioSelecionado.socio?.responsavel_id],
-                ["Telefone", socioSelecionado.socio?.telefone],
-                ["E-mail", socioSelecionado.socio?.email],
-                ["Endereço", socioSelecionado.socio?.endereco],
-              ].map(([label, valor]) => (
-                <div key={label} className="rounded-xl border bg-gray-50 p-3">
-                  <div className="text-xs font-bold uppercase text-gray-500">
-                    {label}
+            <div className="space-y-5 p-5">
+              <div className="grid gap-3 sm:grid-cols-4">
+                {[
+                  ["Matrícula", socioSelecionado.socio?.matricula],
+                  ["CPF", socioSelecionado.socio?.cpf],
+                  ["Categoria", socioSelecionado.socio?.categoria],
+                  [
+                    "Tipo de sócio",
+                    nomes[socioSelecionado.socio?.tipo_socio] ||
+                      socioSelecionado.socio?.tipo_socio,
+                  ],
+                ].map(([label, valor]) => (
+                  <div key={label} className="rounded-xl border bg-gray-50 p-3">
+                    <div className="text-[10px] font-bold uppercase text-gray-500">
+                      {label}
+                    </div>
+                    <div className="mt-1 break-words text-sm font-bold">
+                      {valor || "—"}
+                    </div>
                   </div>
-                  <div className="mt-1 break-words font-semibold">
-                    {valor || "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
-              <h3 className="font-black text-[#005a3c]">
-                Mensalidade {String(mes).padStart(2, "0")}/{ano}
-              </h3>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <span className="text-xs text-gray-500">Valor base</span>
-                  <p className="font-bold">
-                    {moeda(
-                      socioSelecionado.valor_base ?? socioSelecionado.valor
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Tipo de cobrança</span>
-                  <p className="font-bold">
-                    {{
-                      banrisul: "Banrisul",
-                      sicredi: "Sicredi",
-                      bb: "Banco do Brasil",
-                      boleto: "Boleto",
-                      pix: "PIX",
-                      sem_pagamento: "Sem pagamento",
-                      debito_em_conta: "Débito em conta",
-                      dinheiro: "Dinheiro",
-                      transferencia: "Transferência",
-                      outro: "Outro",
-                    }[tipoCobranca(socioSelecionado)] || "—"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Tarifa</span>
-                  <p className="font-bold">
-                    {moeda(socioSelecionado.tarifa_pagamento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Total cobrado</span>
-                  <p className="font-black text-[#005a3c]">
-                    {moeda(socioSelecionado.total_cobrado)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Vencimento</span>
-                  <p className="font-bold">
-                    {data(socioSelecionado.data_vencimento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Situação</span>
-                  <p className="font-bold">
-                    {status(socioSelecionado.situacao)[0]}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Data de pagamento</span>
-                  <p className="font-bold">
-                    {data(socioSelecionado.data_pagamento)}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500">Observações</span>
-                  <p className="font-bold">
-                    {socioSelecionado.motivo ||
-                      socioSelecionado.observacoes ||
-                      "—"}
-                  </p>
-                </div>
+                ))}
               </div>
+
+              <section className="rounded-2xl border border-[#cfe6da] bg-[#f7fbf8] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-[#005a3c]">
+                      Controle de mensalidades — {ano}
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      X = pago · SS = sem saldo · em branco = ainda não pago
+                    </p>
+                  </div>
+                  {carregandoHistoricoSocio && (
+                    <span className="text-xs font-bold text-gray-500">
+                      Carregando histórico...
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <div className="min-w-[760px] rounded-xl border bg-white">
+                    <div className="grid grid-cols-13 border-b bg-[#eaf4ee] text-center text-xs font-black text-[#005a3c]"
+                         style={{ gridTemplateColumns: "minmax(180px,1.5fr) repeat(12,minmax(42px,1fr))" }}>
+                      <div className="px-2 py-3 text-left">Competência</div>
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => (
+                        <div key={numeroMes} className="px-1 py-3">
+                          {String(numeroMes).padStart(2, "0")}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-13 text-center"
+                         style={{ gridTemplateColumns: "minmax(180px,1.5fr) repeat(12,minmax(42px,1fr))" }}>
+                      <div className="border-r px-2 py-3 text-left">
+                        <div className="font-black text-[#005a3c]">Mensalidade</div>
+                        <div className="mt-1 text-[11px] text-gray-500">
+                          Clique em um mês para ver os detalhes
+                        </div>
+                      </div>
+
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
+                        const registro = historicoSocio.find((item) => {
+                          const dataCompetencia = String(item.competencia || "");
+                          return Number(dataCompetencia.slice(5, 7)) === numeroMes;
+                        });
+
+                        const situacao = registro?.situacao || "nao_gerada";
+                        const motivo = String(registro?.motivo || registro?.observacoes || "").toLowerCase();
+                        const semSaldo =
+                          situacao !== "pago" &&
+                          (motivo.includes("sem saldo") ||
+                            motivo.includes("sem_saldo") ||
+                            motivo === "ss");
+
+                        const pago = situacao === "pago";
+                        const isento = situacao === "isento";
+                        const selecionado = mesHistoricoSelecionado === numeroMes;
+                        const naoGerada = !registro;
+
+                        return (
+                          <button
+                            key={numeroMes}
+                            type="button"
+                            onClick={() => setMesHistoricoSelecionado(numeroMes)}
+                            title={
+                              pago
+                                ? `${String(numeroMes).padStart(2, "0")}/${ano}: Pago`
+                                : semSaldo
+                                  ? `${String(numeroMes).padStart(2, "0")}/${ano}: Sem saldo`
+                                  : naoGerada
+                                    ? `${String(numeroMes).padStart(2, "0")}/${ano}: Não gerada`
+                                    : `${String(numeroMes).padStart(2, "0")}/${ano}: Em aberto`
+                            }
+                            className={`border-l px-1 py-3 text-center transition ${
+                              selecionado ? "bg-[#d9eee2] ring-2 ring-inset ring-[#00704a]" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <span
+                              className={`mx-auto flex h-8 w-8 items-center justify-center rounded-lg text-sm font-black ${
+                                pago
+                                  ? "bg-green-100 text-green-700"
+                                  : semSaldo
+                                    ? "bg-amber-100 text-amber-700"
+                                    : isento
+                                      ? "bg-gray-100 text-gray-500"
+                                      : naoGerada
+                                        ? "bg-gray-50 text-gray-300"
+                                        : "bg-white text-gray-300"
+                              }`}
+                            >
+                              {pago ? "X" : semSaldo ? "SS" : isento ? "I" : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-green-700">X Pago</span>
+                  <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">SS Sem saldo</span>
+                  <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-500">I Isento</span>
+                  <span className="rounded-full border bg-white px-3 py-1 text-gray-400">Em aberto / PIX pendente</span>
+                  <span className="rounded-full bg-gray-50 px-3 py-1 text-gray-400">Não gerada</span>
+                </div>
+              </section>
+
+              {(() => {
+                const registroMes = historicoSocio.find((item) => {
+                  const numero = Number(String(item.competencia || "").slice(5, 7));
+                  return numero === mesHistoricoSelecionado;
+                });
+
+                return (
+                  <section className="rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <h3 className="font-black text-[#005a3c]">
+                        Detalhes — {String(mesHistoricoSelecionado || mes).padStart(2, "0")}/{ano}
+                      </h3>
+                      <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${
+                        registroMes?.situacao === "pago"
+                          ? "bg-green-100 text-green-700"
+                          : registroMes
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-gray-100 text-gray-500"
+                      }`}>
+                        {registroMes ? status(registroMes.situacao)[0] : "Não gerada"}
+                      </span>
+                    </div>
+
+                    {registroMes ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                        <div>
+                          <span className="text-xs text-gray-500">Valor base</span>
+                          <p className="font-bold">{moeda(registroMes.valor_base ?? registroMes.valor)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Tarifa</span>
+                          <p className="font-bold">{moeda(registroMes.tarifa_pagamento)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Total cobrado</span>
+                          <p className="font-black text-[#005a3c]">{moeda(registroMes.total_cobrado)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Pagamento</span>
+                          <p className="font-bold">{data(registroMes.data_pagamento)}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-3 rounded-xl bg-white p-3 text-sm text-gray-500">
+                        Essa competência ainda não possui lançamento para este associado.
+                      </p>
+                    )}
+                  </section>
+                );
+              })()}
             </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="flex justify-end border-t bg-gray-50 px-5 py-4">
               <button
                 type="button"
-                onClick={() => setSocioSelecionado(null)}
+                onClick={() => {
+                  setSocioSelecionado(null);
+                  setHistoricoSocio([]);
+                  setMesHistoricoSelecionado(null);
+                }}
                 className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
               >
                 Fechar
