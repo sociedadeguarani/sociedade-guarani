@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Socio = {
   id: string;
@@ -1270,30 +1271,7 @@ export default function FinanceiroPage() {
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
-      <header className="sticky top-0 z-40 border-b border-[#dfe9e3] bg-white/95 shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-            <div>
-              <h1 className="text-lg font-extrabold text-[#123c2b]">
-                SOCIEDADE GUARANI
-              </h1>
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-          </div>
-          <div className="hidden sm:block">
-            <span className="text-sm text-gray-400">Área Administrativa</span>
-          </div>
-        </div>
-      </header>
+      <CabecalhoPadrao />
 
       <div className="min-h-[calc(100vh-80px)]">
         <MenuLateralPadrao />
