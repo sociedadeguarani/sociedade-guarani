@@ -183,7 +183,6 @@ export async function GET(request: Request) {
         email: d.email || null,
         created_at: d.created_at || null,
         updated_at: d.updated_at || null,
-        possui_mensalidade: d.possui_mensalidade === true,
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
         tipo_pagamento: d.tipo_pagamento || null,
