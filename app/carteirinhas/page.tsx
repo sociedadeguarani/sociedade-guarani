@@ -146,9 +146,12 @@ export default function CarteirinhasPage() {
       .toLowerCase()
       .trim();
 
+  const buscaNormalizada = useMemo(() => normalizarBusca(busca), [busca]);
+  const buscaCpf = useMemo(() => buscaNormalizada.replace(/\D/g, ""), [buscaNormalizada]);
+
   const lista = useMemo(() => socios.filter((s) => {
-    const q = normalizarBusca(busca);
-    const qCpf = q.replace(/\D/g, "");
+    const q = buscaNormalizada;
+    const qCpf = buscaCpf;
     const nome = normalizarBusca(s.nome);
     const matricula = normalizarBusca(s.matricula);
     const cpf = String(s.cpf || "").replace(/\D/g, "");
@@ -159,13 +162,13 @@ export default function CarteirinhasPage() {
     if (filtroStatus === "inativos") return !ativo;
     if (filtroStatus === "exame_vencido") return Boolean(s.exame_medico_validade) && new Date(`${String(s.exame_medico_validade).slice(0,10)}T00:00:00`) < new Date(new Date().toISOString().slice(0,10) + "T00:00:00");
     return true;
-  }), [socios, busca, filtroStatus]);
+  }), [socios, buscaNormalizada, buscaCpf, filtroStatus]);
 
   const dependentesLista = useMemo(() => dependentes.filter((d) => {
-    const q = busca.toLowerCase().trim();
-    const matricula = String(d.matricula || "").toLowerCase();
+    const q = buscaNormalizada;
+    const matricula = normalizarBusca(d.matricula);
     return !q || d.nome.toLowerCase().includes(q) || matricula.includes(q) || String(d.titular_matricula || "").includes(q) || String(d.titular_nome || "").toLowerCase().includes(q);
-  }), [dependentes, busca]);
+  }), [dependentes, buscaNormalizada]);
 
   // Quando um associado é selecionado, mostra somente o grupo familiar dele.
   // A árvore é tratada como uma rede: responsável -> dependente e também
@@ -208,6 +211,27 @@ export default function CarteirinhasPage() {
       .filter((d) => String(d.socio_id) === String(selecionado.id) && d.ativo !== false)
       .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
   }, [dependentes, selecionado]);
+
+  const contadores = useMemo(() => {
+    let ativos = 0;
+    let inativos = 0;
+    let examesVencidos = 0;
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    for (const socio of socios) {
+      const ativo = String(socio.situacao || "").toLowerCase() !== "inativo";
+      if (ativo) ativos += 1;
+      else inativos += 1;
+
+      if (socio.exame_medico_validade) {
+        const data = new Date(`${String(socio.exame_medico_validade).slice(0, 10)}T00:00:00`);
+        if (!Number.isNaN(data.getTime()) && data < hoje) examesVencidos += 1;
+      }
+    }
+
+    return { ativos, inativos, examesVencidos };
+  }, [socios]);
 
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
@@ -340,9 +364,9 @@ export default function CarteirinhasPage() {
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {[
                   ["todos", `Todos (${socios.length})`],
-                  ["ativos", `Ativos (${socios.filter((s) => String(s.situacao || "").toLowerCase() !== "inativo").length})`],
-                  ["inativos", `Inativos (${socios.filter((s) => String(s.situacao || "").toLowerCase() === "inativo").length})`],
-                  ["exame_vencido", `Exame vencido (${socios.filter((s) => { if (!s.exame_medico_validade) return false; const d = new Date(`${String(s.exame_medico_validade).slice(0,10)}T00:00:00`); return !Number.isNaN(d.getTime()) && d < new Date(new Date().toISOString().slice(0,10) + "T00:00:00"); }).length})`],
+                  ["ativos", `Ativos (${contadores.ativos})`],
+                  ["inativos", `Inativos (${contadores.inativos})`],
+                  ["exame_vencido", `Exame vencido (${contadores.examesVencidos})`],
                 ].map(([valor, rotulo]) => (
                   <button key={valor} type="button" onClick={() => setFiltroStatus(valor as typeof filtroStatus)} className={`rounded-lg border px-2 py-2 text-xs font-bold ${filtroStatus === valor ? "border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
                     {rotulo}
