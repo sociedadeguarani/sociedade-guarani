@@ -543,17 +543,31 @@ export default function ReservasPage() {
           .toLowerCase()
           .includes(termo);
 
-      const dependenteCombina =
-        !!termo &&
-        familia.some((d) =>
-          `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`
-            .toLowerCase()
-            .includes(termo)
-        );
+      const dependenteCorrespondente = termo
+        ? familia.find((d) =>
+            `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`
+              .toLowerCase()
+              .includes(termo)
+          ) ?? null
+        : null;
+
+      const dependenteCombina = !!dependenteCorrespondente;
+
+      // Quando a busca encontra um dependente, ele fica em primeiro lugar.
+      // Assim a portaria identifica imediatamente quem está pedindo a reserva.
+      const familiaOrdenada = dependenteCorrespondente
+        ? [
+            dependenteCorrespondente,
+            ...familia.filter(
+              (d) => String(d.id) !== String(dependenteCorrespondente.id)
+            ),
+          ]
+        : familia;
 
       return {
         titular: s,
-        familia,
+        familia: familiaOrdenada,
+        pessoaEncontrada: dependenteCorrespondente,
         corresponde: titularCombina || dependenteCombina,
       };
     });
@@ -739,7 +753,11 @@ export default function ReservasPage() {
                       </div>
                       {buscaSocio && !socioId && (
                         <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
-                          {familiasFiltradas.length ? familiasFiltradas.map(({ titular: s, familia }) => {
+                          {familiasFiltradas.length ? familiasFiltradas.map(({ titular: s, familia, pessoaEncontrada }) => {
+                            const outrasPessoas = pessoaEncontrada
+                              ? familia.filter((d) => String(d.id) !== String(pessoaEncontrada.id))
+                              : familia;
+
                             return (
                               <div key={s.id} className="border-b last:border-b-0">
                                 <button
@@ -751,7 +769,7 @@ export default function ReservasPage() {
                                     setMatriculaResponsavel(s.matricula);
                                     setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`);
                                   }}
-                                  className="block w-full px-4 py-3 text-left hover:bg-[#e8f3ee]"
+                                  className={`block w-full px-4 py-3 text-left transition ${!pessoaEncontrada ? "bg-[#e8f3ee]" : "hover:bg-[#f8faf9]"}`}
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <div>
@@ -760,20 +778,52 @@ export default function ReservasPage() {
                                         Matrícula: {s.matricula ?? "—"}
                                       </span>
                                     </div>
-                                    <span className="text-xs font-extrabold text-[#005a3c]">
+                                    <span className="rounded-full bg-[#e8f3ee] px-2.5 py-1 text-[10px] font-extrabold text-[#005a3c]">
                                       Titular da família
                                     </span>
                                   </div>
                                 </button>
 
-                                {familia.length > 0 && (
+                                {pessoaEncontrada && (
+                                  <div className="bg-[#e8f3ee] px-3 py-2">
+                                    <div className="mb-1 px-2 text-[10px] font-extrabold uppercase tracking-wide text-[#005a3c]">
+                                      Pessoa encontrada na busca
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSocioId(s.id);
+                                        setDependenteId(String(pessoaEncontrada.id));
+                                        setNome(pessoaEncontrada.nome);
+                                        setMatriculaResponsavel(pessoaEncontrada.matricula || null);
+                                        setBuscaSocio(
+                                          `${pessoaEncontrada.nome}${pessoaEncontrada.matricula ? ` — Matrícula ${pessoaEncontrada.matricula}` : ""}`
+                                        );
+                                      }}
+                                      className="flex w-full items-center justify-between rounded-xl border-2 border-[#005a3c] bg-white px-3 py-3 text-left shadow-sm hover:bg-[#f7faf8]"
+                                    >
+                                      <span>
+                                        <b className="text-sm">{pessoaEncontrada.nome}</b>
+                                        <span className="ml-2 text-xs text-gray-500">
+                                          {pessoaEncontrada.matricula || "Sem matrícula"}
+                                          {pessoaEncontrada.parentesco ? ` · ${pessoaEncontrada.parentesco}` : ""}
+                                        </span>
+                                      </span>
+                                      <span className="rounded-full bg-[#005a3c] px-3 py-1.5 text-[10px] font-extrabold text-white">
+                                        Selecionar
+                                      </span>
+                                    </button>
+                                  </div>
+                                )}
+
+                                {outrasPessoas.length > 0 && (
                                   <div className="bg-[#f8faf9] px-3 pb-3">
-                                    <div className="px-2 pb-2 pt-1 text-[10px] font-extrabold uppercase tracking-wide text-[#78968a]">
-                                      Pessoas da família
+                                    <div className="px-2 pb-2 pt-2 text-[10px] font-extrabold uppercase tracking-wide text-[#78968a]">
+                                      {pessoaEncontrada ? "Outras pessoas da família" : "Pessoas da família"}
                                     </div>
 
                                     <div className="space-y-1.5">
-                                      {familia.map((d) => (
+                                      {outrasPessoas.map((d) => (
                                         <button
                                           key={d.id}
                                           type="button"
