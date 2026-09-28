@@ -146,14 +146,44 @@ export default function ReservasPage() {
     if (!modoPublico) {
       void (async () => {
         try {
-          const [sociosResult, dependentesResult] = await Promise.all([
+          // Titulares continuam vindo diretamente da tabela socios.
+          // Dependentes são carregados pela API das carteirinhas, que usa a
+          // mesma fonte já validada para a família e evita o problema de RLS
+          // do acesso direto à tabela dependentes pelo navegador.
+          const [sociosResult, carteirinhasResponse] = await Promise.all([
             supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
-            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").order("nome", { ascending: true }),
+            fetch("/api/carteirinhas", { cache: "no-store" }),
           ]);
+
           if (sociosResult.error) throw sociosResult.error;
-          if (dependentesResult.error) throw dependentesResult.error;
-          setSocios(sociosResult.data || []);
-          setDependentes((dependentesResult.data || []).filter((d: DependenteReserva) => d.ativo !== false) as DependenteReserva[]);
+
+          const sociosData = sociosResult.data || [];
+          let dependentesData: DependenteReserva[] = [];
+
+          if (carteirinhasResponse.ok) {
+            const payload = await carteirinhasResponse.json().catch(() => ({}));
+            if (Array.isArray(payload?.dependentes)) {
+              dependentesData = payload.dependentes as DependenteReserva[];
+            }
+          }
+
+          // Fallback para instalações onde a API das carteirinhas ainda não
+          // estiver disponível.
+          if (!dependentesData.length) {
+            const fallback = await supabase
+              .from("dependentes")
+              .select("id,socio_id,matricula,nome,parentesco,ativo")
+              .order("nome", { ascending: true });
+
+            if (!fallback.error) {
+              dependentesData = (fallback.data || []) as DependenteReserva[];
+            }
+          }
+
+          setSocios(sociosData);
+          setDependentes(
+            dependentesData.filter((d) => d.ativo !== false)
+          );
         } catch (error) {
           console.error("Erro ao carregar titulares/dependentes para reservas:", error);
           setSocios([]);
@@ -447,42 +477,36 @@ export default function ReservasPage() {
 
   const sociosFiltrados = useMemo(() => {
     const termo = buscaSocio.trim().toLowerCase();
+    if (!termo) return socios.slice(0, 12);
 
-    // Mostra titulares e também localiza a família quando a busca
-    // for feita pelo nome/matrícula de um dependente.
-    const titularesRelacionados = new Map<string, typeof socios[number]>();
+    // Se o usuário digitar o nome/matrícula de um dependente, encontramos
+    // o titular da família e mostramos a família inteira no mesmo resultado.
+    const titularesComDependente = new Set<string>();
 
-    for (const socio of socios) {
-      const textoTitular = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
+    for (const d of dependentes) {
+      const textoDependente = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
+      if (!textoDependente.includes(termo)) continue;
 
-      if (!termo || textoTitular.includes(termo)) {
-        titularesRelacionados.set(String(socio.id), socio);
-        continue;
-      }
+      if (d.socio_id) titularesComDependente.add(String(d.socio_id));
 
-      const matriculaTitular = String(socio.matricula ?? "").trim().toUpperCase();
-      const baseFamiliar = matriculaTitular.endsWith("A")
-        ? matriculaTitular.slice(0, -1)
-        : matriculaTitular;
-
-      const temDependenteEncontrado = dependentes.some((d) => {
-        const textoDependente = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
-        const matriculaDependente = String(d.matricula ?? "").trim().toUpperCase();
-        const pertenceFamilia =
-          String(d.socio_id) === String(socio.id) ||
-          (!!baseFamiliar &&
-            matriculaDependente.startsWith(baseFamiliar) &&
-            matriculaDependente !== matriculaTitular);
-
-        return pertenceFamilia && textoDependente.includes(termo);
-      });
-
-      if (temDependenteEncontrado) {
-        titularesRelacionados.set(String(socio.id), socio);
+      const m = String(d.matricula ?? "").trim().toUpperCase();
+      const base = m.match(/^(.*?)[A-Z]$/)?.[1];
+      if (base) {
+        for (const s of socios) {
+          const sm = String(s.matricula ?? "").trim().toUpperCase();
+          if (sm === `${base}A` || sm === base) {
+            titularesComDependente.add(String(s.id));
+          }
+        }
       }
     }
 
-    return Array.from(titularesRelacionados.values()).slice(0, 20);
+    return socios
+      .filter((s) => {
+        const textoTitular = `${s.nome} ${s.matricula ?? ""} ${s.cpf ?? ""}`.toLowerCase();
+        return textoTitular.includes(termo) || titularesComDependente.has(String(s.id));
+      })
+      .slice(0, 12);
   }, [socios, dependentes, buscaSocio]);
 
   const dependentesDoSocio = useMemo(() => {
@@ -701,26 +725,74 @@ export default function ReservasPage() {
                             <span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}{dependenteId ? " · Dependente" : " · Titular"}</span>
                             <button type="button" onClick={() => { setSocioId(""); setDependenteId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button>
                           </div>
-                          <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-[#f8faf9] p-3">
+                          <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-white p-3">
                             <div className="text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">
                               Pessoa da reserva
                             </div>
-                            <div className="mt-2 rounded-xl bg-white px-3 py-3 text-sm">
-                              <b>{nome}</b>
-                              <span className="ml-2 text-xs text-gray-500">
-                                Matrícula {matriculaResponsavel ?? "—"}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const titular = socios.find((s) => String(s.id) === String(socioId));
+                                if (!titular) return;
+                                setDependenteId("");
+                                setNome(titular.nome);
+                                setMatriculaResponsavel(titular.matricula ?? null);
+                              }}
+                              className={`mt-2 flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left ${
+                                !dependenteId
+                                  ? "border-[#005a3c] bg-[#e8f3ee]"
+                                  : "border-[#dfe7e2] bg-white"
+                              }`}
+                            >
+                              <span>
+                                <b>{socios.find((s) => String(s.id) === String(socioId))?.nome || "Titular"}</b>
+                                <span className="ml-2 text-xs text-gray-500">
+                                  Matrícula {socios.find((s) => String(s.id) === String(socioId))?.matricula ?? "—"}
+                                </span>
                               </span>
-                              <span className="ml-2 rounded-full bg-[#e8f3ee] px-2 py-1 text-[10px] font-extrabold text-[#005a3c]">
-                                {dependenteId ? "Dependente" : "Titular"}
+                              <span className="rounded-full bg-white px-2 py-1 text-[10px] font-extrabold text-[#005a3c]">
+                                Titular
                               </span>
-                            </div>
+                            </button>
 
                             {dependentesDoSocio.length > 0 && (
-                              <p className="mt-2 text-xs text-gray-500">
-                                Para escolher outro membro da família, clique em <b>Trocar</b> e pesquise novamente.
-                                Os dependentes aparecem logo abaixo do titular, como nas Carteirinhas.
-                              </p>
+                              <>
+                                <div className="px-1 pb-1 pt-4 text-[10px] font-extrabold uppercase tracking-wide text-[#78968a]">
+                                  Dependentes da família
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  {dependentesDoSocio.map((d) => (
+                                    <button
+                                      key={d.id}
+                                      type="button"
+                                      onClick={() => selecionarDependente(String(d.id))}
+                                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left ${
+                                        dependenteId === String(d.id)
+                                          ? "border-[#005a3c] bg-[#e8f3ee]"
+                                          : "border-[#dfe7e2] bg-white hover:border-[#005a3c] hover:bg-[#f5faf7]"
+                                      }`}
+                                    >
+                                      <span>
+                                        <b className="text-sm">{d.nome}</b>
+                                        <span className="ml-2 text-xs text-gray-500">
+                                          {d.matricula || "Sem matrícula"}
+                                          {d.parentesco ? ` · ${d.parentesco}` : ""}
+                                        </span>
+                                      </span>
+                                      <span className="rounded-full bg-[#e8f3ee] px-2 py-1 text-[10px] font-extrabold text-[#005a3c]">
+                                        Dependente
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
                             )}
+
+                            <p className="mt-3 text-xs text-gray-500">
+                              A reserva fica vinculada ao titular da família e registrada no nome e na matrícula da pessoa escolhida.
+                            </p>
                           </div>
                         </>
                       )}
