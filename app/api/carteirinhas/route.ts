@@ -7,26 +7,34 @@ function isPago(situacao: unknown) {
   );
 }
 
-function calcularStatus(mensalidades: any[], socioId: string, responsavelId?: string | null) {
-  const alvoId = String(responsavelId || socioId);
+function statusPorMensalidades(mensalidades: any[]) {
   const hoje = new Date().toISOString().slice(0, 10);
-  const vencidas = mensalidades.filter((m) => {
-    if (String(m.socio_id) !== alvoId) return false;
-    const vencimento = String(m.data_vencimento || "").slice(0, 10);
-    if (!vencimento || vencimento >= hoje) return false;
-    return !isPago(m.situacao);
-  });
+  const mapa = new Map<string, { quantidade: number; dias: number }>();
 
-  const quantidade = vencidas.length;
-  const dias = vencidas.reduce((max, m) => {
+  for (const m of mensalidades) {
+    const id = String(m.socio_id || "");
     const vencimento = String(m.data_vencimento || "").slice(0, 10);
-    if (!vencimento) return max;
-    const d = new Date(`${vencimento}T00:00:00`);
+    if (!id || !vencimento || vencimento >= hoje || isPago(m.situacao)) continue;
+
+    const atual = mapa.get(id) || { quantidade: 0, dias: 0 };
+    atual.quantidade += 1;
+
+    const venc = new Date(`${vencimento}T00:00:00`);
     const h = new Date(`${hoje}T00:00:00`);
-    const diff = Math.max(0, Math.floor((h.getTime() - d.getTime()) / 86400000));
-    return Math.max(max, diff);
-  }, 0);
+    if (!Number.isNaN(venc.getTime())) {
+      atual.dias = Math.max(
+        atual.dias,
+        Math.max(0, Math.floor((h.getTime() - venc.getTime()) / 86400000))
+      );
+    }
 
+    mapa.set(id, atual);
+  }
+
+  return mapa;
+}
+
+function statusFinanceiro(quantidade: number, dias: number) {
   if (quantidade <= 2) {
     return { financeiro_status: "em_dia", dias_atraso: dias, meses_atraso: quantidade };
   }
@@ -35,6 +43,7 @@ function calcularStatus(mensalidades: any[], socioId: string, responsavelId?: st
   }
   return { financeiro_status: "muito_atrasado", dias_atraso: dias, meses_atraso: quantidade };
 }
+
 function emLotes<T>(lista: T[], tamanho = 100): T[][] {
   const lotes: T[][] = [];
 
@@ -135,10 +144,15 @@ export async function GET(request: Request) {
       mensalidades.push(...(data || []));
     }
 
-    const resultado = socios.map((s) => ({
-      ...s,
-      ...calcularStatus(mensalidades, s.id, s.responsavel_id),
-    }));
+    const atrasosPorSocio = statusPorMensalidades(mensalidades);
+    const resultado = socios.map((s) => {
+      const alvoId = String(s.responsavel_id || s.id);
+      const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0 };
+      return {
+        ...s,
+        ...statusFinanceiro(atraso.quantidade, atraso.dias),
+      };
+    });
 
     // Os dependentes familiares agora ficam na tabela public.dependentes.
     // A tabela socios contém somente quem possui matrícula própria.
@@ -160,8 +174,9 @@ export async function GET(request: Request) {
     const { data: dependentesDb, error: dependentesError } = await dependentesQuery;
     if (dependentesError) throw dependentesError;
 
+    const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
     const dependentes = (dependentesDb || []).map((d: any) => {
-      const titular = resultado.find((s) => String(s.id) === String(d.socio_id));
+      const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
       const status = titular
         ? {
