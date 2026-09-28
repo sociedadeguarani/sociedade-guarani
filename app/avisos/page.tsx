@@ -12,6 +12,11 @@ type Notificacao = {
   valor?:number; comprovante_url?:string|null; comprovante_status?:string|null;
 };
 type Conta = {id:string; nome:string; banco:string|null; ativo:boolean};
+type ReservaPendente = {
+  id:string; espaco_id:string; espaco_nome:string; data:string; horario:string;
+  nome:string; matricula:string|null; socio_id:string|null; dependente_id:string|null;
+  valor:number; status:string; pagamento:string; comprovante_url:string|null; comprovante_nome:string|null;
+};
 type Aviso = {
   id:string; titulo:string; mensagem:string; imagem_url:string|null; tipo:string;
   prioridade:string; fixado:boolean; ativo:boolean; publico:string;
@@ -38,6 +43,9 @@ export default function AvisosPage(){
   const [pagamento,setPagamento]=useState<Notificacao|null>(null);
   const [valorPagamento,setValorPagamento]=useState("");
   const [contaPagamento,setContaPagamento]=useState("");
+  const [reservasPendentes,setReservasPendentes]=useState<ReservaPendente[]>([]);
+  const [reservaSelecionada,setReservaSelecionada]=useState<ReservaPendente|null>(null);
+  const [processandoReserva,setProcessandoReserva]=useState<string|null>(null);
   const podeGerenciarAvisos=["administrador","administrador_master","admin","master"].includes(perfil);
   const [form,setForm]=useState<any>({
     titulo:"",mensagem:"",imagem_url:"",tipo:"informativo",prioridade:"normal",
@@ -51,6 +59,17 @@ export default function AvisosPage(){
       headers:{"Content-Type":"application/json",Authorization:`Bearer ${t}`},
       cache:"no-store"
     });
+  }
+
+  async function carregarReservasPendentes(headers: HeadersInit){
+    try{
+      const r=await fetch("/api/reservas?status=pendente",{headers,cache:"no-store"});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok) setReservasPendentes(Array.isArray(j.reservas)?j.reservas:[]);
+      else setReservasPendentes([]);
+    }catch{
+      setReservasPendentes([]);
+    }
   }
 
   async function carregar(){
@@ -89,6 +108,12 @@ export default function AvisosPage(){
       } else {
         setNotificacoes([]);
         setContas([]);
+      }
+
+      if(["administrador","administrador_master","admin","master"].includes(perfilAtual)){
+        await carregarReservasPendentes(headers);
+      } else {
+        setReservasPendentes([]);
       }
     } catch(e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar avisos.");
@@ -165,6 +190,36 @@ export default function AvisosPage(){
     }finally{
       setProcessando(null);
     }
+  }
+
+  async function confirmarReservaPix(reserva:ReservaPendente){
+    const conta=contas.find(c=>String(c.id)===String(contaPagamento)) || contas.find(c=>`${c.nome} ${c.banco||""}`.toLowerCase().includes("sicredi")) || contas[0];
+    if(!conta){ setErro("Cadastre uma conta bancária ativa antes de confirmar o PIX."); return; }
+    if(!reserva.comprovante_url){ setErro("Esta reserva não possui comprovante para conferência."); return; }
+    if(!confirm(`Confirma que o PIX de ${reserva.nome} foi realmente creditado na conta ${conta.nome}?\n\nO lançamento será criado no Financeiro.`)) return;
+    setProcessandoReserva(reserva.id); setErro("");
+    try{
+      const r=await api("/api/reservas",{method:"PATCH",body:JSON.stringify({id:reserva.id,acao:"confirmar_pix",conta_bancaria_id:conta.id})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){setErro(j.error||"Não foi possível confirmar a reserva.");return;}
+      setReservaSelecionada(null);
+      await carregar();
+    }catch(e){setErro(e instanceof Error?e.message:"Erro ao confirmar reserva.");}
+    finally{setProcessandoReserva(null);}
+  }
+
+  async function cancelarReservaPix(reserva:ReservaPendente){
+    const motivo=window.prompt("Motivo do cancelamento da reserva:","Comprovante não confirmado / pagamento não localizado.");
+    if(motivo===null) return;
+    setProcessandoReserva(reserva.id); setErro("");
+    try{
+      const r=await api("/api/reservas",{method:"PATCH",body:JSON.stringify({id:reserva.id,acao:"cancelar",motivo:motivo.trim()||"Pagamento PIX não confirmado."})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){setErro(j.error||"Não foi possível cancelar a reserva.");return;}
+      setReservaSelecionada(null);
+      await carregar();
+    }catch(e){setErro(e instanceof Error?e.message:"Erro ao cancelar reserva.");}
+    finally{setProcessandoReserva(null);}
   }
 
   async function marcarLida(id:string){
@@ -268,6 +323,30 @@ export default function AvisosPage(){
 
       {erro&&<div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{erro}</div>}
 
+      {podeGerenciarAvisos&&reservaSelecionada&&<div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-[#005a3c]">Conferência de reserva PIX</p>
+              <h2 className="mt-1 text-2xl font-black text-[#003d2b]">{reservaSelecionada.nome}</h2>
+              <p className="text-sm text-gray-500">{reservaSelecionada.matricula ? `Matrícula ${reservaSelecionada.matricula} • ` : ""}{reservaSelecionada.espaco_nome} • {new Date(`${reservaSelecionada.data}T00:00:00`).toLocaleDateString("pt-BR")} • {reservaSelecionada.horario}</p>
+            </div>
+            <button onClick={()=>setReservaSelecionada(null)} className="rounded-lg border px-3 py-2 font-black">Fechar</button>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Valor</p><p className="font-black text-[#005a3c]">R$ {Number(reservaSelecionada.valor||0).toFixed(2).replace(".",",")}</p></div>
+            <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Pagamento</p><p className="font-black">PIX — pendente</p></div>
+            <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Comprovante</p><p className="font-black">{reservaSelecionada.comprovante_nome||"Anexado"}</p></div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {reservaSelecionada.comprovante_url&&<a href={reservaSelecionada.comprovante_url} target="_blank" rel="noreferrer" className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-black text-[#005a3c]">Abrir comprovante</a>}
+            <button disabled={processandoReserva===reservaSelecionada.id} onClick={()=>confirmarReservaPix(reservaSelecionada)} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white disabled:opacity-60">{processandoReserva===reservaSelecionada.id?"Processando...":"Confirmar PIX e lançar no Financeiro"}</button>
+            <button disabled={processandoReserva===reservaSelecionada.id} onClick={()=>cancelarReservaPix(reservaSelecionada)} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:opacity-60">Cancelar reserva</button>
+          </div>
+          <p className="mt-4 text-xs font-bold text-amber-700">Confira o crédito no banco antes de confirmar. O comprovante sozinho não cria lançamento financeiro.</p>
+        </div>
+      </div>}
+
       {podeGerenciarAvisos&&<div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -290,9 +369,25 @@ export default function AvisosPage(){
           }
         </div>
 
+        {reservasPendentes.length>0&&<div className="mb-5 space-y-3">
+          {reservasPendentes.map(r=><div key={r.id} className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-amber-200 px-2.5 py-1 text-[10px] font-black uppercase text-amber-900">Reserva / PIX</span><span className="text-xs font-bold text-gray-400">Aguardando conferência</span></div>
+                <p className="mt-2 font-black text-[#003d2b]">{r.nome} {r.matricula?`• ${r.matricula}`:""}</p>
+                <p className="text-sm text-gray-600">{r.espaco_nome} • {new Date(`${r.data}T00:00:00`).toLocaleDateString("pt-BR")} • {r.horario} • <b>R$ {Number(r.valor||0).toFixed(2).replace(".",",")}</b></p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {r.comprovante_url&&<a href={r.comprovante_url} target="_blank" rel="noreferrer" className="rounded-lg border bg-white px-3 py-2 text-xs font-black text-[#005a3c]">Ver comprovante</a>}
+                <button onClick={()=>setReservaSelecionada(r)} className="rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Conferir reserva</button>
+              </div>
+            </div>
+          </div>)}
+        </div>}
+
         {notificacoes.length===0
           ?<div className="rounded-xl border border-[#dfe7e2] bg-[#f7faf8] px-4 py-4 text-sm text-gray-500">
-              Nenhuma pendência aguardando conferência.
+              {reservasPendentes.length===0?"Nenhuma pendência aguardando conferência.":"Nenhuma outra pendência de pagamento."}
             </div>
           :<div className="space-y-3">
             {notificacoes.map(n=>{
