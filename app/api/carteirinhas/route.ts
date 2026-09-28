@@ -46,6 +46,7 @@ function emLotes<T>(lista: T[], tamanho = 100): T[][] {
 }
 
 export async function GET(request: Request) {
+  const modoDependentes = new URL(request.url).searchParams.get("modo") === "dependentes";
   const auth = await requireRoles(request, [
     "administrador",
     "administrador_normal",
@@ -143,9 +144,12 @@ export async function GET(request: Request) {
     // A tabela socios contém somente quem possui matrícula própria.
     let dependentesQuery = supabase
       .from("dependentes")
-      .select("id,socio_id,matricula,nome,cpf,parentesco,ativo,foto_url,situacao_financeira")
-      .eq("ativo", true)
+      .select("id,socio_id,matricula,nome,cpf,data_nascimento,parentesco,telefone,whatsapp,email,ativo,created_at,updated_at,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao_financeira,data_ultimo_pagamento,foto_url,observacoes")
       .order("nome");
+
+    if (!modoDependentes) {
+      dependentesQuery = dependentesQuery.eq("ativo", true);
+    }
 
     // Associado comum vê somente sua família. Administradores e funcionários
     // podem consultar todos os dependentes.
@@ -173,6 +177,18 @@ export async function GET(request: Request) {
         nome: d.nome,
         cpf: d.cpf || null,
         parentesco: d.parentesco || null,
+        data_nascimento: d.data_nascimento || null,
+        telefone: d.telefone || d.whatsapp || null,
+        whatsapp: d.whatsapp || null,
+        email: d.email || null,
+        created_at: d.created_at || null,
+        updated_at: d.updated_at || null,
+        possui_mensalidade: d.possui_mensalidade === true,
+        valor_mensalidade: Number(d.valor_mensalidade || 0),
+        dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
+        tipo_pagamento: d.tipo_pagamento || null,
+        data_ultimo_pagamento: d.data_ultimo_pagamento || null,
+        observacoes: d.observacoes || null,
         ativo: d.ativo !== false,
         foto_url: d.foto_url || null,
         titular_nome: titular?.nome || null,
