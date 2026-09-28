@@ -268,6 +268,25 @@ export default function Home() {
   const [perfilUsuario, setPerfilUsuario] = useState("");
   const somenteConsulta = perfilUsuario === "funcionario";
 
+  const sociosPorId = useMemo(() => {
+    const mapa = new Map<string, Socio>();
+    socios.forEach((socio) => mapa.set(socio.id, socio));
+    return mapa;
+  }, [socios]);
+
+  const filhosPorResponsavel = useMemo(() => {
+    const mapa = new Map<string, Socio[]>();
+    socios.forEach((socio) => {
+      if (!socio.responsavel_id) return;
+      const lista = mapa.get(socio.responsavel_id) || [];
+      lista.push(socio);
+      mapa.set(socio.responsavel_id, lista);
+    });
+    return mapa;
+  }, [socios]);
+
+  const responsaveisIds = useMemo(() => new Set(filhosPorResponsavel.keys()), [filhosPorResponsavel]);
+
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
     new Date().toISOString().slice(0, 7)
@@ -366,6 +385,7 @@ export default function Home() {
             item.data_vencimento < hoje
         )
         .map((item) => item.id);
+      const idsParaAtrasoSet = new Set(idsParaAtraso);
 
       if (idsParaAtraso.length > 0) {
         await supabase
@@ -374,7 +394,7 @@ export default function Home() {
           .in("id", idsParaAtraso);
 
         itens.forEach((item) => {
-          if (idsParaAtraso.includes(item.id)) item.situacao = "em_atraso";
+          if (idsParaAtrasoSet.has(item.id)) item.situacao = "em_atraso";
         });
       }
 
@@ -754,7 +774,7 @@ export default function Home() {
   function editarSocio(socio: Socio) {
     if (somenteConsulta) return;
     setSocioEditando(socio);
-    setBuscaResponsavel(socio.responsavel_id ? (socios.find((p) => p.id === socio.responsavel_id)?.nome || "") : "");
+    setBuscaResponsavel(socio.responsavel_id ? (sociosPorId.get(socio.responsavel_id)?.nome || "") : "");
     setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
     setFotoArquivo(null);
     setAbrirCadastro(true);
@@ -1099,7 +1119,7 @@ export default function Home() {
 
       {abrirPagamento && mensalidadePagamento && (
         <ModalPagamentoGuarani
-          socio={socios.find((s) => s.id === mensalidadePagamento.socio_id) || null}
+          socio={sociosPorId.get(mensalidadePagamento.socio_id) || null}
           mensalidade={mensalidadePagamento}
           form={pagamentoForm}
           setForm={setPagamentoForm}
@@ -1117,7 +1137,7 @@ export default function Home() {
 
       {reciboMensalidade && (
         <ReciboPagamentoGuarani
-          socio={socios.find((s) => s.id === reciboMensalidade.socio_id) || null}
+          socio={sociosPorId.get(reciboMensalidade.socio_id) || null}
           mensalidade={reciboMensalidade}
           fechar={() => setReciboMensalidade(null)}
         />
@@ -1543,7 +1563,7 @@ function Socios({
 
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {socio.responsavel_id
-                        ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
+                        ? sociosPorId.get(socio.responsavel_id)?.nome || "Responsável"
                         : "—"}
                     </td>
 
@@ -1710,9 +1730,10 @@ function Financeiro({
   emitirRecibo: (item: Mensalidade) => void;
 }) {
   const termo = busca.toLowerCase().trim();
+  const sociosPorId = useMemo(() => new Map(socios.map((socio) => [socio.id, socio])), [socios]);
 
   const filtradas = mensalidades.filter((item) => {
-    const socio = socios.find((s) => s.id === item.socio_id);
+    const socio = sociosPorId.get(item.socio_id);
     return (
       !termo ||
       socio?.nome?.toLowerCase().includes(termo) ||
@@ -1847,7 +1868,7 @@ function Financeiro({
 
               {!carregando &&
                 filtradas.map((item) => {
-                  const socio = socios.find((s) => s.id === item.socio_id);
+                  const socio = sociosPorId.get(item.socio_id);
 
                   return (
                     <tr key={item.id} className="transition hover:bg-[#fafcfb]">
@@ -2437,12 +2458,20 @@ function Dependentes({
   editarSocio: (socio: Socio) => void;
 }) {
   const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
-  const responsaveis = socios.filter((s) =>
-    socios.some((filho) => filho.responsavel_id === s.id)
-  );
+  const filhosPorResponsavel = useMemo(() => {
+    const mapa = new Map<string, Socio[]>();
+    socios.forEach((socio) => {
+      if (!socio.responsavel_id) return;
+      const lista = mapa.get(socio.responsavel_id) || [];
+      lista.push(socio);
+      mapa.set(socio.responsavel_id, lista);
+    });
+    return mapa;
+  }, [socios]);
+  const responsaveis = socios.filter((s) => filhosPorResponsavel.has(s.id));
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id);
+    return filhosPorResponsavel.get(id) || [];
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -3305,7 +3334,8 @@ function RelatoriosFinanceiros({
     const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
     return { codigo, label, qtd: itens.length, valor: soma(itens) };
   }).filter((x) => x.qtd > 0);
-  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
+  const sociosPorId = useMemo(() => new Map(socios.map((socio) => [socio.id, socio])), [socios]);
+  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: sociosPorId.get(m.socio_id) }));
 
   return (
     <div className="relatorio-area">
@@ -3333,7 +3363,7 @@ function RelatoriosFinanceiros({
           <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
         </div>
         <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
+        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = sociosPorId.get(m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
       </>}
     </div>
   );
