@@ -4,58 +4,65 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 
 function normalizarPerfil(codigo?: string | null, nome?: string | null) {
-  const valorCodigo = String(codigo || "").trim().toLowerCase();
-  const valorNome = String(nome || "").trim().toLowerCase();
+  const valorCodigo = String(codigo || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
-  // O código é a fonte principal para diferenciar Administrador Master
-  // de Administrador Normal quando os nomes exibidos forem iguais.
-  const valor = valorCodigo || valorNome;
+  const valorNome = String(nome || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
-  if (valorCodigo === "administrador_master" || valorCodigo === "master" || valorNome === "administrador master" || valorNome === "master") {
+  // ADMINISTRADOR MASTER — nível máximo
+  if (
+    valorCodigo === "administrador_master" ||
+    valorCodigo === "master" ||
+    valorNome === "administrador master" ||
+    valorNome === "master"
+  ) {
     return "administrador_master";
   }
 
+  // ADMINISTRADOR
   if (
-    valor === "administrador" ||
-    valor === "admin" ||
-    valor === "administrador_normal"
+    valorCodigo === "administrador" ||
+    valorCodigo === "admin" ||
+    valorNome === "administrador" ||
+    valorNome === "admin"
   ) {
-    return "administrador_normal";
+    return "administrador";
   }
 
-  if (valor === "funcionario" || valor === "funcionário") {
-    return "funcionario";
-  }
-
-  if (valor === "funcionario_inventario" || valor === "funcionário_inventário") {
+  // FUNCIONÁRIO INVENTÁRIO
+  if (
+    valorCodigo === "funcionario_inventario" ||
+    valorNome.includes("funcionario - inventario") ||
+    valorNome.includes("funcionario inventario") ||
+    valorNome.includes("funcionário - inventário") ||
+    valorNome.includes("funcionário inventário")
+  ) {
     return "funcionario_inventario";
   }
 
-  if (valor === "associado") {
-    return "associado";
+  // FUNCIONÁRIO
+  if (
+    valorCodigo === "funcionario" ||
+    valorCodigo === "funcionário" ||
+    valorNome === "funcionario" ||
+    valorNome === "funcionário"
+  ) {
+    return "funcionario";
   }
 
-  // Fallback: se o código não estiver preenchido, tenta o nome.
-  if (valorCodigo && valorCodigo !== valorNome) {
-    if (valorNome === "administrador_master" || valorNome === "master") {
-      return "administrador_master";
-    }
-    if (
-      valorNome === "administrador" ||
-      valorNome === "admin" ||
-      valorNome === "administrador_normal"
-    ) {
-      return "administrador_normal";
-    }
-    if (valorNome === "funcionario" || valorNome === "funcionário") {
-      return "funcionario";
-    }
-    if (valorNome === "funcionario_inventario" || valorNome === "funcionário_inventário" || valorNome === "Funcionário — Inventário".toLowerCase()) {
-      return "funcionario_inventario";
-    }
-    if (valorNome === "associado") {
-      return "associado";
-    }
+  // ASSOCIADO
+  if (
+    valorCodigo === "associado" ||
+    valorNome === "associado"
+  ) {
+    return "associado";
   }
 
   return "";
@@ -133,12 +140,14 @@ export async function GET(request: NextRequest) {
     }
 
     let socioIdEfetivo = usuario.socio_id;
+
     if (!socioIdEfetivo && usuario.dependente_id) {
       const { data: dependente } = await supabaseAdmin
         .from("dependentes")
         .select("socio_id")
         .eq("id", usuario.dependente_id)
         .maybeSingle();
+
       socioIdEfetivo = dependente?.socio_id || null;
     }
 
@@ -170,7 +179,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const perfilCanonico = normalizarPerfil(perfil.codigo, perfil.nome);
+    const perfilCanonico = normalizarPerfil(
+      perfil.codigo,
+      perfil.nome
+    );
 
     if (!perfilCanonico) {
       return NextResponse.json(
@@ -183,14 +195,16 @@ export async function GET(request: NextRequest) {
       usuario: {
         id: usuario.id,
         perfil_id: usuario.perfil_id,
-        // O login grava o perfil canônico no localStorage.
-        // Isso evita que "Administrador" seja confundido com associado
-        // ou com administrador normal quando o código real é Master.
+
+        // Perfil canônico usado pelo sistema inteiro.
         perfil: perfilCanonico,
+
         perfil_nome: perfil.nome,
         perfil_codigo: perfil.codigo,
+
         socio_id: socioIdEfetivo,
         dependente_id: usuario.dependente_id || null,
+
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
         email: user.email,
@@ -198,6 +212,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Erro inesperado no login/perfil:", error);
+
     return NextResponse.json(
       { error: "Erro interno ao validar o acesso." },
       { status: 500 }
