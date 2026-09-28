@@ -280,7 +280,6 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
-    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -302,10 +301,6 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
-    }
-
-    if (socioId) {
-      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
@@ -641,7 +636,7 @@ export async function POST(request: Request) {
        * que passa a pagar individualmente) poderá ser ajustada no
        * cadastro do associado antes da geração.
        */
-      let cobraveis = (socios || []).filter((s: any) => {
+      const cobraveis = (socios || []).filter((s: any) => {
         if (
           String(s.situacao || "").toLowerCase() === "inativo" ||
           s.ativo === false
@@ -657,20 +652,6 @@ export async function POST(request: Request) {
 
         return dependenteTemMensalidade(s);
       });
-
-      // Quando o administrador seleciona associados na tela, gerar somente
-      // aqueles registros. Sem socio_ids, mantém o comportamento atual:
-      // gerar todos os pagadores pendentes da competência.
-      const socioIdsSelecionados = Array.isArray(body.socio_ids)
-        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-
-      if (socioIdsSelecionados.length > 0) {
-        const permitidos = new Set(socioIdsSelecionados);
-        cobraveis = cobraveis.filter((s: any) =>
-          permitidos.has(String(s.id))
-        );
-      }
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -810,6 +791,87 @@ export async function POST(request: Request) {
         ok: true,
         criadas: 0,
         message: "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * MARCAR COMO S.S. — SEM SALDO
+     * =====================================================
+     * Não é pagamento e não cria movimento financeiro.
+     * Apenas registra a ocorrência na mensalidade para que o
+     * histórico anual mostre SS.
+     */
+    if (acao === "marcar_sem_saldo") {
+      const ids: string[] = Array.isArray(body.ids)
+        ? body.ids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+
+      if (ids.length === 0) {
+        return NextResponse.json(
+          { error: "Selecione ao menos uma mensalidade." },
+          { status: 400 }
+        );
+      }
+
+      const { data: registros, error: erroBusca } = await db
+        .from("mensalidades")
+        .select("id,situacao")
+        .in("id", ids);
+
+      if (erroBusca) throw erroBusca;
+
+      const idsValidos = (registros || [])
+        .filter((r: any) => r.situacao !== "pago")
+        .map((r: any) => String(r.id));
+
+      if (idsValidos.length === 0) {
+        return NextResponse.json({
+          ok: true,
+          atualizadas: 0,
+          message: "Nenhuma mensalidade disponível para marcar como S.S.",
+        });
+      }
+
+      const { data: movimentosExistentes, error: erroMovimentos } = await db
+        .from("movimentacoes_financeiras")
+        .select("id,origem_id")
+        .eq("origem_tipo", "mensalidade")
+        .in("origem_id", idsValidos);
+
+      if (erroMovimentos) throw erroMovimentos;
+
+      if ((movimentosExistentes || []).length > 0) {
+        const idsComMovimento = new Set(
+          (movimentosExistentes || []).map((m: any) => String(m.origem_id))
+        );
+        const conflitantes = idsValidos.filter((id) => idsComMovimento.has(id));
+
+        if (conflitantes.length > 0) {
+          return NextResponse.json(
+            { error: "Existe entrada financeira vinculada a uma das mensalidades selecionadas. Estorne ou regularize antes de marcar como S.S." },
+            { status: 409 }
+          );
+        }
+      }
+
+      const { error: erroUpdate } = await db
+        .from("mensalidades")
+        .update({
+          situacao: "em_aberto",
+          data_pagamento: null,
+          tipo_pagamento: null,
+          motivo: "S.S",
+          observacoes: body.observacoes || "S.S — Sem saldo",
+        })
+        .in("id", idsValidos);
+
+      if (erroUpdate) throw erroUpdate;
+
+      return NextResponse.json({
+        ok: true,
+        atualizadas: idsValidos.length,
+        message: `${idsValidos.length} mensalidade(s) marcada(s) como S.S — Sem saldo.`,
       });
     }
 
