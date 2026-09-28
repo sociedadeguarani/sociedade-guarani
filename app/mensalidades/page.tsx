@@ -403,7 +403,7 @@ const selecionadasBaixa = useMemo(
     () =>
       linhasExibicao.filter(
         (item) =>
-          sel.includes(item.id) &&
+          sel.includes(String(item.socio_id)) &&
           item.situacao !== "pago" &&
           item.situacao !== "nao_gerada"
       ),
@@ -541,8 +541,8 @@ const selecionadasBaixa = useMemo(
     setMesesParaGerar(Array.from({ length: limite }, (_, i) => i + 1));
   }
 
-  function alternarGeracaoSocio(id: string) {
-    setSelGeracao((atual) =>
+  function alternarSelecaoSocio(id: string) {
+    setSel((atual) =>
       atual.includes(id)
         ? atual.filter((x) => x !== id)
         : [...atual, id]
@@ -550,15 +550,20 @@ const selecionadasBaixa = useMemo(
   }
 
   function selecionarTodosParaGeracao() {
-    const ids = filtrada
-      .filter((x) => x.situacao === "nao_gerada")
-      .map((x) => String(x.socio_id));
-    setSelGeracao(ids);
+    const ids = filtrada.map((x) => String(x.socio_id));
+    setSel(ids);
+    setSelGeracao([]);
   }
 
   async function gerarSelecionados() {
-    if (selGeracao.length === 0) {
-      setErro("Selecione ao menos um associado sem mensalidade gerada.");
+    const idsGeracao =
+      selGeracao.length > 0
+        ? selGeracao
+        : filtrada
+            .filter((item) => sel.includes(item.id) || sel.includes(String(item.socio_id)))
+            .map((item) => String(item.socio_id));
+    if (idsGeracao.length === 0) {
+      setErro("Selecione ao menos um associado para gerar a mensalidade.");
       return;
     }
 
@@ -573,7 +578,7 @@ const selecionadasBaixa = useMemo(
           acao: "gerar",
           ano,
           mes,
-          socio_ids: selGeracao,
+          socio_ids: idsGeracao,
         }),
       });
 
@@ -581,6 +586,7 @@ const selecionadasBaixa = useMemo(
       if (!r.ok) throw Error(d.error || "Não foi possível gerar as mensalidades selecionadas.");
 
       setSelGeracao([]);
+      setSel([]);
       setMsg(
         d.message ||
           `${Number(d.criadas || selGeracao.length)} mensalidade(s) gerada(s) para os associados selecionados.`
@@ -907,19 +913,19 @@ const selecionadasBaixa = useMemo(
                 <button
                   type="button"
                   onClick={selecionarTodosParaGeracao}
-                  disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
+                  disabled={!filtrada.length}
                   className="rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 font-bold text-[#005a3c] disabled:opacity-40"
                 >
-                  Selecionar pendentes
+                  Selecionar todos para gerar
                 </button>
 
                 <button
                   type="button"
-                  disabled={!selGeracao.length}
+                  disabled={!sel.length}
                   onClick={() => void gerarSelecionados()}
                   className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
                 >
-                  ⚡ Gerar selecionadas ({selGeracao.length})
+                  ⚡ Gerar selecionadas ({sel.length})
                 </button>
 
                 <button
@@ -936,11 +942,14 @@ const selecionadasBaixa = useMemo(
 
             {(selGeracao.length > 0 || sel.length > 0) && (
               <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[#eef7f2] p-3 text-sm font-bold text-[#005a3c]">
-                {selGeracao.length > 0 && (
-                  <span>⚡ {selGeracao.length} para gerar</span>
+                {sel.length > 0 && (
+                  <span>☑ {sel.length} selecionado(s)</span>
                 )}
                 {selecionadasBaixa.length > 0 && (
                   <span>💰 {selecionadasBaixa.length} para baixar</span>
+                )}
+                {sel.length > 0 && (
+                  <span className="text-gray-500">⚡ a geração usa os selecionados</span>
                 )}
                 <button
                   type="button"
@@ -993,28 +1002,8 @@ const selecionadasBaixa = useMemo(
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            disabled={x.situacao === "pago"}
-                            checked={
-                              x.situacao === "nao_gerada"
-                                ? selGeracao.includes(String(x.socio_id))
-                                : x.situacao === "pago"
-                                  ? false
-                                  : sel.includes(x.id)
-                            }
-                            onChange={() => {
-                              if (x.situacao === "nao_gerada") {
-                                alternarGeracaoSocio(String(x.socio_id));
-                                return;
-                              }
-
-                              if (x.situacao === "pago") return;
-
-                              setSel((s) =>
-                                s.includes(x.id)
-                                  ? s.filter((i) => i !== x.id)
-                                  : [...s, x.id]
-                              );
-                            }}
+                            checked={sel.includes(String(x.socio_id))}
+                            onChange={() => alternarSelecaoSocio(String(x.socio_id))}
                           />
                         </td>
 
