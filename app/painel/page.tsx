@@ -42,8 +42,6 @@ export default function PainelPage() {
   const [nome, setNome] = useState("Usuário");
   const [perfil, setPerfil] = useState("");
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
-  const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
-  const [sociosInativos, setSociosInativos] = useState<number | null>(null);
 
   useEffect(() => {
     setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
@@ -63,19 +61,25 @@ export default function PainelPage() {
 
         if (r.ok) {
           setTotalSocios(Number(j.total) || 0);
-          setSociosAtivos(Number(j.ativos) || 0);
-          setSociosInativos(Number(j.inativos) || 0);
         }
       } catch {}
     })();
   }, []);
 
-  const p = perfil.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const p = perfil
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
   const master = p === "administrador_master" || p === "master";
-  const admin = p === "administrador" || p === "administrador_normal" || p === "admin";
+  const admin = p === "administrador" || p === "admin";
   const funcionario = p === "funcionario" || p === "funcionario_inventario";
-  const atalhos = master || admin
-    ? (master ? atalhosMaster : atalhosAdmin)
+
+  const atalhos =
+    master || admin
+      ? master
+        ? atalhosMaster
+        : atalhosAdmin
       : p === "funcionario_inventario"
         ? atalhosInventario
         : funcionario
@@ -96,8 +100,12 @@ export default function PainelPage() {
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
       <CabecalhoPadrao />
       <MenuLateralPadrao />
-      <section className="relative min-w-0 overflow-hidden p-5 sm:p-7 lg:ml-[220px] lg:p-8">
-        <div aria-hidden="true" className="pointer-events-none absolute right-[-120px] top-[180px] z-0 h-[720px] w-[720px] opacity-[0.075] sm:right-[-70px]">
+
+      <section className="relative min-w-0 overflow-hidden p-4 sm:p-6 lg:ml-[220px] lg:p-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-[-120px] top-[180px] z-0 h-[720px] w-[720px] opacity-[0.075] sm:right-[-70px]"
+        >
           <img src="/logo-guarani.png" alt="" className="h-full w-full object-contain" />
         </div>
 
@@ -108,63 +116,68 @@ export default function PainelPage() {
                 <p className="text-sm font-semibold text-white/70">Painel de gestão</p>
                 <h1 className="mt-1 text-3xl font-black sm:text-4xl">Olá, {nome}!</h1>
                 <p className="mt-2 text-sm text-white/80">
-                  {"Tudo da Sociedade Recreativa Guarani em um só lugar. Use os atalhos abaixo para acessar os módulos."}
+                  Tudo da Sociedade Recreativa Guarani em um só lugar. Use os atalhos abaixo para acessar os módulos.
                 </p>
               </div>
-              {(admin || master) && (
-                <a href="/socios" className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]">
-                  + Novo sócio
-                </a>
-              )}
-              {master && (
-                <a href="/usuarios" className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]">
-                  + Novo usuário
-                </a>
-              )}
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {(admin || master) && (
+                  <a
+                    href="/socios"
+                    className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]"
+                  >
+                    + Novo sócio
+                  </a>
+                )}
+                {master && (
+                  <a
+                    href="/usuarios"
+                    className="rounded-xl bg-white px-5 py-3 text-center text-sm font-black text-[#005a3c]"
+                  >
+                    + Novo usuário
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
               <p className="text-sm text-slate-500">Associados cadastrados</p>
-              <p className="mt-1 text-3xl font-black text-[#005a3c]">{totalSocios === null ? "—" : totalSocios}</p>
-              <p className="mt-1 text-xs text-slate-400">Total de cadastros</p>
+              <p className="mt-1 text-3xl font-black text-[#005a3c]">
+                {totalSocios === null ? "—" : totalSocios}
+              </p>
             </div>
-            <div className="rounded-2xl border border-[#dceee4] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Associados ativos</p>
-              <p className="mt-1 text-3xl font-black text-[#16834f]">{sociosAtivos === null ? "—" : sociosAtivos}</p>
-              <p className="mt-1 text-xs text-slate-400">Cadastros liberados</p>
-            </div>
-            <div className="rounded-2xl border border-[#f0e3cf] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Associados inativos</p>
-              <p className="mt-1 text-3xl font-black text-[#b56a12]">{sociosInativos === null ? "—" : sociosInativos}</p>
-              <p className="mt-1 text-xs text-slate-400">Requerem conferência</p>
-            </div>
+
             <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Perfil e acesso</p>
+              <p className="text-sm text-slate-500">Perfil atual</p>
               <p className="mt-1 text-xl font-black text-[#005a3c]">{nomeDoPerfil}</p>
-              <p className="mt-1 text-xs text-slate-400">{master || admin ? "Acesso administrativo" : funcionario ? "Acesso operacional" : "Área do associado"}</p>
+            </div>
+
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Área</p>
+              <p className="mt-1 text-xl font-black text-[#005a3c]">Sociedade Guarani</p>
+            </div>
+
+            <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Acesso</p>
+              <p className="mt-1 text-xl font-black text-[#005a3c]">
+                {master || admin ? "Administrativo" : funcionario ? "Operacional" : "Associado"}
+              </p>
             </div>
           </div>
 
-          {(master || admin) && sociosInativos !== null && sociosInativos > 0 && (
-            <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-[#f1dfbd] bg-[#fffaf0] p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-black text-[#7b4b0b]">⚠️ Atenção cadastral</p>
-                <p className="mt-1 text-sm text-[#8c6a35]">Existem {sociosInativos} associado(s) marcado(s) como inativo(s).</p>
-              </div>
-              <a href="/socios" className="rounded-xl border border-[#d9c18f] bg-white px-4 py-2 text-center text-sm font-bold text-[#7b4b0b]">Ver sócios</a>
-            </div>
-          )}
-
           <div className="mt-8">
             <h2 className="text-2xl font-black text-[#005a3c]">Acesso rápido</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Clique em um módulo para abrir sua tela.
-            </p>
+            <p className="mt-1 text-sm text-slate-500">Clique em um módulo para abrir sua tela.</p>
+
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {atalhos.map(([icone, titulo, rota, descricao]) => (
-                <a key={rota} href={rota} className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <a
+                  key={rota}
+                  href={rota}
+                  className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                >
                   <div className="text-2xl">{icone}</div>
                   <div className="mt-3 text-lg font-black text-[#003d2b]">{titulo}</div>
                   <p className="mt-1 text-sm text-slate-500">{descricao}</p>
