@@ -23,7 +23,6 @@ const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
   administrador_master: [],
   master: [],
-  administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
@@ -149,7 +148,7 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
   const perfisAtuais = [...(p.data || [])] as any[];
   const perfisPadrao = [
     { codigo: "administrador_master", nome: "Administrador Master" },
-    { codigo: "administrador_normal", nome: "Administrador" },
+    { codigo: "administrador", nome: "Administrador" },
     { codigo: "funcionario", nome: "Funcionário" },
     { codigo: "funcionario_inventario", nome: "Funcionário — Inventário" },
     { codigo: "associado", nome: "Associado" },
@@ -244,7 +243,7 @@ export async function POST(request: Request) {
     const perfilChave = normalizarPerfil(perfil.codigo, perfil.nome);
     const escolhidas = perfilChave === "administrador_master"
       ? []
-      : perfilChave === "administrador_normal"
+      : perfilChave === "administrador"
         ? TODAS_PERMISSOES
         : Array.isArray(permissoes)
         ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x))
