@@ -80,15 +80,18 @@ function escolherConfiguracao(
   tipoSocio: string,
   competencia: string
 ) {
-  // As consultas já carregam as configurações por vigencia_inicio
-  // decrescente. Portanto, basta encontrar a primeira válida; não
-  // precisamos filtrar e ordenar novamente para cada associado.
-  return (configuracoes || []).find(
-    (c: any) =>
-      String(c.tipo_socio || "") === String(tipoSocio || "") &&
-      c.ativo !== false &&
-      String(c.vigencia_inicio || "0000-00-00") <= competencia
-  );
+  return (configuracoes || [])
+    .filter(
+      (c: any) =>
+        String(c.tipo_socio || "") === String(tipoSocio || "") &&
+        c.ativo !== false &&
+        String(c.vigencia_inicio || "0000-00-00") <= competencia
+    )
+    .sort((a: any, b: any) =>
+      String(b.vigencia_inicio || "").localeCompare(
+        String(a.vigencia_inicio || "")
+      )
+    )[0];
 }
 
 
@@ -152,56 +155,13 @@ function chaveTarifa(
   return tipo;
 }
 
-function normalizarChaveTarifa(valor: unknown) {
-  const tipo = normalizarTexto(valor);
-  const aliases: Record<string, string> = {
-    banrisul: "banrisul",
-    bergs: "banrisul",
-    debito_banrisul: "banrisul",
-    "debito banrisul": "banrisul",
-    sicredi: "sicredi",
-    debito_sicredi: "sicredi",
-    "debito sicredi": "sicredi",
-    bb: "bb",
-    banco_do_brasil: "bb",
-    debito_bb: "bb",
-    debito_banco_do_brasil: "bb",
-    "debito banco do brasil": "bb",
-    boleto: "boleto",
-    pix: "pix",
-    botero: "pix",
-    dinheiro: "dinheiro",
-    transferencia: "transferencia",
-    outro: "outro",
-  };
-
-  return aliases[tipo] || tipo;
-}
-
-function criarMapaTarifas(tarifas: any[]) {
-  const mapa = new Map<string, number>();
-
-  for (const tarifa of tarifas || []) {
-    if (tarifa?.ativo === false) continue;
-    const chave = normalizarChaveTarifa(tarifa?.tipo_pagamento);
-    if (!chave || mapa.has(chave)) continue;
-    mapa.set(chave, Number(tarifa?.valor_tarifa || 0));
-  }
-
-  return mapa;
-}
-
 function valorTarifa(
-  tarifas: any[] | Map<string, number>,
+  tarifas: any[],
   tipoPagamento: unknown,
   contaBancaria: any | null
 ) {
   const chave = chaveTarifa(tipoPagamento, contaBancaria);
   if (!chave) return 0;
-
-  if (tarifas instanceof Map) {
-    return Number(tarifas.get(chave) || 0);
-  }
 
   const tarifa = (tarifas || []).find(
     (t: any) =>
@@ -323,6 +283,15 @@ export async function GET(request: Request) {
 
     const db = getServiceClient();
 
+    const { data: socios, error: erroSocios } = await db
+      .from("socios")
+      .select(
+        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
+      )
+      .order("nome");
+
+    if (erroSocios) throw erroSocios;
+
     let consulta = db
       .from("mensalidades")
       .select("*")
@@ -334,46 +303,32 @@ export async function GET(request: Request) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
     }
 
-    const [
-      resultadoSocios,
-      resultadoMensalidades,
-      resultadoConfiguracoes,
-      resultadoTarifas,
-      resultadoCobrancas,
-    ] = await Promise.all([
-      db
-        .from("socios")
-        .select(
-          "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
-        )
-        .order("nome"),
-      consulta,
-      db
-        .from("configuracoes_mensalidades")
-        .select("*")
-        .order("vigencia_inicio", { ascending: false }),
-      db
-        .from("configuracoes_tarifas_mensalidades")
-        .select("*")
-        .order("tipo_pagamento"),
-      db
-        .from("configuracoes_cobranca_mensalidades")
-        .select("*")
-        .eq("ativo", true)
-        .order("created_at", { ascending: false })
-        .limit(1),
-    ]);
+    const { data: mensalidades, error: erroMensalidades } =
+      await consulta;
 
-    const { data: socios, error: erroSocios } = resultadoSocios;
-    const { data: mensalidades, error: erroMensalidades } = resultadoMensalidades;
-    const { data: configuracoes, error: erroConfiguracoes } = resultadoConfiguracoes;
-    const { data: tarifas, error: erroTarifas } = resultadoTarifas;
-    const { data: cobrancas, error: erroCobrancas } = resultadoCobrancas;
-
-    if (erroSocios) throw erroSocios;
     if (erroMensalidades) throw erroMensalidades;
+
+    const { data: configuracoes, error: erroConfiguracoes } = await db
+      .from("configuracoes_mensalidades")
+      .select("*")
+      .order("vigencia_inicio", { ascending: false });
+
     if (erroConfiguracoes) throw erroConfiguracoes;
+
+    const { data: tarifas, error: erroTarifas } = await db
+      .from("configuracoes_tarifas_mensalidades")
+      .select("*")
+      .order("tipo_pagamento");
+
     if (erroTarifas) throw erroTarifas;
+
+    const { data: cobrancas, error: erroCobrancas } = await db
+      .from("configuracoes_cobranca_mensalidades")
+      .select("*")
+      .eq("ativo", true)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
     if (erroCobrancas) throw erroCobrancas;
 
     const mapaSocios = new Map<string, any>(
@@ -510,7 +465,6 @@ export async function POST(request: Request) {
       );
 
       if (erroTarifas) throw erroTarifas;
-      const mapaTarifas = criarMapaTarifas(tarifas || []);
 
       const { data: cobrancas, error: erroCobrancas } = await db
         .from("configuracoes_cobranca_mensalidades")
@@ -556,7 +510,7 @@ export async function POST(request: Request) {
             s.tipo_pagamento || config?.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          const tarifa = valorTarifa(mapaTarifas, tipoPagamento, contaBancaria);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -682,7 +636,7 @@ export async function POST(request: Request) {
        * que passa a pagar individualmente) poderá ser ajustada no
        * cadastro do associado antes da geração.
        */
-      const cobraveis = (socios || []).filter((s: any) => {
+      let cobraveis = (socios || []).filter((s: any) => {
         if (
           String(s.situacao || "").toLowerCase() === "inativo" ||
           s.ativo === false
@@ -698,6 +652,20 @@ export async function POST(request: Request) {
 
         return dependenteTemMensalidade(s);
       });
+
+      // Quando o administrador seleciona associados na tela, gerar somente
+      // aqueles registros. Sem socio_ids, mantém o comportamento atual:
+      // gerar todos os pagadores pendentes da competência.
+      const socioIdsSelecionados = Array.isArray(body.socio_ids)
+        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+
+      if (socioIdsSelecionados.length > 0) {
+        const permitidos = new Set(socioIdsSelecionados);
+        cobraveis = cobraveis.filter((s: any) =>
+          permitidos.has(String(s.id))
+        );
+      }
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -725,7 +693,6 @@ export async function POST(request: Request) {
       );
 
       if (erroTarifas) throw erroTarifas;
-      const mapaTarifas = criarMapaTarifas(tarifas || []);
 
       const { data: cobrancas, error: erroCobrancas } = await db
         .from("configuracoes_cobranca_mensalidades")
@@ -779,7 +746,7 @@ export async function POST(request: Request) {
 
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          const tarifa = valorTarifa(mapaTarifas, tipoPagamento, contaBancaria);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -874,9 +841,8 @@ export async function POST(request: Request) {
         .filter((x: any) => x.situacao === "pago")
         .map((x: any) => String(x.id));
 
-      const idsJaPagosSet = new Set(idsJaPagos);
       const idsParaBaixar = ids.filter(
-        (id: string) => !idsJaPagosSet.has(id)
+        (id: string) => !idsJaPagos.includes(id)
       );
 
       if (idsParaBaixar.length === 0) {
@@ -904,7 +870,6 @@ export async function POST(request: Request) {
       );
 
       if (erroTarifas) throw erroTarifas;
-      const mapaTarifas = criarMapaTarifas(tarifas || []);
 
       const { data: cobrancas, error: erroCobrancas } = await db
         .from("configuracoes_cobranca_mensalidades")
@@ -934,9 +899,8 @@ export async function POST(request: Request) {
         (sociosBaixa || []).map((s: any) => [String(s.id), s])
       );
 
-      const idsParaBaixarSet = new Set(idsParaBaixar);
       const registrosParaBaixar = (registros || []).filter((r: any) =>
-        idsParaBaixarSet.has(String(r.id))
+        idsParaBaixar.includes(String(r.id))
       );
 
       // Não permite marcar como pago sem uma conta de destino definida.
@@ -1006,7 +970,7 @@ export async function POST(request: Request) {
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(mapaTarifas, formaPagamento, contaId ? mapaContas.get(String(contaId)) || null : null),
+          valorTarifa(tarifas || [], formaPagamento, contaId ? mapaContas.get(String(contaId)) || null : null),
           regraCobranca
         );
 
@@ -1059,9 +1023,52 @@ export async function POST(request: Request) {
             observacoes: body.observacoes || null,
           });
 
-        // A tarifa cobrada do associado não é uma despesa da Sociedade.
-        // Ela permanece registrada em mensalidades.tarifa_pagamento e
-        // total_cobrado, mas não gera saída no caixa.
+        // A tarifa paga pelo associado é registrada separadamente
+        // como DESPESA bancária da Sociedade.
+        if (calculado.tarifa_pagamento > 0) {
+          const { error: erroTarifa } = await db
+            .from("movimentacoes_financeiras")
+            .insert({
+              conta_bancaria_id: contaId,
+              conta_destino_id: null,
+              grupo_transferencia: null,
+              tipo: "saida",
+              categoria: "Tarifa bancária",
+              descricao: `Tarifa ${formaPagamento} - Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
+              valor: Number(calculado.tarifa_pagamento || 0),
+              data_movimentacao: dataPagamento,
+              forma_pagamento: formaPagamento,
+              origem_tipo: "tarifa_mensalidade",
+              origem_id: registro.id,
+              socio_id: registro.socio_id,
+              dependente_id: null,
+              comprovante_url: null,
+              conciliado: false,
+              data_conciliacao: null,
+              observacoes: "Tarifa bancária repassada ao associado.",
+            });
+
+          if (erroTarifa) {
+            await db
+              .from("movimentacoes_financeiras")
+              .delete()
+              .eq("origem_tipo", "mensalidade")
+              .eq("origem_id", registro.id);
+
+            await db
+              .from("mensalidades")
+              .update({
+                situacao: registro.situacao,
+                data_pagamento: null,
+                tipo_pagamento: registro.tipo_pagamento || null,
+                tarifa_pagamento: null,
+                total_cobrado: null,
+              })
+              .eq("id", registro.id);
+
+            throw erroTarifa;
+          }
+        }
 
         if (erroEntrada) {
           // Se a entrada falhar, desfaz a marcação como paga para não
