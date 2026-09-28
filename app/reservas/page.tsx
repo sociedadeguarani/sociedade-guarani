@@ -39,6 +39,15 @@ type Espaco = {
 
 type Recibo={id:string;numero:string;tipo:string;nome:string;matricula:number|string|null;detalhe:string;periodo:string;valor:number;pagamento:string;operador:string;dataHora:string;status:string};
 
+type DependenteReserva = {
+  id: string;
+  socio_id: string;
+  matricula: string | null;
+  nome: string;
+  parentesco: string | null;
+  ativo: boolean;
+};
+
 type Reserva = {
   id: string;
   espacoId: string;
@@ -46,6 +55,7 @@ type Reserva = {
   horario: string;
   nome: string;
   socioId?: string;
+  dependenteId?: string;
   matricula?: number | string | null;
   tipoPessoa: TipoPessoa;
   valor: number;
@@ -101,7 +111,9 @@ export default function ReservasPage() {
   const [nome, setNome] = useState("");
   const [socioId, setSocioId] = useState("");
   const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
+  const [dependenteId, setDependenteId] = useState("");
   const [socios, setSocios] = useState<Array<{ id: string; matricula: number | null; nome: string; cpf: string | null }>>([]);
+  const [dependentes, setDependentes] = useState<DependenteReserva[]>([]);
   const [buscaSocio, setBuscaSocio] = useState("");
   const [tipoPessoa, setTipoPessoa] = useState<TipoPessoa>("socio");
   const [etapa, setEtapa] = useState<"selecao" | "confirmacao">("selecao");
@@ -134,11 +146,12 @@ export default function ReservasPage() {
     if (!modoPublico) {
       void (async () => {
         try {
-          const { data } = await supabase
-            .from("socios")
-            .select("id,matricula,nome,cpf")
-            .order("nome", { ascending: true });
-          setSocios(data || []);
+          const [sociosResult, dependentesResult] = await Promise.all([
+            supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
+            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").eq("ativo", true).order("nome", { ascending: true }),
+          ]);
+          setSocios(sociosResult.data || []);
+          setDependentes((dependentesResult.data || []) as DependenteReserva[]);
         } catch {
           setSocios([]);
         }
@@ -245,6 +258,12 @@ export default function ReservasPage() {
   function mudarTipo(tipo: TipoPessoa) {
     setTipoPessoa(tipo);
     setEtapa("selecao");
+    if (tipo === "nao_socio") {
+      setSocioId("");
+      setDependenteId("");
+      setMatriculaResponsavel(null);
+      setBuscaSocio("");
+    }
   }
 
   function continuar() {
@@ -294,6 +313,7 @@ export default function ReservasPage() {
     setHorario(r.horario);
     setNome(r.nome);
     setSocioId(r.socioId || "");
+    setDependenteId(r.dependenteId || "");
     setMatriculaResponsavel(r.matricula ?? null);
     setTipoPessoa(r.tipoPessoa);
     setFormaPagamentoReserva(r.pagamento === "dinheiro" ? "dinheiro" : "pix");
@@ -348,6 +368,7 @@ export default function ReservasPage() {
         horario,
         nome: nome.trim(),
         socioId: socioId || undefined,
+        dependenteId: dependenteId || undefined,
         matricula: matriculaResponsavel,
         tipoPessoa,
         valor,
@@ -376,6 +397,7 @@ export default function ReservasPage() {
       setAba("reservas");
       setNome("");
       setSocioId("");
+      setDependenteId("");
       setMatriculaResponsavel(null);
       setBuscaSocio("");
       setData("");
@@ -426,6 +448,24 @@ export default function ReservasPage() {
       .filter((s) => `${s.nome} ${s.matricula ?? ""} ${s.cpf ?? ""}`.toLowerCase().includes(termo))
       .slice(0, 12);
   }, [socios, buscaSocio]);
+
+  const dependentesDoSocio = useMemo(
+    () => dependentes.filter((d) => String(d.socio_id) === String(socioId)),
+    [dependentes, socioId]
+  );
+
+  function selecionarDependente(id: string) {
+    setDependenteId(id);
+    const dependente = dependentesDoSocio.find((d) => String(d.id) === String(id));
+    const titular = socios.find((s) => String(s.id) === String(socioId));
+    if (dependente) {
+      setNome(dependente.nome);
+      setMatriculaResponsavel(dependente.matricula || null);
+    } else if (titular) {
+      setNome(titular.nome);
+      setMatriculaResponsavel(titular.matricula ?? null);
+    }
+  }
 
   function alterarPreco(id: string, campo: "precoSocio" | "precoNaoSocio", v: number) {
     const novoValor = Math.max(0, v);
@@ -534,7 +574,7 @@ export default function ReservasPage() {
                         <Users className="h-5 w-5 text-gray-400" />
                         <input
                           value={buscaSocio}
-                          onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setMatriculaResponsavel(null); setNome(""); }}
+                          onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setDependenteId(""); setMatriculaResponsavel(null); setNome(""); }}
                           placeholder="Buscar sócio por nome ou matrícula..."
                           className="w-full outline-none"
                         />
@@ -542,13 +582,38 @@ export default function ReservasPage() {
                       {buscaSocio && !socioId && (
                         <div className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
                           {sociosFiltrados.length ? sociosFiltrados.map((s) => (
-                            <button key={s.id} type="button" onClick={() => { setSocioId(s.id); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }} className="block w-full border-b px-4 py-3 text-left hover:bg-[#e8f3ee]">
+                            <button key={s.id} type="button" onClick={() => { setSocioId(s.id); setDependenteId(""); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }} className="block w-full border-b px-4 py-3 text-left hover:bg-[#e8f3ee]">
                               <b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span>
                             </button>
                           )) : <div className="p-4 text-sm text-gray-500">Nenhum sócio encontrado.</div>}
                         </div>
                       )}
-                      {socioId && <div className="mt-3 flex items-center justify-between rounded-xl bg-[#e8f3ee] p-3 text-sm"><span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}</span><button type="button" onClick={() => { setSocioId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button></div>}
+                      {socioId && (
+                        <>
+                          <div className="mt-3 flex items-center justify-between rounded-xl bg-[#e8f3ee] p-3 text-sm">
+                            <span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}{dependenteId ? " · Dependente" : " · Titular"}</span>
+                            <button type="button" onClick={() => { setSocioId(""); setDependenteId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button>
+                          </div>
+                          {dependentesDoSocio.length > 0 && (
+                            <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-white p-3">
+                              <label className="block text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">Reservar para</label>
+                              <select
+                                value={dependenteId}
+                                onChange={(e) => selecionarDependente(e.target.value)}
+                                className="mt-2 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]"
+                              >
+                                <option value="">Titular — {socios.find((s) => String(s.id) === String(socioId))?.nome || "Sócio"}</option>
+                                {dependentesDoSocio.map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.nome} — {d.matricula || "Sem matrícula"}{d.parentesco ? ` · ${d.parentesco}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="mt-2 text-xs text-gray-500">A reserva continua vinculada ao titular da família, mas fica registrada no nome e na matrícula da pessoa escolhida.</p>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   ) : (
                     <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" />
