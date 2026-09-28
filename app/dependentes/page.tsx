@@ -8,8 +8,6 @@ type Socio = {
   id: string;
   matricula: string | null;
   nome: string;
-  situacao: string | null;
-  responsavel_id?: string | null;
 };
 
 type Dependente = {
@@ -22,14 +20,13 @@ type Dependente = {
   parentesco: string | null;
   telefone: string | null;
   ativo: boolean | null;
-  created_at: string | null;
   possui_mensalidade: boolean | null;
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
   situacao_financeira: string | null;
+  financeiro_status?: string | null;
   data_ultimo_pagamento: string | null;
-  source?: "socios" | "dependentes";
 };
 
 const parentescos = [
@@ -62,7 +59,6 @@ function formatarTelefone(valor: string | null) {
 export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
-  const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, string>>({});
   const [busca, setBusca] = useState("");
   const [filtroSocio, setFiltroSocio] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("todos");
@@ -170,30 +166,26 @@ export default function DependentesPage() {
           parentesco: d.parentesco ?? null,
           telefone: d.telefone ?? d.whatsapp ?? null,
           ativo: d.ativo !== false,
-          created_at: d.created_at ?? null,
-          possui_mensalidade: Boolean(d.possui_mensalidade),
+              possui_mensalidade: Boolean(d.possui_mensalidade),
           valor_mensalidade: Number(d.valor_mensalidade || 0),
           dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
           tipo_pagamento: d.tipo_pagamento ?? null,
           situacao_financeira: d.situacao_financeira ?? null,
+          financeiro_status: d.financeiro_status ?? "em_dia",
           data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          source: "dependentes",
         }));
 
       setSocios(sociosData.map((s: any) => ({
         id: String(s.id),
         matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome ?? "",
-        situacao: s.situacao ?? null,
       })));
       setDependentes(dependentesData);
-      setStatusResponsaveis(dados?.statusResponsaveis || {});
     } catch (error) {
       console.error(error);
       setErro(error instanceof Error ? error.message : "Erro ao carregar dependentes.");
       setSocios([]);
       setDependentes([]);
-      setStatusResponsaveis({});
     } finally {
       setCarregando(false);
     }
@@ -428,8 +420,7 @@ export default function DependentesPage() {
                     <tbody>
                       {dependentesFiltrados.map((d) => {
                         const socio = socioPorId[d.socio_id];
-                        const statusResponsavel = statusResponsaveis[d.socio_id] || "em_dia";
-                        const statusLabel = statusResponsavel === "muito_atrasado" ? "5+ meses" : statusResponsavel === "atrasado" ? "3–4 meses" : "Até 2 meses";
+                        const statusResponsavel = d.financeiro_status || "em_dia";
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
