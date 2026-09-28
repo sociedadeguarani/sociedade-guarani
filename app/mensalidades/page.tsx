@@ -10,8 +10,6 @@ type Socio = {
   id: string;
   nome: string;
   matricula?: string | number | null;
-  numero_titulo?: number | null;
-  numero_debitos_referencia?: number | null;
   cpf?: string | null;
   categoria?: string | null;
   tipo_socio?: string | null;
@@ -170,6 +168,7 @@ export default function Page() {
   const [cobranca, setCobranca] = useState<Cobranca>(cobrancaInicial);
 
   const [sel, setSel] = useState<string[]>([]);
+  const [selGeracao, setSelGeracao] = useState<string[]>([]);
   const [erro, setErro] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -211,33 +210,30 @@ export default function Page() {
     try {
       setErro("");
 
-      const headers = await h();
-
-      // As duas fontes são independentes: carregamos em paralelo para
-      // reduzir o tempo de abertura/troca de competência.
-      const [resMensalidades, resContas] = await Promise.all([
-        fetch(`/api/mensalidades/admin?ano=${ano}&mes=${mes}`, {
-          headers,
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${ano}&mes=${mes}`,
+        {
+          headers: await h(),
           cache: "no-store",
-        }),
-        supabase
-          .from("contas_bancarias")
-          .select("id,nome,banco")
-          .order("nome"),
-      ]);
+        }
+      );
 
-      const d = await resMensalidades.json();
+      const d = await r.json();
 
-      if (!resMensalidades.ok) {
-        throw Error(d.error || "Erro ao carregar mensalidades.");
-      }
+      if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
 
       setLista(d.mensalidades || []);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
-      setContas(resContas.data || []);
+
+      const { data: contasData } = await supabase
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .order("nome");
+
+      setContas(contasData || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
@@ -318,7 +314,7 @@ export default function Page() {
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta = contaPorId.get(String(contaId));
+    const conta = contas.find((c) => String(c.id) === String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (
@@ -346,18 +342,6 @@ export default function Page() {
     socios.forEach((s) => mapa.set(String(s.id), s));
     return mapa;
   }, [socios]);
-
-  const contaPorId = useMemo(() => {
-    const mapa = new Map<string, Conta>();
-    contas.forEach((c) => mapa.set(String(c.id), c));
-    return mapa;
-  }, [contas]);
-
-  const tarifaPorTipo = useMemo(() => {
-    const mapa = new Map<string, T>();
-    tarifas.forEach((t) => mapa.set(String(t.tipo_pagamento), t));
-    return mapa;
-  }, [tarifas]);
 
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
@@ -411,7 +395,7 @@ export default function Page() {
 
       return bateBusca && bateCobranca;
     });
-  }, [linhasExibicao, busca, cobrancasSelecionadas, contaPorId]);
+  }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
 
   async function post(body: any) {
     setErro("");
@@ -430,6 +414,7 @@ export default function Page() {
 
       setMsg(d.message || "Concluído.");
       setSel([]);
+      setSelGeracao([]);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
@@ -490,6 +475,60 @@ export default function Page() {
     setMesesParaGerar(Array.from({ length: limite }, (_, i) => i + 1));
   }
 
+  function alternarGeracaoSocio(id: string) {
+    setSelGeracao((atual) =>
+      atual.includes(id)
+        ? atual.filter((x) => x !== id)
+        : [...atual, id]
+    );
+  }
+
+  function selecionarTodosParaGeracao() {
+    const ids = filtrada
+      .filter((x) => x.situacao === "nao_gerada")
+      .map((x) => String(x.socio_id));
+    setSelGeracao(ids);
+  }
+
+  async function gerarSelecionados() {
+    if (selGeracao.length === 0) {
+      setErro("Selecione ao menos um associado sem mensalidade gerada.");
+      return;
+    }
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "gerar",
+          ano,
+          mes,
+          socio_ids: selGeracao,
+        }),
+      });
+
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível gerar as mensalidades selecionadas.");
+
+      setSelGeracao([]);
+      setMsg(
+        d.message ||
+          `${Number(d.criadas || selGeracao.length)} mensalidade(s) gerada(s) para os associados selecionados.`
+      );
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível gerar as mensalidades selecionadas."
+      );
+    }
+  }
+
   async function previsualizarGeracao() {
     const selecionados = [...mesesParaGerar].sort((a, b) => a - b);
     if (selecionados.length === 0) {
@@ -503,30 +542,22 @@ export default function Page() {
     setPrevias([]);
 
     try {
-      const headers = await h();
-      const resultados = await Promise.all(
-        selecionados.map(async (mesGeracao) => {
-          const r = await fetch("/api/mensalidades/admin", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              acao: "previsualizar",
-              ano,
-              mes: mesGeracao,
-            }),
-          });
+      const resultados: PreviaGeracao[] = [];
+      for (const mesGeracao of selecionados) {
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({
+            acao: "previsualizar",
+            ano,
+            mes: mesGeracao,
+          }),
+        });
 
-          const d = await r.json();
-          if (!r.ok) {
-            throw Error(
-              d.error ||
-                `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`
-            );
-          }
-
-          return d as PreviaGeracao;
-        })
-      );
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`);
+        resultados.push(d);
+      }
 
       setPrevias(resultados);
     } catch (e) {
@@ -575,6 +606,7 @@ export default function Page() {
       setPrevias([]);
       setMsg(`Geração concluída: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`);
       setSel([]);
+      setSelGeracao([]);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao gerar competências.");
@@ -653,7 +685,7 @@ export default function Page() {
                 onClick={() => void previsualizarGeracao()}
                 className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
-                Gerar competência
+                ⚡ Gerar competência
               </button>
 
               <button
@@ -804,29 +836,70 @@ export default function Page() {
                 Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
               </div>
 
-              <button
-                disabled={!sel.length}
-                onClick={() =>
-                  void post({
-                    acao: "baixar",
-                    ids: sel,
-                    data_pagamento: new Date().toISOString().slice(0, 10),
-                  })
-                }
-                className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
-              >
-                Baixar selecionadas ({sel.length})
-              </button>
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                <button
+                  type="button"
+                  onClick={selecionarTodosParaGeracao}
+                  disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
+                  className="rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 font-bold text-[#005a3c] disabled:opacity-40"
+                >
+                  Selecionar pendentes
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!selGeracao.length}
+                  onClick={() => void gerarSelecionados()}
+                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                >
+                  ⚡ Gerar selecionadas ({selGeracao.length})
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!sel.length}
+                  onClick={() =>
+                    void post({
+                      acao: "baixar",
+                      ids: sel,
+                      data_pagamento: new Date().toISOString().slice(0, 10),
+                    })
+                  }
+                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                >
+                  💰 Baixar selecionadas ({sel.length})
+                </button>
+              </div>
             </div>
 
+            {(selGeracao.length > 0 || sel.length > 0) && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[#eef7f2] p-3 text-sm font-bold text-[#005a3c]">
+                {selGeracao.length > 0 && (
+                  <span>⚡ {selGeracao.length} para gerar</span>
+                )}
+                {sel.length > 0 && (
+                  <span>💰 {sel.length} para baixar</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSel([]);
+                    setSelGeracao([]);
+                  }}
+                  className="ml-auto text-xs font-bold underline"
+                >
+                  Limpar seleção
+                </button>
+              </div>
+            )}
+
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[1280px] text-sm">
+              <table className="w-full min-w-[1200px] text-sm">
                 <thead className="bg-[#e8f3ee]">
                   <tr>
                     <th className="p-3">✓</th>
                     <th className="p-3 text-left">Associado</th>
                     <th className="p-3 text-left">Matrícula</th>
-                    <th className="p-3 text-left">Nº débitos</th>
                     <th className="p-3 text-left">Tipo</th>
                     <th className="p-3 text-left">Vencimento</th>
                     <th className="p-3 text-left">Base</th>
@@ -857,15 +930,23 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            disabled={x.situacao === "nao_gerada"}
-                            checked={sel.includes(x.id)}
-                            onChange={() =>
+                            checked={
+                              x.situacao === "nao_gerada"
+                                ? selGeracao.includes(String(x.socio_id))
+                                : sel.includes(x.id)
+                            }
+                            onChange={() => {
+                              if (x.situacao === "nao_gerada") {
+                                alternarGeracaoSocio(String(x.socio_id));
+                                return;
+                              }
+
                               setSel((s) =>
                                 s.includes(x.id)
                                   ? s.filter((i) => i !== x.id)
                                   : [...s, x.id]
-                              )
-                            }
+                              );
+                            }}
                           />
                         </td>
 
@@ -880,10 +961,6 @@ export default function Page() {
                         </td>
 
                         <td className="p-3">{x.socio?.matricula || "—"}</td>
-
-                        <td className="p-3 font-semibold text-gray-600">
-                          {x.socio?.numero_debitos_referencia ?? "—"}
-                        </td>
 
                         <td className="p-3">
                           {nomes[x.socio?.tipo_socio] ||
@@ -1368,7 +1445,9 @@ export default function Page() {
                 <div className="space-y-3">
                   {tiposPagamento.map((tipo) => {
                     const atual =
-                      tarifaPorTipo.get(tipo.value) || {
+                      tarifas.find(
+                        (x) => x.tipo_pagamento === tipo.value
+                      ) || {
                         tipo_pagamento: tipo.value,
                         nome: tipo.label,
                         valor_tarifa: 0,
