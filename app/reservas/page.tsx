@@ -607,12 +607,60 @@ export default function ReservasPage() {
                         />
                       </div>
                       {buscaSocio && !socioId && (
-                        <div className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
-                          {sociosFiltrados.length ? sociosFiltrados.map((s) => (
-                            <button key={s.id} type="button" onClick={() => { setSocioId(s.id); setDependenteId(""); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }} className="block w-full border-b px-4 py-3 text-left hover:bg-[#e8f3ee]">
-                              <b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span>
-                            </button>
-                          )) : <div className="p-4 text-sm text-gray-500">Nenhum sócio encontrado.</div>}
+                        <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
+                          {sociosFiltrados.length ? sociosFiltrados.map((s) => {
+                            const titularMatricula = String(s.matricula ?? "").trim().toUpperCase();
+                            const baseFamiliar = titularMatricula.endsWith("A") ? titularMatricula.slice(0, -1) : titularMatricula;
+                            const familia = dependentes.filter((d) => {
+                              const m = String(d.matricula ?? "").trim().toUpperCase();
+                              const direto = String(d.socio_id) === String(s.id);
+                              const porMatricula = !!baseFamiliar && m.startsWith(baseFamiliar) && m !== titularMatricula && /[A-Z]$/.test(m);
+                              return direto || porMatricula;
+                            }).reduce<DependenteReserva[]>((lista, d) => {
+                              if (!lista.some((x) => String(x.id) === String(d.id))) lista.push(d);
+                              return lista;
+                            }, []).sort((a, b) => String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true }));
+
+                            return (
+                              <div key={s.id} className="border-b last:border-b-0">
+                                <button
+                                  type="button"
+                                  onClick={() => { setSocioId(s.id); setDependenteId(""); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }}
+                                  className="block w-full px-4 py-3 text-left hover:bg-[#e8f3ee]"
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div><b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span></div>
+                                    <span className="text-xs font-extrabold text-[#005a3c]">Titular</span>
+                                  </div>
+                                </button>
+
+                                {familia.length > 0 && (
+                                  <div className="bg-[#f8faf9] px-3 pb-3">
+                                    <div className="px-2 pb-2 pt-1 text-[10px] font-extrabold uppercase tracking-wide text-[#78968a]">Dependentes da família</div>
+                                    <div className="space-y-1.5">
+                                      {familia.map((d) => (
+                                        <button
+                                          key={d.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setSocioId(s.id);
+                                            setDependenteId(String(d.id));
+                                            setNome(d.nome);
+                                            setMatriculaResponsavel(d.matricula || null);
+                                            setBuscaSocio(`${d.nome}${d.matricula ? ` — Matrícula ${d.matricula}` : ""}`);
+                                          }}
+                                          className="flex w-full items-center justify-between rounded-lg border border-[#d9e9e2] bg-white px-3 py-2 text-left hover:border-[#005a3c] hover:bg-[#e8f3ee]"
+                                        >
+                                          <span><b className="text-sm">{d.nome}</b><span className="ml-2 text-xs text-gray-500">{d.matricula || "Sem matrícula"}{d.parentesco ? ` · ${d.parentesco}` : ""}</span></span>
+                                          <span className="text-[10px] font-extrabold text-[#005a3c]">Dependente</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }) : <div className="p-4 text-sm text-gray-500">Nenhum sócio encontrado.</div>}
                         </div>
                       )}
                       {socioId && (
