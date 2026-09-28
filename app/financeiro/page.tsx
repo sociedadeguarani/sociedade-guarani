@@ -1165,6 +1165,7 @@ export default function FinanceiroPage() {
   }, [contasBancarias, movimentosFinanceiros]);
 
   const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
+  const contasPorId = useMemo(() => new Map(contasBancarias.map((conta) => [conta.id, conta])), [contasBancarias]);
 
   const saldoTotalBancos = useMemo(
     () => Array.from(saldosPorConta.values()).reduce((sum: number, saldo: number) => sum + saldo, 0),
@@ -1685,7 +1686,7 @@ export default function FinanceiroPage() {
                         {movimentosFluxo.map((m) => (
                           <tr key={m.id} className="hover:bg-[#fafcfb]">
                             <td className="px-4 py-3 text-sm">{formatarData(m.data_movimentacao)}</td>
-                            <td className="px-4 py-3 font-semibold">{contasBancarias.find((c) => c.id === m.conta_bancaria_id)?.nome || "—"}</td>
+                            <td className="px-4 py-3 font-semibold">{contasPorId.get(m.conta_bancaria_id)?.nome || "—"}</td>
                             <td className="px-4 py-3">
                               <p className="font-semibold">{m.descricao}</p>
                               <p className="text-xs text-gray-500">{m.categoria || "Sem categoria"}</p>
