@@ -211,30 +211,33 @@ export default function Page() {
     try {
       setErro("");
 
-      const r = await fetch(
-        `/api/mensalidades/admin?ano=${ano}&mes=${mes}`,
-        {
-          headers: await h(),
+      const headers = await h();
+
+      // As duas fontes são independentes: carregamos em paralelo para
+      // reduzir o tempo de abertura/troca de competência.
+      const [resMensalidades, resContas] = await Promise.all([
+        fetch(`/api/mensalidades/admin?ano=${ano}&mes=${mes}`, {
+          headers,
           cache: "no-store",
-        }
-      );
+        }),
+        supabase
+          .from("contas_bancarias")
+          .select("id,nome,banco")
+          .order("nome"),
+      ]);
 
-      const d = await r.json();
+      const d = await resMensalidades.json();
 
-      if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
+      if (!resMensalidades.ok) {
+        throw Error(d.error || "Erro ao carregar mensalidades.");
+      }
 
       setLista(d.mensalidades || []);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
       setCobranca(d.cobranca || cobrancaInicial);
-
-      const { data: contasData } = await supabase
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .order("nome");
-
-      setContas(contasData || []);
+      setContas(resContas.data || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
@@ -315,7 +318,7 @@ export default function Page() {
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const conta = contaPorId.get(String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (
@@ -343,6 +346,18 @@ export default function Page() {
     socios.forEach((s) => mapa.set(String(s.id), s));
     return mapa;
   }, [socios]);
+
+  const contaPorId = useMemo(() => {
+    const mapa = new Map<string, Conta>();
+    contas.forEach((c) => mapa.set(String(c.id), c));
+    return mapa;
+  }, [contas]);
+
+  const tarifaPorTipo = useMemo(() => {
+    const mapa = new Map<string, T>();
+    tarifas.forEach((t) => mapa.set(String(t.tipo_pagamento), t));
+    return mapa;
+  }, [tarifas]);
 
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
@@ -396,7 +411,7 @@ export default function Page() {
 
       return bateBusca && bateCobranca;
     });
-  }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
+  }, [linhasExibicao, busca, cobrancasSelecionadas, contaPorId]);
 
   async function post(body: any) {
     setErro("");
@@ -488,22 +503,30 @@ export default function Page() {
     setPrevias([]);
 
     try {
-      const resultados: PreviaGeracao[] = [];
-      for (const mesGeracao of selecionados) {
-        const r = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers: await h(),
-          body: JSON.stringify({
-            acao: "previsualizar",
-            ano,
-            mes: mesGeracao,
-          }),
-        });
+      const headers = await h();
+      const resultados = await Promise.all(
+        selecionados.map(async (mesGeracao) => {
+          const r = await fetch("/api/mensalidades/admin", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              acao: "previsualizar",
+              ano,
+              mes: mesGeracao,
+            }),
+          });
 
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`);
-        resultados.push(d);
-      }
+          const d = await r.json();
+          if (!r.ok) {
+            throw Error(
+              d.error ||
+                `Não foi possível gerar a prévia de ${String(mesGeracao).padStart(2, "0")}/${ano}.`
+            );
+          }
+
+          return d as PreviaGeracao;
+        })
+      );
 
       setPrevias(resultados);
     } catch (e) {
@@ -1345,9 +1368,7 @@ export default function Page() {
                 <div className="space-y-3">
                   {tiposPagamento.map((tipo) => {
                     const atual =
-                      tarifas.find(
-                        (x) => x.tipo_pagamento === tipo.value
-                      ) || {
+                      tarifaPorTipo.get(tipo.value) || {
                         tipo_pagamento: tipo.value,
                         nome: tipo.label,
                         valor_tarifa: 0,
