@@ -75,6 +75,7 @@ export default function DependentesPage() {
   const [perfilUsuario, setPerfilUsuario] = useState("");
 
   const somenteConsulta = perfilUsuario === "funcionario";
+  const nomePerfil = perfilUsuario === "administrador_master" ? "Administrador Master" : perfilUsuario === "administrador_normal" ? "Administrador" : perfilUsuario === "funcionario" ? "Funcionário" : "Gestão";
 
   type FormDependente = {
     socio_id: string;
@@ -147,7 +148,7 @@ export default function DependentesPage() {
       // A página não consulta mais a tabela dependentes diretamente pelo cliente.
       // O endpoint usa o usuário autenticado + service role, evitando que uma
       // política RLS antiga esconda os 412 dependentes do Administrador Master.
-      const resposta = await fetch("/api/dependentes", {
+      const resposta = await fetch("/api/carteirinhas?modo=dependentes", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
@@ -162,6 +163,7 @@ export default function DependentesPage() {
         .map((d: any) => ({
           id: String(d.id),
           socio_id: String(d.socio_id),
+          matricula: d.matricula == null ? null : String(d.matricula),
           nome: d.nome ?? "",
           cpf: d.cpf ?? null,
           data_nascimento: d.data_nascimento ?? null,
@@ -364,7 +366,7 @@ export default function DependentesPage() {
           <div className="flex items-center gap-4">
             <div className="hidden text-right sm:block">
               <div className="text-xs text-slate-500">Área Administrativa</div>
-              <div className="font-bold text-[#005A3C]">Gestão</div>
+              <div className="font-bold text-[#005A3C]">{nomePerfil}</div>
             </div>
             <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:px-4">Sair</button>
           </div>
