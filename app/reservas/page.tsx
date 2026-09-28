@@ -447,11 +447,43 @@ export default function ReservasPage() {
 
   const sociosFiltrados = useMemo(() => {
     const termo = buscaSocio.trim().toLowerCase();
-    if (!termo) return socios.slice(0, 12);
-    return socios
-      .filter((s) => `${s.nome} ${s.matricula ?? ""} ${s.cpf ?? ""}`.toLowerCase().includes(termo))
-      .slice(0, 12);
-  }, [socios, buscaSocio]);
+
+    // Mostra titulares e também localiza a família quando a busca
+    // for feita pelo nome/matrícula de um dependente.
+    const titularesRelacionados = new Map<string, typeof socios[number]>();
+
+    for (const socio of socios) {
+      const textoTitular = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
+
+      if (!termo || textoTitular.includes(termo)) {
+        titularesRelacionados.set(String(socio.id), socio);
+        continue;
+      }
+
+      const matriculaTitular = String(socio.matricula ?? "").trim().toUpperCase();
+      const baseFamiliar = matriculaTitular.endsWith("A")
+        ? matriculaTitular.slice(0, -1)
+        : matriculaTitular;
+
+      const temDependenteEncontrado = dependentes.some((d) => {
+        const textoDependente = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
+        const matriculaDependente = String(d.matricula ?? "").trim().toUpperCase();
+        const pertenceFamilia =
+          String(d.socio_id) === String(socio.id) ||
+          (!!baseFamiliar &&
+            matriculaDependente.startsWith(baseFamiliar) &&
+            matriculaDependente !== matriculaTitular);
+
+        return pertenceFamilia && textoDependente.includes(termo);
+      });
+
+      if (temDependenteEncontrado) {
+        titularesRelacionados.set(String(socio.id), socio);
+      }
+    }
+
+    return Array.from(titularesRelacionados.values()).slice(0, 20);
+  }, [socios, dependentes, buscaSocio]);
 
   const dependentesDoSocio = useMemo(() => {
     if (!socioId) return [];
@@ -669,26 +701,27 @@ export default function ReservasPage() {
                             <span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}{dependenteId ? " · Dependente" : " · Titular"}</span>
                             <button type="button" onClick={() => { setSocioId(""); setDependenteId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button>
                           </div>
-                          <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-white p-3">
-                              <label className="block text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">Reservar para</label>
-                              <select
-                                value={dependenteId}
-                                onChange={(e) => selecionarDependente(e.target.value)}
-                                className="mt-2 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]"
-                              >
-                                <option value="">Titular — {socios.find((s) => String(s.id) === String(socioId))?.nome || "Sócio"}</option>
-                                {dependentesDoSocio.map((d) => (
-                                  <option key={d.id} value={d.id}>
-                                    {d.nome} — {d.matricula || "Sem matrícula"}{d.parentesco ? ` · ${d.parentesco}` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                              {dependentesDoSocio.length > 0 ? (
-                                <p className="mt-2 text-xs text-gray-500">A reserva continua vinculada ao titular da família, mas fica registrada no nome e na matrícula da pessoa escolhida.</p>
-                              ) : (
-                                <p className="mt-2 text-xs text-gray-500">Nenhum dependente ativo foi encontrado para esta família.</p>
-                              )}
+                          <div className="mt-3 rounded-xl border border-[#cfe3d8] bg-[#f8faf9] p-3">
+                            <div className="text-xs font-extrabold uppercase tracking-wide text-[#005a3c]">
+                              Pessoa da reserva
                             </div>
+                            <div className="mt-2 rounded-xl bg-white px-3 py-3 text-sm">
+                              <b>{nome}</b>
+                              <span className="ml-2 text-xs text-gray-500">
+                                Matrícula {matriculaResponsavel ?? "—"}
+                              </span>
+                              <span className="ml-2 rounded-full bg-[#e8f3ee] px-2 py-1 text-[10px] font-extrabold text-[#005a3c]">
+                                {dependenteId ? "Dependente" : "Titular"}
+                              </span>
+                            </div>
+
+                            {dependentesDoSocio.length > 0 && (
+                              <p className="mt-2 text-xs text-gray-500">
+                                Para escolher outro membro da família, clique em <b>Trocar</b> e pesquise novamente.
+                                Os dependentes aparecem logo abaixo do titular, como nas Carteirinhas.
+                              </p>
+                            )}
+                          </div>
                         </>
                       )}
                     </div>
