@@ -27,6 +27,30 @@ export async function GET(request: Request) {
     const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
     if ("response" in auth) return auth.response;
     const db = getServiceClient();
+    const url = new URL(request.url);
+    if (url.searchParams.get("resumo") === "1") {
+      const { data, error } = await db
+        .from("socios")
+        .select("ativo,situacao");
+
+      if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
+
+      const lista = data || [];
+      const total = lista.length;
+      const inativos = lista.filter(
+        (s) =>
+          s.ativo === false ||
+          String(s.situacao || "").trim().toLowerCase() === "inativo",
+      ).length;
+      const ativos = total - inativos;
+
+      return NextResponse.json({
+        total,
+        ativos,
+        inativos,
+      });
+    }
+
     const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
     return NextResponse.json({ socios: data || [] });
