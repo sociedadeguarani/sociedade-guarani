@@ -34,16 +34,27 @@ export async function usuarioAutenticado(request: Request) {
 
   const { data: usuario, error: usuarioError } = await supabase
     .from("usuarios_sistema")
-    .select("id,nome_exibicao,perfil_id,socio_id,funcionario_id,ativo,perfis:perfil_id(id,nome,codigo)")
+    .select("id,nome_exibicao,perfil_id,socio_id,dependente_id,funcionario_id,ativo,perfis:perfil_id(id,nome,codigo)")
     .eq("id", authData.user.id)
     .maybeSingle();
   if (usuarioError) return { error: `Não foi possível consultar seu acesso: ${usuarioError.message}`, status: 500 as const };
   if (!usuario) return { error: "Seu usuário não está cadastrado no sistema.", status: 403 as const };
+
+  let usuarioComVinculo = usuario as typeof usuario & { socio_id: string | null };
+  if (!usuarioComVinculo.socio_id && usuario.dependente_id) {
+    const { data: dependente } = await supabase
+      .from("dependentes")
+      .select("socio_id")
+      .eq("id", usuario.dependente_id)
+      .maybeSingle();
+    usuarioComVinculo = { ...usuario, socio_id: dependente?.socio_id || null };
+  }
+
   if (!usuario.ativo) return { error: "Seu acesso está inativo.", status: 403 as const };
 
-  const perfilRaw = Array.isArray(usuario.perfis) ? usuario.perfis[0] : usuario.perfis;
+  const perfilRaw = Array.isArray(usuarioComVinculo.perfis) ? usuarioComVinculo.perfis[0] : usuarioComVinculo.perfis;
   const perfil = normalizarPerfil(perfilRaw?.codigo, perfilRaw?.nome);
-  return { supabase, authUser: authData.user, usuario, perfil };
+  return { supabase, authUser: authData.user, usuario: usuarioComVinculo, perfil };
 }
 
 export async function requireRoles(request: Request, roles: string[]) {
