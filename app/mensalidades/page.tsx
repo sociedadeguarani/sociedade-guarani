@@ -40,6 +40,7 @@ type M = {
   motivo: string | null;
   conta_pagadora_id?: string | null;
   socio?: any;
+  updated_at?: string | null;
 };
 
 type C = {
@@ -730,6 +731,48 @@ const selecionadasBaixa = useMemo(
     setPrevias([]);
   }
 
+  // Uma única fonte de verdade para o histórico anual.
+  // Se houver mais de um lançamento na mesma competência, S.S. tem
+  // prioridade visual, depois Isento, Pago, Atrasada e Em aberto.
+  const historicoPorMes = useMemo(() => {
+    const prioridade = (item: M) => {
+      if (ehSemSaldo(item)) return 50;
+      if (item.situacao === "isento") return 40;
+      if (item.situacao === "pago") return 30;
+      if (item.situacao === "em_atraso") return 20;
+      if (item.situacao === "em_aberto") return 10;
+      return 0;
+    };
+
+    const mapa = new Map<number, M>();
+
+    for (const item of historicoSocio) {
+      const competencia = String(item.competencia || "").slice(0, 10);
+      const partes = competencia.split("-");
+      const anoItem = Number(partes[0]);
+      const mesItem = Number(partes[1]);
+
+      if (anoItem !== Number(anoHistoricoSocio) || mesItem < 1 || mesItem > 12) continue;
+
+      const atual = mapa.get(mesItem);
+      if (!atual) {
+        mapa.set(mesItem, item);
+        continue;
+      }
+
+      const prioridadeAtual = prioridade(atual);
+      const prioridadeNovo = prioridade(item);
+      const dataAtual = String(atual.updated_at || atual.data_pagamento || "");
+      const dataNovo = String(item.updated_at || item.data_pagamento || "");
+
+      if (prioridadeNovo > prioridadeAtual || (prioridadeNovo === prioridadeAtual && dataNovo > dataAtual)) {
+        mapa.set(mesItem, item);
+      }
+    }
+
+    return mapa;
+  }, [historicoSocio, anoHistoricoSocio]);
+
   function abrirConfiguracao() {
     setAbaConfig("mensalidades");
     setEdit(null);
@@ -1287,23 +1330,12 @@ const selecionadasBaixa = useMemo(
                       </div>
 
                       {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
-                        const registrosMes = historicoSocio.filter((item) => {
-                          const dataCompetencia = String(item.competencia || "");
-                          return Number(dataCompetencia.slice(5, 7)) === numeroMes;
-                        });
-
-                        const registroSemSaldo = registrosMes.find((item) => {
-                          const motivo = String(item.motivo || item.observacoes || "").toLowerCase();
-                          return motivo.includes("sem saldo") || motivo.includes("sem_saldo") || motivo === "ss" || motivo.includes("s.s");
-                        });
-                        const registroIsento = registrosMes.find((item) => item.situacao === "isento");
-                        const registroPago = registrosMes.find((item) => item.situacao === "pago");
-                        const registro = registroSemSaldo || registroIsento || registroPago || registrosMes[0];
-
+                        const registro = historicoPorMes.get(numeroMes);
                         const situacao = registro?.situacao || "nao_gerada";
-                        const semSaldo = Boolean(registroSemSaldo);
-                        const pago = !semSaldo && situacao === "pago";
-                        const isento = !semSaldo && situacao === "isento";
+                        const semSaldo = Boolean(registro && ehSemSaldo(registro));
+                        const pago = Boolean(registro && !semSaldo && situacao === "pago");
+                        const isento = Boolean(registro && !semSaldo && situacao === "isento");
+                        const naoGerada = !registro;
                         const selecionado = mesHistoricoSelecionado === numeroMes;
                         const naoGerada = registrosMes.length === 0;
 
@@ -1357,16 +1389,15 @@ const selecionadasBaixa = useMemo(
               </section>
 
               {(() => {
-                const registroMes = historicoSocio.find((item) => {
-                  const numero = Number(String(item.competencia || "").slice(5, 7));
-                  return numero === mesHistoricoSelecionado;
-                });
+                const registroMes = mesHistoricoSelecionado
+                  ? historicoPorMes.get(mesHistoricoSelecionado) || null
+                  : null;
 
                 return (
                   <section className="rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <h3 className="font-black text-[#005a3c]">
-                        Detalhes — {String(mesHistoricoSelecionado || mes).padStart(2, "0")}/{ano}
+                        Detalhes — {String(mesHistoricoSelecionado || mes).padStart(2, "0")}/{anoHistoricoSocio}
                       </h3>
                       <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${
                         registroMes?.situacao === "pago"
