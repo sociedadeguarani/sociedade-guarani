@@ -8,6 +8,12 @@ const ROLES = [
   "funcionario",
 ];
 
+function erroBanco(error: any) {
+  return [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" — ");
+}
+
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ROLES);
   if ("response" in auth) return auth.response;
@@ -32,7 +38,6 @@ export async function GET(request: Request) {
     const socios = sociosResult.data || [];
     const dependentes = dependentesResult.data || [];
 
-    // O status financeiro exibido para dependentes familiares acompanha o titular.
     const ids = socios.map((s: any) => String(s.id)).filter(Boolean);
     const statusResponsaveis: Record<string, string> = {};
     const hoje = new Date();
@@ -81,6 +86,101 @@ export async function GET(request: Request) {
     console.error("GET /api/dependentes:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao carregar dependentes." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master"]);
+  if ("response" in auth) return auth.response;
+
+  try {
+    const supabase = getServiceClient();
+    const body = await request.json().catch(() => ({}));
+    const acao = String(body?.acao || "migrar_legados");
+
+    if (acao !== "migrar_legados") {
+      return NextResponse.json({ error: "Ação de migração inválida." }, { status: 400 });
+    }
+
+    const { data: legados, error: buscaError } = await supabase
+      .from("socios")
+      .select("id,matricula,nome,cpf,data_nascimento,parentesco,telefone,whatsapp,email,responsavel_id,situacao,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao_financeira,data_ultimo_pagamento,foto_url,observacoes,tipo_socio")
+      .like("tipo_socio", "dependente_%")
+      .eq("possui_mensalidade", false);
+
+    if (buscaError) throw buscaError;
+
+    const candidatos = legados || [];
+    const semResponsavel = candidatos.filter((d: any) => !d.responsavel_id);
+    const migraveis = candidatos.filter((d: any) => d.responsavel_id);
+
+    let migrados = 0;
+    const erros: Array<{ nome: string; erro: string }> = [];
+
+    for (const d of migraveis) {
+      try {
+        const dados = {
+          socio_id: d.responsavel_id,
+          matricula: d.matricula || null,
+          nome: d.nome,
+          cpf: d.cpf || null,
+          data_nascimento: d.data_nascimento || null,
+          parentesco: d.parentesco || null,
+          telefone: d.telefone || null,
+          whatsapp: d.whatsapp || null,
+          email: d.email || null,
+          ativo: String(d.situacao || "ativo").toLowerCase() !== "inativo",
+          possui_mensalidade: false,
+          valor_mensalidade: 0,
+          dia_vencimento: Number(d.dia_vencimento || 10),
+          tipo_pagamento: "pix",
+          situacao_financeira: "isento",
+          data_ultimo_pagamento: d.data_ultimo_pagamento || null,
+          foto_url: d.foto_url || null,
+          observacoes: d.observacoes || null,
+        };
+
+        // Evita duplicação quando a migração for executada novamente.
+        const { data: existente, error: existenteError } = await supabase
+          .from("dependentes")
+          .select("id")
+          .eq("socio_id", d.responsavel_id)
+          .eq("nome", d.nome)
+          .maybeSingle();
+
+        if (existenteError) throw existenteError;
+
+        if (!existente) {
+          const { error: insertError } = await supabase.from("dependentes").insert(dados);
+          if (insertError) throw insertError;
+        }
+
+        const { error: deleteError } = await supabase.from("socios").delete().eq("id", d.id);
+        if (deleteError) throw deleteError;
+
+        migrados += 1;
+      } catch (error) {
+        erros.push({ nome: d.nome, erro: erroBanco(error) || "Erro desconhecido." });
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      encontrados: candidatos.length,
+      migrados,
+      sem_responsavel: semResponsavel.map((d: any) => ({ id: d.id, nome: d.nome })),
+      erros,
+      message:
+        semResponsavel.length > 0
+          ? `${migrados} dependente(s) migrado(s). ${semResponsavel.length} dependente(s) ainda precisam de responsável.`
+          : `${migrados} dependente(s) antigo(s) migrado(s) para Dependentes.`,
+    });
+  } catch (error) {
+    console.error("POST /api/dependentes/migrar:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro ao migrar dependentes antigos." },
       { status: 500 }
     );
   }
