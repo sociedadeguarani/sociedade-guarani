@@ -280,7 +280,6 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
-    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -302,10 +301,6 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
-    }
-
-    if (socioId) {
-      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
@@ -444,14 +439,6 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
-      const socioIdsSolicitados = Array.isArray(body.socio_ids)
-        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-
-      const cobraveisSelecionados = socioIdsSolicitados.length > 0
-        ? cobraveis.filter((s: any) => socioIdsSolicitados.includes(String(s.id)))
-        : cobraveis;
-
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -501,7 +488,7 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
-      const novos = cobraveisSelecionados
+      const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -547,8 +534,7 @@ export async function POST(request: Request) {
             conta_pagadora_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
-        })
-        .filter((item: any) => Number(item.valor_base || 0) > 0);
+        });
 
       const soma = (campo: string) =>
         Number(
@@ -564,8 +550,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         competencia,
-        total_cobraveis: cobraveisSelecionados.length,
-        ja_existentes: cobraveisSelecionados.filter((s: any) =>
+        total_cobraveis: cobraveis.length,
+        ja_existentes: cobraveis.filter((s: any) =>
           idsExistentes.has(String(s.id))
         ).length,
         quantidade_nova: novos.length,
@@ -667,14 +653,6 @@ export async function POST(request: Request) {
         return dependenteTemMensalidade(s);
       });
 
-      const socioIdsSolicitados = Array.isArray(body.socio_ids)
-        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-
-      const cobraveisSelecionados = socioIdsSolicitados.length > 0
-        ? cobraveis.filter((s: any) => socioIdsSolicitados.includes(String(s.id)))
-        : cobraveis;
-
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
           .from("configuracoes_mensalidades")
@@ -729,7 +707,7 @@ export async function POST(request: Request) {
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveisSelecionados
+      const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -775,12 +753,11 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            situacao: "em_aberto",
+            situacao: valor === 0 ? "isento" : "em_aberto",
             tipo_pagamento: tipoPagamento,
             conta_pagadora_id: s.conta_bancaria_id || null,
           };
-        })
-        .filter((item: any) => Number(item.valor_base || 0) > 0);
+        });
 
       if (novos.length > 0) {
         // Inserimos em lotes para evitar timeout da função/serverless
@@ -883,7 +860,8 @@ export async function POST(request: Request) {
         .update({
           situacao: "em_aberto",
           data_pagamento: null,
-          tipo_pagamento: null,
+          // Mantém a forma de cobrança original (ex.: boleto) para que,
+          // se o associado pagar depois, possamos registrar o pagamento via PIX.
           motivo: "S.S",
           observacoes: body.observacoes || "S.S — Sem saldo",
         })
@@ -993,21 +971,23 @@ export async function POST(request: Request) {
         idsParaBaixar.includes(String(r.id))
       );
 
-      // Não permite marcar como pago sem uma conta de destino definida.
-      const semConta = registrosParaBaixar.filter((r: any) => {
-        const socio = mapaSociosBaixa.get(String(r.socio_id));
-        return !r.conta_pagadora_id && !socio?.conta_bancaria_id;
-      });
+      // A conta do associado é a conta pagadora/debitada e NUNCA deve ser
+      // usada como conta que recebe a receita da Sociedade. Para uma baixa
+      // manual (inclusive pagamento posterior via PIX), a conta de
+      // recebimento da Sociedade deve ser informada explicitamente.
+      const contaRecebimentoId = String(body.conta_recebimento_id || "").trim();
 
-      if (semConta.length > 0) {
-        const nomes = semConta
-          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
-          .join(", ");
-
+      if (!contaRecebimentoId) {
         return NextResponse.json(
-          {
-            error: `Não foi possível registrar a entrada financeira. Cadastre a conta bancária de: ${nomes}.`,
-          },
+          { error: "Selecione a conta bancária da Sociedade que recebeu o pagamento." },
+          { status: 400 }
+        );
+      }
+
+      const contaRecebimento = mapaContas.get(contaRecebimentoId);
+      if (!contaRecebimento) {
+        return NextResponse.json(
+          { error: "A conta de recebimento selecionada não foi encontrada ou está inativa." },
           { status: 400 }
         );
       }
@@ -1046,8 +1026,7 @@ export async function POST(request: Request) {
 
       for (const registro of registrosParaBaixar) {
         const socio = mapaSociosBaixa.get(String(registro.socio_id));
-        const contaId =
-          registro.conta_pagadora_id || socio?.conta_bancaria_id || null;
+        const contaId = contaRecebimentoId;
 
         const formaPagamento =
           body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
