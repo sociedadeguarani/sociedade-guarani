@@ -17,40 +17,12 @@ const MOTIVOS = [
   "Outro",
 ];
 
-const TIPOS_DEPENDENTES_COM_MENSALIDADE = [
-  "dependente_patrimonial_familiar_mensalidade",
-  "dependente_patrimonial_individual_mensalidade",
-  "dependente_contribuinte_familiar_mensalidade",
-  "dependente_contribuinte_individual_mensalidade",
-];
-
-function normalizarTexto(valor: unknown) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-/**
- * Para dependentes, a categoria importada do sistema antigo é a
- * referência principal para saber se aquela pessoa realmente paga
- * mensalidade. Isso evita transformar automaticamente esposa, filhos
- * e outros dependentes em pagadores apenas porque o tipo_socio foi
- * normalizado durante a migração/sincronização.
- *
- * Exemplos de categorias pagantes:
- * - Dependente Patrimonial C/ Mensalidade
- * - Dependente Contribuinte C/ Mensalidade
- * - Sócio dependente c/ mensalidade
- *
- * Quando a categoria não estiver preenchida, usamos o tipo_socio como
- * fallback para manter compatibilidade com novos cadastros.
- */
-function dependenteTemMensalidade(_socio: any) {
-  // Regra oficial: dependentes não possuem mensalidade própria.
-  // A única cobrança da família pertence ao titular/responsável.
-  return false;
+function ehPagador(socio: any) {
+  if (String(socio?.situacao || "").toLowerCase() === "inativo" || socio?.ativo === false) return false;
+  if (socio?.possui_mensalidade !== true) return false;
+  if (!socio?.responsavel_id) return true;
+  // Dependente pagante é uma exceção explícita: matrícula SD....A + mensalidade própria.
+  return /^SD\d{4,}A$/i.test(String(socio?.matricula || ""));
 }
 
 const primeiroDia = (ano: number, mes: number) =>
@@ -238,6 +210,7 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
+    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -259,6 +232,9 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
+    }
+    if (socioId) {
+      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
@@ -382,18 +358,7 @@ export async function POST(request: Request) {
 
       if (erroSocios) throw erroSocios;
 
-      const cobraveis = (socios || []).filter((s: any) => {
-        if (
-          String(s.situacao || "").toLowerCase() === "inativo" ||
-          s.ativo === false
-        ) {
-          return false;
-        }
-
-        // Somente titular/responsável pode gerar mensalidade.
-        // Dependentes nunca geram cobrança própria.
-        return !s.responsavel_id && Boolean(s.possui_mensalidade);
-      });
+      const cobraveis = (socios || []).filter(ehPagador);
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -447,6 +412,8 @@ export async function POST(request: Request) {
               ? Number(config.valor || 0)
               : Number(s.valor_mensalidade || 0);
 
+          if (valor <= 0) return null;
+
           const dia = config?.dia_vencimento
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
@@ -477,7 +444,8 @@ export async function POST(request: Request) {
             tipo_pagamento: tipoPagamento,
             data_vencimento: vencimento,
           };
-        });
+        })
+        .filter((item): item is Record<string, unknown> => item !== null);
 
       const soma = (campo: string) =>
         Number(
@@ -556,43 +524,14 @@ export async function POST(request: Request) {
 
       if (erroSocios) throw erroSocios;
 
-      /*
-       * REGRA OFICIAL DO GERADOR
-       *
-       * O gerador NÃO altera cadastro e NÃO usa o botão antigo
-       * de sincronização.
-       *
-       * Titulares:
-       *   possui_mensalidade = true => pode gerar.
-       *
-       * Dependentes:
-       *   usamos a categoria preservada da migração como referência
-       *   principal. Só entram automaticamente quando a categoria
-       *   informa "C/ Mensalidade" ou "Com Mensalidade".
-       *
-       * Isso é importante porque a sincronização anterior alterou
-       * muitos dependentes para possui_mensalidade=true apenas por
-       * causa do tipo_socio. A categoria antiga preserva a regra real
-       * da família e evita cobrar esposa/filhos automaticamente.
-       *
-       * A definição de casos excepcionais (por exemplo, dependente
-       * que passa a pagar individualmente) poderá ser ajustada no
-       * cadastro do associado antes da geração.
-       */
-      const cobraveis = (socios || []).filter((s: any) => {
-        if (
-          String(s.situacao || "").toLowerCase() === "inativo" ||
-          s.ativo === false
-        ) {
-          return false;
-        }
+      const cobraveis = (socios || []).filter(ehPagador);
 
-        const ehDependente = Boolean(s.responsavel_id);
-
-        // Somente titular/responsável pode gerar mensalidade.
-        // Dependentes nunca geram cobrança própria.
-        return !ehDependente && Boolean(s.possui_mensalidade);
-      });
+      const idsSolicitados = Array.isArray(body.socio_ids)
+        ? new Set(body.socio_ids.map((id: unknown) => String(id)))
+        : null;
+      const cobraveisSelecionados = idsSolicitados
+        ? cobraveis.filter((s: any) => idsSolicitados.has(String(s.id)))
+        : cobraveis;
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -637,7 +576,7 @@ export async function POST(request: Request) {
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveis
+      const novos = cobraveisSelecionados
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -650,6 +589,8 @@ export async function POST(request: Request) {
             config?.valor !== undefined
               ? Number(config.valor || 0)
               : Number(s.valor_mensalidade || 0);
+
+          if (valor <= 0) return null;
 
           const dia = config?.dia_vencimento
             ? Number(config.dia_vencimento)
@@ -682,10 +623,11 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            situacao: valor === 0 ? "isento" : "em_aberto",
+            situacao: "em_aberto",
             tipo_pagamento: tipoPagamento,
           };
-        });
+        })
+        .filter((item): item is Record<string, unknown> => item !== null);
 
       if (novos.length > 0) {
         const { error: erroInsert } = await db
