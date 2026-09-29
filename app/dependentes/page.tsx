@@ -61,6 +61,21 @@ function formatarTelefone(valor: string | null) {
   return valor;
 }
 
+function baseFamiliar(matricula: string | null | undefined) {
+  const valor = String(matricula || "").trim().toUpperCase();
+  return valor && /[A-Z]$/.test(valor) ? valor.slice(0, -1) : valor;
+}
+
+function proximaMatriculaFamiliar(responsavelMatricula: string | null | undefined, usadas: Set<string>) {
+  const base = baseFamiliar(responsavelMatricula);
+  if (!base) return null;
+  for (let codigo = "B".charCodeAt(0); codigo <= "Z".charCodeAt(0); codigo += 1) {
+    const candidata = `${base}${String.fromCharCode(codigo)}`;
+    if (!usadas.has(candidata)) return candidata;
+  }
+  return null;
+}
+
 export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
@@ -316,8 +331,43 @@ export default function DependentesPage() {
 
     setSalvando(true);
 
+    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+    if (!socioResponsavel) {
+      setErro("Selecione um sócio responsável válido.");
+      setSalvando(false);
+      return;
+    }
+
+    let matricula = editando?.matricula || null;
+    if (!matricula) {
+      const [{ data: sociosComMatricula, error: sociosError }, { data: dependentesComMatricula, error: dependentesError }] = await Promise.all([
+        supabase.from("socios").select("matricula"),
+        supabase.from("dependentes").select("matricula"),
+      ]);
+      if (sociosError) {
+        setErro(`Não foi possível gerar a matrícula: ${sociosError.message}`);
+        setSalvando(false);
+        return;
+      }
+      if (dependentesError) {
+        setErro(`Não foi possível gerar a matrícula: ${dependentesError.message}`);
+        setSalvando(false);
+        return;
+      }
+      const usadas = new Set<string>();
+      for (const s of sociosComMatricula || []) if (s.matricula) usadas.add(String(s.matricula).toUpperCase());
+      for (const d of dependentesComMatricula || []) if (d.matricula) usadas.add(String(d.matricula).toUpperCase());
+      matricula = proximaMatriculaFamiliar(socioResponsavel.matricula, usadas);
+      if (!matricula) {
+        setErro("Não foi possível gerar uma matrícula familiar para este dependente. Verifique a matrícula do responsável.");
+        setSalvando(false);
+        return;
+      }
+    }
+
     const dados = {
       socio_id: form.socio_id,
+      matricula,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
@@ -331,13 +381,6 @@ export default function DependentesPage() {
       situacao_financeira: form.possui_mensalidade ? form.situacao_financeira : "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
-
-    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    if (!socioResponsavel) {
-      setErro("Selecione um sócio responsável válido.");
-      setSalvando(false);
-      return;
-    }
 
     let resultado;
     if (editando) {
