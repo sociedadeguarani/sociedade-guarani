@@ -292,8 +292,9 @@ export default function Home() {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
+        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" ? "administrador" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
         perfil
       );
     } catch {}
@@ -698,9 +699,6 @@ export default function Home() {
     const { data, error } = await supabase
       .from("socios")
       .select("*")
-      // Regra do sistema: na guia Sócios ficam as pessoas que possuem
-      // mensalidade própria. Dependentes sem mensalidade ficam em Dependentes.
-      .eq("possui_mensalidade", true)
       .order("matricula", { ascending: true });
 
     if (error) {
@@ -746,7 +744,10 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      // Novo dependente começa sem mensalidade. Se passar a pagar,
+      // o cadastro pode ser alterado para mensalidade = SIM e então
+      // ele aparecerá automaticamente na guia Sócios.
+      possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -958,6 +959,10 @@ export default function Home() {
     const termo = busca.toLowerCase().trim();
 
     return socios.filter((socio) => {
+      // Regra oficial de exibição: quem possui mensalidade fica em Sócios,
+      // inclusive quando possui responsavel_id.
+      if (socio.possui_mensalidade !== true) return false;
+
       const correspondeBusca =
         !termo ||
         socio.nome?.toLowerCase().includes(termo) ||
@@ -1050,7 +1055,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.length}
+              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1059,7 +1064,7 @@ export default function Home() {
           {menu === "Sócios" && (
             <Socios
               socios={sociosFiltrados}
-              quantidadeTotal={socios.length}
+              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true).length}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1238,7 +1243,7 @@ function Inicio({
 
         <DashboardCard
           titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
           descricao="Vinculados a responsáveis"
           icone="👨‍👩‍👧‍👦"
         />
@@ -2476,13 +2481,13 @@ function Dependentes({
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
 }) {
-  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
+  const dependentes = socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true);
   const responsaveis = socios.filter((s) =>
     socios.some((filho) => filho.responsavel_id === s.id)
   );
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id);
+    return socios.filter((s) => s.responsavel_id === id && s.possui_mensalidade !== true);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2603,7 +2608,7 @@ function Dependentes({
       <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
           <p className="text-sm text-gray-500">Pessoas cadastradas</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.length}</p>
+          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.filter((s) => s.possui_mensalidade !== true).length}</p>
         </div>
 
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
