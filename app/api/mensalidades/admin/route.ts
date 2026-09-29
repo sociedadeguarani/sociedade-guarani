@@ -407,10 +407,15 @@ export async function POST(request: Request) {
             competencia
           );
 
+          // O valor individual cadastrado no associado tem prioridade.
+          // A configuração por tipo só é usada quando o associado não
+          // possui um valor próprio definido. Isso evita que todos os
+          // associados do mesmo tipo recebam a mesma mensalidade por engano.
+          const valorIndividual = Number(s.valor_mensalidade || 0);
           const valor =
-            config?.valor !== undefined
-              ? Number(config.valor || 0)
-              : Number(s.valor_mensalidade || 0);
+            valorIndividual > 0
+              ? valorIndividual
+              : Number(config?.valor || 0);
 
           if (valor <= 0) return null;
 
@@ -585,10 +590,15 @@ export async function POST(request: Request) {
             competencia
           );
 
+          // O valor individual cadastrado no associado tem prioridade.
+          // A configuração por tipo só é usada quando o associado não
+          // possui um valor próprio definido. Isso evita que todos os
+          // associados do mesmo tipo recebam a mesma mensalidade por engano.
+          const valorIndividual = Number(s.valor_mensalidade || 0);
           const valor =
-            config?.valor !== undefined
-              ? Number(config.valor || 0)
-              : Number(s.valor_mensalidade || 0);
+            valorIndividual > 0
+              ? valorIndividual
+              : Number(config?.valor || 0);
 
           if (valor <= 0) return null;
 
