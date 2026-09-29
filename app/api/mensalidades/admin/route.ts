@@ -506,8 +506,9 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          const tipoPagamento =
-            s.tipo_pagamento || config?.tipo_pagamento || null;
+          // A forma de pagamento é individual. Não aplicar a forma
+          // da configuração geral a todos os associados.
+          const tipoPagamento = s.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
           const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
@@ -534,7 +535,8 @@ export async function POST(request: Request) {
             conta_pagadora_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
-        });
+        })
+        .filter((item: any) => Number(item.valor_base || 0) > 0);
 
       const soma = (campo: string) =>
         Number(
@@ -725,10 +727,11 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          const tipoPagamento =
-            s.tipo_pagamento ||
-            config?.tipo_pagamento ||
-            null;
+          // A forma de pagamento pertence ao cadastro do associado.
+          // Não usar o tipo_pagamento da configuração geral para todos,
+          // pois isso pode transformar centenas de associados em boleto
+          // mesmo quando o cadastro individual não é boleto.
+          const tipoPagamento = s.tipo_pagamento || null;
 
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
@@ -753,11 +756,16 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            situacao: valor === 0 ? "isento" : "em_aberto",
+            // Valor zero não significa automaticamente "isento".
+            // Sem valor de cobrança, a geração deve ser impedida antes deste ponto.
+            situacao: "em_aberto",
             tipo_pagamento: tipoPagamento,
             conta_pagadora_id: s.conta_bancaria_id || null,
           };
-        });
+        })
+        // Não criar lançamento para quem não possui valor de mensalidade.
+        // "Isento" é uma situação explícita, não um efeito de valor zero.
+        .filter((m: any) => Number(m.valor_base || 0) > 0);
 
       if (novos.length > 0) {
         // Inserimos em lotes para evitar timeout da função/serverless
