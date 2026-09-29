@@ -117,8 +117,15 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
-        socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
+      const texto = [
+        d.nome,
+        d.cpf || "",
+        d.parentesco || "",
+        d.telefone || "",
+        socio?.nome || "",
+        socio?.matricula || "",
+        d.matricula || "",
+      ].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
       const bateStatus =
@@ -159,7 +166,7 @@ export default function DependentesPage() {
     // A tabela dependentes fica apenas como legado para não perder registros
     // que ainda não tenham sido migrados.
     const dependentesAtuais: Dependente[] = sociosData
-      .filter((s) => s.responsavel_id && s.possui_mensalidade !== true)
+      .filter((s) => s.responsavel_id)
       .map((s) => ({
         id: String(s.id),
         socio_id: String(s.responsavel_id),
@@ -186,8 +193,6 @@ export default function DependentesPage() {
     const dependentesLegados: Dependente[] = (dependentesResult.data || [])
       .map((d: any) => ({ ...d, source: "dependentes" as const }))
       .filter((d: any) => {
-        // Dependente com mensalidade pertence à guia Sócios.
-        if (d.possui_mensalidade === true) return false;
         const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
         return !chavesAtuais.has(chave);
       });
@@ -481,7 +486,7 @@ export default function DependentesPage() {
               <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
                 <div className="flex items-center rounded-xl border border-slate-200 px-4">
                   <span className="mr-3 text-xl">🔎</span>
-                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
+                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula, CPF, parentesco ou responsável..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
                 </div>
                 <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
                   <option value="">Todos os responsáveis</option>
@@ -503,7 +508,7 @@ export default function DependentesPage() {
                   <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
