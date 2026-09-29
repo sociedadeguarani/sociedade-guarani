@@ -327,19 +327,12 @@ export default function Page() {
 
   function socioElegivelParaGeracao(s: Socio) {
     if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
-    if (!s.responsavel_id) return s.possui_mensalidade === true;
 
-    const categoria = String(s.categoria || "").trim().toLowerCase();
-    if (categoria) {
-      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade");
-    }
-
-    return [
-      "dependente_patrimonial_familiar_mensalidade",
-      "dependente_patrimonial_individual_mensalidade",
-      "dependente_contribuinte_familiar_mensalidade",
-      "dependente_contribuinte_individual_mensalidade",
-    ].includes(String(s.tipo_socio || ""));
+    // Regra única do sistema: somente quem possui mensalidade = SIM
+    // entra na guia/geração de mensalidades. Isso vale para titular e
+    // dependente com mensalidade. Categoria/tipo_socio não pode criar
+    // cobrança por conta própria.
+    return s.possui_mensalidade === true;
   }
 
   const sociosElegiveis = useMemo(
