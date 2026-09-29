@@ -419,7 +419,20 @@ export default function Page() {
 
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
-    lista.forEach((m) => existentes.set(String(m.socio_id), m));
+    lista.forEach((m) => {
+      // Para cobranças ainda abertas, a forma de pagamento deve acompanhar
+      // o cadastro atual do associado. O tipo gravado na mensalidade pode
+      // ser antigo (por exemplo, boleto), e não deve fazer uma mensalidade
+      // aparecer como "Boleto não pago" quando o associado hoje paga por PIX
+      // ou débito em conta. Depois que a mensalidade é paga, preservamos a
+      // forma efetivamente usada no pagamento.
+      const situacao = String(m.situacao || "").toLowerCase();
+      const tipoAtual = m.socio?.tipo_pagamento || m.tipo_pagamento || null;
+      const tipoEfetivo = situacao === "pago" || situacao === "isento"
+        ? m.tipo_pagamento
+        : tipoAtual;
+      existentes.set(String(m.socio_id), { ...m, tipo_pagamento: tipoEfetivo });
+    });
 
     // Quando a competência ainda não foi gerada, mostramos os associados
     // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
@@ -451,14 +464,19 @@ export default function Page() {
   }, [lista, sociosElegiveis, ano, mes]);
 
   const filtrada = useMemo(() => {
-    const q = busca.toLowerCase().trim();
+    const normalizar = (valor: unknown) =>
+      String(valor || "")
+        .toLocaleLowerCase("pt-BR")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, "");
+    const q = normalizar(busca);
 
     return linhasExibicao.filter((x) => {
-      const bateBusca =
-        !q ||
+      const textoBusca = normalizar(
         `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
-          .toLowerCase()
-          .includes(q);
+      );
+      const bateBusca = !q || textoBusca.includes(q);
 
       // Linhas ainda não geradas não devem desaparecer quando um filtro
       // de banco é aplicado: o banco/tipo de cobrança vem do cadastro do sócio.
