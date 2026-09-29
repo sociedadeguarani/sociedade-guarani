@@ -269,6 +269,73 @@ export default function Page() {
     }
   }
 
+  async function alterarMensalidadeDoModal(acao: "baixar" | "marcar_sem_saldo" | "estornar") {
+    const registro = mesHistoricoSelecionado
+      ? historicoPorMes.get(mesHistoricoSelecionado) || null
+      : null;
+
+    if (!registro || String(registro.id).startsWith("virtual-")) {
+      setErro("Esta competência ainda não possui uma mensalidade gerada.");
+      return;
+    }
+
+    const competenciaTexto = `${String(mesHistoricoSelecionado || 1).padStart(2, "0")}/${anoHistoricoSocio}`;
+    const nome = registro.socio?.nome || socioSelecionado?.socio?.nome || "este associado";
+
+    if (acao === "baixar") {
+      const ok = window.confirm(
+        `Confirmar pagamento da mensalidade de ${competenciaTexto} de ${nome}?\n\nA baixa será registrada no Financeiro.`
+      );
+      if (!ok) return;
+    } else if (acao === "marcar_sem_saldo") {
+      const ok = window.confirm(
+        `Marcar a mensalidade de ${competenciaTexto} de ${nome} como S.S — Sem saldo?\n\nNenhum lançamento financeiro será criado.`
+      );
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(
+        `Estornar o pagamento da mensalidade de ${competenciaTexto} de ${nome}?`
+      );
+      if (!ok) return;
+    }
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const body = acao === "baixar"
+        ? {
+            acao: "baixar",
+            ids: [registro.id],
+            data_pagamento: new Date().toISOString().slice(0, 10),
+          }
+        : acao === "marcar_sem_saldo"
+          ? {
+              acao: "marcar_sem_saldo",
+              ids: [registro.id],
+              motivo: "S.S",
+              observacoes: "S.S — Sem saldo",
+            }
+          : { acao: "estornar", id: registro.id };
+
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível atualizar a mensalidade.");
+
+      setMsg(d.message || "Mensalidade atualizada com sucesso.");
+      await carregar();
+      if (socioSelecionado) {
+        await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível atualizar a mensalidade.");
+    }
+  }
+
   async function carregar() {
     try {
       setErro("");
@@ -1410,6 +1477,7 @@ const selecionadasBaixa = useMemo(
                     </div>
 
                     {registroMes ? (
+                      <>
                       <div className="mt-3 grid gap-3 sm:grid-cols-4">
                         <div>
                           <span className="text-xs text-gray-500">Valor base</span>
@@ -1428,6 +1496,36 @@ const selecionadasBaixa = useMemo(
                           <p className="font-bold">{data(registroMes.data_pagamento)}</p>
                         </div>
                       </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+                        {registroMes.situacao === "pago" ? (
+                          <button
+                            type="button"
+                            onClick={() => void alterarMensalidadeDoModal("estornar")}
+                            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                          >
+                            ↩ Estornar pagamento
+                          </button>
+                        ) : !ehSemSaldo(registroMes) && registroMes.situacao !== "isento" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void alterarMensalidadeDoModal("baixar")}
+                              className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white hover:bg-[#004a31]"
+                            >
+                              ✓ Dar baixa — Pago
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void alterarMensalidadeDoModal("marcar_sem_saldo")}
+                              className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                            >
+                              SS — Sem saldo
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                      </>
                     ) : (
                       <p className="mt-3 rounded-xl bg-white p-3 text-sm text-gray-500">
                         Essa competência ainda não possui lançamento para este associado.
