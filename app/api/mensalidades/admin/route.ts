@@ -48,6 +48,12 @@ function normalizarTexto(valor: unknown) {
  * fallback para manter compatibilidade com novos cadastros.
  */
 function dependenteTemMensalidade(socio: any) {
+  // Dependente só entra na cobrança quando o cadastro dele marca
+  // explicitamente que possui mensalidade. A categoria antiga serve
+  // apenas como uma segunda validação para evitar cobrar dependentes
+  // sem mensalidade.
+  if (socio?.possui_mensalidade !== true) return false;
+
   const categoria = normalizarTexto(socio?.categoria);
 
   if (categoria) {
@@ -280,7 +286,6 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
-    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -302,14 +307,6 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
-    }
-
-    // Quando o histórico de um associado é solicitado, é obrigatório
-    // limitar a consulta ao socio_id selecionado. Sem esse filtro, o
-    // histórico anual retornava as mensalidades de todos os associados
-    // e o frontend acabava exibindo a mesma situação para pessoas diferentes.
-    if (socioId) {
-      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
@@ -543,7 +540,8 @@ export async function POST(request: Request) {
             conta_pagadora_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
-        });
+        })
+        .filter((item: any) => Number(item.valor_base || 0) > 0);
 
       const soma = (campo: string) =>
         Number(
@@ -762,11 +760,12 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            situacao: valor === 0 ? "isento" : "em_aberto",
+            situacao: "em_aberto",
             tipo_pagamento: tipoPagamento,
             conta_pagadora_id: s.conta_bancaria_id || null,
           };
-        });
+        })
+        .filter((item: any) => Number(item.valor || 0) > 0);
 
       if (novos.length > 0) {
         // Inserimos em lotes para evitar timeout da função/serverless
