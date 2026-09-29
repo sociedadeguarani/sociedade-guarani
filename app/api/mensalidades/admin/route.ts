@@ -47,24 +47,10 @@ function normalizarTexto(valor: unknown) {
  * Quando a categoria não estiver preenchida, usamos o tipo_socio como
  * fallback para manter compatibilidade com novos cadastros.
  */
-function dependenteTemMensalidade(socio: any) {
-  const categoria = normalizarTexto(socio?.categoria);
-
-  if (categoria) {
-    if (
-      categoria.includes("c/ mensalidade") ||
-      categoria.includes("com mensalidade")
-    ) {
-      return true;
-    }
-
-    // Categoria preenchida e sem indicação de mensalidade: não cobrar.
-    return false;
-  }
-
-  return TIPOS_DEPENDENTES_COM_MENSALIDADE.includes(
-    String(socio?.tipo_socio || "")
-  );
+function dependenteTemMensalidade(_socio: any) {
+  // Regra oficial: dependentes não possuem mensalidade própria.
+  // A única cobrança da família pertence ao titular/responsável.
+  return false;
 }
 
 const primeiroDia = (ano: number, mes: number) =>
@@ -95,77 +81,49 @@ function escolherConfiguracao(
 }
 
 
-function normalizarBanco(valor: unknown) {
-  return normalizarTexto(valor)
-    .replace(/banco\s+do\s+brasil/g, "bb")
-    .replace(/banco\s+banrisul/g, "banrisul");
-}
-
-function chaveTarifa(
-  tipoPagamento: unknown,
-  contaBancaria: any | null
+function valorTarifa(
+  tarifas: any[],
+  tipoPagamento: unknown
 ) {
-  const tipo = normalizarTexto(tipoPagamento);
+  const tipo = String(tipoPagamento || "").toLowerCase().trim();
+  if (!tipo) return 0;
 
   const aliases: Record<string, string> = {
+    // Banrisul / "bergs" — nome usado na planilha antiga
     banrisul: "banrisul",
     bergs: "banrisul",
     debito_banrisul: "banrisul",
-    "debito banrisul": "banrisul",
+    "débito banrisul": "banrisul",
+
+    // Sicredi
     sicredi: "sicredi",
     debito_sicredi: "sicredi",
-    "debito sicredi": "sicredi",
+    "débito sicredi": "sicredi",
+
+    // Banco do Brasil
     bb: "bb",
     banco_do_brasil: "bb",
     debito_bb: "bb",
     debito_banco_do_brasil: "bb",
-    "debito banco do brasil": "bb",
+    "débito banco do brasil": "bb",
+
+    // Boleto
     boleto: "boleto",
+
+    // PIX — "botero" é a identificação usada na planilha antiga
     pix: "pix",
     botero: "pix",
+
     dinheiro: "dinheiro",
     transferencia: "transferencia",
+    transferência: "transferencia",
     outro: "outro",
   };
 
-  if (aliases[tipo]) return aliases[tipo];
-
-  // No cadastro, Banrisul/Sicredi/BB ficam como "debito_em_conta".
-  // A tarifa correta vem da instituição da conta bancária vinculada.
-  if (
-    tipo === "debito_em_conta" ||
-    tipo === "debito em conta" ||
-    tipo === "debito"
-  ) {
-    const banco = normalizarBanco(
-      `${contaBancaria?.nome || ""} ${contaBancaria?.banco || ""}`
-    );
-
-    if (banco.includes("banrisul") || banco.includes("bergs")) {
-      return "banrisul";
-    }
-    if (banco.includes("sicredi")) {
-      return "sicredi";
-    }
-    if (banco === "bb" || banco.includes("bb") || banco.includes("banco do brasil")) {
-      return "bb";
-    }
-  }
-
-  return tipo;
-}
-
-function valorTarifa(
-  tarifas: any[],
-  tipoPagamento: unknown,
-  contaBancaria: any | null
-) {
-  const chave = chaveTarifa(tipoPagamento, contaBancaria);
-  if (!chave) return 0;
-
+  const chave = aliases[tipo] || tipo;
   const tarifa = (tarifas || []).find(
     (t: any) =>
-      normalizarTexto(t.tipo_pagamento) === chave &&
+      String(t.tipo_pagamento || "").toLowerCase() === chave &&
       t.ativo !== false
   );
 
@@ -286,7 +244,7 @@ export async function GET(request: Request) {
     const { data: socios, error: erroSocios } = await db
       .from("socios")
       .select(
-        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
+        "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,situacao_financeira"
       )
       .order("nome");
 
@@ -301,11 +259,6 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
-    }
-
-    const socioId = String(url.searchParams.get("socio_id") || "").trim();
-    if (socioId) {
-      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
@@ -423,7 +376,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
+          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
         )
         .order("nome");
 
@@ -437,10 +390,9 @@ export async function POST(request: Request) {
           return false;
         }
 
-        // Regra oficial: se possui mensalidade = SIM, gera cobrança.
-        // Isso vale também para dependentes que pagam mensalidade.
-        // Se possui mensalidade = NÃO, não gera lançamento e não é isento.
-        return s.possui_mensalidade === true;
+        // Somente titular/responsável pode gerar mensalidade.
+        // Dependentes nunca geram cobrança própria.
+        return !s.responsavel_id && Boolean(s.possui_mensalidade);
       });
 
       const { data: configuracoes, error: erroConfiguracoes } =
@@ -456,17 +408,6 @@ export async function POST(request: Request) {
         .from("configuracoes_tarifas_mensalidades")
         .select("*")
         .eq("ativo", true);
-
-      const { data: contasBancarias, error: erroContas } = await db
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .eq("ativo", true);
-
-      if (erroContas) throw erroContas;
-
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
-      );
 
       if (erroTarifas) throw erroTarifas;
 
@@ -510,13 +451,10 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          // A forma de cobrança vem do cadastro individual.
-          // Nunca usar a configuração geral como fallback, para não
-          // transformar todos os associados em boleto/PIX automaticamente.
-          const tipoPagamento = s.tipo_pagamento || null;
+          const tipoPagamento =
+            s.tipo_pagamento || config?.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
-          const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -537,11 +475,9 @@ export async function POST(request: Request) {
             desconto: calculado.desconto,
             total_cobrado: calculado.total_cobrado,
             tipo_pagamento: tipoPagamento,
-            conta_pagadora_id: s.conta_bancaria_id || null,
             data_vencimento: vencimento,
           };
-        })
-        .filter((item: any) => Number(item.valor_base || 0) > 0);
+        });
 
       const soma = (campo: string) =>
         Number(
@@ -615,7 +551,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
+          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao,ativo"
         );
 
       if (erroSocios) throw erroSocios;
@@ -651,9 +587,11 @@ export async function POST(request: Request) {
           return false;
         }
 
-        // Regra única: possui_mensalidade = SIM gera cobrança.
-        // Titular ou dependente não muda essa regra.
-        return s.possui_mensalidade === true;
+        const ehDependente = Boolean(s.responsavel_id);
+
+        // Somente titular/responsável pode gerar mensalidade.
+        // Dependentes nunca geram cobrança própria.
+        return !ehDependente && Boolean(s.possui_mensalidade);
       });
 
       const { data: configuracoes, error: erroConfiguracoes } =
@@ -669,17 +607,6 @@ export async function POST(request: Request) {
         .from("configuracoes_tarifas_mensalidades")
         .select("*")
         .eq("ativo", true);
-
-      const { data: contasBancarias, error: erroContas } = await db
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .eq("ativo", true);
-
-      if (erroContas) throw erroContas;
-
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
-      );
 
       if (erroTarifas) throw erroTarifas;
 
@@ -705,21 +632,12 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
-      const socioIdsSolicitados = Array.isArray(body.socio_ids)
-        ? body.socio_ids.map((id: unknown) => String(id).trim()).filter(Boolean)
-        : null;
-
-      const cobraveisSelecionados =
-        socioIdsSolicitados && socioIdsSolicitados.length > 0
-          ? cobraveis.filter((s: any) => socioIdsSolicitados.includes(String(s.id)))
-          : cobraveis;
-
       /*
        * A lista "cobraveis" acima já representa os pagadores desta
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveisSelecionados
+      const novos = cobraveis
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -737,12 +655,13 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          // A forma de cobrança vem do cadastro individual.
-          const tipoPagamento = s.tipo_pagamento || null;
+          const tipoPagamento =
+            s.tipo_pagamento ||
+            config?.tipo_pagamento ||
+            null;
 
           const vencimento = dataVencimento(competencia, dia);
-          const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
+          const tarifa = valorTarifa(tarifas || [], tipoPagamento);
           const calculado = calcularCobranca(
             valor,
             vencimento,
@@ -763,129 +682,26 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            // Valor zero não vira Isento automaticamente.
-            // Isento deve ser uma decisão explícita, nunca resultado de geração.
-            situacao: "em_aberto",
+            situacao: valor === 0 ? "isento" : "em_aberto",
             tipo_pagamento: tipoPagamento,
-            conta_pagadora_id: s.conta_bancaria_id || null,
           };
-        })
-        .filter((item: any) => Number(item.valor_base || 0) > 0);
+        });
 
       if (novos.length > 0) {
-        // Inserimos em lotes para evitar timeout da função/serverless
-        // quando uma competência possui centenas de lançamentos.
-        const TAMANHO_LOTE = 50;
-        let criadas = 0;
+        const { error: erroInsert } = await db
+          .from("mensalidades")
+          .insert(novos);
 
-        for (let inicio = 0; inicio < novos.length; inicio += TAMANHO_LOTE) {
-          const lote = novos.slice(inicio, inicio + TAMANHO_LOTE);
-          const { error: erroInsert } = await db
-            .from("mensalidades")
-            .insert(lote);
-
-          if (erroInsert) {
-            throw new Error(
-              `Erro ao gerar o lote ${Math.floor(inicio / TAMANHO_LOTE) + 1}: ${erroInsert.message}`
-            );
-          }
-
-          criadas += lote.length;
-        }
-
-        return NextResponse.json({
-          ok: true,
-          criadas,
-          message: `${criadas} mensalidade(s) gerada(s) com sucesso.`,
-        });
+        if (erroInsert) throw erroInsert;
       }
 
       return NextResponse.json({
         ok: true,
-        criadas: 0,
-        message: "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
-      });
-    }
-
-    /*
-     * =====================================================
-     * MARCAR COMO S.S. — SEM SALDO
-     * =====================================================
-     * Não é pagamento e não cria movimento financeiro.
-     * Apenas registra a ocorrência na mensalidade para que o
-     * histórico anual mostre SS.
-     */
-    if (acao === "marcar_sem_saldo") {
-      const ids: string[] = Array.isArray(body.ids)
-        ? body.ids.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-
-      if (ids.length === 0) {
-        return NextResponse.json(
-          { error: "Selecione ao menos uma mensalidade." },
-          { status: 400 }
-        );
-      }
-
-      const { data: registros, error: erroBusca } = await db
-        .from("mensalidades")
-        .select("id,situacao")
-        .in("id", ids);
-
-      if (erroBusca) throw erroBusca;
-
-      const idsValidos = (registros || [])
-        .filter((r: any) => r.situacao !== "pago")
-        .map((r: any) => String(r.id));
-
-      if (idsValidos.length === 0) {
-        return NextResponse.json({
-          ok: true,
-          atualizadas: 0,
-          message: "Nenhuma mensalidade disponível para marcar como S.S.",
-        });
-      }
-
-      const { data: movimentosExistentes, error: erroMovimentos } = await db
-        .from("movimentacoes_financeiras")
-        .select("id,origem_id")
-        .eq("origem_tipo", "mensalidade")
-        .in("origem_id", idsValidos);
-
-      if (erroMovimentos) throw erroMovimentos;
-
-      if ((movimentosExistentes || []).length > 0) {
-        const idsComMovimento = new Set(
-          (movimentosExistentes || []).map((m: any) => String(m.origem_id))
-        );
-        const conflitantes = idsValidos.filter((id) => idsComMovimento.has(id));
-
-        if (conflitantes.length > 0) {
-          return NextResponse.json(
-            { error: "Existe entrada financeira vinculada a uma das mensalidades selecionadas. Estorne ou regularize antes de marcar como S.S." },
-            { status: 409 }
-          );
-        }
-      }
-
-      const { error: erroUpdate } = await db
-        .from("mensalidades")
-        .update({
-          situacao: "em_aberto",
-          data_pagamento: null,
-          // Mantém a forma original de cobrança (ex.: boleto).
-          // O S.S. é uma ocorrência do pagamento, não uma troca do método de cobrança.
-          motivo: "S.S",
-          observacoes: body.observacoes || "S.S — Sem saldo",
-        })
-        .in("id", idsValidos);
-
-      if (erroUpdate) throw erroUpdate;
-
-      return NextResponse.json({
-        ok: true,
-        atualizadas: idsValidos.length,
-        message: `${idsValidos.length} mensalidade(s) marcada(s) como S.S — Sem saldo.`,
+        criadas: novos.length,
+        message:
+          novos.length > 0
+            ? `${novos.length} mensalidade(s) gerada(s).`
+            : "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
       });
     }
 
@@ -913,7 +729,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
+        .select("id,socio_id,situacao,valor,valor_base,data_vencimento,tipo_pagamento")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -939,17 +755,6 @@ export async function POST(request: Request) {
         .select("*")
         .eq("ativo", true);
 
-      const { data: contasBancarias, error: erroContas } = await db
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .eq("ativo", true);
-
-      if (erroContas) throw erroContas;
-
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
-      );
-
       if (erroTarifas) throw erroTarifas;
 
       const { data: cobrancas, error: erroCobrancas } = await db
@@ -962,100 +767,23 @@ export async function POST(request: Request) {
       if (erroCobrancas) throw erroCobrancas;
 
       const regraCobranca = cobrancas?.[0] || null;
-
-      // A conta usada na baixa é SEMPRE a conta de recebimento da Sociedade.
-      // Nunca usamos a conta bancária pessoal do associado como destino da receita.
-      const contaRecebimentoId = String(body.conta_recebimento_id || "").trim();
-      if (!contaRecebimentoId) {
-        return NextResponse.json(
-          { error: "Selecione a conta bancária da Sociedade que recebeu o pagamento." },
-          { status: 400 }
-        );
-      }
-
-      const { data: contaRecebimento, error: erroContaRecebimento } = await db
-        .from("contas_bancarias")
-        .select("id,nome,banco,ativo")
-        .eq("id", contaRecebimentoId)
-        .maybeSingle();
-
-      if (erroContaRecebimento) throw erroContaRecebimento;
-      if (!contaRecebimento || contaRecebimento.ativo === false) {
-        return NextResponse.json(
-          { error: "A conta de recebimento selecionada não está disponível." },
-          { status: 400 }
-        );
-      }
-
-      const socioIds = Array.from(
-        new Set((registros || []).map((r: any) => String(r.socio_id)))
-      );
-
-      const { data: sociosBaixa, error: erroSociosBaixa } = await db
-        .from("socios")
-        .select("id,nome,matricula,responsavel_id")
-        .in("id", socioIds);
-
-      if (erroSociosBaixa) throw erroSociosBaixa;
-
-      const mapaSociosBaixa = new Map<string, any>(
-        (sociosBaixa || []).map((s: any) => [String(s.id), s])
-      );
-
       const registrosParaBaixar = (registros || []).filter((r: any) =>
         idsParaBaixar.includes(String(r.id))
       );
 
-      // Verifica antes da baixa se alguma mensalidade já possui entrada.
-      // Assim uma nova tentativa nunca duplica o recebimento.
-      const { data: movimentosExistentes, error: erroMovimentosExistentes } =
-        await db
-          .from("movimentacoes_financeiras")
-          .select("id,origem_id")
-          .eq("origem_tipo", "mensalidade")
-          .in("origem_id", idsParaBaixar);
-
-      if (erroMovimentosExistentes) throw erroMovimentosExistentes;
-
-      const idsComEntrada = new Set(
-        (movimentosExistentes || []).map((m: any) => String(m.origem_id))
-      );
-
-      const registrosComEntrada = registrosParaBaixar.filter((r: any) =>
-        idsComEntrada.has(String(r.id))
-      );
-
-      if (registrosComEntrada.length > 0) {
-        const nomes = registrosComEntrada
-          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
-          .join(", ");
-
-        return NextResponse.json(
-          {
-            error: `Já existe entrada financeira para: ${nomes}. A baixa foi interrompida para evitar duplicidade.`,
-          },
-          { status: 409 }
-        );
-      }
-
       for (const registro of registrosParaBaixar) {
-        const socio = mapaSociosBaixa.get(String(registro.socio_id));
-        const formaPagamento = String(
-          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro"
-        );
+        const formaPagamento =
+          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
 
         const valorBase = Number(
           registro.valor_base ?? registro.valor ?? 0
         );
 
-        // A tarifa é determinada pela forma REAL do pagamento.
-        // Ex.: se um boleto virou PIX depois de S.S., a baixa via PIX
-        // não deve carregar automaticamente a tarifa do boleto.
         const calculado = calcularCobranca(
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento, null),
+          valorTarifa(tarifas || [], formaPagamento),
           regraCobranca
         );
 
@@ -1077,101 +805,6 @@ export async function POST(request: Request) {
           .eq("id", registro.id);
 
         if (erroBaixa) throw erroBaixa;
-
-        // A baixa da mensalidade precisa gerar a entrada no Financeiro.
-        // Cada mensalidade recebe sua própria origem_id para impedir
-        // duplicidade e permitir rastrear o recebimento até a cobrança.
-        const { error: erroEntrada } = await db
-          .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: contaRecebimentoId,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "entrada",
-            categoria: "Mensalidade",
-            descricao: `Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
-            // A receita da Sociedade é sempre o valor da mensalidade,
-            // sem somar a tarifa cobrada do associado pelo banco.
-            // Ex.: mensalidade R$ 60,00 + tarifa R$ 2,50 =
-            // associado paga R$ 62,50, mas a Sociedade registra
-            // R$ 60,00 como receita.
-            // O associado paga o total cobrado. A tarifa, quando existir,
-            // é registrada em uma saída separada; o saldo líquido recebido
-            // na conta da Sociedade fica equivalente ao valor-base.
-            valor: Number(calculado.total_cobrado || valorBase || 0),
-            data_movimentacao: dataPagamento,
-            forma_pagamento: formaPagamento,
-            origem_tipo: "mensalidade",
-            origem_id: registro.id,
-            socio_id: registro.socio_id,
-            dependente_id: null,
-            comprovante_url: null,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: body.observacoes || null,
-          });
-
-        // A tarifa paga pelo associado é registrada separadamente
-        // como DESPESA bancária da Sociedade.
-        if (calculado.tarifa_pagamento > 0) {
-          const { error: erroTarifa } = await db
-            .from("movimentacoes_financeiras")
-            .insert({
-              conta_bancaria_id: contaRecebimentoId,
-              conta_destino_id: null,
-              grupo_transferencia: null,
-              tipo: "saida",
-              categoria: "Tarifa bancária",
-              descricao: `Tarifa ${formaPagamento} - Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
-              valor: Number(calculado.tarifa_pagamento || 0),
-              data_movimentacao: dataPagamento,
-              forma_pagamento: formaPagamento,
-              origem_tipo: "tarifa_mensalidade",
-              origem_id: registro.id,
-              socio_id: registro.socio_id,
-              dependente_id: null,
-              comprovante_url: null,
-              conciliado: false,
-              data_conciliacao: null,
-              observacoes: "Tarifa bancária repassada ao associado.",
-            });
-
-          if (erroTarifa) {
-            await db
-              .from("movimentacoes_financeiras")
-              .delete()
-              .eq("origem_tipo", "mensalidade")
-              .eq("origem_id", registro.id);
-
-            await db
-              .from("mensalidades")
-              .update({
-                situacao: registro.situacao,
-                data_pagamento: null,
-                tipo_pagamento: registro.tipo_pagamento || null,
-                tarifa_pagamento: null,
-                total_cobrado: null,
-              })
-              .eq("id", registro.id);
-
-            throw erroTarifa;
-          }
-        }
-
-        if (erroEntrada) {
-          // Se a entrada falhar, desfaz a marcação como paga para não
-          // deixar a mensalidade quitada sem correspondente financeiro.
-          await db
-            .from("mensalidades")
-            .update({
-              situacao: registro.situacao,
-              data_pagamento: null,
-              tipo_pagamento: registro.tipo_pagamento || null,
-            })
-            .eq("id", registro.id);
-
-          throw erroEntrada;
-        }
       }
 
       return NextResponse.json({
@@ -1180,146 +813,6 @@ export async function POST(request: Request) {
         ignoradas: idsJaPagos.length,
         message:
           `${idsParaBaixar.length} mensalidade(s) baixada(s).`,
-      });
-    }
-
-    /*
-     * =====================================================
-     * ESTORNAR BAIXA
-     * =====================================================
-     * Reabre a mensalidade e remove a entrada financeira vinculada
-     * quando ela ainda não foi conciliada. Se a entrada já estiver
-     * conciliada, preservamos o histórico e lançamos uma saída de
-     * estorno para neutralizar o efeito no caixa.
-     */
-    if (acao === "estornar") {
-      const id = String(body.id || "").trim();
-
-      if (!id) {
-        return NextResponse.json(
-          { error: "Mensalidade não informada." },
-          { status: 400 }
-        );
-      }
-
-      const { data: mensalidade, error: erroMensalidade } = await db
-        .from("mensalidades")
-        .select("id,socio_id,competencia,situacao,data_pagamento,tipo_pagamento,comprovante_url,observacoes,total_cobrado,valor,conta_pagadora_id")
-        .eq("id", id)
-        .maybeSingle();
-
-      if (erroMensalidade) throw erroMensalidade;
-
-      if (!mensalidade) {
-        return NextResponse.json(
-          { error: "Mensalidade não encontrada." },
-          { status: 404 }
-        );
-      }
-
-      if (mensalidade.situacao !== "pago") {
-        return NextResponse.json(
-          { error: "Esta mensalidade não está baixada como paga." },
-          { status: 400 }
-        );
-      }
-
-      const { data: movimentos, error: erroMovimentos } = await db
-        .from("movimentacoes_financeiras")
-        .select("id,conta_bancaria_id,tipo,valor,conciliado,origem_tipo,origem_id,descricao,observacoes")
-        .eq("origem_tipo", "mensalidade")
-        .eq("origem_id", id);
-
-      if (erroMovimentos) throw erroMovimentos;
-
-      const { data: estornosExistentes, error: erroEstornos } = await db
-        .from("movimentacoes_financeiras")
-        .select("id")
-        .eq("origem_tipo", "estorno_mensalidade")
-        .eq("origem_id", id)
-        .limit(1);
-
-      if (erroEstornos) throw erroEstornos;
-
-      if ((estornosExistentes || []).length > 0) {
-        return NextResponse.json(
-          { error: "Esta mensalidade já possui um estorno financeiro registrado." },
-          { status: 409 }
-        );
-      }
-
-      const pendentes = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado !== true
-      );
-      const conciliados = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado === true
-      );
-
-      // Entradas ainda pendentes podem ser removidas sem perder
-      // conciliação/histórico bancário. Isso faz o valor desaparecer
-      // imediatamente do quadro de Entradas, como no caso do Aldoir.
-      for (const movimento of pendentes) {
-        const { error } = await db
-          .from("movimentacoes_financeiras")
-          .delete()
-          .eq("id", movimento.id);
-
-        if (error) throw error;
-      }
-
-      // Se já foi conciliada, não apagamos o histórico. Criamos uma
-      // saída correspondente, mantendo a trilha do estorno.
-      for (const movimento of conciliados) {
-        const { error } = await db
-          .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: movimento.conta_bancaria_id,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "saida",
-            categoria: "Estorno de Mensalidade",
-            descricao: `Estorno de mensalidade ${String(mensalidade.competencia || "").slice(0, 7)}`,
-            valor: Number(movimento.valor || mensalidade.total_cobrado || mensalidade.valor || 0),
-            data_movimentacao: new Date().toISOString().slice(0, 10),
-            forma_pagamento: mensalidade.tipo_pagamento || null,
-            origem_tipo: "estorno_mensalidade",
-            origem_id: id,
-            socio_id: mensalidade.socio_id || null,
-            dependente_id: null,
-            comprovante_url: null,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: `Estorno da entrada financeira ${movimento.id}.`,
-          });
-
-        if (error) throw error;
-      }
-
-      const observacaoAnterior = String(mensalidade.observacoes || "").trim();
-      const observacaoEstorno = `Pagamento estornado em ${new Date().toLocaleDateString("pt-BR")} — aguardando nova baixa.`;
-      const observacoes = observacaoAnterior
-        ? `${observacaoAnterior}\n${observacaoEstorno}`
-        : observacaoEstorno;
-
-      const { error: erroUpdate } = await db
-        .from("mensalidades")
-        .update({
-          situacao: "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: null,
-          comprovante_url: null,
-          observacoes,
-        })
-        .eq("id", id);
-
-      if (erroUpdate) throw erroUpdate;
-
-      return NextResponse.json({
-        ok: true,
-        mensagemId: id,
-        entradas_removidas: pendentes.length,
-        estornos_conciliados: conciliados.length,
-        message: "Pagamento estornado com sucesso. A mensalidade voltou para Em aberto.",
       });
     }
 
