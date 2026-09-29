@@ -134,6 +134,13 @@ function data(v: string | null) {
   return `${d}/${m}/${a}`;
 }
 
+function chavePixDaConta(conta: Conta | undefined) {
+  const texto = `${conta?.nome || ""} ${conta?.banco || ""}`.toLowerCase();
+  if (texto.includes("banrisul")) return "55991817619";
+  if (texto.includes("cresol")) return "sociedader.guarani@gmail.com";
+  return "";
+}
+
 function status(s: string | null) {
   if (s === "nao_gerada") return ["Não gerada", "bg-gray-100 text-gray-600"];
   if (s === "pago") return ["Pago", "bg-green-100 text-green-700"];
@@ -145,8 +152,12 @@ function status(s: string | null) {
 
 function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   if (item.situacao === "pago") return false;
-  const texto = String(item.motivo || item.observacoes || "").toLowerCase();
-  return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
+  // Somente o marcador criado pela ação S.S. deve exibir "SS".
+  // Não interpretar textos antigos como "Não debitou — sem saldo"
+  // como S.S. automaticamente.
+  const motivo = String(item.motivo || "").trim().toLowerCase();
+  const observacao = String(item.observacoes || "").trim().toLowerCase();
+  return motivo === "s.s" || motivo === "ss" || observacao === "s.s — sem saldo" || observacao === "s.s - sem saldo";
 }
 
 function statusMensalidade(item: M) {
@@ -1490,6 +1501,17 @@ const selecionadasBaixa = useMemo(
                                 ))}
                               </select>
                             </div>
+
+                            {(() => {
+                              const contaSelecionada = contas.find((c) => String(c.id) === String(contaRecebimentoSelecionada));
+                              const chavePix = chavePixDaConta(contaSelecionada);
+                              return chavePix ? (
+                                <div className="rounded-xl border border-[#cfe6da] bg-[#f4faf7] px-3 py-2 text-xs">
+                                  <div className="font-bold text-[#005a3c]">Chave PIX da Sociedade</div>
+                                  <div className="font-black text-[#173d2e]">{chavePix}</div>
+                                </div>
+                              ) : null;
+                            })()}
 
                             <div>
                               <label className="mb-1 block text-xs font-bold text-gray-500">Forma do pagamento</label>
