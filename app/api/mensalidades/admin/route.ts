@@ -407,13 +407,9 @@ export async function POST(request: Request) {
             competencia
           );
 
-          // O valor individual cadastrado no associado tem prioridade.
-          // A configuração por tipo só é usada quando o associado não
-          // possui um valor próprio definido. Isso evita que todos os
-          // associados do mesmo tipo recebam a mesma mensalidade por engano.
-          const valorIndividual = Number(s.valor_mensalidade || 0);
+          const valorIndividual = Number(s.valor_mensalidade);
           const valor =
-            valorIndividual > 0
+            Number.isFinite(valorIndividual) && valorIndividual > 0
               ? valorIndividual
               : Number(config?.valor || 0);
 
@@ -450,7 +446,7 @@ export async function POST(request: Request) {
             data_vencimento: vencimento,
           };
         })
-        .filter((item): item is Record<string, unknown> => item !== null);
+        .filter((item) => item !== null);
 
       const soma = (campo: string) =>
         Number(
@@ -590,13 +586,9 @@ export async function POST(request: Request) {
             competencia
           );
 
-          // O valor individual cadastrado no associado tem prioridade.
-          // A configuração por tipo só é usada quando o associado não
-          // possui um valor próprio definido. Isso evita que todos os
-          // associados do mesmo tipo recebam a mesma mensalidade por engano.
-          const valorIndividual = Number(s.valor_mensalidade || 0);
+          const valorIndividual = Number(s.valor_mensalidade);
           const valor =
-            valorIndividual > 0
+            Number.isFinite(valorIndividual) && valorIndividual > 0
               ? valorIndividual
               : Number(config?.valor || 0);
 
@@ -637,7 +629,7 @@ export async function POST(request: Request) {
             tipo_pagamento: tipoPagamento,
           };
         })
-        .filter((item): item is Record<string, unknown> => item !== null);
+        .filter((item) => item !== null);
 
       if (novos.length > 0) {
         const { error: erroInsert } = await db
