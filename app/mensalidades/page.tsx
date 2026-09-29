@@ -1337,7 +1337,6 @@ const selecionadasBaixa = useMemo(
                         const isento = Boolean(registro && !semSaldo && situacao === "isento");
                         const naoGerada = !registro;
                         const selecionado = mesHistoricoSelecionado === numeroMes;
-                        const naoGerada = registrosMes.length === 0;
 
                         return (
                           <button
