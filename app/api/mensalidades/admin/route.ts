@@ -303,6 +303,11 @@ export async function GET(request: Request) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
     }
 
+    const socioId = String(url.searchParams.get("socio_id") || "").trim();
+    if (socioId) {
+      consulta = consulta.eq("socio_id", socioId);
+    }
+
     const { data: mensalidades, error: erroMensalidades } =
       await consulta;
 
@@ -432,11 +437,10 @@ export async function POST(request: Request) {
           return false;
         }
 
-        if (!s.responsavel_id) {
-          return Boolean(s.possui_mensalidade);
-        }
-
-        return dependenteTemMensalidade(s);
+        // Regra oficial: se possui mensalidade = SIM, gera cobrança.
+        // Isso vale também para dependentes que pagam mensalidade.
+        // Se possui mensalidade = NÃO, não gera lançamento e não é isento.
+        return s.possui_mensalidade === true;
       });
 
       const { data: configuracoes, error: erroConfiguracoes } =
@@ -506,8 +510,9 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          // A forma de pagamento é individual. Não aplicar a forma
-          // da configuração geral a todos os associados.
+          // A forma de cobrança vem do cadastro individual.
+          // Nunca usar a configuração geral como fallback, para não
+          // transformar todos os associados em boleto/PIX automaticamente.
           const tipoPagamento = s.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
@@ -646,13 +651,9 @@ export async function POST(request: Request) {
           return false;
         }
 
-        const ehDependente = Boolean(s.responsavel_id);
-
-        if (!ehDependente) {
-          return Boolean(s.possui_mensalidade);
-        }
-
-        return dependenteTemMensalidade(s);
+        // Regra única: possui_mensalidade = SIM gera cobrança.
+        // Titular ou dependente não muda essa regra.
+        return s.possui_mensalidade === true;
       });
 
       const { data: configuracoes, error: erroConfiguracoes } =
@@ -704,12 +705,21 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
+      const socioIdsSolicitados = Array.isArray(body.socio_ids)
+        ? body.socio_ids.map((id: unknown) => String(id).trim()).filter(Boolean)
+        : null;
+
+      const cobraveisSelecionados =
+        socioIdsSolicitados && socioIdsSolicitados.length > 0
+          ? cobraveis.filter((s: any) => socioIdsSolicitados.includes(String(s.id)))
+          : cobraveis;
+
       /*
        * A lista "cobraveis" acima já representa os pagadores desta
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveis
+      const novos = cobraveisSelecionados
         .filter((s: any) => !idsExistentes.has(String(s.id)))
         .map((s: any) => {
           const config = escolherConfiguracao(
@@ -727,10 +737,7 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          // A forma de pagamento pertence ao cadastro do associado.
-          // Não usar o tipo_pagamento da configuração geral para todos,
-          // pois isso pode transformar centenas de associados em boleto
-          // mesmo quando o cadastro individual não é boleto.
+          // A forma de cobrança vem do cadastro individual.
           const tipoPagamento = s.tipo_pagamento || null;
 
           const vencimento = dataVencimento(competencia, dia);
@@ -756,16 +763,14 @@ export async function POST(request: Request) {
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
             data_vencimento: vencimento,
-            // Valor zero não significa automaticamente "isento".
-            // Sem valor de cobrança, a geração deve ser impedida antes deste ponto.
+            // Valor zero não vira Isento automaticamente.
+            // Isento deve ser uma decisão explícita, nunca resultado de geração.
             situacao: "em_aberto",
             tipo_pagamento: tipoPagamento,
             conta_pagadora_id: s.conta_bancaria_id || null,
           };
         })
-        // Não criar lançamento para quem não possui valor de mensalidade.
-        // "Isento" é uma situação explícita, não um efeito de valor zero.
-        .filter((m: any) => Number(m.valor_base || 0) > 0);
+        .filter((item: any) => Number(item.valor_base || 0) > 0);
 
       if (novos.length > 0) {
         // Inserimos em lotes para evitar timeout da função/serverless
@@ -868,8 +873,8 @@ export async function POST(request: Request) {
         .update({
           situacao: "em_aberto",
           data_pagamento: null,
-          // Mantém a forma de cobrança original (ex.: boleto) para que,
-          // se o associado pagar depois, possamos registrar o pagamento via PIX.
+          // Mantém a forma original de cobrança (ex.: boleto).
+          // O S.S. é uma ocorrência do pagamento, não uma troca do método de cobrança.
           motivo: "S.S",
           observacoes: body.observacoes || "S.S — Sem saldo",
         })
@@ -958,15 +963,37 @@ export async function POST(request: Request) {
 
       const regraCobranca = cobrancas?.[0] || null;
 
-      // Recupera a conta vinculada ao associado para que a baixa também
-      // gere automaticamente a entrada correspondente no fluxo financeiro.
+      // A conta usada na baixa é SEMPRE a conta de recebimento da Sociedade.
+      // Nunca usamos a conta bancária pessoal do associado como destino da receita.
+      const contaRecebimentoId = String(body.conta_recebimento_id || "").trim();
+      if (!contaRecebimentoId) {
+        return NextResponse.json(
+          { error: "Selecione a conta bancária da Sociedade que recebeu o pagamento." },
+          { status: 400 }
+        );
+      }
+
+      const { data: contaRecebimento, error: erroContaRecebimento } = await db
+        .from("contas_bancarias")
+        .select("id,nome,banco,ativo")
+        .eq("id", contaRecebimentoId)
+        .maybeSingle();
+
+      if (erroContaRecebimento) throw erroContaRecebimento;
+      if (!contaRecebimento || contaRecebimento.ativo === false) {
+        return NextResponse.json(
+          { error: "A conta de recebimento selecionada não está disponível." },
+          { status: 400 }
+        );
+      }
+
       const socioIds = Array.from(
         new Set((registros || []).map((r: any) => String(r.socio_id)))
       );
 
       const { data: sociosBaixa, error: erroSociosBaixa } = await db
         .from("socios")
-        .select("id,nome,matricula,conta_bancaria_id,responsavel_id")
+        .select("id,nome,matricula,responsavel_id")
         .in("id", socioIds);
 
       if (erroSociosBaixa) throw erroSociosBaixa;
@@ -978,27 +1005,6 @@ export async function POST(request: Request) {
       const registrosParaBaixar = (registros || []).filter((r: any) =>
         idsParaBaixar.includes(String(r.id))
       );
-
-      // A conta do associado é a conta pagadora/debitada e NUNCA deve ser
-      // usada como conta que recebe a receita da Sociedade. Para uma baixa
-      // manual (inclusive pagamento posterior via PIX), a conta de
-      // recebimento da Sociedade deve ser informada explicitamente.
-      const contaRecebimentoId = String(body.conta_recebimento_id || "").trim();
-
-      if (!contaRecebimentoId) {
-        return NextResponse.json(
-          { error: "Selecione a conta bancária da Sociedade que recebeu o pagamento." },
-          { status: 400 }
-        );
-      }
-
-      const contaRecebimento = mapaContas.get(contaRecebimentoId);
-      if (!contaRecebimento) {
-        return NextResponse.json(
-          { error: "A conta de recebimento selecionada não foi encontrada ou está inativa." },
-          { status: 400 }
-        );
-      }
 
       // Verifica antes da baixa se alguma mensalidade já possui entrada.
       // Assim uma nova tentativa nunca duplica o recebimento.
@@ -1034,20 +1040,22 @@ export async function POST(request: Request) {
 
       for (const registro of registrosParaBaixar) {
         const socio = mapaSociosBaixa.get(String(registro.socio_id));
-        const contaId = contaRecebimentoId;
-
-        const formaPagamento =
-          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
+        const formaPagamento = String(
+          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro"
+        );
 
         const valorBase = Number(
           registro.valor_base ?? registro.valor ?? 0
         );
 
+        // A tarifa é determinada pela forma REAL do pagamento.
+        // Ex.: se um boleto virou PIX depois de S.S., a baixa via PIX
+        // não deve carregar automaticamente a tarifa do boleto.
         const calculado = calcularCobranca(
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento, contaId ? mapaContas.get(String(contaId)) || null : null),
+          valorTarifa(tarifas || [], formaPagamento, null),
           regraCobranca
         );
 
@@ -1076,7 +1084,7 @@ export async function POST(request: Request) {
         const { error: erroEntrada } = await db
           .from("movimentacoes_financeiras")
           .insert({
-            conta_bancaria_id: contaId,
+            conta_bancaria_id: contaRecebimentoId,
             conta_destino_id: null,
             grupo_transferencia: null,
             tipo: "entrada",
@@ -1087,7 +1095,10 @@ export async function POST(request: Request) {
             // Ex.: mensalidade R$ 60,00 + tarifa R$ 2,50 =
             // associado paga R$ 62,50, mas a Sociedade registra
             // R$ 60,00 como receita.
-            valor: Number(valorBase || 0),
+            // O associado paga o total cobrado. A tarifa, quando existir,
+            // é registrada em uma saída separada; o saldo líquido recebido
+            // na conta da Sociedade fica equivalente ao valor-base.
+            valor: Number(calculado.total_cobrado || valorBase || 0),
             data_movimentacao: dataPagamento,
             forma_pagamento: formaPagamento,
             origem_tipo: "mensalidade",
@@ -1106,7 +1117,7 @@ export async function POST(request: Request) {
           const { error: erroTarifa } = await db
             .from("movimentacoes_financeiras")
             .insert({
-              conta_bancaria_id: contaId,
+              conta_bancaria_id: contaRecebimentoId,
               conta_destino_id: null,
               grupo_transferencia: null,
               tipo: "saida",
