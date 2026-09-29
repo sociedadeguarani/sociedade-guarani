@@ -11,7 +11,7 @@ const supabase = createClient(
 
 type Socio = {
   id: string;
-  matricula: string | null;
+  matricula: number | null;
   nome: string;
   cpf: string | null;
   rg: string | null;
@@ -292,8 +292,9 @@ export default function Home() {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
+        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" ? "administrador" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
         perfil
       );
     } catch {}
@@ -743,7 +744,10 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      // Novo dependente começa sem mensalidade. Se passar a pagar,
+      // o cadastro pode ser alterado para mensalidade = SIM e então
+      // ele aparecerá automaticamente na guia Sócios.
+      possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -951,21 +955,38 @@ export default function Home() {
     setTimeout(() => setMensagem(""), 1500);
   }
 
-  const normalizarBuscaSocio = (valor: unknown) =>
-    String(valor || "")
-      .toLocaleLowerCase("pt-BR")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]/g, "");
+  // Regra de separação:
+  // - Sócios = titulares/responsáveis + dependentes que possuem mensalidade própria.
+  // - Dependentes = pessoas vinculadas a um responsável e sem mensalidade própria.
+  // Um dependente pagante continua em Sócios, mas somente se tiver mensalidade
+  // própria e matrícula especial SD....A.
+  const ehDependentePagante = (socio: Socio) =>
+    Boolean(socio.responsavel_id) &&
+    socio.possui_mensalidade === true &&
+    /^SD\d{1,6}A$/i.test(String(socio.matricula || "").trim());
+
+  const ehSocioDeCadastro = (socio: Socio) =>
+    !socio.responsavel_id || ehDependentePagante(socio);
 
   const sociosFiltrados = useMemo(() => {
-    const termo = normalizarBuscaSocio(busca);
+    const termo = busca.toLowerCase().trim();
+
     return socios.filter((socio) => {
-      const nome = normalizarBuscaSocio(socio.nome);
-      const cpf = normalizarBuscaSocio(socio.cpf);
-      const matricula = normalizarBuscaSocio(socio.matricula);
-      const correspondeBusca = !termo || nome.includes(termo) || cpf.includes(termo) || matricula.includes(termo);
-      const correspondeTipo = !mostrarSomenteDependentes || Boolean(socio.responsavel_id) || (socio.tipo_socio || "").startsWith("dependente_");
+      if (!ehSocioDeCadastro(socio)) return false;
+
+      const matricula = String(socio.matricula || "").toLowerCase();
+      const cpf = String(socio.cpf || "").toLowerCase();
+      const nome = String(socio.nome || "").toLowerCase();
+
+      const correspondeBusca =
+        !termo ||
+        nome.includes(termo) ||
+        cpf.includes(termo) ||
+        matricula.includes(termo);
+
+      const correspondeTipo =
+        !mostrarSomenteDependentes || ehDependentePagante(socio);
+
       return correspondeBusca && correspondeTipo;
     });
   }, [socios, busca, mostrarSomenteDependentes]);
@@ -1047,7 +1068,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.length}
+              quantidadeSocios={socios.filter(ehSocioDeCadastro).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1056,7 +1077,7 @@ export default function Home() {
           {menu === "Sócios" && (
             <Socios
               socios={sociosFiltrados}
-              quantidadeTotal={socios.length}
+              quantidadeTotal={socios.filter(ehSocioDeCadastro).length}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1235,7 +1256,7 @@ function Inicio({
 
         <DashboardCard
           titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
           descricao="Vinculados a responsáveis"
           icone="👨‍👩‍👧‍👦"
         />
@@ -2474,18 +2495,22 @@ function Dependentes({
   editarSocio: (socio: Socio) => void;
 }) {
   const [buscaDependente, setBuscaDependente] = useState("");
-  const normalizarBusca = (valor: unknown) =>
-    String(valor || "")
-      .toLocaleLowerCase("pt-BR")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]/g, "");
-  const termoBusca = normalizarBusca(buscaDependente);
-  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
-  const responsaveis = socios.filter((s) => socios.some((filho) => filho.responsavel_id === s.id));
+
+  // Aqui entram somente dependentes familiares sem mensalidade própria.
+  // Dependentes pagantes (SD....A) permanecem exclusivamente em Sócios.
+  const dependentes = socios.filter(
+    (s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true
+  );
+  const responsaveis = socios.filter((s) =>
+    socios.some(
+      (filho) =>
+        filho.responsavel_id === s.id &&
+        filho.possui_mensalidade !== true
+    )
+  );
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id);
+    return socios.filter((s) => s.responsavel_id === id && s.possui_mensalidade !== true);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2581,34 +2606,27 @@ function Dependentes({
     );
   }
 
+  const termoBuscaDependente = buscaDependente.toLowerCase().trim();
+
+  const correspondeBuscaDependente = (pessoa: Socio) => {
+    if (!termoBuscaDependente) return true;
+    const nome = String(pessoa.nome || "").toLowerCase();
+    const cpf = String(pessoa.cpf || "").toLowerCase();
+    const matricula = String(pessoa.matricula || "").toLowerCase();
+    return (
+      nome.includes(termoBuscaDependente) ||
+      cpf.includes(termoBuscaDependente) ||
+      matricula.includes(termoBuscaDependente)
+    );
+  };
+
   const raizes = socios.filter(
     (s) =>
       !s.responsavel_id &&
-      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
+      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0) &&
+      (correspondeBuscaDependente(s) ||
+        filhosDe(s.id).some(correspondeBuscaDependente))
   );
-
-  function familiaDaRaiz(raiz: Socio) {
-    const ids = new Set<string>([String(raiz.id)]);
-    let mudou = true;
-    while (mudou) {
-      mudou = false;
-      for (const pessoa of socios) {
-        const responsavel = pessoa.responsavel_id ? String(pessoa.responsavel_id) : "";
-        if (responsavel && ids.has(responsavel) && !ids.has(String(pessoa.id))) {
-          ids.add(String(pessoa.id));
-          mudou = true;
-        }
-      }
-    }
-    return socios.filter((p) => ids.has(String(p.id)));
-  }
-
-  const raizesFiltradas = termoBusca
-    ? raizes.filter((raiz) => familiaDaRaiz(raiz).some((pessoa) => {
-        const texto = [pessoa.nome, pessoa.matricula, pessoa.cpf, pessoa.parentesco].map(normalizarBusca).join(" ");
-        return texto.includes(termoBusca);
-      }))
-    : raizes;
 
   return (
     <div>
@@ -2629,14 +2647,19 @@ function Dependentes({
       <div className="mb-5 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:p-4">
         <div className="flex items-center gap-3">
           <span className="text-xl">🔎</span>
-          <input value={buscaDependente} onChange={(e) => setBuscaDependente(e.target.value)} placeholder="Buscar dependente por nome, CPF ou matrícula nova..." className="w-full min-w-0 bg-transparent py-2 text-sm outline-none sm:text-base" />
+          <input
+            value={buscaDependente}
+            onChange={(e) => setBuscaDependente(e.target.value)}
+            placeholder="Buscar dependente por nome, CPF ou matrícula nova..."
+            className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
+          />
         </div>
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Pessoas cadastradas</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.length}</p>
+          <p className="text-sm text-gray-500">Dependentes cadastrados</p>
+          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{dependentes.length}</p>
         </div>
 
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
@@ -2671,12 +2694,7 @@ function Dependentes({
         </div>
       ) : (
         <div className="space-y-5">
-          {raizesFiltradas.length === 0 && termoBusca && (
-            <div className="rounded-2xl border border-dashed border-[#cfe3d8] bg-white p-8 text-center text-sm text-gray-500">
-              Nenhum dependente ou matrícula encontrada para <b>{buscaDependente}</b>.
-            </div>
-          )}
-          {raizesFiltradas.map((raiz) => (
+          {raizes.map((raiz) => (
             <div
               key={raiz.id}
               className="rounded-3xl border border-[#dfe9e3] bg-[#f7faf8] p-4 shadow-sm sm:p-5"
