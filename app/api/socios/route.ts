@@ -9,7 +9,7 @@ const COLUNAS_BASE = [
   "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade",
 ];
 const COLUNAS_EXTRAS = [
-  "foto_url", "parentesco", "numero_titulo", "numero_debitos_referencia", "valor_mensalidade",
+  "foto_url", "parentesco", "valor_mensalidade",
   "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "modalidade_temporada", "inicio_temporada", "fim_temporada",
   "situacao_financeira", "data_ultimo_pagamento",
 ];
@@ -27,30 +27,6 @@ export async function GET(request: Request) {
     const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
     if ("response" in auth) return auth.response;
     const db = getServiceClient();
-    const url = new URL(request.url);
-    if (url.searchParams.get("resumo") === "1") {
-      const { data, error } = await db
-        .from("socios")
-        .select("ativo,situacao");
-
-      if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-
-      const lista = data || [];
-      const total = lista.length;
-      const inativos = lista.filter(
-        (s) =>
-          s.ativo === false ||
-          String(s.situacao || "").trim().toLowerCase() === "inativo",
-      ).length;
-      const ativos = total - inativos;
-
-      return NextResponse.json({
-        total,
-        ativos,
-        inativos,
-      });
-    }
-
     const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
     return NextResponse.json({ socios: data || [] });
@@ -75,18 +51,35 @@ export async function POST(request: Request) {
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
     const responsavelId = String(body.responsavel_id || "").trim();
-    if (!matricula && !(responsavelId && !possuiMensalidade)) {
+    if (!matricula && !responsavelId) {
       return NextResponse.json({ error: "Informe a matrícula-base do associado. Dependentes sem mensalidade recebem a matrícula automaticamente." }, { status: 400 });
     }
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
-    const dados = limparObjeto({ ...body, matricula: matricula || null, nome, cpf: body.cpf || null }, [...COLUNAS_BASE, ...COLUNAS_EXTRAS]);
-    const { data, error } = await auth.supabase.from("socios").insert(dados).select("*").single();
+    const ehDependente = Boolean(responsavelId);
+    const dadosNormalizados = {
+      ...body,
+      matricula: matricula || null,
+      nome,
+      cpf: body.cpf || null,
+      possui_mensalidade: ehDependente ? false : possuiMensalidade,
+      ...(ehDependente ? { valor_mensalidade: 0 } : {}),
+    };
+    const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
+    const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
     if (error) {
       if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
       return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
     }
-    return NextResponse.json({ socio: data, avisos: [] });
+    const extras = limparObjeto({ ...dadosNormalizados }, COLUNAS_EXTRAS);
+    const avisos: string[] = [];
+    for (const [campo, valor] of Object.entries(extras)) {
+      if (campo === "foto_url" && !valor) continue;
+      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", data.id);
+      if (extraError) avisos.push(`${campo}: ${erroBanco(extraError)}`);
+    }
+    const { data: final } = await auth.supabase.from("socios").select("*").eq("id", data.id).single();
+    return NextResponse.json({ socio: final || data, avisos });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
   }
@@ -103,12 +96,29 @@ export async function PUT(request: Request) {
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
-    const dados = limparObjeto(body, [...COLUNAS_BASE, ...COLUNAS_EXTRAS]);
-    dados.matricula = matricula || null;
-    dados.nome = nome;
-    dados.cpf = body.cpf || null;
-    const { error } = await auth.supabase.from("socios").update(dados).eq("id", id);
+    const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade").eq("id", id).maybeSingle();
+    const responsavelId = body.responsavel_id !== undefined
+      ? String(body.responsavel_id || "").trim()
+      : String(atual?.responsavel_id || "").trim();
+    const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
+    const ehDependente = Boolean(responsavelId);
+    const dadosNormalizados = {
+      ...body,
+      matricula: matricula || null,
+      nome,
+      cpf: body.cpf || null,
+      responsavel_id: responsavelId || null,
+      possui_mensalidade: ehDependente ? false : possuiMensalidade,
+      ...(ehDependente ? { valor_mensalidade: 0 } : {}),
+    };
+    const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
+    const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
     if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
+    const extras = limparObjeto(dadosNormalizados, COLUNAS_EXTRAS);
+    for (const [campo, valor] of Object.entries(extras)) {
+      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", id);
+      if (extraError) console.error(`Erro no campo ${campo}:`, extraError);
+    }
     const { data } = await auth.supabase.from("socios").select("*").eq("id", id).single();
     return NextResponse.json({ socio: data });
   } catch (error) {
