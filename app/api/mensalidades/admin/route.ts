@@ -280,6 +280,7 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
+    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -301,6 +302,14 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consulta = consulta.eq("competencia", primeiroDia(ano, mes));
+    }
+
+    // Quando o histórico de um associado é solicitado, é obrigatório
+    // limitar a consulta ao socio_id selecionado. Sem esse filtro, o
+    // histórico anual retornava as mensalidades de todos os associados
+    // e o frontend acabava exibindo a mesma situação para pessoas diferentes.
+    if (socioId) {
+      consulta = consulta.eq("socio_id", socioId);
     }
 
     const { data: mensalidades, error: erroMensalidades } =
