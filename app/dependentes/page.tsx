@@ -76,6 +76,8 @@ export default function DependentesPage() {
   const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
+  const [migrandoLegados, setMigrandoLegados] = useState(false);
+  const [legadosPendentes, setLegadosPendentes] = useState<string[]>([]);
 
   const somenteConsulta = perfilUsuario === "funcionario";
 
@@ -213,6 +215,39 @@ export default function DependentesPage() {
     } catch {}
     carregarDados();
   }, []);
+
+  async function migrarLegados() {
+    if (somenteConsulta || migrandoLegados) return;
+
+    setMigrandoLegados(true);
+    setErro("");
+    setSucesso("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+
+      const resposta = await fetch("/api/dependentes/migrar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ acao: "migrar_legados" }),
+      });
+
+      const dados = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes antigos.");
+
+      setLegadosPendentes((dados?.sem_responsavel || []).map((d: any) => String(d.nome || "")).filter(Boolean));
+      setSucesso(dados?.message || "Migração concluída.");
+      await carregarDados();
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
+    } finally {
+      setMigrandoLegados(false);
+    }
+  }
 
   function abrirNovo() {
     if (somenteConsulta) return;
@@ -392,11 +427,25 @@ export default function DependentesPage() {
                 <h1 className="text-2xl font-black tracking-tight text-[#005A3C] sm:text-3xl">Dependentes</h1>
                 <p className="mt-1 text-slate-500">Cadastro e gerenciamento dos dependentes dos associados.</p>
               </div>
-              <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                {!somenteConsulta && (
+                  <button onClick={migrarLegados} disabled={migrandoLegados} className="w-full rounded-xl border border-[#005A3C] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto">
+                    {migrandoLegados ? "Migrando..." : "↻ Migrar antigos"}
+                  </button>
+                )}
+                <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
+              </div>
             </div>
 
             {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
             {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
+            {legadosPendentes.length > 0 && (
+              <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                <div>⚠️ Estes dependentes antigos ainda não foram migrados porque estão sem sócio responsável:</div>
+                <div className="mt-1">{legadosPendentes.join(", ")}</div>
+                <div className="mt-1 font-normal">Defina o responsável no cadastro e execute a migração novamente.</div>
+              </div>
+            )}
 
             <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
