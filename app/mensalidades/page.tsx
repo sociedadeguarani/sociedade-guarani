@@ -327,19 +327,11 @@ export default function Page() {
 
   function socioElegivelParaGeracao(s: Socio) {
     if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
-    if (!s.responsavel_id) return s.possui_mensalidade === true;
+    if (s.possui_mensalidade !== true) return false;
+    if (!s.responsavel_id) return true;
 
-    const categoria = String(s.categoria || "").trim().toLowerCase();
-    if (categoria) {
-      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade");
-    }
-
-    return [
-      "dependente_patrimonial_familiar_mensalidade",
-      "dependente_patrimonial_individual_mensalidade",
-      "dependente_contribuinte_familiar_mensalidade",
-      "dependente_contribuinte_individual_mensalidade",
-    ].includes(String(s.tipo_socio || ""));
+    // Exceção oficial: dependente com mensalidade própria usa matrícula SD....A.
+    return /^SD\d{4,}A$/i.test(String(s.matricula || ""));
   }
 
   const sociosElegiveis = useMemo(
