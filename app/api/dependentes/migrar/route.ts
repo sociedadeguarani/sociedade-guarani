@@ -14,6 +14,21 @@ function erroBanco(error: any) {
     .join(" — ");
 }
 
+function baseFamiliar(matricula: string | null | undefined) {
+  const valor = String(matricula || "").trim().toUpperCase();
+  return valor && /[A-Z]$/.test(valor) ? valor.slice(0, -1) : valor;
+}
+
+function proximaMatriculaFamiliar(responsavelMatricula: string | null | undefined, usadas: Set<string>) {
+  const base = baseFamiliar(responsavelMatricula);
+  if (!base) return null;
+  for (let codigo = "B".charCodeAt(0); codigo <= "Z".charCodeAt(0); codigo += 1) {
+    const candidata = `${base}${String.fromCharCode(codigo)}`;
+    if (!usadas.has(candidata)) return candidata;
+  }
+  return null;
+}
+
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ROLES);
   if ("response" in auth) return auth.response;
@@ -116,14 +131,41 @@ export async function POST(request: Request) {
     const semResponsavel = candidatos.filter((d: any) => !d.responsavel_id);
     const migraveis = candidatos.filter((d: any) => d.responsavel_id);
 
+    const { data: todosSocios, error: todosSociosError } = await supabase
+      .from("socios")
+      .select("id,matricula");
+    if (todosSociosError) throw todosSociosError;
+
+    const { data: todosDependentes, error: todosDependentesError } = await supabase
+      .from("dependentes")
+      .select("id,socio_id,nome,matricula");
+    if (todosDependentesError) throw todosDependentesError;
+
+    const socioPorId = new Map((todosSocios || []).map((s: any) => [String(s.id), s]));
+    const usadas = new Set<string>();
+    for (const s of todosSocios || []) if (s.matricula) usadas.add(String(s.matricula).toUpperCase());
+    for (const d of todosDependentes || []) if (d.matricula) usadas.add(String(d.matricula).toUpperCase());
+
     let migrados = 0;
+    let matriculasAtribuidas = 0;
     const erros: Array<{ nome: string; erro: string }> = [];
 
     for (const d of migraveis) {
       try {
+        const responsavel = socioPorId.get(String(d.responsavel_id));
+        if (!responsavel) throw new Error("Responsável não encontrado.");
+
+        let matricula = String(d.matricula || "").trim().toUpperCase() || null;
+        if (!matricula) {
+          matricula = proximaMatriculaFamiliar(responsavel.matricula, usadas);
+          if (!matricula) throw new Error(`Não foi possível gerar matrícula familiar para ${d.nome}.`);
+          matriculasAtribuidas += 1;
+          usadas.add(matricula);
+        }
+
         const dados = {
           socio_id: d.responsavel_id,
-          matricula: d.matricula || null,
+          matricula,
           nome: d.nome,
           cpf: d.cpf || null,
           data_nascimento: d.data_nascimento || null,
@@ -145,7 +187,7 @@ export async function POST(request: Request) {
         // Evita duplicação quando a migração for executada novamente.
         const { data: existente, error: existenteError } = await supabase
           .from("dependentes")
-          .select("id")
+          .select("id,matricula")
           .eq("socio_id", d.responsavel_id)
           .eq("nome", d.nome)
           .maybeSingle();
@@ -155,6 +197,12 @@ export async function POST(request: Request) {
         if (!existente) {
           const { error: insertError } = await supabase.from("dependentes").insert(dados);
           if (insertError) throw insertError;
+        } else if (!existente.matricula) {
+          const { error: updateError } = await supabase
+            .from("dependentes")
+            .update({ matricula })
+            .eq("id", existente.id);
+          if (updateError) throw updateError;
         }
 
         const { error: deleteError } = await supabase.from("socios").delete().eq("id", d.id);
@@ -170,6 +218,7 @@ export async function POST(request: Request) {
       ok: true,
       encontrados: candidatos.length,
       migrados,
+      matriculas_atribuidas: matriculasAtribuidas,
       sem_responsavel: semResponsavel.map((d: any) => ({ id: d.id, nome: d.nome })),
       erros,
       message:
