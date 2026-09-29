@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
 
 type Socio = {
@@ -16,8 +15,6 @@ type Socio = {
 type Dependente = {
   id: string;
   socio_id: string;
-  matricula?: string | null;
-  foto_url?: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -70,13 +67,11 @@ export default function DependentesPage() {
   const [filtroStatus, setFiltroStatus] = useState("todos");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [migrando, setMigrando] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
-  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
 
   const somenteConsulta = perfilUsuario === "funcionario";
 
@@ -147,68 +142,123 @@ export default function DependentesPage() {
       return;
     }
 
-    try {
-      // A página não consulta mais a tabela dependentes diretamente pelo cliente.
-      // O endpoint usa o usuário autenticado + service role, evitando que uma
-      // política RLS antiga esconda os 412 dependentes do Administrador Master.
-      const resposta = await fetch("/api/carteirinhas?modo=dependentes", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
+    const [sociosResult, dependentesResult] = await Promise.all([
+      supabase.from("socios").select("*").order("nome"),
+      supabase.from("dependentes")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .order("nome"),
+    ]);
+
+    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
+
+    const sociosData = (sociosResult.data || []) as any[];
+    const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
+
+    // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
+    // A tabela dependentes fica apenas como legado para não perder registros
+    // que ainda não tenham sido migrados.
+    const dependentesAtuais: Dependente[] = sociosData
+      .filter((s) => s.responsavel_id && s.possui_mensalidade !== true)
+      .map((s) => ({
+        id: String(s.id),
+        socio_id: String(s.responsavel_id),
+        nome: s.nome,
+        cpf: s.cpf ?? null,
+        data_nascimento: s.data_nascimento ?? null,
+        parentesco: s.parentesco ?? null,
+        telefone: s.telefone ?? s.whatsapp ?? null,
+        ativo: String(s.situacao || "").toLowerCase() !== "inativo",
+        created_at: s.created_at ?? null,
+        possui_mensalidade: Boolean(s.possui_mensalidade),
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
+        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
+        tipo_pagamento: s.tipo_pagamento ?? null,
+        situacao_financeira: s.situacao_financeira ?? null,
+        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+        source: "socios",
+      }));
+
+    const chavesAtuais = new Set(
+      dependentesAtuais.map((d) => `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${d.nome.trim().toLowerCase()}`)
+    );
+
+    const dependentesLegados: Dependente[] = (dependentesResult.data || [])
+      .map((d: any) => ({ ...d, source: "dependentes" as const }))
+      .filter((d: any) => {
+        // Dependente com mensalidade pertence à guia Sócios.
+        if (d.possui_mensalidade === true) return false;
+        const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
+        return !chavesAtuais.has(chave);
       });
 
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) {
-        throw new Error(dados?.error || "Não foi possível carregar os dependentes.");
+    const dependentesData = [...dependentesAtuais, ...dependentesLegados];
+
+    setSocios(sociosData.map((s) => ({
+      id: String(s.id),
+      matricula: s.matricula == null ? null : String(s.matricula),
+      nome: s.nome,
+      situacao: s.situacao ?? null,
+    })));
+    setDependentes(dependentesData);
+
+    const responsaveisIds = Array.from(new Set(dependentesData.map((d) => String(d.socio_id)).filter(Boolean)));
+    const statusMap: Record<string, string> = {};
+
+    for (let i = 0; i < responsaveisIds.length; i += 100) {
+      const lote = responsaveisIds.slice(i, i + 100);
+      const { data: mensalidades, error: mensalidadesError } = await supabase
+        .from("mensalidades")
+        .select("socio_id, competencia, data_vencimento, situacao")
+        .in("socio_id", lote);
+
+      if (mensalidadesError) {
+        console.error(mensalidadesError);
+        continue;
       }
 
-      const sociosData = Array.isArray(dados?.socios) ? dados.socios : [];
-      const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
-        .map((d: any) => ({
-          id: String(d.id),
-          socio_id: String(d.socio_id),
-          matricula: d.matricula == null ? null : String(d.matricula),
-          foto_url: d.foto_url ?? null,
-          nome: d.nome ?? "",
-          cpf: d.cpf ?? null,
-          data_nascimento: d.data_nascimento ?? null,
-          parentesco: d.parentesco ?? null,
-          telefone: d.telefone ?? d.whatsapp ?? null,
-          ativo: d.ativo !== false,
-          created_at: d.created_at ?? null,
-          possui_mensalidade: Boolean(d.possui_mensalidade),
-          valor_mensalidade: Number(d.valor_mensalidade || 0),
-          dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
-          tipo_pagamento: d.tipo_pagamento ?? null,
-          situacao_financeira: d.situacao_financeira ?? null,
-          data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          source: "dependentes",
-        }));
+      for (const id of lote) {
+        const itens = (mensalidades || []).filter((m: any) => String(m.socio_id) === id);
+        const hoje = new Date();
+        const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const pendencias = new Set<string>();
 
-      setSocios(sociosData.map((s: any) => ({
-        id: String(s.id),
-        matricula: s.matricula == null ? null : String(s.matricula),
-        nome: s.nome ?? "",
-        situacao: s.situacao ?? null,
-      })));
-      setDependentes(dependentesData);
-      setStatusResponsaveis(dados?.statusResponsaveis || {});
-    } catch (error) {
-      console.error(error);
-      setErro(error instanceof Error ? error.message : "Erro ao carregar dependentes.");
-      setSocios([]);
-      setDependentes([]);
-      setStatusResponsaveis({});
-    } finally {
-      setCarregando(false);
+        for (const m of itens) {
+          const situacao = String(m.situacao || "").trim().toLowerCase();
+          if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) continue;
+          const dataBase = m.competencia || m.data_vencimento;
+          if (!dataBase) continue;
+          const texto = String(dataBase).slice(0, 10);
+          const partes = texto.split("-").map(Number);
+          if (partes.length < 2 || !partes[0] || !partes[1]) continue;
+          const mes = new Date(partes[0], partes[1] - 1, 1);
+          if (mes < inicioMesAtual) pendencias.add(`${partes[0]}-${String(partes[1]).padStart(2, "0")}`);
+        }
+
+        const atrasoMeses = pendencias.size;
+        statusMap[id] = atrasoMeses <= 2 ? "em_dia" : atrasoMeses <= 4 ? "atrasado" : "muito_atrasado";
+      }
     }
+
+    // Se o responsável ainda não tem histórico de mensalidades, respeita o
+    // status financeiro gravado no cadastro, mas sem inventar atraso.
+    for (const id of responsaveisIds) {
+      if (statusMap[id]) continue;
+      const socio = sociosMap.get(id);
+      const situacao = String(socio?.situacao_financeira || "").toLowerCase();
+      statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
+    }
+
+    setCarregando(false);
   }
 
   useEffect(() => {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
+        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" ? "administrador" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
         perfil
       );
     } catch {}
@@ -218,7 +268,6 @@ export default function DependentesPage() {
   function abrirNovo() {
     if (somenteConsulta) return;
     setEditando(null);
-    setFotoArquivo(null);
     setForm({
       socio_id: filtroSocio,
       nome: "",
@@ -242,7 +291,6 @@ export default function DependentesPage() {
   function abrirEdicao(d: Dependente) {
     if (somenteConsulta) return;
     setEditando(d);
-    setFotoArquivo(null);
     setForm({
       socio_id: d.socio_id,
       nome: d.nome || "",
@@ -261,48 +309,6 @@ export default function DependentesPage() {
     setErro("");
     setSucesso("");
     setModalAberto(true);
-  }
-
-  async function migrarDependentesAntigos() {
-    if (somenteConsulta || migrando) return;
-    if (!window.confirm("Migrar para Dependentes todos os cadastros antigos que estão em Sócios sem mensalidade?")) return;
-
-    setMigrando(true);
-    setErro("");
-    setSucesso("");
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const resposta = await fetch("/api/dependentes/migrar", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      });
-
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes.");
-
-      const migrados = Array.isArray(dados?.migrados) ? dados.migrados : [];
-      const ignorados = Array.isArray(dados?.ignorados) ? dados.ignorados : [];
-      const detalhes = migrados.map((item: any) => `${item.nome} → ${item.matricula}`).join("\n");
-      const pendencias = ignorados.map((item: any) => `${item.nome}: ${item.motivo}`).join("\n");
-
-      setSucesso(`${dados?.mensagem || "Migração concluída."}${detalhes ? `\n\n${detalhes}` : ""}`);
-      if (pendencias) setErro(`Não foi possível concluir alguns cadastros:\n${pendencias}`);
-      await carregarDados();
-    } catch (error) {
-      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
-    } finally {
-      setMigrando(false);
-    }
   }
 
   function fecharModal() {
@@ -341,17 +347,41 @@ export default function DependentesPage() {
     };
 
     const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    if (!socioResponsavel) {
-      setErro("Selecione um sócio responsável válido.");
-      setSalvando(false);
-      return;
-    }
+    const { data: responsavelCompleto } = await supabase.from("socios").select("tipo_socio").eq("id", form.socio_id).maybeSingle();
+    const dadosSocio = {
+      nome: dados.nome,
+      cpf: dados.cpf,
+      data_nascimento: dados.data_nascimento,
+      parentesco: dados.parentesco,
+      telefone: dados.telefone,
+      situacao: dados.ativo ? "ativo" : "inativo",
+      categoria: "Dependente",
+      tipo_socio: (() => {
+        const contribuinte = String(responsavelCompleto?.tipo_socio || "").toLowerCase().includes("contribuinte");
+        if (dados.possui_mensalidade) return contribuinte ? "dependente_contribuinte_familiar_mensalidade" : "dependente_patrimonial_familiar_mensalidade";
+        return contribuinte ? "dependente_contribuinte" : "dependente_patrimonial";
+      })(),
+      responsavel_id: dados.socio_id,
+      possui_mensalidade: dados.possui_mensalidade,
+      valor_mensalidade: dados.valor_mensalidade,
+      dia_vencimento: dados.dia_vencimento,
+      tipo_pagamento: dados.tipo_pagamento,
+      situacao_financeira: dados.situacao_financeira,
+      data_ultimo_pagamento: dados.data_ultimo_pagamento,
+    };
 
     let resultado;
-    if (editando) {
-      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+    if (editando?.source === "socios" || !editando) {
+      if (!socioResponsavel) {
+        setErro("Selecione um sócio responsável válido.");
+        setSalvando(false);
+        return;
+      }
+      resultado = editando
+        ? await supabase.from("socios").update(dadosSocio).eq("id", editando.id)
+        : await supabase.from("socios").insert(dadosSocio);
     } else {
-      resultado = await supabase.from("dependentes").insert(dados).select("id").single();
+      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
     }
 
     if (resultado.error) {
@@ -360,32 +390,7 @@ export default function DependentesPage() {
       return;
     }
 
-    const dependenteId = editando?.id || (Array.isArray(resultado.data) ? resultado.data[0]?.id : resultado.data?.id);
-    if (fotoArquivo && dependenteId) {
-      try {
-        const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `dependentes/${dependenteId}.${extensao}`;
-        const upload = await supabase.storage
-          .from("fotos-associados")
-          .upload(caminho, fotoArquivo, {
-            upsert: true,
-            contentType: fotoArquivo.type || "image/jpeg",
-          });
-        if (upload.error) throw upload.error;
-
-        const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
-        const fotoUpdate = await supabase
-          .from("dependentes")
-          .update({ foto_url: urlData.publicUrl })
-          .eq("id", dependenteId);
-        if (fotoUpdate.error) throw fotoUpdate.error;
-      } catch (fotoError) {
-        setErro(`Dependente salvo, mas a foto não pôde ser enviada: ${fotoError instanceof Error ? fotoError.message : "erro no upload"}`);
-      }
-    }
-
     setSucesso(editando ? "Dependente atualizado com sucesso." : "Dependente cadastrado com sucesso.");
-    setFotoArquivo(null);
     await carregarDados();
     setSalvando(false);
 
@@ -399,7 +404,9 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
-    const { error } = await supabase.from("dependentes").delete().eq("id", d.id);
+    const { error } = d.source === "socios"
+      ? await supabase.from("socios").update({ situacao: "inativo" }).eq("id", d.id)
+      : await supabase.from("dependentes").delete().eq("id", d.id);
     if (error) {
       setErro(`Não foi possível excluir: ${error.message}`);
       return;
@@ -412,7 +419,9 @@ export default function DependentesPage() {
   async function alternarStatus(d: Dependente) {
     if (somenteConsulta) return;
     setErro("");
-    const { error } = await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
+    const { error } = d.source === "socios"
+      ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
+      : await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
     if (error) {
       setErro(`Não foi possível alterar a situação: ${error.message}`);
       return;
@@ -420,9 +429,30 @@ export default function DependentesPage() {
     await carregarDados();
   }
 
+  function sair() {
+    supabase.auth.signOut().then(() => { window.location.href = "/login"; });
+  }
+
   return (
     <main className="min-h-screen bg-[#F8FAF9] text-slate-800">
-      <CabecalhoPadrao />
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
+        <div className="flex min-h-[68px] items-center justify-between gap-3 px-3 sm:min-h-[76px] sm:px-6 lg:px-10">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#005A3C] text-xl">🏛️</div>
+            <div>
+              <div className="text-sm font-extrabold tracking-tight text-[#003D2B] sm:text-lg">SOCIEDADE GUARANI</div>
+              <div className="hidden text-xs text-slate-500 sm:block">Sociedade Recreativa Guarani — S.R.G.</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="hidden text-right sm:block">
+              <div className="text-xs text-slate-500">Área Administrativa</div>
+              <div className="font-bold text-[#005A3C]">Gestão</div>
+            </div>
+            <button onClick={sair} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:px-4">Sair</button>
+          </div>
+        </div>
+      </header>
 
       <div className="flex min-h-[calc(100vh-76px)] min-w-0">
         <MenuLateralPadrao />
@@ -435,12 +465,7 @@ export default function DependentesPage() {
                 <h1 className="text-2xl font-black tracking-tight text-[#005A3C] sm:text-3xl">Dependentes</h1>
                 <p className="mt-1 text-slate-500">Cadastro e gerenciamento dos dependentes dos associados.</p>
               </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                {!somenteConsulta && (
-                  <button onClick={migrarDependentesAntigos} disabled={migrando} className="w-full rounded-xl border border-[#9fcdb9] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] shadow-sm hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto sm:px-5">{migrando ? "Migrando..." : "↻ Corrigir antigos"}</button>
-                )}
-                <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
-              </div>
+              <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
             </div>
 
             {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
@@ -478,7 +503,7 @@ export default function DependentesPage() {
                   <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -489,19 +514,7 @@ export default function DependentesPage() {
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4">
-                              <div className="flex items-center gap-3">
-                                {d.foto_url ? (
-                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
-                                ) : (
-                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
-                                    {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
-                                  </div>
-                                )}
-                                <div className="font-extrabold text-[#003D2B]">{d.nome}</div>
-                              </div>
-                            </td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-extrabold text-[#003D2B]">{d.nome}</div></td>
                             <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
@@ -557,27 +570,6 @@ export default function DependentesPage() {
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
-                  <div className="md:col-span-2 rounded-xl border border-dashed border-[#9fc8b5] bg-white p-4">
-                    <div className="mb-3 text-sm font-bold text-[#005A3C]">📷 Foto do dependente</div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      {(fotoArquivo || editando?.foto_url) && (
-                        <div className="h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                          <img
-                            src={fotoArquivo ? URL.createObjectURL(fotoArquivo) : editando?.foto_url || ""}
-                            alt="Prévia"
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label className="inline-flex cursor-pointer items-center rounded-xl border border-[#cfe3d8] bg-[#E8F3EE] px-4 py-2.5 text-sm font-extrabold text-[#005A3C] hover:bg-[#d9eee4]">
-                          📷 {fotoArquivo ? "Trocar foto" : "Escolher foto"}
-                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setFotoArquivo(e.target.files?.[0] || null)} />
-                        </label>
-                        {fotoArquivo && <p className="mt-2 text-xs text-slate-500">{fotoArquivo.name}</p>}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
 
