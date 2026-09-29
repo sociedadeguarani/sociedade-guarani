@@ -665,59 +665,36 @@ export default function FinanceiroPage() {
     try {
       await atualizarAtrasos();
 
-      const existentes = mensalidades.filter(
-        (m) => m.competencia?.slice(0, 7) === competencia
-      );
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Sessão não encontrada.");
 
-      const chavesExistentes = new Set(
-        existentes.map((m) =>
-          m.dependente_id
-            ? `dependente:${m.dependente_id}`
-            : `socio:${m.socio_id}`
-        )
-      );
+      const [anoGeracao, mesGeracao] = competencia.split("-").map(Number);
+      if (!anoGeracao || !mesGeracao) throw new Error("Competência inválida.");
 
-      const novos = pessoas
-        .filter((p) => !chavesExistentes.has(p.chave))
-        .map((p) => ({
-          socio_id: p.socio_id,
-          dependente_id: p.dependente_id,
-          competencia: primeiroDia(competencia),
-          valor: Number(p.valor_mensalidade || 0),
-          data_vencimento: vencimentoCompetencia(
-            competencia,
-            p.dia_vencimento
-          ),
-          situacao:
-            Number(p.valor_mensalidade || 0) === 0 ? "isento" : "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: p.tipo_pagamento || "pix",
-          comprovante_url: null,
-          observacoes: null,
-        }));
+      // O módulo Mensalidades é a única fonte de verdade para geração.
+      // Assim o Financeiro não cria registros paralelos, não gera isentos
+      // automaticamente e respeita possui_mensalidade/tipo_pagamento.
+      const response = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "gerar",
+          ano: anoGeracao,
+          mes: mesGeracao,
+        }),
+      });
 
-      if (novos.length === 0) {
-        setMensagem(
-          `As mensalidades de ${formatarCompetencia(
-            competencia
-          )} já estão lançadas.`
-        );
-        return;
-      }
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Não foi possível gerar as mensalidades.");
 
-      const { data, error } = await supabase
-        .from("mensalidades")
-        .insert(novos)
-        .select("*");
-
-      if (error) throw error;
-
-      setMensalidades((lista) => [...(data as Mensalidade[]), ...lista]);
-
+      await carregarTudo();
       setMensagem(
-        `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(
-          competencia
-        )}.`
+        result.message ||
+          `${Number(result.criadas || 0)} mensalidade(s) gerada(s) para ${formatarCompetencia(competencia)}.`
       );
     } catch (error) {
       console.error(error);
