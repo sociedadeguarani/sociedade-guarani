@@ -743,7 +743,7 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -782,18 +782,9 @@ export default function Home() {
 
       if (campo === "tipo_socio") {
         const tipo = valor;
-        const mensalidadeObrigatoria = [
-          "dependente_patrimonial_familiar_mensalidade",
-          "dependente_patrimonial_individual_mensalidade",
-          "dependente_contribuinte_familiar_mensalidade",
-          "dependente_contribuinte_individual_mensalidade",
-        ].includes(tipo);
-
         if (tipo === "remido") {
           proximo.possui_mensalidade = false;
           proximo.valor_mensalidade = 0;
-        } else if (mensalidadeObrigatoria) {
-          proximo.possui_mensalidade = true;
         }
 
         if (!tipo.startsWith("dependente_")) {
@@ -853,6 +844,86 @@ export default function Home() {
     };
 
     try {
+      const ehDependente = String(form.tipo_socio || "").startsWith("dependente_");
+      const semMensalidade = !Boolean(form.possui_mensalidade);
+
+      // Dependentes sem mensalidade pertencem à tabela public.dependentes.
+      // Dependentes que realmente pagam mensalidade continuam na tabela
+      // socios por enquanto, pois o módulo de mensalidades usa socio_id.
+      if (ehDependente && semMensalidade) {
+        if (!form.responsavel_id) {
+          setMensagem("Selecione o sócio responsável antes de salvar o dependente.");
+          return;
+        }
+
+        const dadosDependente = {
+          socio_id: form.responsavel_id,
+          matricula: null,
+          nome: form.nome?.trim(),
+          cpf: form.cpf ? String(form.cpf).replace(/\D/g, "") || null : null,
+          data_nascimento: form.data_nascimento || null,
+          parentesco: form.parentesco || null,
+          telefone: form.telefone || null,
+          whatsapp: form.whatsapp || null,
+          email: form.email || null,
+          ativo: String(form.situacao || "ativo").toLowerCase() !== "inativo",
+          possui_mensalidade: false,
+          valor_mensalidade: 0,
+          dia_vencimento: Number(form.dia_vencimento || 10),
+          tipo_pagamento: "pix",
+          situacao_financeira: "isento",
+          data_ultimo_pagamento: null,
+          foto_url: form.foto_url || null,
+          observacoes: form.observacoes || null,
+        };
+
+        const dependenteExistente = socioEditando
+          ? await supabase.from("dependentes").select("id").eq("id", socioEditando.id).maybeSingle()
+          : { data: null, error: null };
+
+        // Registros antigos em socios possuem outro UUID. Nesse caso
+        // criamos o dependente corretamente e só depois removemos o legado.
+        if (dependenteExistente.error) throw dependenteExistente.error;
+
+        let dependenteId = dependenteExistente.data?.id || "";
+        if (dependenteId) {
+          const resultado = await supabase.from("dependentes").update(dadosDependente).eq("id", dependenteId);
+          if (resultado.error) throw resultado.error;
+        } else {
+          const resultado = await supabase.from("dependentes").insert(dadosDependente).select("id").single();
+          if (resultado.error) throw resultado.error;
+          dependenteId = resultado.data.id;
+        }
+
+        if (fotoArquivo && dependenteId) {
+          const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+          const caminho = `dependentes/${dependenteId}.${extensao}`;
+          const upload = await supabase.storage.from("fotos-associados").upload(caminho, fotoArquivo, {
+            upsert: true,
+            contentType: fotoArquivo.type || "image/jpeg",
+          });
+          if (upload.error) throw upload.error;
+          const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+          const fotoUpdate = await supabase.from("dependentes").update({ foto_url: urlData.publicUrl }).eq("id", dependenteId);
+          if (fotoUpdate.error) throw fotoUpdate.error;
+        }
+
+        if (socioEditando) {
+          const removerLegado = await supabase.from("socios").delete().eq("id", socioEditando.id);
+          if (removerLegado.error) throw removerLegado.error;
+        }
+
+        setMensagem("Dependente salvo no cadastro de Dependentes.");
+        setFotoArquivo(null);
+        await carregarSocios();
+        setTimeout(() => {
+          setAbrirCadastro(false);
+          setSocioEditando(null);
+          setMensagem("");
+        }, 900);
+        return;
+      }
+
       let socioId = socioEditando?.id || "";
 
       if (socioEditando) {
