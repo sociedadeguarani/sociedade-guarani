@@ -61,21 +61,6 @@ function formatarTelefone(valor: string | null) {
   return valor;
 }
 
-function baseFamiliar(matricula: string | null | undefined) {
-  const valor = String(matricula || "").trim().toUpperCase();
-  return valor && /[A-Z]$/.test(valor) ? valor.slice(0, -1) : valor;
-}
-
-function proximaMatriculaFamiliar(responsavelMatricula: string | null | undefined, usadas: Set<string>) {
-  const base = baseFamiliar(responsavelMatricula);
-  if (!base) return null;
-  for (let codigo = "B".charCodeAt(0); codigo <= "Z".charCodeAt(0); codigo += 1) {
-    const candidata = `${base}${String.fromCharCode(codigo)}`;
-    if (!usadas.has(candidata)) return candidata;
-  }
-  return null;
-}
-
 export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
@@ -85,14 +70,13 @@ export default function DependentesPage() {
   const [filtroStatus, setFiltroStatus] = useState("todos");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [migrando, setMigrando] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [modalAberto, setModalAberto] = useState(false);
   const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
-  const [migrandoLegados, setMigrandoLegados] = useState(false);
-  const [legadosPendentes, setLegadosPendentes] = useState<string[]>([]);
 
   const somenteConsulta = perfilUsuario === "funcionario";
 
@@ -231,39 +215,6 @@ export default function DependentesPage() {
     carregarDados();
   }, []);
 
-  async function migrarLegados() {
-    if (somenteConsulta || migrandoLegados) return;
-
-    setMigrandoLegados(true);
-    setErro("");
-    setSucesso("");
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Sessão expirada. Faça login novamente.");
-
-      const resposta = await fetch("/api/dependentes/migrar", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ acao: "migrar_legados" }),
-      });
-
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes antigos.");
-
-      setLegadosPendentes((dados?.sem_responsavel || []).map((d: any) => String(d.nome || "")).filter(Boolean));
-      setSucesso(dados?.message || "Migração concluída.");
-      await carregarDados();
-    } catch (error) {
-      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
-    } finally {
-      setMigrandoLegados(false);
-    }
-  }
-
   function abrirNovo() {
     if (somenteConsulta) return;
     setEditando(null);
@@ -312,6 +263,48 @@ export default function DependentesPage() {
     setModalAberto(true);
   }
 
+  async function migrarDependentesAntigos() {
+    if (somenteConsulta || migrando) return;
+    if (!window.confirm("Migrar para Dependentes todos os cadastros antigos que estão em Sócios sem mensalidade?")) return;
+
+    setMigrando(true);
+    setErro("");
+    setSucesso("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const resposta = await fetch("/api/dependentes/migrar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const dados = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes.");
+
+      const migrados = Array.isArray(dados?.migrados) ? dados.migrados : [];
+      const ignorados = Array.isArray(dados?.ignorados) ? dados.ignorados : [];
+      const detalhes = migrados.map((item: any) => `${item.nome} → ${item.matricula}`).join("\n");
+      const pendencias = ignorados.map((item: any) => `${item.nome}: ${item.motivo}`).join("\n");
+
+      setSucesso(`${dados?.mensagem || "Migração concluída."}${detalhes ? `\n\n${detalhes}` : ""}`);
+      if (pendencias) setErro(`Não foi possível concluir alguns cadastros:\n${pendencias}`);
+      await carregarDados();
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
+    } finally {
+      setMigrando(false);
+    }
+  }
+
   function fecharModal() {
     if (salvando) return;
     setModalAberto(false);
@@ -331,43 +324,8 @@ export default function DependentesPage() {
 
     setSalvando(true);
 
-    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    if (!socioResponsavel) {
-      setErro("Selecione um sócio responsável válido.");
-      setSalvando(false);
-      return;
-    }
-
-    let matricula = editando?.matricula || null;
-    if (!matricula) {
-      const [{ data: sociosComMatricula, error: sociosError }, { data: dependentesComMatricula, error: dependentesError }] = await Promise.all([
-        supabase.from("socios").select("matricula"),
-        supabase.from("dependentes").select("matricula"),
-      ]);
-      if (sociosError) {
-        setErro(`Não foi possível gerar a matrícula: ${sociosError.message}`);
-        setSalvando(false);
-        return;
-      }
-      if (dependentesError) {
-        setErro(`Não foi possível gerar a matrícula: ${dependentesError.message}`);
-        setSalvando(false);
-        return;
-      }
-      const usadas = new Set<string>();
-      for (const s of sociosComMatricula || []) if (s.matricula) usadas.add(String(s.matricula).toUpperCase());
-      for (const d of dependentesComMatricula || []) if (d.matricula) usadas.add(String(d.matricula).toUpperCase());
-      matricula = proximaMatriculaFamiliar(socioResponsavel.matricula, usadas);
-      if (!matricula) {
-        setErro("Não foi possível gerar uma matrícula familiar para este dependente. Verifique a matrícula do responsável.");
-        setSalvando(false);
-        return;
-      }
-    }
-
     const dados = {
       socio_id: form.socio_id,
-      matricula,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
@@ -381,6 +339,13 @@ export default function DependentesPage() {
       situacao_financeira: form.possui_mensalidade ? form.situacao_financeira : "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
+
+    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+    if (!socioResponsavel) {
+      setErro("Selecione um sócio responsável válido.");
+      setSalvando(false);
+      return;
+    }
 
     let resultado;
     if (editando) {
@@ -472,9 +437,7 @@ export default function DependentesPage() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {!somenteConsulta && (
-                  <button onClick={migrarLegados} disabled={migrandoLegados} className="w-full rounded-xl border border-[#005A3C] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto">
-                    {migrandoLegados ? "Migrando..." : "↻ Migrar antigos"}
-                  </button>
+                  <button onClick={migrarDependentesAntigos} disabled={migrando} className="w-full rounded-xl border border-[#9fcdb9] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] shadow-sm hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto sm:px-5">{migrando ? "Migrando..." : "↻ Corrigir antigos"}</button>
                 )}
                 <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
               </div>
@@ -482,13 +445,6 @@ export default function DependentesPage() {
 
             {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
             {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
-            {legadosPendentes.length > 0 && (
-              <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                <div>⚠️ Estes dependentes antigos ainda não foram migrados porque estão sem sócio responsável:</div>
-                <div className="mt-1">{legadosPendentes.join(", ")}</div>
-                <div className="mt-1 font-normal">Defina o responsável no cadastro e execute a migração novamente.</div>
-              </div>
-            )}
 
             <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
