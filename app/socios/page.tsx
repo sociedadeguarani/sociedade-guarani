@@ -744,10 +744,7 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      // Novo dependente começa sem mensalidade. Se passar a pagar,
-      // o cadastro pode ser alterado para mensalidade = SIM e então
-      // ele aparecerá automaticamente na guia Sócios.
-      possui_mensalidade: false,
+      possui_mensalidade: true,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -955,37 +952,38 @@ export default function Home() {
     setTimeout(() => setMensagem(""), 1500);
   }
 
-  // Regra de separação:
-  // - Sócios = titulares/responsáveis + dependentes que possuem mensalidade própria.
-  // - Dependentes = pessoas vinculadas a um responsável e sem mensalidade própria.
-  // Um dependente pagante continua em Sócios, mas somente se tiver mensalidade
-  // própria e matrícula especial SD....A.
-  const ehDependentePagante = (socio: Socio) =>
-    Boolean(socio.responsavel_id) &&
-    socio.possui_mensalidade === true &&
-    /^SD\d{1,6}A$/i.test(String(socio.matricula || "").trim());
-
-  const ehSocioDeCadastro = (socio: Socio) =>
-    !socio.responsavel_id || ehDependentePagante(socio);
-
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
-    return socios.filter((socio) => {
-      if (!ehSocioDeCadastro(socio)) return false;
+    const ehDependentePagante = (socio: Socio) =>
+      Boolean(socio.responsavel_id) &&
+      socio.possui_mensalidade === true &&
+      /^SD\d{1,6}A$/i.test(String(socio.matricula || "").trim());
 
-      const matricula = String(socio.matricula || "").toLowerCase();
-      const cpf = String(socio.cpf || "").toLowerCase();
-      const nome = String(socio.nome || "").toLowerCase();
+    const ehDependenteComum = (socio: Socio) => {
+      const tipo = String(socio.tipo_socio || "").trim().toLowerCase();
+      const categoria = String(socio.categoria || "").trim().toLowerCase();
+      return Boolean(socio.responsavel_id) ||
+        tipo === "dependente" ||
+        tipo.startsWith("dependente_") ||
+        categoria.includes("dependente");
+    };
+
+    return socios.filter((socio) => {
+      const dependentePagante = ehDependentePagante(socio);
+      const dependenteComum = ehDependenteComum(socio);
+
+      // Sócios normais ficam aqui. Dependentes comuns vão para /dependentes.
+      // A única exceção é o dependente especial com mensalidade própria SD....A.
+      if (dependenteComum && !dependentePagante) return false;
 
       const correspondeBusca =
         !termo ||
-        nome.includes(termo) ||
-        cpf.includes(termo) ||
-        matricula.includes(termo);
+        socio.nome?.toLowerCase().includes(termo) ||
+        socio.cpf?.toLowerCase().includes(termo) ||
+        String(socio.matricula || "").toLowerCase().includes(termo);
 
-      const correspondeTipo =
-        !mostrarSomenteDependentes || ehDependentePagante(socio);
+      const correspondeTipo = !mostrarSomenteDependentes || dependentePagante;
 
       return correspondeBusca && correspondeTipo;
     });
@@ -1068,7 +1066,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.filter(ehSocioDeCadastro).length}
+              quantidadeSocios={socios.length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1077,7 +1075,7 @@ export default function Home() {
           {menu === "Sócios" && (
             <Socios
               socios={sociosFiltrados}
-              quantidadeTotal={socios.filter(ehSocioDeCadastro).length}
+              quantidadeTotal={socios.length}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1256,7 +1254,7 @@ function Inicio({
 
         <DashboardCard
           titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
           descricao="Vinculados a responsáveis"
           icone="👨‍👩‍👧‍👦"
         />
@@ -2494,23 +2492,13 @@ function Dependentes({
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
 }) {
-  const [buscaDependente, setBuscaDependente] = useState("");
-
-  // Aqui entram somente dependentes familiares sem mensalidade própria.
-  // Dependentes pagantes (SD....A) permanecem exclusivamente em Sócios.
-  const dependentes = socios.filter(
-    (s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true
-  );
+  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
   const responsaveis = socios.filter((s) =>
-    socios.some(
-      (filho) =>
-        filho.responsavel_id === s.id &&
-        filho.possui_mensalidade !== true
-    )
+    socios.some((filho) => filho.responsavel_id === s.id)
   );
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id && s.possui_mensalidade !== true);
+    return socios.filter((s) => s.responsavel_id === id);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2606,26 +2594,10 @@ function Dependentes({
     );
   }
 
-  const termoBuscaDependente = buscaDependente.toLowerCase().trim();
-
-  const correspondeBuscaDependente = (pessoa: Socio) => {
-    if (!termoBuscaDependente) return true;
-    const nome = String(pessoa.nome || "").toLowerCase();
-    const cpf = String(pessoa.cpf || "").toLowerCase();
-    const matricula = String(pessoa.matricula || "").toLowerCase();
-    return (
-      nome.includes(termoBuscaDependente) ||
-      cpf.includes(termoBuscaDependente) ||
-      matricula.includes(termoBuscaDependente)
-    );
-  };
-
   const raizes = socios.filter(
     (s) =>
       !s.responsavel_id &&
-      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0) &&
-      (correspondeBuscaDependente(s) ||
-        filhosDe(s.id).some(correspondeBuscaDependente))
+      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
   );
 
   return (
@@ -2644,22 +2616,10 @@ function Dependentes({
         </div>
       </div>
 
-      <div className="mb-5 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:p-4">
-        <div className="flex items-center gap-3">
-          <span className="text-xl">🔎</span>
-          <input
-            value={buscaDependente}
-            onChange={(e) => setBuscaDependente(e.target.value)}
-            placeholder="Buscar dependente por nome, CPF ou matrícula nova..."
-            className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
-          />
-        </div>
-      </div>
-
       <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Dependentes cadastrados</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{dependentes.length}</p>
+          <p className="text-sm text-gray-500">Pessoas cadastradas</p>
+          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.length}</p>
         </div>
 
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
