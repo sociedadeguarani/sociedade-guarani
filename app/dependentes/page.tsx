@@ -15,6 +15,7 @@ type Socio = {
 type Dependente = {
   id: string;
   socio_id: string;
+  matricula: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -159,24 +160,16 @@ export default function DependentesPage() {
       setErro(`Erro ao carregar sócios: ${sociosPayload?.error || "Não foi possível carregar os sócios."}`);
     }
 
-    let dependentesPayload: any = null;
-    let dependentesError: string | null = null;
-
-    if (perfilAtual === "administrador_normal" || perfilAtual === "administrador_master") {
-      const respostaDependentes = await fetch("/api/dependentes", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-      dependentesPayload = await respostaDependentes.json().catch(() => ({}));
-      if (!respostaDependentes.ok) dependentesError = dependentesPayload?.error || "Não foi possível carregar os dependentes.";
-    } else {
-      const respostaLegado = await supabase
-        .from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
-        .order("nome");
-      dependentesPayload = { dependentes: respostaLegado.data || [] };
-      if (respostaLegado.error) dependentesError = respostaLegado.error.message;
-    }
+    // Não usamos /api/dependentes aqui: essa rota não faz parte do backup original
+    // e sua ausência causava 404. Os dependentes atuais ficam em socios.responsavel_id;
+    // a tabela dependentes é somente legado. Para Admin/Master, /api/socios usa service-role
+    // e devolve todos os registros, contornando a RLS que escondia os dependentes do Master.
+    const respostaLegado = await supabase
+      .from("dependentes")
+      .select("id, socio_id, matricula, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+      .order("nome");
+    const dependentesPayload = { dependentes: respostaLegado.data || [] };
+    const dependentesError = respostaLegado.error?.message || null;
 
     if (dependentesError) setErro(`Erro ao carregar dependentes: ${dependentesError}`);
 
@@ -191,6 +184,7 @@ export default function DependentesPage() {
       .map((s) => ({
         id: String(s.id),
         socio_id: String(s.responsavel_id),
+        matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome,
         cpf: s.cpf ?? null,
         data_nascimento: s.data_nascimento ?? null,
@@ -212,7 +206,7 @@ export default function DependentesPage() {
     );
 
     const dependentesLegados: Dependente[] = (dependentesPayload?.dependentes || [])
-      .map((d: any) => ({ ...d, source: "dependentes" as const }))
+      .map((d: any) => ({ ...d, matricula: d.matricula == null ? null : String(d.matricula), source: "dependentes" as const }))
       .filter((d: any) => {
         // Dependente com mensalidade pertence à guia Sócios.
         if (d.possui_mensalidade === true) return false;
@@ -377,6 +371,7 @@ export default function DependentesPage() {
     const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
     const { data: responsavelCompleto } = await supabase.from("socios").select("tipo_socio").eq("id", form.socio_id).maybeSingle();
     const dadosSocio = {
+      ...(editando?.source === "socios" && editando.matricula ? { matricula: editando.matricula } : {}),
       nome: dados.nome,
       cpf: dados.cpf,
       data_nascimento: dados.data_nascimento,
@@ -410,12 +405,12 @@ export default function DependentesPage() {
       }
 
       if (usaApiAdministrativa) {
-        const resposta = await fetch("/api/dependentes", {
+        const resposta = await fetch("/api/socios", {
           method: editando ? "PUT" : "POST",
           headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
           body: JSON.stringify(editando
-            ? { source: "socios", id: editando.id, data: dadosSocio }
-            : { source: "socios", data: dadosSocio }),
+            ? { id: editando.id, ...dadosSocio }
+            : dadosSocio),
         });
         const payload = await resposta.json().catch(() => ({}));
         if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível salvar o dependente.";
@@ -425,15 +420,9 @@ export default function DependentesPage() {
           : await supabase.from("socios").insert(dadosSocio);
         if (resultado.error) erroOperacao = resultado.error.message;
       }
-    } else if (usaApiAdministrativa) {
-      const resposta = await fetch("/api/dependentes", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
-        body: JSON.stringify({ source: "dependentes", id: editando.id, data: dados }),
-      });
-      const payload = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível salvar o dependente.";
     } else {
+      // Registros legados permanecem na tabela dependentes. Admin e Master usam
+      // a sessão atual; não há necessidade de uma rota /api/dependentes inexistente.
       const resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
       if (resultado.error) erroOperacao = resultado.error.message;
     }
@@ -461,13 +450,11 @@ export default function DependentesPage() {
     let erroOperacao = "";
     const usaApiAdministrativa = perfilUsuario === "administrador_normal" || perfilUsuario === "administrador_master";
     const sessionAtual = usaApiAdministrativa ? (await supabase.auth.getSession()).data.session : null;
-    if (usaApiAdministrativa) {
-      const resposta = await fetch("/api/dependentes", {
-        method: d.source === "socios" ? "PUT" : "DELETE",
+    if (d.source === "socios" && usaApiAdministrativa) {
+      const resposta = await fetch("/api/socios", {
+        method: "PUT",
         headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
-        body: JSON.stringify(d.source === "socios"
-          ? { source: "socios", id: d.id, data: { situacao: "inativo" } }
-          : { source: "dependentes", id: d.id }),
+        body: JSON.stringify({ id: d.id, matricula: d.matricula || "", nome: d.nome, situacao: "inativo" }),
       });
       const payload = await resposta.json().catch(() => ({}));
       if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível excluir o dependente.";
@@ -491,16 +478,12 @@ export default function DependentesPage() {
     setErro("");
     let erroOperacao = "";
     const usaApiAdministrativa = perfilUsuario === "administrador_normal" || perfilUsuario === "administrador_master";
-    if (usaApiAdministrativa) {
+    if (d.source === "socios" && usaApiAdministrativa) {
       const sessionAtual = (await supabase.auth.getSession()).data.session;
-      const resposta = await fetch("/api/dependentes", {
+      const resposta = await fetch("/api/socios", {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
-        body: JSON.stringify({
-          source: d.source === "socios" ? "socios" : "dependentes",
-          id: d.id,
-          data: d.source === "socios" ? { situacao: d.ativo !== true ? "inativo" : "ativo" } : { ativo: d.ativo !== true },
-        }),
+        body: JSON.stringify({ id: d.id, matricula: d.matricula || "", nome: d.nome, situacao: d.ativo !== true ? "ativo" : "inativo" }),
       });
       const payload = await resposta.json().catch(() => ({}));
       if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível alterar a situação.";
