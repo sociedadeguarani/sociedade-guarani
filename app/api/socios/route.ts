@@ -17,32 +17,25 @@ const COLUNAS_EXTRAS = [
 function limparObjeto(body: Record<string, unknown>, colunas: string[]) {
   return Object.fromEntries(colunas.filter((c) => body[c] !== undefined).map((c) => [c, body[c]]));
 }
-function ehPagadorDependente(responsavelId: string, possuiMensalidade: boolean) {
-  return Boolean(responsavelId) && possuiMensalidade;
-}
-
-async function gerarMatriculaDependentePagante(db: any, matriculaAtual: string) {
-  const atual = String(matriculaAtual || "").trim().toUpperCase();
-  if (/^SD\d{4,}A$/.test(atual)) return atual;
-
-  const { data } = await db
-    .from("socios")
-    .select("matricula")
-    .like("matricula", "SD%A")
-    .order("matricula", { ascending: false })
-    .limit(2000);
-
-  let maior = 0;
-  for (const item of data || []) {
-    const match = String(item.matricula || "").match(/^SD(\d+)A$/i);
-    if (match) maior = Math.max(maior, Number(match[1]));
-  }
-  return `SD${String(maior + 1).padStart(4, "0")}A`;
-}
-
 function erroBanco(error: unknown) {
   const e = error as { message?: string; details?: string; hint?: string; code?: string } | null;
   return [e?.message, e?.details, e?.hint, e?.code ? `Código ${e.code}` : ""].filter(Boolean).join(" — ");
+}
+
+async function proximaMatriculaSD(db: any) {
+  const { data, error } = await db
+    .from("socios")
+    .select("matricula")
+    .ilike("matricula", "SD%A")
+    .limit(1000);
+  if (error) throw error;
+
+  let maior = 0;
+  for (const row of data || []) {
+    const match = String(row.matricula || "").toUpperCase().match(/^SD(\d+)A$/);
+    if (match) maior = Math.max(maior, Number(match[1]));
+  }
+  return `SD${String(maior + 1).padStart(4, "0")}A`;
 }
 
 export async function GET(request: Request) {
@@ -80,17 +73,21 @@ export async function POST(request: Request) {
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
     const ehDependente = Boolean(responsavelId);
-    const dependentePagante = ehPagadorDependente(responsavelId, possuiMensalidade);
-    const matriculaNormalizada = dependentePagante
-      ? await gerarMatriculaDependentePagante(auth.supabase, matricula)
-      : matricula || null;
+    const matriculaFinal = ehDependente && possuiMensalidade
+      ? (matricula || await proximaMatriculaSD(auth.supabase))
+      : (matricula || null);
+
+    if (ehDependente && possuiMensalidade && !/^SD\d{1,6}A$/i.test(matriculaFinal)) {
+      return NextResponse.json({ error: "Dependente com mensalidade própria deve usar matrícula SD....A." }, { status: 400 });
+    }
+
     const dadosNormalizados = {
       ...body,
-      matricula: matriculaNormalizada,
+      matricula: matriculaFinal,
       nome,
       cpf: body.cpf || null,
-      possui_mensalidade: possuiMensalidade,
-      ...(ehDependente && !dependentePagante ? { valor_mensalidade: 0 } : {}),
+      possui_mensalidade: ehDependente ? possuiMensalidade : possuiMensalidade,
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0 } : {}),
     };
     const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
     const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
@@ -123,27 +120,29 @@ export async function PUT(request: Request) {
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!nome) return NextResponse.json({ error: "Nome é obrigatório para este cadastro." }, { status: 400 });
-    if (!matricula && !String(body.responsavel_id || "").trim()) {
-      return NextResponse.json({ error: "Informe a matrícula-base ou o responsável do associado." }, { status: 400 });
-    }
     const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade").eq("id", id).maybeSingle();
     const responsavelId = body.responsavel_id !== undefined
       ? String(body.responsavel_id || "").trim()
       : String(atual?.responsavel_id || "").trim();
     const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
     const ehDependente = Boolean(responsavelId);
-    const dependentePagante = ehPagadorDependente(responsavelId, possuiMensalidade);
-    const matriculaNormalizada = dependentePagante
-      ? await gerarMatriculaDependentePagante(auth.supabase, matricula)
+    if (!matricula && !ehDependente) return NextResponse.json({ error: "Matrícula é obrigatória para sócio sem responsável." }, { status: 400 });
+    const matriculaFinal = ehDependente && possuiMensalidade
+      ? (matricula || await proximaMatriculaSD(auth.supabase))
       : matricula || null;
+
+    if (ehDependente && possuiMensalidade && !/^SD\d{1,6}A$/i.test(matriculaFinal || "")) {
+      return NextResponse.json({ error: "Dependente com mensalidade própria deve usar matrícula SD....A." }, { status: 400 });
+    }
+
     const dadosNormalizados = {
       ...body,
-      matricula: matriculaNormalizada,
+      matricula: matriculaFinal,
       nome,
       cpf: body.cpf || null,
       responsavel_id: responsavelId || null,
       possui_mensalidade: possuiMensalidade,
-      ...(ehDependente && !dependentePagante ? { valor_mensalidade: 0 } : {}),
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0 } : {}),
     };
     const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
     const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
