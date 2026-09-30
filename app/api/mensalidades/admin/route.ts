@@ -707,7 +707,7 @@ export async function POST(request: Request) {
             tipo_pagamento: tipoPagamento,
           };
         })
-        .filter((item): item is Record<string, unknown> => item !== null);
+        .filter((item) => item !== null);
 
       if (novos.length > 0) {
         const { error: erroInsert } = await db
