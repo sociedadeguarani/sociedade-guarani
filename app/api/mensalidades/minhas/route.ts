@@ -14,7 +14,13 @@ export async function GET(request: Request) {
     const titularId = pessoa.responsavel_id || pessoa.id;
     const { data: familia, error: fe } = await db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,possui_mensalidade").or(`id.eq.${titularId},responsavel_id.eq.${titularId}`).order("nome");
     if (fe) throw fe;
-    const cobraveis = (familia || []).filter((x:any)=>x.possui_mensalidade === true).map((x:any)=>x.id);
+    const cobraveis = (familia || [])
+      .filter((x:any) => {
+        if (x.possui_mensalidade !== true) return false;
+        if (!x.responsavel_id) return true;
+        return /^SD\d{1,6}A$/i.test(String(x.matricula || "").trim());
+      })
+      .map((x:any)=>x.id);
     const { data: mensalidades, error: me } = cobraveis.length
       ? await db.from("mensalidades").select("id,socio_id,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo,comprovante_url,comprovante_enviado_em,comprovante_status,motivo_recusa,observacoes,motivo").in("socio_id", cobraveis).order("competencia",{ascending:false}).limit(60)
       : {data:[],error:null} as any;
