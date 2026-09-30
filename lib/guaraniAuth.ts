@@ -205,7 +205,11 @@ export async function requireRoles(
     normalizarPerfil(role)
   );
 
-  if (!permitidos.includes(resultado.perfil)) {
+  const masterHerdaAdministrador =
+    resultado.perfil === "administrador_master" &&
+    permitidos.includes("administrador");
+
+  if (!permitidos.includes(resultado.perfil) && !masterHerdaAdministrador) {
     return {
       response: new Response(
         JSON.stringify({
