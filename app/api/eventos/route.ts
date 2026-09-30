@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
     const [{ data, error }, { data: contas, error: contasError }] = await Promise.all([
       query,
-      resultado.supabase.from("contas_bancarias").select(resultado.perfil === "administrador" ? "id,nome,banco,agencia,conta,ativo" : "id,nome,banco,ativo").eq("ativo", true).order("nome", { ascending: true }),
+      resultado.supabase.from("contas_bancarias").select(["administrador", "administrador_master"].includes(resultado.perfil) ? "id,nome,banco,agencia,conta,ativo" : "id,nome,banco,ativo").eq("ativo", true).order("nome", { ascending: true }),
     ]);
     if (error) throw new Error(error.message);
     if (contasError) throw new Error(contasError.message);
