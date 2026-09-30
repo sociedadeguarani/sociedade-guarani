@@ -15,7 +15,6 @@ type Socio = {
 type Dependente = {
   id: string;
   socio_id: string;
-  matricula?: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -118,7 +117,7 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [d.nome, d.matricula || "", d.cpf || "", d.parentesco || "", d.telefone || "",
+      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
         socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
@@ -143,59 +142,114 @@ export default function DependentesPage() {
       return;
     }
 
-    try {
-      // Usa a API administrativa com service role para não perder registros
-      // por causa das políticas RLS do cliente. A fonte oficial é a tabela
-      // public.dependentes.
-      const resposta = await fetch("/api/dependentes", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
+    const [sociosResult, dependentesResult] = await Promise.all([
+      supabase.from("socios").select("*").order("nome"),
+      supabase.from("dependentes")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .order("nome"),
+    ]);
+
+    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
+
+    const sociosData = (sociosResult.data || []) as any[];
+    const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
+
+    // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
+    // A tabela dependentes fica apenas como legado para não perder registros
+    // que ainda não tenham sido migrados.
+    const dependentesAtuais: Dependente[] = sociosData
+      .filter((s) => s.responsavel_id && s.possui_mensalidade !== true)
+      .map((s) => ({
+        id: String(s.id),
+        socio_id: String(s.responsavel_id),
+        nome: s.nome,
+        cpf: s.cpf ?? null,
+        data_nascimento: s.data_nascimento ?? null,
+        parentesco: s.parentesco ?? null,
+        telefone: s.telefone ?? s.whatsapp ?? null,
+        ativo: String(s.situacao || "").toLowerCase() !== "inativo",
+        created_at: s.created_at ?? null,
+        possui_mensalidade: Boolean(s.possui_mensalidade),
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
+        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
+        tipo_pagamento: s.tipo_pagamento ?? null,
+        situacao_financeira: s.situacao_financeira ?? null,
+        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+        source: "socios",
+      }));
+
+    const chavesAtuais = new Set(
+      dependentesAtuais.map((d) => `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${d.nome.trim().toLowerCase()}`)
+    );
+
+    const dependentesLegados: Dependente[] = (dependentesResult.data || [])
+      .map((d: any) => ({ ...d, source: "dependentes" as const }))
+      .filter((d: any) => {
+        // Dependente com mensalidade pertence à guia Sócios.
+        if (d.possui_mensalidade === true) return false;
+        const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
+        return !chavesAtuais.has(chave);
       });
 
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) {
-        throw new Error(dados?.error || "Não foi possível carregar os dependentes.");
+    const dependentesData = [...dependentesAtuais, ...dependentesLegados];
+
+    setSocios(sociosData.map((s) => ({
+      id: String(s.id),
+      matricula: s.matricula == null ? null : String(s.matricula),
+      nome: s.nome,
+      situacao: s.situacao ?? null,
+    })));
+    setDependentes(dependentesData);
+
+    const responsaveisIds = Array.from(new Set(dependentesData.map((d) => String(d.socio_id)).filter(Boolean)));
+    const statusMap: Record<string, string> = {};
+
+    for (let i = 0; i < responsaveisIds.length; i += 100) {
+      const lote = responsaveisIds.slice(i, i + 100);
+      const { data: mensalidades, error: mensalidadesError } = await supabase
+        .from("mensalidades")
+        .select("socio_id, competencia, data_vencimento, situacao")
+        .in("socio_id", lote);
+
+      if (mensalidadesError) {
+        console.error(mensalidadesError);
+        continue;
       }
 
-      const sociosData = Array.isArray(dados?.socios) ? dados.socios : [];
-      const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
-        .map((d: any) => ({
-          id: String(d.id),
-          socio_id: String(d.socio_id),
-          matricula: d.matricula == null ? null : String(d.matricula),
-          nome: d.nome ?? "",
-          cpf: d.cpf ?? null,
-          data_nascimento: d.data_nascimento ?? null,
-          parentesco: d.parentesco ?? null,
-          telefone: d.telefone ?? d.whatsapp ?? null,
-          ativo: d.ativo !== false,
-          created_at: d.created_at ?? null,
-          possui_mensalidade: Boolean(d.possui_mensalidade),
-          valor_mensalidade: Number(d.valor_mensalidade || 0),
-          dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
-          tipo_pagamento: d.tipo_pagamento ?? null,
-          situacao_financeira: d.situacao_financeira ?? null,
-          data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          source: "dependentes",
-        }));
+      for (const id of lote) {
+        const itens = (mensalidades || []).filter((m: any) => String(m.socio_id) === id);
+        const hoje = new Date();
+        const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const pendencias = new Set<string>();
 
-      setSocios(sociosData.map((s: any) => ({
-        id: String(s.id),
-        matricula: s.matricula == null ? null : String(s.matricula),
-        nome: s.nome ?? "",
-        situacao: s.situacao ?? null,
-      })));
-      setDependentes(dependentesData);
-      setStatusResponsaveis(dados?.statusResponsaveis || {});
-    } catch (error) {
-      console.error(error);
-      setErro(error instanceof Error ? error.message : "Erro ao carregar dependentes.");
-      setSocios([]);
-      setDependentes([]);
-      setStatusResponsaveis({});
-    } finally {
-      setCarregando(false);
+        for (const m of itens) {
+          const situacao = String(m.situacao || "").trim().toLowerCase();
+          if (["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(situacao)) continue;
+          const dataBase = m.competencia || m.data_vencimento;
+          if (!dataBase) continue;
+          const texto = String(dataBase).slice(0, 10);
+          const partes = texto.split("-").map(Number);
+          if (partes.length < 2 || !partes[0] || !partes[1]) continue;
+          const mes = new Date(partes[0], partes[1] - 1, 1);
+          if (mes < inicioMesAtual) pendencias.add(`${partes[0]}-${String(partes[1]).padStart(2, "0")}`);
+        }
+
+        const atrasoMeses = pendencias.size;
+        statusMap[id] = atrasoMeses <= 2 ? "em_dia" : atrasoMeses <= 4 ? "atrasado" : "muito_atrasado";
+      }
     }
+
+    // Se o responsável ainda não tem histórico de mensalidades, respeita o
+    // status financeiro gravado no cadastro, mas sem inventar atraso.
+    for (const id of responsaveisIds) {
+      if (statusMap[id]) continue;
+      const socio = sociosMap.get(id);
+      const situacao = String(socio?.situacao_financeira || "").toLowerCase();
+      statusMap[id] = situacao.includes("atras") ? "atrasado" : "em_dia";
+    }
+
+    setCarregando(false);
   }
 
   useEffect(() => {
@@ -204,7 +258,7 @@ export default function DependentesPage() {
       setPerfilUsuario(
         perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
         perfil
       );
     } catch {}
@@ -427,7 +481,7 @@ export default function DependentesPage() {
               <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
                 <div className="flex items-center rounded-xl border border-slate-200 px-4">
                   <span className="mr-3 text-xl">🔎</span>
-                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula, CPF, parentesco ou responsável..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
+                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
                 </div>
                 <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
                   <option value="">Todos os responsáveis</option>
