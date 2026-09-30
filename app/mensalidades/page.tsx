@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -134,13 +134,6 @@ function data(v: string | null) {
   return `${d}/${m}/${a}`;
 }
 
-function chavePixDaConta(conta: Conta | undefined) {
-  const texto = `${conta?.nome || ""} ${conta?.banco || ""}`.toLowerCase();
-  if (texto.includes("banrisul")) return "55991817619";
-  if (texto.includes("cresol")) return "sociedader.guarani@gmail.com";
-  return "";
-}
-
 function status(s: string | null) {
   if (s === "nao_gerada") return ["Não gerada", "bg-gray-100 text-gray-600"];
   if (s === "pago") return ["Pago", "bg-green-100 text-green-700"];
@@ -152,28 +145,13 @@ function status(s: string | null) {
 
 function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   if (item.situacao === "pago") return false;
-  // Somente o marcador criado pela ação S.S. deve exibir "SS".
-  // Não interpretar textos antigos como "Não debitou — sem saldo"
-  // como S.S. automaticamente.
-  const motivo = String(item.motivo || "").trim().toLowerCase();
-  const observacao = String(item.observacoes || "").trim().toLowerCase();
-  return motivo === "s.s" || motivo === "ss" || observacao === "s.s — sem saldo" || observacao === "s.s - sem saldo";
+  const texto = String(item.motivo || item.observacoes || "").toLowerCase();
+  return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
 function statusMensalidade(item: M) {
   if (ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
-
-  // Para lançamentos ainda não pagos, a forma de cobrança deve refletir
-  // o cadastro atual do associado. Um boleto antigo não pode continuar
-  // aparecendo como "Boleto não pago" depois que o associado mudou para PIX,
-  // débito em conta etc. Para pagamentos concluídos, vale a forma realmente
-  // registrada no lançamento.
-  const pagamento = String(
-    item.situacao === "pago"
-      ? item.tipo_pagamento || ""
-      : item.socio?.tipo_pagamento || item.tipo_pagamento || ""
-  ).toLowerCase().trim();
-
+  const pagamento = String(item.tipo_pagamento || "").toLowerCase();
   if (pagamento === "boleto" && item.situacao !== "pago" && item.situacao !== "isento") {
     return ["Boleto não pago", "bg-orange-100 text-orange-700"];
   }
@@ -237,7 +215,8 @@ export default function Page() {
   const [anoHistoricoSocio, setAnoHistoricoSocio] = useState(hoje.getFullYear());
   const [tipoBaixaSelecionada, setTipoBaixaSelecionada] = useState<"pago" | "sem_saldo">("pago");
   const [contaRecebimentoSelecionada, setContaRecebimentoSelecionada] = useState("");
-  const [formaPagamentoModal, setFormaPagamentoModal] = useState("pix");
+  const [operacoesEmAndamento, setOperacoesEmAndamento] = useState<string[]>([]);
+  const operacoesEmAndamentoRef = useRef(new Set<string>());
 
 
   async function h() {
@@ -288,7 +267,6 @@ export default function Page() {
     setAnoHistoricoSocio(ano);
     setTipoBaixaSelecionada("pago");
     setContaRecebimentoSelecionada("");
-    setFormaPagamentoModal(String(item.situacao === "pago" ? (item.tipo_pagamento || "pix") : (item.socio?.tipo_pagamento || item.tipo_pagamento || "pix")));
     await carregarHistoricoSocio(item, ano);
   }
 
@@ -340,10 +318,17 @@ export default function Page() {
     if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
     if (!s.responsavel_id) return s.possui_mensalidade === true;
 
-    // Dependente comum nunca gera mensalidade própria. A exceção é o
-    // dependente pagante, identificado explicitamente por SD....A e
-    // possui_mensalidade=true.
-    return s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim());
+    const categoria = String(s.categoria || "").trim().toLowerCase();
+    if (categoria) {
+      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade");
+    }
+
+    return [
+      "dependente_patrimonial_familiar_mensalidade",
+      "dependente_patrimonial_individual_mensalidade",
+      "dependente_contribuinte_familiar_mensalidade",
+      "dependente_contribuinte_individual_mensalidade",
+    ].includes(String(s.tipo_socio || ""));
   }
 
   const sociosElegiveis = useMemo(
@@ -565,6 +550,21 @@ const selecionadasBaixa = useMemo(
     setErro("");
     setMsg("");
 
+    // Proteção contra duplo clique enquanto a primeira requisição ainda
+    // está aguardando o servidor. O ref é usado para bloquear de forma
+    // síncrona, antes mesmo do próximo render do React.
+    const ids = Array.isArray(body?.ids)
+      ? body.ids.map((id: unknown) => String(id)).filter(Boolean)
+      : [];
+    const chaveOperacao = `${String(body?.acao || "")}:${ids.join(",")}`;
+
+    if (operacoesEmAndamentoRef.current.has(chaveOperacao)) {
+      return;
+    }
+
+    operacoesEmAndamentoRef.current.add(chaveOperacao);
+    setOperacoesEmAndamento((lista) => [...lista, chaveOperacao]);
+
     try {
       const r = await fetch("/api/mensalidades/admin", {
         method: "POST",
@@ -585,6 +585,9 @@ const selecionadasBaixa = useMemo(
       }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
+    } finally {
+      operacoesEmAndamentoRef.current.delete(chaveOperacao);
+      setOperacoesEmAndamento((lista) => lista.filter((x) => x !== chaveOperacao));
     }
   }
 
@@ -1374,12 +1377,7 @@ const selecionadasBaixa = useMemo(
                           <button
                             key={numeroMes}
                             type="button"
-                            onClick={() => {
-                              setMesHistoricoSelecionado(numeroMes);
-                              const registroSelecionado = historicoPorMes.get(numeroMes);
-                              setFormaPagamentoModal(String(registroSelecionado?.tipo_pagamento || "pix"));
-                              setContaRecebimentoSelecionada("");
-                            }}
+                            onClick={() => setMesHistoricoSelecionado(numeroMes)}
                             title={
                               pago
                                 ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Pago`
@@ -1477,97 +1475,42 @@ const selecionadasBaixa = useMemo(
 
                     {registroMes && registroMes.situacao !== "pago" && registroMes.situacao !== "isento" && (
                       <div className="mt-4 rounded-xl border bg-white p-4">
-                        <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                           <div>
                             <div className="text-sm font-black text-[#005a3c]">Ações da mensalidade</div>
-                            <div className="mt-1 text-xs text-gray-500">
-                              {ehSemSaldo(registroMes)
-                                ? "Esta mensalidade está como S.S. Se o associado pagar depois, escolha a conta que recebeu e registre o pagamento."
-                                : String(registroMes.tipo_pagamento || "").toLowerCase() === "boleto"
-                                  ? "Boleto ainda não pago. Se ele pagar pelo boleto, use Dar baixa. Se pagar por PIX, use Pago agora via PIX."
-                                  : "Registre o pagamento quando ele ocorrer. A conta selecionada é a conta de recebimento da Sociedade."}
-                            </div>
+                            <div className="mt-1 text-xs text-gray-500">{ehSemSaldo(registroMes) ? "Esta mensalidade está marcada como S.S. Se o associado pagar depois, registre o pagamento via PIX." : String(registroMes.tipo_pagamento || "").toLowerCase() === "boleto" ? "Boleto não pago. Se o associado pagar por PIX, registre o pagamento aqui." : "Registre o pagamento quando ele ocorrer."}</div>
                           </div>
-
-                          <div className="flex flex-wrap items-end gap-2">
-                            <div>
-                              <label className="mb-1 block text-xs font-bold text-gray-500">Conta que recebeu</label>
-                              <select
-                                value={contaRecebimentoSelecionada}
-                                onChange={(e) => setContaRecebimentoSelecionada(e.target.value)}
-                                className="rounded-xl border px-3 py-2 text-sm font-bold"
-                              >
-                                <option value="">Selecione a conta da Sociedade</option>
-                                {contas.map((conta) => (
-                                  <option key={conta.id} value={conta.id}>
-                                    {conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            {(() => {
-                              const contaSelecionada = contas.find((c) => String(c.id) === String(contaRecebimentoSelecionada));
-                              const chavePix = chavePixDaConta(contaSelecionada);
-                              return chavePix ? (
-                                <div className="rounded-xl border border-[#cfe6da] bg-[#f4faf7] px-3 py-2 text-xs">
-                                  <div className="font-bold text-[#005a3c]">Chave PIX da Sociedade</div>
-                                  <div className="font-black text-[#173d2e]">{chavePix}</div>
-                                </div>
-                              ) : null;
-                            })()}
-
-                            <div>
-                              <label className="mb-1 block text-xs font-bold text-gray-500">Forma do pagamento</label>
-                              <select
-                                value={formaPagamentoModal}
-                                onChange={(e) => setFormaPagamentoModal(e.target.value)}
-                                className="rounded-xl border px-3 py-2 text-sm font-bold"
-                              >
-                                <option value="pix">PIX</option>
-                                <option value="boleto">Boleto</option>
-                                <option value="dinheiro">Dinheiro</option>
-                                <option value="transferencia">Transferência</option>
-                                <option value="outro">Outro</option>
-                              </select>
-                            </div>
-
-                            <button
-                              type="button"
-                              disabled={!contaRecebimentoSelecionada}
-                              onClick={() => void post({
-                                acao: "baixar",
-                                ids: [registroMes.id],
-                                tipo_pagamento: formaPagamentoModal || String(registroMes.tipo_pagamento || "pix"),
-                                data_pagamento: new Date().toISOString().slice(0, 10),
-                                conta_recebimento_id: contaRecebimentoSelecionada,
-                                observacoes: ehSemSaldo(registroMes)
-                                  ? `Pagamento posterior via ${String(formaPagamentoModal || "pix").toUpperCase()} após S.S.`
-                                  : `Pagamento via ${String(formaPagamentoModal || "pix").toUpperCase()}`,
-                              })}
-                              className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white disabled:opacity-40"
+                          <div className="flex flex-wrap gap-2">
+                            <select
+                              value={contaRecebimentoSelecionada}
+                              onChange={(e) => setContaRecebimentoSelecionada(e.target.value)}
+                              className="rounded-xl border px-3 py-2 text-sm font-bold"
                             >
-                              ✓ Dar baixa — Pago
-                            </button>
-
+                              <option value="">Conta que recebeu o PIX</option>
+                              {contas.map((conta) => (
+                                <option key={conta.id} value={conta.id}>{conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}</option>
+                              ))}
+                            </select>
                             <button
                               type="button"
-                              disabled={!contaRecebimentoSelecionada}
+                              disabled={
+                                !contaRecebimentoSelecionada ||
+                                operacoesEmAndamento.includes(`baixar:${registroMes.id}`)
+                              }
                               onClick={() => void post({
                                 acao: "baixar",
                                 ids: [registroMes.id],
                                 tipo_pagamento: "pix",
                                 data_pagamento: new Date().toISOString().slice(0, 10),
                                 conta_recebimento_id: contaRecebimentoSelecionada,
-                                observacoes: ehSemSaldo(registroMes)
-                                  ? "Pagamento posterior via PIX após S.S."
-                                  : "Pagamento via PIX",
+                                observacoes: ehSemSaldo(registroMes) ? "Pagamento posterior via PIX após S.S." : "Pagamento via PIX",
                               })}
-                              className="rounded-xl border border-[#00704a] bg-[#eef7f2] px-4 py-2 text-sm font-black text-[#005a3c] disabled:opacity-40"
+                              className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white disabled:opacity-40"
                             >
-                              💠 Pago agora via PIX
+                              {operacoesEmAndamento.includes(`baixar:${registroMes.id}`)
+                                ? "⏳ Processando..."
+                                : "💠 Pago agora via PIX"}
                             </button>
-
                             {!ehSemSaldo(registroMes) && (
                               <button
                                 type="button"
