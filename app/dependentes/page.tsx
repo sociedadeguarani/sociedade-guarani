@@ -15,7 +15,6 @@ type Socio = {
 type Dependente = {
   id: string;
   socio_id: string;
-  matricula?: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -118,7 +117,7 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [d.nome, d.matricula || "", d.cpf || "", d.parentesco || "", d.telefone || "",
+      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
         socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
@@ -159,26 +158,11 @@ export default function DependentesPage() {
     // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
     // A tabela dependentes fica apenas como legado para não perder registros
     // que ainda não tenham sido migrados.
-    // Um dependente pode estar na tabela socios de duas formas históricas:
-    // 1) com responsavel_id preenchido; ou
-    // 2) com tipo_socio/categoria identificando dependente, mesmo que o
-    //    responsavel_id esteja ausente. Não podemos perder esses cadastros.
-    const ehCadastroDependente = (s: any) => {
-      const tipo = String(s.tipo_socio || "").trim().toLowerCase();
-      const categoria = String(s.categoria || "").trim().toLowerCase();
-      return Boolean(s.responsavel_id) ||
-        tipo.startsWith("dependente_") ||
-        tipo === "dependente" ||
-        categoria.includes("dependente");
-    };
-
     const dependentesAtuais: Dependente[] = sociosData
-      .filter(ehCadastroDependente)
-      .filter((s) => !(s.responsavel_id && s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim())))
+      .filter((s) => s.responsavel_id && s.possui_mensalidade !== true)
       .map((s) => ({
         id: String(s.id),
-        socio_id: s.responsavel_id ? String(s.responsavel_id) : "",
-        matricula: s.matricula == null ? null : String(s.matricula),
+        socio_id: String(s.responsavel_id),
         nome: s.nome,
         cpf: s.cpf ?? null,
         data_nascimento: s.data_nascimento ?? null,
@@ -200,8 +184,10 @@ export default function DependentesPage() {
     );
 
     const dependentesLegados: Dependente[] = (dependentesResult.data || [])
-      .map((d: any) => ({ ...d, matricula: d.matricula ?? null, source: "dependentes" as const }))
+      .map((d: any) => ({ ...d, source: "dependentes" as const }))
       .filter((d: any) => {
+        // Dependente com mensalidade pertence à guia Sócios.
+        if (d.possui_mensalidade === true) return false;
         const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
         return !chavesAtuais.has(chave);
       });
@@ -495,7 +481,7 @@ export default function DependentesPage() {
               <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
                 <div className="flex items-center rounded-xl border border-slate-200 px-4">
                   <span className="mr-3 text-xl">🔎</span>
-                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula, CPF, parentesco ou responsável..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
+                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
                 </div>
                 <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
                   <option value="">Todos os responsáveis</option>
