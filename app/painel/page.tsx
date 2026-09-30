@@ -47,96 +47,81 @@ export default function PainelPage() {
   const [totalDependentes, setTotalDependentes] = useState<number | null>(null);
   const [reservasPendentes, setReservasPendentes] = useState<number | null>(null);
   const [pixPendentes, setPixPendentes] = useState<number | null>(null);
-  const [notificacoesPendentes, setNotificacoesPendentes] = useState<any[]>([]);
+  const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
     setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
     setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
+
+    let ativo = true;
 
     (async () => {
       try {
         let { data: { session } } = await supabase.auth.getSession();
         if (!session) session = (await supabase.auth.refreshSession()).data.session;
         if (!session?.access_token) return;
-        const r = await fetch("/api/socios", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          cache: "no-store",
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok) {
-          const lista = Array.isArray(j.socios) ? j.socios : [];
 
-          // Sócios oficiais = titulares + dependentes com mensalidade própria.
-          // Dependentes familiares sem mensalidade ficam exclusivamente no módulo Dependentes.
-          const sociosOficiais = lista.filter(
-            (s: any) => !s.responsavel_id || s.possui_mensalidade === true
-          );
+        const headers = { Authorization: `Bearer ${session.access_token}` };
 
-          setTotalSocios(sociosOficiais.length);
-          setSociosAtivos(
-            sociosOficiais.filter(
-              (s: any) =>
-                s.ativo !== false &&
-                String(s.situacao || "ativo").toLowerCase() !== "inativo"
-            ).length
-          );
-          setSociosInativos(
-            sociosOficiais.filter(
-              (s: any) =>
-                s.ativo === false ||
-                String(s.situacao || "").toLowerCase() === "inativo"
-            ).length
-          );
+        // Consultas independentes em paralelo: o painel não espera uma tela
+        // terminar para começar a próxima.
+        const [sociosResponse, dependentesResponse, reservasResponse, notificacoesResponse] =
+          await Promise.all([
+            fetch("/api/socios?resumo=1", { headers, cache: "no-store" }),
+            fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
+            fetch("/api/reservas?status=pendente", { headers, cache: "no-store" }),
+            fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", { headers, cache: "no-store" }),
+          ]);
 
-          // Os dependentes da tela própria são a fonte oficial do contador.
-          const rd = await fetch("/api/dependentes/migrar", {
-            headers: { Authorization: `Bearer ${session.access_token}` },
-            cache: "no-store",
-          });
-          const jd = await rd.json().catch(() => ({}));
-          if (rd.ok) {
-            setTotalDependentes(
-              Array.isArray(jd.dependentes) ? jd.dependentes.length : 0
-            );
-          }
+        const [sociosJson, dependentesJson, reservasJson, notificacoesJson] = await Promise.all([
+          sociosResponse.json().catch(() => ({})),
+          dependentesResponse.json().catch(() => ({})),
+          reservasResponse.json().catch(() => ({})),
+          notificacoesResponse.json().catch(() => ({})),
+        ]);
 
-          if (master || admin) {
-            const [rr, rn] = await Promise.all([
-              fetch("/api/reservas?status=pendente", {
-                headers: { Authorization: `Bearer ${session.access_token}` },
-                cache: "no-store",
-              }),
-              fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", {
-                headers: { Authorization: `Bearer ${session.access_token}` },
-                cache: "no-store",
-              }),
-            ]);
+        if (!ativo) return;
 
-            const jr = await rr.json().catch(() => ({}));
-            if (rr.ok) {
-              setReservasPendentes(
-                Array.isArray(jr.reservas) ? jr.reservas.length : 0
-              );
-            }
-
-            const jn = await rn.json().catch(() => ({}));
-            if (rn.ok) {
-              const listaNotificacoes = Array.isArray(jn.notificacoes)
-                ? jn.notificacoes
-                : [];
-              setNotificacoesPendentes(listaNotificacoes);
-              setPixPendentes(
-                listaNotificacoes.filter(
-                  (n: any) =>
-                    Boolean(n.comprovante_url) &&
-                    String(n.comprovante_status || "pendente").toLowerCase() !== "aprovado"
-                ).length
-              );
-            }
-          }
+        if (sociosResponse.ok) {
+          setTotalSocios(Number(sociosJson.total) || 0);
+          setSociosAtivos(Number(sociosJson.ativos) || 0);
+          setSociosInativos(Number(sociosJson.inativos) || 0);
         }
-      } catch {}
+
+        if (dependentesResponse.ok) {
+          const lista = Array.isArray(dependentesJson.dependentes)
+            ? dependentesJson.dependentes
+            : [];
+          setTotalDependentes(lista.length);
+        }
+
+        if (reservasResponse.ok) {
+          const lista = Array.isArray(reservasJson.reservas)
+            ? reservasJson.reservas
+            : [];
+          setReservasPendentes(lista.filter((r: any) => r.status === "pendente").length);
+        }
+
+        if (notificacoesResponse.ok) {
+          const lista = Array.isArray(notificacoesJson.notificacoes)
+            ? notificacoesJson.notificacoes
+            : [];
+          const pendentes = lista.filter((n: any) =>
+            String(n.comprovante_status || "").toLowerCase() === "pendente" ||
+            String(n.origem_tipo || "").toLowerCase() === "pagamento"
+          );
+          setPixPendentes(pendentes.length);
+        }
+      } catch {
+        // Os cards individuais permanecem com “—” quando uma fonte falhar.
+      } finally {
+        if (ativo) setCarregandoPainel(false);
+      }
     })();
+
+    return () => {
+      ativo = false;
+    };
   }, []);
 
   const p = perfil.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -194,128 +179,52 @@ export default function PainelPage() {
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <a
-              href="/socios"
-              className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-            >
+            <a href="/socios" className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <p className="text-sm text-slate-500">Sócios</p>
-              <p className="mt-1 text-3xl font-black text-[#005a3c]">
-                {totalSocios === null ? "—" : totalSocios}
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {sociosAtivos === null ? "Carregando..." : `${sociosAtivos} ativos`}
-              </p>
+              <p className="mt-1 text-3xl font-black text-[#005a3c]">{carregandoPainel ? "—" : totalSocios ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-400">{sociosAtivos ?? "—"} ativos · {sociosInativos ?? "—"} inativos</p>
             </a>
-
-            <a
-              href="/dependentes"
-              className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-            >
+            <a href="/dependentes" className="rounded-2xl border border-[#dceee4] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <p className="text-sm text-slate-500">Dependentes</p>
-              <p className="mt-1 text-3xl font-black text-[#005a3c]">
-                {totalDependentes === null ? "—" : totalDependentes}
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Famílias e dependentes cadastrados
-              </p>
+              <p className="mt-1 text-3xl font-black text-[#005a3c]">{carregandoPainel ? "—" : totalDependentes ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-400">Cadastros familiares unificados</p>
             </a>
-
-            <a
-              href="/reservas"
-              className="rounded-2xl border border-[#dceee4] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-            >
+            <a href="/reservas?status=pendente" className="rounded-2xl border border-[#f0e3cf] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <p className="text-sm text-slate-500">Reservas pendentes</p>
-              <p className="mt-1 text-3xl font-black text-[#16834f]">
-                {reservasPendentes === null ? "—" : reservasPendentes}
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Aguardando conferência
-              </p>
+              <p className="mt-1 text-3xl font-black text-[#b56a12]">{carregandoPainel ? "—" : reservasPendentes ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-400">Aguardando conferência</p>
             </a>
-
-            <a
-              href="/avisos"
-              className="rounded-2xl border border-[#f0e3cf] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <p className="text-sm text-slate-500">
-                {master || admin ? "PIX pendentes" : "Avisos pendentes"}
-              </p>
-              <p className="mt-1 text-3xl font-black text-[#b56a12]">
-                {master || admin
-                  ? pixPendentes === null
-                    ? "—"
-                    : pixPendentes
-                  : notificacoesPendentes.length}
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {master || admin
-                  ? "Comprovantes aguardando conferência"
-                  : "Notificações para consultar"}
-              </p>
+            <a href="/avisos" className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <p className="text-sm text-slate-500">PIX pendentes</p>
+              <p className="mt-1 text-3xl font-black text-[#b56a12]">{carregandoPainel ? "—" : pixPendentes ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-400">Comprovantes aguardando conferência</p>
             </a>
           </div>
 
-          {(master || admin) && (
-            <section className="mt-6 rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {(master || admin) && (sociosInativos ?? 0) > 0 && (
+            <div className="mt-5 rounded-2xl border border-[#f1dfbd] bg-[#fffaf0] p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-xl font-black text-[#005a3c]">🔔 Atenção</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    O que precisa de conferência ou ação agora.
-                  </p>
+                  <p className="font-black text-[#7b4b0b]">🔔 Atenção</p>
+                  <p className="mt-1 text-sm text-[#8c6a35]">Há itens que podem precisar de ação da administração.</p>
                 </div>
-                <a
-                  href="/avisos"
-                  className="rounded-xl border border-[#b9d8c7] px-4 py-2 text-center text-sm font-bold text-[#005a3c]"
-                >
-                  Ver avisos
-                </a>
+                <a href="/avisos" className="rounded-xl border border-[#d9c18f] bg-white px-4 py-2 text-center text-sm font-bold text-[#7b4b0b]">Ver avisos</a>
               </div>
-
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <a
-                  href="/reservas"
-                  className="rounded-xl border border-[#e7eee9] bg-[#f8fbf9] p-4"
-                >
-                  <p className="font-black text-[#003d2b]">📅 Reservas</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {reservasPendentes === null
-                      ? "Carregando..."
-                      : reservasPendentes === 0
-                        ? "Nenhuma reserva pendente."
-                        : `${reservasPendentes} aguardando confirmação.`}
-                  </p>
+                <a href="/reservas?status=pendente" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                  <p className="font-black text-[#173d2e]">📅 Reservas</p>
+                  <p className="mt-1 text-sm text-slate-500">{reservasPendentes === null ? "Carregando..." : `${reservasPendentes} pendente(s)`}</p>
                 </a>
-
-                <a
-                  href="/avisos"
-                  className="rounded-xl border border-[#e7eee9] bg-[#f8fbf9] p-4"
-                >
-                  <p className="font-black text-[#003d2b]">💠 Pagamentos PIX</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {pixPendentes === null
-                      ? "Carregando..."
-                      : pixPendentes === 0
-                        ? "Nenhum PIX pendente."
-                        : `${pixPendentes} comprovante(s) aguardando conferência.`}
-                  </p>
+                <a href="/avisos" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                  <p className="font-black text-[#173d2e]">💠 Pagamentos PIX</p>
+                  <p className="mt-1 text-sm text-slate-500">{pixPendentes === null ? "Carregando..." : `${pixPendentes} pendente(s)`}</p>
                 </a>
-
-                <a
-                  href="/socios"
-                  className="rounded-xl border border-[#e7eee9] bg-[#f8fbf9] p-4"
-                >
-                  <p className="font-black text-[#003d2b]">⚠️ Cadastro</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {sociosInativos === null
-                      ? "Carregando..."
-                      : sociosInativos === 0
-                        ? "Nenhum sócio inativo."
-                        : `${sociosInativos} sócio(s) inativo(s).`}
-                  </p>
+                <a href="/socios" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                  <p className="font-black text-[#173d2e]">⚠️ Cadastro</p>
+                  <p className="mt-1 text-sm text-slate-500">{sociosInativos ?? "—"} sócio(s) inativo(s)</p>
                 </a>
               </div>
-            </section>
+            </div>
           )}
 
           <div className="mt-8">
