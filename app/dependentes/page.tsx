@@ -142,17 +142,21 @@ export default function DependentesPage() {
       return;
     }
 
-    const [sociosResult, dependentesResult] = await Promise.all([
-      supabase.from("socios").select("*").order("nome"),
+    const [sociosResponse, dependentesResult] = await Promise.all([
+      fetch("/api/socios", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      }),
       supabase.from("dependentes")
         .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
         .order("nome"),
     ]);
 
-    if (sociosResult.error) setErro(`Erro ao carregar sócios: ${sociosResult.error.message}`);
+    const sociosPayload = await sociosResponse.json().catch(() => ({}));
+    if (!sociosResponse.ok) setErro(`Erro ao carregar sócios: ${sociosPayload?.error || "Não foi possível carregar os sócios."}`);
     if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
 
-    const sociosData = (sociosResult.data || []) as any[];
+    const sociosData = (sociosPayload?.socios || []) as any[];
     const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
 
     // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
