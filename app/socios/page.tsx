@@ -744,7 +744,10 @@ export default function Home() {
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      possui_mensalidade: true,
+      // Novo dependente começa sem mensalidade. Se passar a pagar,
+      // o cadastro pode ser alterado para mensalidade = SIM e então
+      // ele aparecerá automaticamente na guia Sócios.
+      possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],
     });
@@ -955,35 +958,21 @@ export default function Home() {
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
-    const ehDependentePagante = (socio: Socio) =>
-      Boolean(socio.responsavel_id) &&
-      socio.possui_mensalidade === true &&
-      /^SD\d{1,6}A$/i.test(String(socio.matricula || "").trim());
-
-    const ehDependenteComum = (socio: Socio) => {
-      const tipo = String(socio.tipo_socio || "").trim().toLowerCase();
-      const categoria = String(socio.categoria || "").trim().toLowerCase();
-      return Boolean(socio.responsavel_id) ||
-        tipo === "dependente" ||
-        tipo.startsWith("dependente_") ||
-        categoria.includes("dependente");
-    };
-
     return socios.filter((socio) => {
-      const dependentePagante = ehDependentePagante(socio);
-      const dependenteComum = ehDependenteComum(socio);
-
-      // Sócios normais ficam aqui. Dependentes comuns vão para /dependentes.
-      // A única exceção é o dependente especial com mensalidade própria SD....A.
-      if (dependenteComum && !dependentePagante) return false;
+      // Regra oficial de exibição: quem possui mensalidade fica em Sócios,
+      // inclusive quando possui responsavel_id.
+      if (socio.possui_mensalidade !== true) return false;
 
       const correspondeBusca =
         !termo ||
         socio.nome?.toLowerCase().includes(termo) ||
         socio.cpf?.toLowerCase().includes(termo) ||
-        String(socio.matricula || "").toLowerCase().includes(termo);
+        String(socio.matricula || "").includes(termo);
 
-      const correspondeTipo = !mostrarSomenteDependentes || dependentePagante;
+      const correspondeTipo =
+        !mostrarSomenteDependentes ||
+        Boolean(socio.responsavel_id) ||
+        (socio.tipo_socio || "").startsWith("dependente_");
 
       return correspondeBusca && correspondeTipo;
     });
@@ -1066,7 +1055,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.length}
+              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1075,7 +1064,7 @@ export default function Home() {
           {menu === "Sócios" && (
             <Socios
               socios={sociosFiltrados}
-              quantidadeTotal={socios.length}
+              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true).length}
               busca={busca}
               setBusca={setBusca}
               novoSocio={novoSocio}
@@ -1254,7 +1243,7 @@ function Inicio({
 
         <DashboardCard
           titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id)).length)}
+          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
           descricao="Vinculados a responsáveis"
           icone="👨‍👩‍👧‍👦"
         />
@@ -2492,13 +2481,13 @@ function Dependentes({
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
 }) {
-  const dependentes = socios.filter((s) => Boolean(s.responsavel_id));
+  const dependentes = socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true);
   const responsaveis = socios.filter((s) =>
     socios.some((filho) => filho.responsavel_id === s.id)
   );
 
   function filhosDe(id: string) {
-    return socios.filter((s) => s.responsavel_id === id);
+    return socios.filter((s) => s.responsavel_id === id && s.possui_mensalidade !== true);
   }
 
   function arvore(pessoa: Socio, nivel = 0): ReactNode {
@@ -2619,7 +2608,7 @@ function Dependentes({
       <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
           <p className="text-sm text-gray-500">Pessoas cadastradas</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.length}</p>
+          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.filter((s) => s.possui_mensalidade !== true).length}</p>
         </div>
 
         <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
