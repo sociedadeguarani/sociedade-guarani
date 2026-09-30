@@ -8,7 +8,7 @@ import { Campo, Info, Modal, Resumo } from "./components/FinanceiroUI";
 
 type Socio = {
   id: string;
-  matricula: number | null;
+  matricula: string | number | null;
   nome: string;
   cpf: string | null;
   whatsapp: string | null;
@@ -45,6 +45,12 @@ type Mensalidade = {
   situacao: string | null;
   data_pagamento: string | null;
   tipo_pagamento: string | null;
+  valor_base?: number | null;
+  tarifa_pagamento?: number | null;
+  multa?: number | null;
+  juros?: number | null;
+  desconto?: number | null;
+  total_cobrado?: number | null;
   comprovante_url: string | null;
   observacoes: string | null;
   numero_recibo?: string | null;
@@ -56,7 +62,7 @@ type PessoaFinanceira = {
   socio_id: string;
   dependente_id: string | null;
   nome: string;
-  matricula: number | null;
+  matricula: string | number | null;
   cpf: string | null;
   foto_url: string | null;
   responsavel_nome: string | null;
@@ -151,6 +157,12 @@ function situacaoClasse(situacao: string | null | undefined) {
   if (situacao === "isento") return "bg-gray-100 text-gray-600";
   if (situacao === "em_atraso") return "bg-red-100 text-red-700";
   return "bg-yellow-100 text-yellow-700";
+}
+
+function ehPagadorSocio(s: Socio) {
+  if (s.situacao?.toLowerCase() === "inativo") return false;
+  if (!s.responsavel_id) return s.possui_mensalidade === true;
+  return s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim());
 }
 
 function nivelAtraso(meses: number) {
@@ -392,6 +404,11 @@ export default function FinanceiroPage() {
     () =>
       mensalidades
         .filter((m) => m.competencia?.slice(0, 7) === competencia)
+        .filter((m) => {
+          const socio = socios.find((s) => s.id === m.socio_id);
+          if (!socio) return true;
+          return ehPagadorSocio(socio);
+        })
         .sort((a, b) =>
           String(a.data_vencimento || "").localeCompare(
             String(b.data_vencimento || "")
@@ -786,6 +803,11 @@ export default function FinanceiroPage() {
       return;
     }
 
+    if (!contaPagamentoId) {
+      setMensagem("Selecione a conta da Sociedade que recebeu o pagamento.");
+      return;
+    }
+
     setSalvandoPagamento(true);
     setMensagem("");
 
@@ -807,106 +829,76 @@ export default function FinanceiroPage() {
         comprovante = caminho;
       }
 
-      const ids = selecionadas.map((m) => m.id);
-
-      const totalSelecionado = selecionadas.reduce(
-        (soma, m) => soma + Number(m.valor || 0),
+      const valorEsperado = selecionadas.reduce(
+        (soma, m) => soma + Number(m.total_cobrado ?? m.valor ?? 0),
         0
       );
-      const totalInformado = Number(valorPagamento || 0);
+      const totalInformado = Number(String(valorPagamento || "0").replace(",", "."));
 
-      if (Math.abs(totalInformado - totalSelecionado) > 0.01) {
+      if (Math.abs(totalInformado - valorEsperado) > 0.01) {
         throw new Error(
-          `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total das competências selecionadas (${formatarMoeda(totalSelecionado)}).`
+          `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total cobrado das competências selecionadas (${formatarMoeda(valorEsperado)}).`
         );
       }
 
-      const { error } = await supabase
-        .from("mensalidades")
-        .update({
-          situacao: "pago",
-          data_pagamento: dataPagamento || null,
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Sessão não encontrada.");
+
+      const response = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "baixar",
+          ids: selecionadas.map((m) => m.id),
+          data_pagamento: dataPagamento || new Date().toISOString().slice(0, 10),
           tipo_pagamento: tipoPagamento || null,
+          conta_recebimento_id: contaPagamentoId,
           comprovante_url: comprovante || null,
           observacoes: observacoes || null,
-        })
-        .in("id", ids);
+        }),
+      });
 
-      if (error) throw error;
-
-      const pessoa = pessoaDoLancamento(pagamento);
-      if (pessoa && !pessoa.dependente_id) {
-        await supabase
-          .from("socios")
-          .update({
-            situacao_financeira: "em_dia",
-            data_ultimo_pagamento: dataPagamento || null,
-          })
-          .eq("id", pessoa.socio_id);
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Não foi possível registrar o pagamento.");
       }
 
       const numero = await gerarNumeroRecibo(selecionadas[0]);
-
-      const { error: reciboError } = await supabase
-        .from("mensalidades")
-        .update({ numero_recibo: numero })
-        .in("id", ids);
-
-      if (reciboError) throw reciboError;
-
       const atualizadas = selecionadas.map((m) => ({
         ...m,
         situacao: "pago",
         data_pagamento: dataPagamento || null,
-        tipo_pagamento: tipoPagamento || null,
+        tipo_pagamento: tipoPagamento || m.tipo_pagamento || null,
         comprovante_url: comprovante || null,
         observacoes: observacoes || null,
         numero_recibo: numero,
       }));
 
+      const { error: reciboError } = await supabase
+        .from("mensalidades")
+        .update({ numero_recibo: numero })
+        .in("id", selecionadas.map((m) => m.id));
+      if (reciboError) throw reciboError;
+
       setMensalidades((lista) =>
         lista.map((m) => atualizadas.find((a) => a.id === m.id) || m)
       );
 
-      if (contaPagamentoId) {
-        const pessoa = pessoaDoLancamento(pagamento);
-        const { data: movimentoData, error: movimentoError } = await supabase
-          .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: contaPagamentoId,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "entrada",
-            categoria: "Mensalidade",
-            descricao: `Mensalidade ${selecionadas.map((m) => formatarCompetencia(m.competencia)).join(", ")} - ${pessoa?.nome || "Cadastro não localizado"}`,
-            valor: totalSelecionado,
-            data_movimentacao: dataPagamento || new Date().toISOString().slice(0,10),
-            forma_pagamento: tipoPagamento || null,
-            origem_tipo: "mensalidade",
-            origem_id: selecionadas[0].id,
-            socio_id: pessoa?.socio_id || null,
-            dependente_id: pessoa?.dependente_id || null,
-            comprovante_url: comprovante || null,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: observacoes || null,
-          })
-          .select("*")
-          .single();
-        if (movimentoError) throw movimentoError;
-        setMovimentosFinanceiros((lista) => [movimentoData as MovimentoFinanceiro, ...lista]);
-      }
-
       setMensagem(
         selecionadas.length === 1
-          ? "Pagamento registrado com sucesso."
-          : `${selecionadas.length} mensalidades pagas em um único pagamento.`
+          ? "Pagamento registrado e lançado no Financeiro."
+          : `${selecionadas.length} mensalidades pagas e lançadas no Financeiro.`
       );
 
       setPagamento(null);
       setMesesPagamento([]);
       setMesesSelecionados([]);
       setReciboItens(atualizadas);
+      await carregarTudo();
     } catch (error) {
       console.error(error);
       setMensagem(
@@ -919,15 +911,12 @@ export default function FinanceiroPage() {
     }
   }
 
-  function abrirEdicao(item: Mensalidade) {
-    setEdicao(item);
-    setEdicaoValor(String(Number(item.valor || 0)));
-    setEdicaoVencimento(item.data_vencimento || "");
-    setEdicaoSituacao(item.situacao || "em_aberto");
-  }
-
   async function salvarEdicao() {
     if (!edicao) return;
+    if (edicao.situacao === "pago") {
+      setMensagem("Mensalidade já paga não pode ser editada por esta tela para evitar divergência no Financeiro. Estorne a baixa e faça a correção antes de pagar novamente.");
+      return;
+    }
 
     const { error } = await supabase
       .from("mensalidades")
@@ -939,8 +928,7 @@ export default function FinanceiroPage() {
       .eq("id", edicao.id);
 
     if (error) {
-      console.error(error);
-      setMensagem(`Não foi possível atualizar. ${error.message}`);
+      setMensagem(`Não foi possível atualizar a mensalidade. ${error.message}`);
       return;
     }
 
@@ -956,27 +944,8 @@ export default function FinanceiroPage() {
           : m
       )
     );
-
     setEdicao(null);
     setMensagem("Mensalidade atualizada.");
-  }
-
-  async function excluir(item: Mensalidade) {
-    if (!window.confirm("Deseja realmente excluir esta mensalidade?")) return;
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .delete()
-      .eq("id", item.id);
-
-    if (error) {
-      console.error(error);
-      setMensagem(`Não foi possível excluir. ${error.message}`);
-      return;
-    }
-
-    setMensalidades((lista) => lista.filter((m) => m.id !== item.id));
-    setMensagem("Mensalidade excluída.");
   }
 
   async function gerarNumeroRecibo(item: Mensalidade) {
