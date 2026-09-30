@@ -67,7 +67,7 @@ export default function PainelPage() {
         // terminar para começar a próxima.
         const [sociosResponse, dependentesResponse, reservasResponse, notificacoesResponse] =
           await Promise.all([
-            fetch("/api/socios?resumo=1", { headers, cache: "no-store" }),
+            fetch("/api/socios", { headers, cache: "no-store" }),
             fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
             fetch("/api/reservas?status=pendente", { headers, cache: "no-store" }),
             fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", { headers, cache: "no-store" }),
