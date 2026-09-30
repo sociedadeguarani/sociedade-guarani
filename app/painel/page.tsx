@@ -83,16 +83,52 @@ export default function PainelPage() {
         if (!ativo) return;
 
         if (sociosResponse.ok) {
-          setTotalSocios(Number(sociosJson.total) || 0);
-          setSociosAtivos(Number(sociosJson.ativos) || 0);
-          setSociosInativos(Number(sociosJson.inativos) || 0);
-        }
+          const todosSocios = Array.isArray(sociosJson.socios) ? sociosJson.socios : [];
 
-        if (dependentesResponse.ok) {
-          const lista = Array.isArray(dependentesJson.dependentes)
+          // A tela Sócios considera como Sócio: titular + pessoa com
+          // mensalidade própria. Dependente familiar comum não entra aqui.
+          const sociosOficiais = todosSocios.filter((s: any) =>
+            !s?.responsavel_id || s?.possui_mensalidade === true
+          );
+
+          setTotalSocios(sociosOficiais.length);
+          setSociosAtivos(
+            sociosOficiais.filter((s: any) =>
+              String(s?.situacao || "").toLowerCase() === "ativo"
+            ).length
+          );
+          setSociosInativos(
+            sociosOficiais.filter((s: any) =>
+              String(s?.situacao || "").toLowerCase() === "inativo"
+            ).length
+          );
+
+          // Dependentes antigos ainda podem existir em `socios`. Eles precisam
+          // ser somados aos já migrados para `dependentes`, mas sem duplicar.
+          const dependentesAntigos = todosSocios
+            .filter((s: any) => Boolean(s?.responsavel_id) && s?.possui_mensalidade !== true)
+            .map((s: any) => ({
+              socio_id: String(s.responsavel_id),
+              nome: String(s.nome || ""),
+              cpf: String(s.cpf || ""),
+            }));
+
+          const dependentesMigrados = Array.isArray(dependentesJson.dependentes)
             ? dependentesJson.dependentes
             : [];
-          setTotalDependentes(lista.length);
+
+          const chaveDependente = (d: any) => {
+            const responsavel = String(d?.socio_id || "");
+            const cpf = String(d?.cpf || "").replace(/\D/g, "");
+            const nome = String(d?.nome || "").trim().toLowerCase().replace(/\s+/g, " ");
+            return `${responsavel}|${cpf}|${nome}`;
+          };
+
+          const unicos = new Set<string>();
+          for (const d of [...dependentesMigrados, ...dependentesAntigos]) {
+            unicos.add(chaveDependente(d));
+          }
+          setTotalDependentes(unicos.size);
         }
 
         if (reservasResponse.ok) {
