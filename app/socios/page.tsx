@@ -696,16 +696,23 @@ export default function Home() {
   async function carregarSocios() {
     setCarregando(true);
 
-    const { data, error } = await supabase
-      .from("socios")
-      .select("*")
-      .order("matricula", { ascending: true });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        window.location.replace("/login");
+        return;
+      }
 
-    if (error) {
+      const response = await fetch("/api/socios", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Erro ao carregar os sócios.");
+      setSocios((payload?.socios || []) as Socio[]);
+    } catch (error) {
       console.error(error);
-      setMensagem("Erro ao carregar os sócios.");
-    } else {
-      setSocios(data || []);
+      setMensagem(error instanceof Error ? error.message : "Erro ao carregar os sócios.");
     }
 
     setCarregando(false);
