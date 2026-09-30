@@ -142,19 +142,43 @@ export default function DependentesPage() {
       return;
     }
 
-    const [sociosResponse, dependentesResult] = await Promise.all([
-      fetch("/api/socios", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      }),
-      supabase.from("dependentes")
-        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
-        .order("nome"),
-    ]);
+    const perfilLocal = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+    const perfilAtual =
+      perfilLocal === "funcionario" ? "funcionario" :
+      perfilLocal === "master" ? "administrador_master" :
+      perfilLocal === "admin" || perfilLocal === "administrador" ? "administrador_normal" :
+      perfilLocal;
+
+    const sociosResponse = await fetch("/api/socios", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      cache: "no-store",
+    });
 
     const sociosPayload = await sociosResponse.json().catch(() => ({}));
-    if (!sociosResponse.ok) setErro(`Erro ao carregar sócios: ${sociosPayload?.error || "Não foi possível carregar os sócios."}`);
-    if (dependentesResult.error) setErro(`Erro ao carregar dependentes antigos: ${dependentesResult.error.message}`);
+    if (!sociosResponse.ok) {
+      setErro(`Erro ao carregar sócios: ${sociosPayload?.error || "Não foi possível carregar os sócios."}`);
+    }
+
+    let dependentesPayload: any = null;
+    let dependentesError: string | null = null;
+
+    if (perfilAtual === "administrador_normal" || perfilAtual === "administrador_master") {
+      const respostaDependentes = await fetch("/api/dependentes", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      dependentesPayload = await respostaDependentes.json().catch(() => ({}));
+      if (!respostaDependentes.ok) dependentesError = dependentesPayload?.error || "Não foi possível carregar os dependentes.";
+    } else {
+      const respostaLegado = await supabase
+        .from("dependentes")
+        .select("id, socio_id, nome, cpf, data_nascimento, parentesco, telefone, ativo, created_at, possui_mensalidade, valor_mensalidade, dia_vencimento, tipo_pagamento, situacao_financeira, data_ultimo_pagamento")
+        .order("nome");
+      dependentesPayload = { dependentes: respostaLegado.data || [] };
+      if (respostaLegado.error) dependentesError = respostaLegado.error.message;
+    }
+
+    if (dependentesError) setErro(`Erro ao carregar dependentes: ${dependentesError}`);
 
     const sociosData = (sociosPayload?.socios || []) as any[];
     const sociosMap = new Map(sociosData.map((s) => [String(s.id), s]));
@@ -187,7 +211,7 @@ export default function DependentesPage() {
       dependentesAtuais.map((d) => `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${d.nome.trim().toLowerCase()}`)
     );
 
-    const dependentesLegados: Dependente[] = (dependentesResult.data || [])
+    const dependentesLegados: Dependente[] = (dependentesPayload?.dependentes || [])
       .map((d: any) => ({ ...d, source: "dependentes" as const }))
       .filter((d: any) => {
         // Dependente com mensalidade pertence à guia Sócios.
@@ -374,22 +398,48 @@ export default function DependentesPage() {
       data_ultimo_pagamento: dados.data_ultimo_pagamento,
     };
 
-    let resultado;
+    let erroOperacao = "";
+    const usaApiAdministrativa = perfilUsuario === "administrador_normal" || perfilUsuario === "administrador_master";
+    const sessionAtual = usaApiAdministrativa ? (await supabase.auth.getSession()).data.session : null;
+
     if (editando?.source === "socios" || !editando) {
       if (!socioResponsavel) {
         setErro("Selecione um sócio responsável válido.");
         setSalvando(false);
         return;
       }
-      resultado = editando
-        ? await supabase.from("socios").update(dadosSocio).eq("id", editando.id)
-        : await supabase.from("socios").insert(dadosSocio);
+
+      if (usaApiAdministrativa) {
+        const resposta = await fetch("/api/dependentes", {
+          method: editando ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
+          body: JSON.stringify(editando
+            ? { source: "socios", id: editando.id, data: dadosSocio }
+            : { source: "socios", data: dadosSocio }),
+        });
+        const payload = await resposta.json().catch(() => ({}));
+        if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível salvar o dependente.";
+      } else {
+        const resultado = editando
+          ? await supabase.from("socios").update(dadosSocio).eq("id", editando.id)
+          : await supabase.from("socios").insert(dadosSocio);
+        if (resultado.error) erroOperacao = resultado.error.message;
+      }
+    } else if (usaApiAdministrativa) {
+      const resposta = await fetch("/api/dependentes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
+        body: JSON.stringify({ source: "dependentes", id: editando.id, data: dados }),
+      });
+      const payload = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível salvar o dependente.";
     } else {
-      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+      const resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+      if (resultado.error) erroOperacao = resultado.error.message;
     }
 
-    if (resultado.error) {
-      setErro(`Não foi possível salvar: ${resultado.error.message}`);
+    if (erroOperacao) {
+      setErro(`Não foi possível salvar: ${erroOperacao}`);
       setSalvando(false);
       return;
     }
@@ -408,11 +458,27 @@ export default function DependentesPage() {
     if (somenteConsulta) return;
     if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
     setErro("");
-    const { error } = d.source === "socios"
-      ? await supabase.from("socios").update({ situacao: "inativo" }).eq("id", d.id)
-      : await supabase.from("dependentes").delete().eq("id", d.id);
-    if (error) {
-      setErro(`Não foi possível excluir: ${error.message}`);
+    let erroOperacao = "";
+    const usaApiAdministrativa = perfilUsuario === "administrador_normal" || perfilUsuario === "administrador_master";
+    const sessionAtual = usaApiAdministrativa ? (await supabase.auth.getSession()).data.session : null;
+    if (usaApiAdministrativa) {
+      const resposta = await fetch("/api/dependentes", {
+        method: d.source === "socios" ? "PUT" : "DELETE",
+        headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
+        body: JSON.stringify(d.source === "socios"
+          ? { source: "socios", id: d.id, data: { situacao: "inativo" } }
+          : { source: "dependentes", id: d.id }),
+      });
+      const payload = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível excluir o dependente.";
+    } else {
+      const { error } = d.source === "socios"
+        ? await supabase.from("socios").update({ situacao: "inativo" }).eq("id", d.id)
+        : await supabase.from("dependentes").delete().eq("id", d.id);
+      if (error) erroOperacao = error.message;
+    }
+    if (erroOperacao) {
+      setErro(`Não foi possível excluir: ${erroOperacao}`);
       return;
     }
     setSucesso("Dependente excluído com sucesso.");
@@ -423,11 +489,29 @@ export default function DependentesPage() {
   async function alternarStatus(d: Dependente) {
     if (somenteConsulta) return;
     setErro("");
-    const { error } = d.source === "socios"
-      ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
-      : await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
-    if (error) {
-      setErro(`Não foi possível alterar a situação: ${error.message}`);
+    let erroOperacao = "";
+    const usaApiAdministrativa = perfilUsuario === "administrador_normal" || perfilUsuario === "administrador_master";
+    if (usaApiAdministrativa) {
+      const sessionAtual = (await supabase.auth.getSession()).data.session;
+      const resposta = await fetch("/api/dependentes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(sessionAtual ? { Authorization: `Bearer ${sessionAtual.access_token}` } : {}) },
+        body: JSON.stringify({
+          source: d.source === "socios" ? "socios" : "dependentes",
+          id: d.id,
+          data: d.source === "socios" ? { situacao: d.ativo !== true ? "inativo" : "ativo" } : { ativo: d.ativo !== true },
+        }),
+      });
+      const payload = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) erroOperacao = payload?.error || "Não foi possível alterar a situação.";
+    } else {
+      const { error } = d.source === "socios"
+        ? await supabase.from("socios").update({ situacao: d.ativo !== true ? "inativo" : "ativo" }).eq("id", d.id)
+        : await supabase.from("dependentes").update({ ativo: d.ativo !== true }).eq("id", d.id);
+      if (error) erroOperacao = error.message;
+    }
+    if (erroOperacao) {
+      setErro(`Não foi possível alterar a situação: ${erroOperacao}`);
       return;
     }
     await carregarDados();
