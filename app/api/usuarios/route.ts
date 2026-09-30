@@ -21,7 +21,9 @@ const TODAS_PERMISSOES = [
 
 const DEFAULTS: Record<string, string[]> = {
   administrador: TODAS_PERMISSOES,
-  administrador_master: [],
+  // O Master herda todas as permissões do Administrador e ainda possui
+  // a função exclusiva de gerenciar usuários/perfis.
+  administrador_master: TODAS_PERMISSOES,
   master: [],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
@@ -242,7 +244,7 @@ export async function POST(request: Request) {
 
     const perfilChave = normalizarPerfil(perfil.codigo, perfil.nome);
     const escolhidas = perfilChave === "administrador_master"
-      ? []
+      ? TODAS_PERMISSOES
       : perfilChave === "administrador"
         ? TODAS_PERMISSOES
         : Array.isArray(permissoes)
