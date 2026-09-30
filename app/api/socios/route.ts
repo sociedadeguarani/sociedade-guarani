@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       ? (matricula || await proximaMatriculaSD(auth.supabase))
       : (matricula || null);
 
-    if (ehDependente && possuiMensalidade && !/^SD\d{1,6}A$/i.test(matriculaFinal)) {
+    if (ehDependente && possuiMensalidade && !/^SD\d{1,6}A$/i.test(matriculaFinal || "")) {
       return NextResponse.json({ error: "Dependente com mensalidade própria deve usar matrícula SD....A." }, { status: 400 });
     }
 
