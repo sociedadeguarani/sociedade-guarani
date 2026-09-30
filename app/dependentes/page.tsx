@@ -15,6 +15,7 @@ type Socio = {
 type Dependente = {
   id: string;
   socio_id: string;
+  matricula?: string | null;
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
@@ -117,15 +118,8 @@ export default function DependentesPage() {
     const termo = busca.trim().toLowerCase();
     return dependentes.filter((d) => {
       const socio = socioPorId[d.socio_id];
-      const texto = [
-        d.nome,
-        d.cpf || "",
-        d.parentesco || "",
-        d.telefone || "",
-        socio?.nome || "",
-        socio?.matricula || "",
-        d.matricula || "",
-      ].join(" ").toLowerCase();
+      const texto = [d.nome, d.matricula || "", d.cpf || "", d.parentesco || "", d.telefone || "",
+        socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
       const bateStatus =
@@ -165,11 +159,26 @@ export default function DependentesPage() {
     // A fonte atual dos dependentes é a tabela socios, usando responsavel_id.
     // A tabela dependentes fica apenas como legado para não perder registros
     // que ainda não tenham sido migrados.
+    // Um dependente pode estar na tabela socios de duas formas históricas:
+    // 1) com responsavel_id preenchido; ou
+    // 2) com tipo_socio/categoria identificando dependente, mesmo que o
+    //    responsavel_id esteja ausente. Não podemos perder esses cadastros.
+    const ehCadastroDependente = (s: any) => {
+      const tipo = String(s.tipo_socio || "").trim().toLowerCase();
+      const categoria = String(s.categoria || "").trim().toLowerCase();
+      return Boolean(s.responsavel_id) ||
+        tipo.startsWith("dependente_") ||
+        tipo === "dependente" ||
+        categoria.includes("dependente");
+    };
+
     const dependentesAtuais: Dependente[] = sociosData
-      .filter((s) => s.responsavel_id)
+      .filter(ehCadastroDependente)
+      .filter((s) => !(s.responsavel_id && s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim())))
       .map((s) => ({
         id: String(s.id),
-        socio_id: String(s.responsavel_id),
+        socio_id: s.responsavel_id ? String(s.responsavel_id) : "",
+        matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome,
         cpf: s.cpf ?? null,
         data_nascimento: s.data_nascimento ?? null,
@@ -191,7 +200,7 @@ export default function DependentesPage() {
     );
 
     const dependentesLegados: Dependente[] = (dependentesResult.data || [])
-      .map((d: any) => ({ ...d, source: "dependentes" as const }))
+      .map((d: any) => ({ ...d, matricula: d.matricula ?? null, source: "dependentes" as const }))
       .filter((d: any) => {
         const chave = `${d.socio_id}|${String(d.cpf || "").replace(/\D/g, "")}|${String(d.nome || "").trim().toLowerCase()}`;
         return !chavesAtuais.has(chave);
@@ -508,7 +517,7 @@ export default function DependentesPage() {
                   <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
