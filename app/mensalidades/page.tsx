@@ -162,7 +162,18 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
 
 function statusMensalidade(item: M) {
   if (ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
-  const pagamento = String(item.tipo_pagamento || "").toLowerCase();
+
+  // Para lançamentos ainda não pagos, a forma de cobrança deve refletir
+  // o cadastro atual do associado. Um boleto antigo não pode continuar
+  // aparecendo como "Boleto não pago" depois que o associado mudou para PIX,
+  // débito em conta etc. Para pagamentos concluídos, vale a forma realmente
+  // registrada no lançamento.
+  const pagamento = String(
+    item.situacao === "pago"
+      ? item.tipo_pagamento || ""
+      : item.socio?.tipo_pagamento || item.tipo_pagamento || ""
+  ).toLowerCase().trim();
+
   if (pagamento === "boleto" && item.situacao !== "pago" && item.situacao !== "isento") {
     return ["Boleto não pago", "bg-orange-100 text-orange-700"];
   }
@@ -277,7 +288,7 @@ export default function Page() {
     setAnoHistoricoSocio(ano);
     setTipoBaixaSelecionada("pago");
     setContaRecebimentoSelecionada("");
-    setFormaPagamentoModal(String(item.tipo_pagamento || "pix"));
+    setFormaPagamentoModal(String(item.situacao === "pago" ? (item.tipo_pagamento || "pix") : (item.socio?.tipo_pagamento || item.tipo_pagamento || "pix")));
     await carregarHistoricoSocio(item, ano);
   }
 
@@ -327,11 +338,12 @@ export default function Page() {
 
   function socioElegivelParaGeracao(s: Socio) {
     if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
-    if (s.possui_mensalidade !== true) return false;
-    if (!s.responsavel_id) return true;
+    if (!s.responsavel_id) return s.possui_mensalidade === true;
 
-    // Exceção oficial: dependente com mensalidade própria usa matrícula SD....A.
-    return /^SD\d{4,}A$/i.test(String(s.matricula || ""));
+    // Dependente comum nunca gera mensalidade própria. A exceção é o
+    // dependente pagante, identificado explicitamente por SD....A e
+    // possui_mensalidade=true.
+    return s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim());
   }
 
   const sociosElegiveis = useMemo(
@@ -419,20 +431,7 @@ export default function Page() {
 
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
-    lista.forEach((m) => {
-      // Para cobranças ainda abertas, a forma de pagamento deve acompanhar
-      // o cadastro atual do associado. O tipo gravado na mensalidade pode
-      // ser antigo (por exemplo, boleto), e não deve fazer uma mensalidade
-      // aparecer como "Boleto não pago" quando o associado hoje paga por PIX
-      // ou débito em conta. Depois que a mensalidade é paga, preservamos a
-      // forma efetivamente usada no pagamento.
-      const situacao = String(m.situacao || "").toLowerCase();
-      const tipoAtual = m.socio?.tipo_pagamento || m.tipo_pagamento || null;
-      const tipoEfetivo = situacao === "pago" || situacao === "isento"
-        ? m.tipo_pagamento
-        : tipoAtual;
-      existentes.set(String(m.socio_id), { ...m, tipo_pagamento: tipoEfetivo });
-    });
+    lista.forEach((m) => existentes.set(String(m.socio_id), m));
 
     // Quando a competência ainda não foi gerada, mostramos os associados
     // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
@@ -464,19 +463,14 @@ export default function Page() {
   }, [lista, sociosElegiveis, ano, mes]);
 
   const filtrada = useMemo(() => {
-    const normalizar = (valor: unknown) =>
-      String(valor || "")
-        .toLocaleLowerCase("pt-BR")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, "");
-    const q = normalizar(busca);
+    const q = busca.toLowerCase().trim();
 
     return linhasExibicao.filter((x) => {
-      const textoBusca = normalizar(
+      const bateBusca =
+        !q ||
         `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
-      );
-      const bateBusca = !q || textoBusca.includes(q);
+          .toLowerCase()
+          .includes(q);
 
       // Linhas ainda não geradas não devem desaparecer quando um filtro
       // de banco é aplicado: o banco/tipo de cobrança vem do cadastro do sócio.
