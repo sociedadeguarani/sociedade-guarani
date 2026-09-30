@@ -29,7 +29,13 @@ export async function GET(request: Request) {
     const db = getServiceClient();
     const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-    return NextResponse.json({ socios: data || [] });
+
+    const socios = data || [];
+    if (new URL(request.url).searchParams.get("resumo") === "1") {
+      return NextResponse.json({ total: socios.length });
+    }
+
+    return NextResponse.json({ socios });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
