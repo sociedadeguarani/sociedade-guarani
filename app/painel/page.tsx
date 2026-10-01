@@ -238,25 +238,25 @@ export default function PainelPage() {
             </a>
           </div>
 
-          {(master || admin) && (sociosInativos ?? 0) > 0 && (
+          {(master || admin) && ((sociosInativos ?? 0) > 0 || (reservasPendentes ?? 0) > 0 || (pixPendentes ?? 0) > 0) && (
             <div className="mt-5 rounded-2xl border border-[#f1dfbd] bg-[#fffaf0] p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-black text-[#7b4b0b]">🔔 Atenção</p>
-                  <p className="mt-1 text-sm text-[#8c6a35]">Há itens que podem precisar de ação da administração.</p>
+                  <p className="mt-1 text-sm text-[#8c6a35]">Há itens que podem precisar de ação da administração. Clique em uma pendência para conferir.</p>
                 </div>
-                <a href="/avisos" className="rounded-xl border border-[#d9c18f] bg-white px-4 py-2 text-center text-sm font-bold text-[#7b4b0b]">Ver avisos</a>
+                <a href="/avisos" className="rounded-xl border border-[#d9c18f] bg-white px-4 py-2 text-center text-sm font-bold text-[#7b4b0b]">Conferir pendências</a>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <a href="/reservas?status=pendente" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                <a href="/avisos" className="rounded-xl border border-white bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                   <p className="font-black text-[#173d2e]">📅 Reservas</p>
-                  <p className="mt-1 text-sm text-slate-500">{reservasPendentes === null ? "Carregando..." : `${reservasPendentes} pendente(s)`}</p>
+                  <p className="mt-1 text-sm text-slate-500">{reservasPendentes === null ? "Carregando..." : `${reservasPendentes} pendente(s) — conferir agora`}</p>
                 </a>
-                <a href="/avisos" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                <a href="/avisos" className="rounded-xl border border-white bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                   <p className="font-black text-[#173d2e]">💠 Pagamentos PIX</p>
-                  <p className="mt-1 text-sm text-slate-500">{pixPendentes === null ? "Carregando..." : `${pixPendentes} pendente(s)`}</p>
+                  <p className="mt-1 text-sm text-slate-500">{pixPendentes === null ? "Carregando..." : `${pixPendentes} pendente(s) — conferir agora`}</p>
                 </a>
-                <a href="/socios" className="rounded-xl border border-white bg-white p-4 shadow-sm">
+                <a href="/socios" className="rounded-xl border border-white bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                   <p className="font-black text-[#173d2e]">⚠️ Cadastro</p>
                   <p className="mt-1 text-sm text-slate-500">{sociosInativos ?? "—"} sócio(s) inativo(s)</p>
                 </a>
