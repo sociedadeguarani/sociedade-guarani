@@ -477,18 +477,6 @@ export default function ReservasPage() {
           alert("O comprovante deve ter no máximo 8 MB.");
           return;
         }
-
-        const extensao = arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `reservas/${crypto.randomUUID()}.${extensao}`;
-        const upload = await supabase.storage
-          .from("comprovantes-financeiro")
-          .upload(caminho, arquivoComprovante, {
-            upsert: false,
-            contentType: arquivoComprovante.type,
-          });
-
-        if (upload.error) throw upload.error;
-        comprovanteUrl = caminho;
       }
 
       if (valor > 0 && formaPagamentoReserva === "pix" && !pix?.copia_e_cola) {
@@ -543,6 +531,27 @@ export default function ReservasPage() {
         const resultado = await resposta.json().catch(() => ({}));
         if (!resposta.ok) throw new Error(resultado.error || "Não foi possível gravar a reserva no banco.");
         if (resultado.reserva?.id) novaReserva.id = String(resultado.reserva.id);
+
+        if (arquivoComprovante && novaReserva.id) {
+          const form = new FormData();
+          form.append("origem_tipo", "reserva");
+          form.append("origem_id", novaReserva.id);
+          form.append("arquivo", arquivoComprovante);
+
+          const uploadResposta = await fetch("/api/reservas/comprovante", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${tokenReserva}` },
+            body: form,
+          });
+          const uploadResultado = await uploadResposta.json().catch(() => ({}));
+          if (!uploadResposta.ok) {
+            console.warn("Reserva criada, mas o comprovante não foi enviado:", uploadResultado?.error);
+            alert(`Reserva criada, mas não foi possível anexar o comprovante. ${uploadResultado?.error || "Tente anexá-lo novamente na reserva."}`);
+          } else {
+            comprovanteUrl = uploadResultado?.url || null;
+            novaReserva.comprovante_url = comprovanteUrl;
+          }
+        }
       }
 
       if (editandoReservaId) {
