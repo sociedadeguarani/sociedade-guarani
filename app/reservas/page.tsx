@@ -187,7 +187,7 @@ export default function ReservasPage() {
       void (async () => {
         try {
           const sessaoMembros = await supabase.auth.getSession();
-          const tokenMembros = sessaoMembros.session?.access_token || "";
+          const tokenMembros = sessaoMembros.data.session?.access_token || "";
           const sociosResponse = await fetch("/api/socios", {
             headers: { Authorization: `Bearer ${tokenMembros}` },
             cache: "no-store",
