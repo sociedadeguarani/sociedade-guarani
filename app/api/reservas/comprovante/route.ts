@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
   const { data: r, error: e } = await db
     .from("reservas")
-    .select("id,nome,valor,socio_id")
+    .select("id,responsavel_nome,valor,socio_id")
     .eq("id", id)
     .single();
 
@@ -55,7 +55,9 @@ export async function POST(request: Request) {
     .from("reservas")
     .update({
       comprovante_url: caminho,
-      comprovante_nome: arquivo.name,
+      comprovante_enviado_em: new Date().toISOString(),
+      comprovante_status: "pendente",
+      motivo_recusa: null,
     })
     .eq("id", id)
     .select("*")
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
   const n = await db.from("notificacoes_admin").insert({
     tipo: "comprovante_pagamento",
     titulo: "Novo comprovante de reserva aguardando aprovação",
-    mensagem: `Reserva de ${r.nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
+    mensagem: `Reserva de ${r.responsavel_nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
     origem_tipo: "reserva",
     origem_id: id,
     lida: false,
