@@ -278,7 +278,7 @@ export default function ReservasPage() {
               parentesco: d.parentesco ?? null,
               ativo: d.ativo !== false,
             }))
-            .filter((d) => {
+            .filter((d: DependenteReserva) => {
               const chave = `${d.socio_id}|${String(d.matricula || "").toUpperCase()}|${d.nome.trim().toLowerCase()}`;
               return !chavesAtuais.has(chave);
             });
