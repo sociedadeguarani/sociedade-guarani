@@ -9,6 +9,25 @@ function erroBanco(error: any) {
     .join(" — ");
 }
 
+const ESPACOS_UUID: Record<string, string> = {
+  fut: "10000000-0000-4000-8000-000000000001",
+  volei: "10000000-0000-4000-8000-000000000002",
+  areia: "10000000-0000-4000-8000-000000000003",
+  q48: "10000000-0000-4000-8000-000000000004",
+  q1: "10000000-0000-4000-8000-000000000005",
+  q2: "10000000-0000-4000-8000-000000000006",
+  q3: "10000000-0000-4000-8000-000000000007",
+  salao_p: "10000000-0000-4000-8000-000000000008",
+  salao_g: "10000000-0000-4000-8000-000000000009",
+  ctg: "10000000-0000-4000-8000-000000000010",
+};
+
+function normalizarEspacoId(valor: string) {
+  const v = valor.trim();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)) return v;
+  return ESPACOS_UUID[v] || null;
+}
+
 async function assinaturaComprovante(db: any, path: string | null) {
   if (!path) return null;
   const { data } = await db.storage
@@ -18,7 +37,7 @@ async function assinaturaComprovante(db: any, path: string | null) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireRoles(request, ["funcionario", "administrador", "administrador_master"]);
+  const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
   if ("response" in auth) return auth.response;
 
   try {
@@ -59,14 +78,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireRoles(request, ["funcionario", "administrador", "administrador_master"]);
+  const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
   if ("response" in auth) return auth.response;
 
   try {
     const body = await request.json();
     const db = getServiceClient();
 
-    const espacoId = String(body.espaco_id || "").trim();
+    const espacoIdInformado = String(body.espaco_id || "").trim();
+    const espacoId = normalizarEspacoId(espacoIdInformado);
     const espacoNome = String(body.espaco_nome || "").trim();
     const data = String(body.data || "").trim();
     const horario = String(body.horario || "").trim();
