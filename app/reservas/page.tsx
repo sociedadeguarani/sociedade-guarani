@@ -795,7 +795,9 @@ export default function ReservasPage() {
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <div><b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span></div>
-                                    <span className="text-xs font-extrabold text-[#005a3c]">Titular</span>
+                                    <span className="text-xs font-extrabold text-[#005a3c]">
+                                      {s.responsavel_id ? "Responsável pagante" : "Titular"}
+                                    </span>
                                   </div>
                                 </button>
 
