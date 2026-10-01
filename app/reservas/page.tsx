@@ -212,17 +212,26 @@ export default function ReservasPage() {
           if (!resposta.ok) throw new Error(payload?.error || "Não foi possível carregar os membros.");
 
           const todos = Array.isArray(payload?.socios) ? payload.socios : [];
+          // Para Reservas, além dos titulares normais, um dependente pagante
+          // com matrícula SD....A também pode ser o responsável da própria
+          // família. Ele continua sendo dependente do pai/mãe no cadastro,
+          // mas precisa aparecer como pessoa pesquisável na Reserva.
           const titulares: SocioReserva[] = todos
-            .filter((s: any) => !s.responsavel_id)
+            .filter((s: any) => {
+              if (!s.responsavel_id) return true;
+              const matricula = String(s.matricula ?? "").trim().toUpperCase();
+              return /^SD\d+A$/.test(matricula);
+            })
             .map((s: any) => ({
               id: String(s.id),
               matricula: s.matricula ?? null,
               nome: String(s.nome || ""),
               cpf: s.cpf ?? null,
-              responsavel_id: null,
+              responsavel_id: s.responsavel_id ?? null,
               parentesco: s.parentesco ?? null,
               situacao: s.situacao ?? null,
-            }));
+            }))
+            .filter((s: SocioReserva) => String(s.situacao || "").toLowerCase() !== "inativo");
 
           const dependentesAtuais: DependenteReserva[] = todos
             .filter((s: any) => s.responsavel_id && String(s.situacao || "").toLowerCase() !== "inativo")
@@ -564,18 +573,31 @@ export default function ReservasPage() {
   const sociosFiltrados = useMemo(() => {
     const termo = buscaSocio.trim().toLowerCase();
 
-    // Mostra titulares e também localiza a família quando a busca
-    // for feita pelo nome/matrícula de um dependente.
+    // Primeiro mostra quem realmente corresponde à busca. Isso evita o erro
+    // em que pesquisar o nome de um dependente pagante (ex.: Mateus Felipe)
+    // abria o pai como responsável da reserva.
+    const correspondenciasDiretas = socios.filter((socio) => {
+      const texto = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
+      return !termo || texto.includes(termo);
+    });
+
+    if (!termo) return correspondenciasDiretas.slice(0, 20);
+    if (correspondenciasDiretas.length > 0) {
+      return correspondenciasDiretas
+        .sort((a, b) => {
+          const an = String(a.nome).toLowerCase();
+          const bn = String(b.nome).toLowerCase();
+          const ae = an === termo ? 0 : an.startsWith(termo) ? 1 : 2;
+          const be = bn === termo ? 0 : bn.startsWith(termo) ? 1 : 2;
+          return ae - be || an.localeCompare(bn, "pt-BR");
+        })
+        .slice(0, 20);
+    }
+
+    // Se a busca for por um dependente comum (que não pode ser responsável),
+    // localiza o responsável da família para permitir a reserva.
     const titularesRelacionados = new Map<string, typeof socios[number]>();
-
     for (const socio of socios) {
-      const textoTitular = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
-
-      if (!termo || textoTitular.includes(termo)) {
-        titularesRelacionados.set(String(socio.id), socio);
-        continue;
-      }
-
       const matriculaTitular = String(socio.matricula ?? "").trim().toUpperCase();
       const baseFamiliar = matriculaTitular.endsWith("A")
         ? matriculaTitular.slice(0, -1)
@@ -586,16 +608,11 @@ export default function ReservasPage() {
         const matriculaDependente = String(d.matricula ?? "").trim().toUpperCase();
         const pertenceFamilia =
           String(d.socio_id) === String(socio.id) ||
-          (!!baseFamiliar &&
-            matriculaDependente.startsWith(baseFamiliar) &&
-            matriculaDependente !== matriculaTitular);
-
+          (!!baseFamiliar && matriculaDependente.startsWith(baseFamiliar) && matriculaDependente !== matriculaTitular);
         return pertenceFamilia && textoDependente.includes(termo);
       });
 
-      if (temDependenteEncontrado) {
-        titularesRelacionados.set(String(socio.id), socio);
-      }
+      if (temDependenteEncontrado) titularesRelacionados.set(String(socio.id), socio);
     }
 
     return Array.from(titularesRelacionados.values()).slice(0, 20);
