@@ -85,10 +85,11 @@ export default function PainelPage() {
         if (sociosResponse.ok) {
           const todosSocios = Array.isArray(sociosJson.socios) ? sociosJson.socios : [];
 
-          // A tela Sócios considera como Sócio: titular + pessoa com
-          // mensalidade própria. Dependente familiar comum não entra aqui.
+          // A tela /socios usa exatamente esta regra: entram somente
+          // os cadastros com mensalidade própria. Dependentes familiares
+          // comuns não entram na contagem de Sócios.
           const sociosOficiais = todosSocios.filter((s: any) =>
-            !s?.responsavel_id || s?.possui_mensalidade === true
+            s?.possui_mensalidade === true
           );
 
           setTotalSocios(sociosOficiais.length);
