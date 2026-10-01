@@ -162,7 +162,7 @@ export default function ReservasPage() {
             if (reservasDb.length) {
               const convertidas: Reserva[] = reservasDb.map((r: any) => ({
                 id: String(r.id),
-                espacoId: String(r.espaco_id),
+                espacoId: espacos.find((e) => e.nome === String(r.espaco_nome || ""))?.id || String(r.espaco_id),
                 data: String(r.data),
                 horario: String(r.horario),
                 nome: String(r.nome),
