@@ -48,16 +48,6 @@ type DependenteReserva = {
   ativo: boolean;
 };
 
-type SocioReserva = {
-  id: string;
-  matricula: number | string | null;
-  nome: string;
-  cpf: string | null;
-  responsavel_id?: string | null;
-  parentesco?: string | null;
-  situacao?: string | null;
-};
-
 type ContaBancaria = { id:string; nome:string; banco:string|null; ativo:boolean };
 
 type Reserva = {
@@ -124,7 +114,7 @@ export default function ReservasPage() {
   const [socioId, setSocioId] = useState("");
   const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
   const [dependenteId, setDependenteId] = useState("");
-  const [socios, setSocios] = useState<SocioReserva[]>([]);
+  const [socios, setSocios] = useState<Array<{ id: string; matricula: number | null; nome: string; cpf: string | null }>>([]);
   const [dependentes, setDependentes] = useState<DependenteReserva[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [buscaSocio, setBuscaSocio] = useState("");
@@ -196,95 +186,14 @@ export default function ReservasPage() {
 
       void (async () => {
         try {
-          // Reservas usa as APIs protegidas para que Funcionário, Administrador
-          // e Administrador Master recebam exatamente a mesma base de pessoas.
-          // /api/dependentes/migrar (GET) também devolve os dependentes legados
-          // que ainda estejam na tabela antiga, sem criar nenhuma rota nova.
-          const [{ data: sessaoMembros }, { data: sessaoDependentes }] = await Promise.all([
-            supabase.auth.getSession(),
-            supabase.auth.getSession(),
+          const [sociosResult, dependentesResult] = await Promise.all([
+            supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
+            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").order("nome", { ascending: true }),
           ]);
-          const tokenMembros = sessaoMembros.session?.access_token || sessaoDependentes.session?.access_token || "";
-          if (!tokenMembros) throw new Error("Sessão não encontrada.");
-
-          const [respostaSocios, respostaDependentes] = await Promise.all([
-            fetch("/api/socios", {
-              headers: { Authorization: `Bearer ${tokenMembros}` },
-              cache: "no-store",
-            }),
-            fetch("/api/dependentes/migrar", {
-              headers: { Authorization: `Bearer ${tokenMembros}` },
-              cache: "no-store",
-            }),
-          ]);
-
-          const [payloadSocios, payloadDependentes] = await Promise.all([
-            respostaSocios.json().catch(() => ({})),
-            respostaDependentes.json().catch(() => ({})),
-          ]);
-
-          if (!respostaSocios.ok) throw new Error(payloadSocios?.error || "Não foi possível carregar os sócios.");
-          if (!respostaDependentes.ok) throw new Error(payloadDependentes?.error || "Não foi possível carregar os dependentes.");
-
-          const todos = Array.isArray(payloadSocios?.socios) ? payloadSocios.socios : [];
-          const legados = Array.isArray(payloadDependentes?.dependentes) ? payloadDependentes.dependentes : [];
-
-          // Pessoa que pode iniciar uma reserva: titular normal ou dependente
-          // pagante SD....A. O SD....A continua ligado ao seu responsável no
-          // cadastro, mas para Reservas ele também pode ser responsável por
-          // sua própria família.
-          const responsaveis: SocioReserva[] = todos
-            .filter((s: any) => {
-              if (!s.responsavel_id) return true;
-              const matricula = String(s.matricula ?? "").trim().toUpperCase();
-              return /^SD\d+A$/.test(matricula);
-            })
-            .map((s: any) => ({
-              id: String(s.id),
-              matricula: s.matricula ?? null,
-              nome: String(s.nome || ""),
-              cpf: s.cpf ?? null,
-              responsavel_id: s.responsavel_id ?? null,
-              parentesco: s.parentesco ?? null,
-              situacao: s.situacao ?? null,
-            }))
-            .filter((s: SocioReserva) => String(s.situacao || "").toLowerCase() !== "inativo");
-
-          // Fonte atual: socios.responsavel_id.
-          const dependentesAtuais: DependenteReserva[] = todos
-            .filter((s: any) => s.responsavel_id && String(s.situacao || "").toLowerCase() !== "inativo")
-            .map((s: any) => ({
-              id: String(s.id),
-              socio_id: String(s.responsavel_id),
-              matricula: s.matricula == null ? null : String(s.matricula),
-              nome: String(s.nome || ""),
-              parentesco: s.parentesco ?? null,
-              ativo: true,
-            }));
-
-          // Fonte legada: dependentes.socio_id. Mantemos estes registros na
-          // Reserva até que todos estejam migrados, como já faz a tela
-          // Dependentes. Deduplica contra a fonte atual por ID/CPF/nome.
-          const chavesAtuais = new Set(
-            dependentesAtuais.map((d) => `${d.socio_id}|${String(d.matricula || "").toUpperCase()}|${d.nome.trim().toLowerCase()}`)
-          );
-          const dependentesLegados: DependenteReserva[] = legados
-            .filter((d: any) => d.ativo !== false)
-            .map((d: any) => ({
-              id: String(d.id),
-              socio_id: String(d.socio_id),
-              matricula: d.matricula == null ? null : String(d.matricula),
-              nome: String(d.nome || ""),
-              parentesco: d.parentesco ?? null,
-              ativo: d.ativo !== false,
-            }))
-            .filter((d: DependenteReserva) => {
-              const chave = `${d.socio_id}|${String(d.matricula || "").toUpperCase()}|${d.nome.trim().toLowerCase()}`;
-              return !chavesAtuais.has(chave);
-            });
-
-          setSocios(responsaveis);
-          setDependentes([...dependentesAtuais, ...dependentesLegados]);
+          if (sociosResult.error) throw sociosResult.error;
+          if (dependentesResult.error) throw dependentesResult.error;
+          setSocios(sociosResult.data || []);
+          setDependentes((dependentesResult.data || []).filter((d: DependenteReserva) => d.ativo !== false) as DependenteReserva[]);
         } catch (error) {
           console.error("Erro ao carregar titulares/dependentes para reservas:", error);
           setSocios([]);
@@ -533,25 +442,31 @@ export default function ReservasPage() {
         if (resultado.reserva?.id) novaReserva.id = String(resultado.reserva.id);
 
         if (arquivoComprovante && novaReserva.id) {
-          const form = new FormData();
-          form.append("origem_tipo", "reserva");
-          form.append("origem_id", novaReserva.id);
-          form.append("arquivo", arquivoComprovante);
+          const { data: sessaoComprovante } = await supabase.auth.getSession();
+          const tokenComprovante = sessaoComprovante.session?.access_token || "";
+          const formComprovante = new FormData();
+          formComprovante.append("origem_tipo", "reserva");
+          formComprovante.append("origem_id", novaReserva.id);
+          formComprovante.append("arquivo", arquivoComprovante);
 
-          const uploadResposta = await fetch("/api/reservas/comprovante", {
+          const envio = await fetch("/api/reservas/comprovante", {
             method: "POST",
-            headers: { Authorization: `Bearer ${tokenReserva}` },
-            body: form,
+            headers: { Authorization: `Bearer ${tokenComprovante}` },
+            body: formComprovante,
           });
-          const uploadResultado = await uploadResposta.json().catch(() => ({}));
-          if (!uploadResposta.ok) {
-            console.warn("Reserva criada, mas o comprovante não foi enviado:", uploadResultado?.error);
-            alert(`Reserva criada, mas não foi possível anexar o comprovante. ${uploadResultado?.error || "Tente anexá-lo novamente na reserva."}`);
-          } else {
-            comprovanteUrl = uploadResultado?.url || null;
-            novaReserva.comprovante_url = comprovanteUrl;
-          }
+          const resultadoComprovante = await envio.json().catch(() => ({}));
+          if (!envio.ok) throw new Error(resultadoComprovante.error || "Não foi possível enviar o comprovante.");
+          comprovanteUrl = resultadoComprovante.url || null;
+          novaReserva.comprovante_url = comprovanteUrl;
         }
+      } else if (arquivoComprovante) {
+        // No modo público a reserva não passa pelo endpoint autenticado.
+        // O comprovante fica sem upload automático para não abrir o Storage publicamente.
+        comprovanteUrl = null;
+      }
+
+      if (editandoReservaId && arquivoComprovante && publico) {
+        throw new Error("O envio de comprovante está disponível somente com sessão autenticada.");
       }
 
       if (editandoReservaId) {
@@ -586,7 +501,8 @@ export default function ReservasPage() {
         : "Reserva registrada com sucesso.");
     } catch (error) {
       console.error(error);
-      alert("Não foi possível enviar o comprovante. Você pode confirmar a reserva sem anexar o arquivo.");
+      const detalhe = error instanceof Error ? error.message : "Erro desconhecido.";
+      alert(`Não foi possível concluir a reserva/comprovante: ${detalhe}`);
     } finally {
       setEnviandoComprovante(false);
     }
@@ -602,6 +518,10 @@ export default function ReservasPage() {
 
   async function abrirComprovante(path: string | null | undefined) {
     if (!path) return;
+    if (/^https?:\/\//i.test(path)) {
+      window.open(path, "_blank");
+      return;
+    }
     const { data, error } = await supabase.storage
       .from("comprovantes-financeiro")
       .createSignedUrl(path, 60 * 10);
@@ -620,49 +540,71 @@ export default function ReservasPage() {
 
   const sociosFiltrados = useMemo(() => {
     const termo = buscaSocio.trim().toLowerCase();
-    if (!termo) return socios.slice(0, 20);
 
-    // Primeiro localiza a própria pessoa pesquisada. Isso é importante para
-    // dependentes pagantes SD....A: ao procurar Fabiana, Mateus etc., a pessoa
-    // correta aparece como responsável pesquisável, sem ser trocada pelo pai.
-    const diretos = socios
-      .filter((socio) => {
-        const texto = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
-        return texto.includes(termo);
-      })
-      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    // Mostra titulares e também localiza a família quando a busca
+    // for feita pelo nome/matrícula de um dependente.
+    const titularesRelacionados = new Map<string, typeof socios[number]>();
 
-    if (diretos.length) return diretos.slice(0, 20);
+    for (const socio of socios) {
+      const textoTitular = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
 
-    // Se a busca for por um dependente comum, retorna o responsável real pelo
-    // vínculo socio_id/responsavel_id, sem inferir a família pela matrícula.
-    const relacionados = new Map<string, SocioReserva>();
-    for (const d of dependentes) {
-      const texto = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
-      if (!texto.includes(termo)) continue;
-      const responsavel = socios.find((s) => String(s.id) === String(d.socio_id));
-      if (responsavel) relacionados.set(String(responsavel.id), responsavel);
+      if (!termo || textoTitular.includes(termo)) {
+        titularesRelacionados.set(String(socio.id), socio);
+        continue;
+      }
+
+      const matriculaTitular = String(socio.matricula ?? "").trim().toUpperCase();
+      const baseFamiliar = matriculaTitular.endsWith("A")
+        ? matriculaTitular.slice(0, -1)
+        : matriculaTitular;
+
+      const temDependenteEncontrado = dependentes.some((d) => {
+        const textoDependente = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
+        const matriculaDependente = String(d.matricula ?? "").trim().toUpperCase();
+        const pertenceFamilia =
+          String(d.socio_id) === String(socio.id) ||
+          (!!baseFamiliar &&
+            matriculaDependente.startsWith(baseFamiliar) &&
+            matriculaDependente !== matriculaTitular);
+
+        return pertenceFamilia && textoDependente.includes(termo);
+      });
+
+      if (temDependenteEncontrado) {
+        titularesRelacionados.set(String(socio.id), socio);
+      }
     }
 
-    return Array.from(relacionados.values()).slice(0, 20);
+    return Array.from(titularesRelacionados.values()).slice(0, 20);
   }, [socios, dependentes, buscaSocio]);
 
   const dependentesDoSocio = useMemo(() => {
     if (!socioId) return [];
 
-    // A família é definida pelo vínculo real do banco: dependentes.socio_id
-    // ou socios.responsavel_id já normalizado para a lista acima. Não usamos
-    // prefixo de matrícula para evitar misturar famílias diferentes.
-    return dependentes
-      .filter((d) => String(d.socio_id) === String(socioId) && d.ativo !== false)
-      .sort((a, b) =>
-        String(a.matricula ?? a.nome).localeCompare(
-          String(b.matricula ?? b.nome),
-          "pt-BR",
-          { numeric: true }
-        )
-      );
-  }, [dependentes, socioId]);
+    const titular = socios.find((s) => String(s.id) === String(socioId));
+    const matricula = String(titular?.matricula ?? "").trim().toUpperCase();
+    const baseFamiliar = matricula.endsWith("A") ? matricula.slice(0, -1) : matricula;
+
+    // Primeiro usa o vínculo direto pelo socio_id.
+    const diretos = dependentes.filter((d) => String(d.socio_id) === String(socioId));
+
+    // Fallback importante: as matrículas familiares seguem A/B/C/D...
+    // Assim, mesmo que algum vínculo antigo esteja diferente, SD0056B/C/D
+    // continua aparecendo para o titular SD0056A.
+    const porMatricula = baseFamiliar
+      ? dependentes.filter((d) => {
+          const m = String(d.matricula ?? "").trim().toUpperCase();
+          return m.startsWith(baseFamiliar) && m !== matricula && /[A-Z]$/.test(m);
+        })
+      : [];
+
+    const unicos = new Map<string, DependenteReserva>();
+    [...diretos, ...porMatricula].forEach((d) => unicos.set(String(d.id), d));
+
+    return Array.from(unicos.values()).sort((a, b) =>
+      String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true })
+    );
+  }, [dependentes, socios, socioId]);
 
   function selecionarDependente(id: string) {
     setDependenteId(id);
@@ -792,9 +734,17 @@ export default function ReservasPage() {
                       {buscaSocio && !socioId && (
                         <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">
                           {sociosFiltrados.length ? sociosFiltrados.map((s) => {
-                            const familia = dependentes
-                              .filter((d) => String(d.socio_id) === String(s.id) && d.ativo !== false)
-                              .sort((a, b) => String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true }));
+                            const titularMatricula = String(s.matricula ?? "").trim().toUpperCase();
+                            const baseFamiliar = titularMatricula.endsWith("A") ? titularMatricula.slice(0, -1) : titularMatricula;
+                            const familia = dependentes.filter((d) => {
+                              const m = String(d.matricula ?? "").trim().toUpperCase();
+                              const direto = String(d.socio_id) === String(s.id);
+                              const porMatricula = !!baseFamiliar && m.startsWith(baseFamiliar) && m !== titularMatricula && /[A-Z]$/.test(m);
+                              return direto || porMatricula;
+                            }).reduce<DependenteReserva[]>((lista, d) => {
+                              if (!lista.some((x) => String(x.id) === String(d.id))) lista.push(d);
+                              return lista;
+                            }, []).sort((a, b) => String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true }));
 
                             return (
                               <div key={s.id} className="border-b last:border-b-0">
@@ -805,9 +755,7 @@ export default function ReservasPage() {
                                 >
                                   <div className="flex items-center justify-between gap-3">
                                     <div><b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span></div>
-                                    <span className="text-xs font-extrabold text-[#005a3c]">
-                                      {s.responsavel_id ? "Responsável pagante" : "Titular"}
-                                    </span>
+                                    <span className="text-xs font-extrabold text-[#005a3c]">Titular</span>
                                   </div>
                                 </button>
 
