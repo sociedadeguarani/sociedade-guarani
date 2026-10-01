@@ -177,50 +177,92 @@ export default function ReservasPage() {
 
           const reservasDb = Array.isArray(resultado.reservas) ? resultado.reservas : [];
           const contasDb = Array.isArray(resultado.contas_bancarias) ? resultado.contas_bancarias : [];
-          const espacosDb = Array.isArray(resultado.espacos) ? resultado.espacos : [];
-          const sociosDb = Array.isArray(resultado.socios) ? resultado.socios : [];
-          const dependentesDb = Array.isArray(resultado.dependentes) ? resultado.dependentes : [];
 
           setContasBancarias(contasDb);
 
-          // Substitui SOMENTE o id local pelo UUID que realmente existe no banco.
-          // Nome, preço e regras continuam vindo da configuração da tela.
-          if (espacosDb.length) {
-            const porNome = new Map<string, any>();
-            for (const item of espacosDb) porNome.set(normalizarTexto(item.nome), item);
-            setEspacos((atuais) =>
-              atuais.map((e) => {
-                const real = porNome.get(normalizarTexto(e.nome));
-                return real?.id ? { ...e, id: String(real.id) } : e;
-              }),
-            );
+          // A lista de pessoas da Reserva deve usar a mesma fonte autenticada
+          // para todos os perfis. /api/socios usa Service Role no servidor e
+          // devolve todos os registros, inclusive SD....A pagantes.
+          const token = sessaoReservas.session?.access_token || "";
+          const [sociosResponse, carteirinhasResponse] = await Promise.all([
+            fetch("/api/socios", {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            }),
+            fetch("/api/carteirinhas", {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            }),
+          ]);
+
+          const sociosPayload = await sociosResponse.json().catch(() => ({}));
+          if (!sociosResponse.ok) {
+            throw new Error(sociosPayload?.error || "Não foi possível carregar os sócios.");
           }
 
+          const sociosDb = Array.isArray(sociosPayload?.socios) ? sociosPayload.socios : [];
+          const carteirinhasPayload = await carteirinhasResponse.json().catch(() => ({}));
+          const dependentesLegados = Array.isArray(carteirinhasPayload?.dependentes)
+            ? carteirinhasPayload.dependentes
+            : [];
+
+          // Todos os socios são mantidos na lista de responsáveis, inclusive
+          // quem tem responsavel_id histórico. Isso é indispensável para
+          // SD....A: ele possui mensalidade própria e é responsável da própria família.
           setSocios(
-            sociosDb.map((s: any) => ({
-              id: String(s.id),
-              matricula: s.matricula ?? null,
-              nome: String(s.nome || ""),
-              cpf: s.cpf ?? null,
-              responsavel_id: s.responsavel_id ?? null,
-              parentesco: s.parentesco ?? null,
-              situacao: s.situacao ?? null,
-            })),
+            sociosDb
+              .filter((s: any) => {
+                const matricula = String(s.matricula ?? "").trim().toUpperCase();
+                // Responsáveis da Reserva: titulares normais (sem responsável)
+                // e SD....A, que possui mensalidade própria e responde pela
+                // própria família mesmo quando possui responsavel_id histórico.
+                return !s.responsavel_id || /^SD\d+A$/.test(matricula);
+              })
+              .map((s: any) => ({
+                id: String(s.id),
+                matricula: s.matricula ?? null,
+                nome: String(s.nome || ""),
+                cpf: s.cpf ?? null,
+                responsavel_id: s.responsavel_id ?? null,
+                parentesco: s.parentesco ?? null,
+                situacao: s.situacao ?? null,
+              })),
           );
-          // A API já unifica a tabela legada `dependentes` com os registros
-          // de `socios` que possuem responsavel_id. Mantemos aqui somente a
-          // normalização para que Funcionário, Administrador e Master recebam
-          // exatamente a mesma lista.
-          setDependentes(
-            dependentesDb.map((d: any) => ({
+
+          // Dependentes comuns podem estar na tabela socios (vínculo atual)
+          // ou na tabela legada dependentes. SD....A pagante NUNCA entra aqui:
+          // ele permanece em Sócios e seus próprios dependentes serão ligados
+          // a ele pelo responsavel_id/matrícula.
+          const dependentesPorId = new Map<string, DependenteReserva>();
+          for (const s of sociosDb) {
+            const matricula = String(s.matricula ?? "").trim().toUpperCase();
+            if (!s.responsavel_id || /^SD\d+A$/.test(matricula)) continue;
+            if (String(s.situacao || "").toLowerCase() === "inativo") continue;
+            dependentesPorId.set(String(s.id), {
+              id: String(s.id),
+              socio_id: String(s.responsavel_id),
+              matricula: s.matricula == null ? null : String(s.matricula),
+              nome: String(s.nome || ""),
+              parentesco: s.parentesco ?? null,
+              ativo: true,
+            });
+          }
+
+          for (const d of dependentesLegados) {
+            const matricula = String(d.matricula ?? "").trim().toUpperCase();
+            if (/^SD\d+A$/.test(matricula)) continue;
+            if (d.ativo === false) continue;
+            dependentesPorId.set(String(d.id), {
               id: String(d.id),
               socio_id: String(d.socio_id),
               matricula: d.matricula == null ? null : String(d.matricula),
               nome: String(d.nome || ""),
               parentesco: d.parentesco ?? null,
-              ativo: d.ativo !== false,
-            })),
-          );
+              ativo: true,
+            });
+          }
+
+          setDependentes(Array.from(dependentesPorId.values()));
 
           // Sempre sincroniza com o banco, inclusive quando ele estiver vazio.
           // Isso evita mostrar reservas antigas do localStorage como se fossem atuais.
