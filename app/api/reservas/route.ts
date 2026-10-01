@@ -9,23 +9,49 @@ function erroBanco(error: any) {
     .join(" — ");
 }
 
-const ESPACOS_UUID: Record<string, string> = {
-  fut: "10000000-0000-4000-8000-000000000001",
-  volei: "10000000-0000-4000-8000-000000000002",
-  areia: "10000000-0000-4000-8000-000000000003",
-  q48: "10000000-0000-4000-8000-000000000004",
-  q1: "10000000-0000-4000-8000-000000000005",
-  q2: "10000000-0000-4000-8000-000000000006",
-  q3: "10000000-0000-4000-8000-000000000007",
-  salao_p: "10000000-0000-4000-8000-000000000008",
-  salao_g: "10000000-0000-4000-8000-000000000009",
-  ctg: "10000000-0000-4000-8000-000000000010",
-};
+function ehUuid(valor: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(valor.trim());
+}
 
-function normalizarEspacoId(valor: string) {
-  const v = valor.trim();
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)) return v;
-  return ESPACOS_UUID[v] || null;
+function normalizarTexto(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+async function resolverEspacoId(db: any, valorInformado: string, nomeInformado: string) {
+  const valor = valorInformado.trim();
+  const nome = nomeInformado.trim();
+
+  // Se a tela já enviou um UUID, ele só é aceito se realmente existir
+  // na tabela espacos. Nunca criamos um UUID fictício.
+  if (ehUuid(valor)) {
+    const { data, error } = await db.from("espacos").select("id,nome").eq("id", valor).maybeSingle();
+    if (error) throw error;
+    if (data?.id) return { id: String(data.id), nome: String(data.nome || nome) };
+  }
+
+  // A tela usa códigos como "salao_p". Eles não são IDs do banco.
+  // Resolva pelo nome cadastrado em espacos e use o UUID real encontrado lá.
+  const { data: porNome, error: erroNome } = await db
+    .from("espacos")
+    .select("id,nome")
+    .eq("nome", nome)
+    .limit(1)
+    .maybeSingle();
+  if (erroNome) throw erroNome;
+  if (porNome?.id) return { id: String(porNome.id), nome: String(porNome.nome || nome) };
+
+  // Tolerância para acentos/maiúsculas diferentes no cadastro do espaço.
+  const { data: todos, error: erroTodos } = await db.from("espacos").select("id,nome");
+  if (erroTodos) throw erroTodos;
+  const alvo = normalizarTexto(nome);
+  const encontrado = (todos || []).find((item: any) => normalizarTexto(item.nome) === alvo);
+  if (encontrado?.id) return { id: String(encontrado.id), nome: String(encontrado.nome || nome) };
+
+  throw new Error(`O espaço "${nome}" não foi encontrado na tabela de espaços. Nenhum ID foi criado automaticamente.`);
 }
 
 function dividirHorario(horario: string) {
@@ -114,7 +140,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const db = getServiceClient();
 
-    const espacoId = normalizarEspacoId(String(body.espaco_id || ""));
+    const espacoInformado = String(body.espaco_id || "").trim();
     const espacoNome = String(body.espaco_nome || "").trim();
     const data = String(body.data || "").trim();
     const horario = String(body.horario || "").trim();
@@ -123,9 +149,12 @@ export async function POST(request: Request) {
     const status = String(body.status || "").trim() || (pagamento === "pix" ? "pendente" : "confirmada");
     const valor = Number(body.valor || 0);
 
-    if (!espacoId || !espacoNome || !data || !horario || !nome) {
+    if (!espacoInformado || !espacoNome || !data || !horario || !nome) {
       return NextResponse.json({ error: "Espaço, data, horário e nome são obrigatórios." }, { status: 400 });
     }
+
+    const espacoResolvido = await resolverEspacoId(db, espacoInformado, espacoNome);
+    const espacoId = espacoResolvido.id;
     if (!["pix", "dinheiro", "transferencia", "pendente"].includes(pagamento)) {
       return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
     }
