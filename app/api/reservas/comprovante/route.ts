@@ -1,31 +1,20 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, requireRoles, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 const BUCKET = "comprovantes-financeiro";
 const TIPOS = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
 export async function POST(request: Request) {
-  const authRoles = await requireRoles(request, ["funcionario", "administrador", "administrador_normal", "administrador_master"]);
-  const ehEquipe = !("response" in authRoles);
-
-  let db: any;
-  let usuario: any = null;
-
-  if (ehEquipe) {
-    db = getServiceClient();
-    usuario = authRoles.usuario;
-  } else {
-    const authUser = await usuarioAutenticado(request);
-    if ("error" in authUser) {
-      return NextResponse.json({ error: authUser.error }, { status: authUser.status });
-    }
-    if (!authUser.usuario.socio_id) {
-      return NextResponse.json({ error: "Associado não identificado." }, { status: 403 });
-    }
-    db = authUser.supabase;
-    usuario = authUser.usuario;
+  const auth = await usuarioAutenticado(request);
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+
+  const perfisPermitidos = ["funcionario", "administrador", "administrador_master"];
+  const ehEquipe = perfisPermitidos.includes(auth.perfil);
+  const usuario = auth.usuario;
+  const db = getServiceClient();
 
   const form = await request.formData();
   const id = String(form.get("origem_id") || "");
@@ -37,7 +26,7 @@ export async function POST(request: Request) {
 
   const { data: r, error: e } = await db
     .from("reservas")
-    .select("id,responsavel_nome,nome,valor,socio_id")
+    .select("id,responsavel_nome,valor,socio_id")
     .eq("id", id)
     .single();
 
@@ -48,7 +37,7 @@ export async function POST(request: Request) {
 
   const atual = await db.storage.getBucket(BUCKET);
   if (atual.error) {
-    const cr = await db.storage.createBucket(BUCKET, { public: true });
+    const cr = await db.storage.createBucket(BUCKET, { public: false });
     if (cr.error && !/already exists/i.test(cr.error.message)) {
       return NextResponse.json({ error: cr.error.message }, { status: 500 });
     }
@@ -62,13 +51,11 @@ export async function POST(request: Request) {
   });
   if (up.error) return NextResponse.json({ error: up.error.message }, { status: 500 });
 
-  const { data: url } = db.storage.from(BUCKET).getPublicUrl(caminho);
   const agora = new Date().toISOString();
-
   const { data, error } = await db
     .from("reservas")
     .update({
-      comprovante_url: url.publicUrl,
+      comprovante_url: caminho,
       comprovante_enviado_em: agora,
       comprovante_status: "pendente",
       motivo_recusa: null,
@@ -77,12 +64,15 @@ export async function POST(request: Request) {
     .select("*")
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    await db.storage.from(BUCKET).remove([caminho]);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   const n = await db.from("notificacoes_admin").insert({
     tipo: "comprovante_pagamento",
     titulo: "Novo comprovante de reserva aguardando aprovação",
-    mensagem: `Reserva de ${r.responsavel_nome || r.nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
+    mensagem: `Reserva de ${r.responsavel_nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
     origem_tipo: "reserva",
     origem_id: id,
     lida: false,
@@ -92,11 +82,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       aviso: `Comprovante enviado, mas a notificação não foi criada: ${n.error.message}`,
-      url: url.publicUrl,
+      url: caminho,
       reserva: data,
     });
   }
 
-  return NextResponse.json({ ok: true, url: url.publicUrl, reserva: data });
+  return NextResponse.json({ ok: true, url: caminho, reserva: data });
 }
-
