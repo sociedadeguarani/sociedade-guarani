@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
-  const perfisPermitidos = ["funcionario", "administrador", "administrador_master"];
+  const perfisPermitidos = ["funcionario", "administrador_normal", "administrador_master", "administrador"];
   const ehEquipe = perfisPermitidos.includes(auth.perfil);
   const usuario = auth.usuario;
   const db = getServiceClient();
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
   const { data: r, error: e } = await db
     .from("reservas")
-    .select("id,responsavel_nome,valor,socio_id")
+    .select("id,nome,valor,socio_id")
     .eq("id", id)
     .single();
 
@@ -51,14 +51,11 @@ export async function POST(request: Request) {
   });
   if (up.error) return NextResponse.json({ error: up.error.message }, { status: 500 });
 
-  const agora = new Date().toISOString();
   const { data, error } = await db
     .from("reservas")
     .update({
       comprovante_url: caminho,
-      comprovante_enviado_em: agora,
-      comprovante_status: "pendente",
-      motivo_recusa: null,
+      comprovante_nome: arquivo.name,
     })
     .eq("id", id)
     .select("*")
@@ -72,20 +69,23 @@ export async function POST(request: Request) {
   const n = await db.from("notificacoes_admin").insert({
     tipo: "comprovante_pagamento",
     titulo: "Novo comprovante de reserva aguardando aprovação",
-    mensagem: `Reserva de ${r.responsavel_nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
+    mensagem: `Reserva de ${r.nome || "responsável"} no valor de R$ ${Number(r.valor || 0).toFixed(2).replace(".", ",")} foi enviada para conferência.`,
     origem_tipo: "reserva",
     origem_id: id,
     lida: false,
   });
 
+  const { data: signed } = await db.storage.from(BUCKET).createSignedUrl(caminho, 60 * 60);
+  const url = signed?.signedUrl || caminho;
+
   if (n.error) {
     return NextResponse.json({
       ok: true,
       aviso: `Comprovante enviado, mas a notificação não foi criada: ${n.error.message}`,
-      url: caminho,
+      url,
       reserva: data,
     });
   }
 
-  return NextResponse.json({ ok: true, url: caminho, reserva: data });
+  return NextResponse.json({ ok: true, url, reserva: data });
 }
