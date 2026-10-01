@@ -186,14 +186,30 @@ export default function ReservasPage() {
 
       void (async () => {
         try {
-          const [sociosResult, dependentesResult] = await Promise.all([
-            supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
-            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").order("nome", { ascending: true }),
-          ]);
-          if (sociosResult.error) throw sociosResult.error;
-          if (dependentesResult.error) throw dependentesResult.error;
-          setSocios(sociosResult.data || []);
-          setDependentes((dependentesResult.data || []).filter((d: DependenteReserva) => d.ativo !== false) as DependenteReserva[]);
+          const sessaoMembros = await supabase.auth.getSession();
+          const tokenMembros = sessaoMembros.session?.access_token || "";
+          const sociosResponse = await fetch("/api/socios", {
+            headers: { Authorization: `Bearer ${tokenMembros}` },
+            cache: "no-store",
+          });
+          const sociosPayload = await sociosResponse.json().catch(() => ({}));
+          if (!sociosResponse.ok) throw new Error(sociosPayload?.error || "Não foi possível carregar os associados.");
+
+          const todosSocios = Array.isArray(sociosPayload?.socios) ? sociosPayload.socios : [];
+          const titulares = todosSocios.filter((s: any) => !s.responsavel_id || s.possui_mensalidade === true);
+          const dependentesDaTabelaSocios: DependenteReserva[] = todosSocios
+            .filter((s: any) => s.responsavel_id && s.possui_mensalidade !== true)
+            .map((s: any) => ({
+              id: String(s.id),
+              socio_id: String(s.responsavel_id),
+              matricula: s.matricula == null ? null : String(s.matricula),
+              nome: String(s.nome || ""),
+              parentesco: s.parentesco ?? null,
+              ativo: String(s.situacao || "").toLowerCase() !== "inativo",
+            }));
+
+          setSocios(titulares);
+          setDependentes(dependentesDaTabelaSocios.filter((d) => d.ativo !== false));
         } catch (error) {
           console.error("Erro ao carregar titulares/dependentes para reservas:", error);
           setSocios([]);
@@ -388,16 +404,22 @@ export default function ReservasPage() {
         }
 
         const extensao = arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `reservas/${crypto.randomUUID()}.${extensao}`;
-        const upload = await supabase.storage
-          .from("comprovantes-financeiro")
-          .upload(caminho, arquivoComprovante, {
-            upsert: false,
-            contentType: arquivoComprovante.type,
-          });
+        const { data: sessaoUpload } = await supabase.auth.getSession();
+        const tokenUpload = sessaoUpload.session?.access_token || "";
+        const form = new FormData();
+        form.append("arquivo", arquivoComprovante);
 
-        if (upload.error) throw upload.error;
-        comprovanteUrl = caminho;
+        const uploadResponse = await fetch("/api/reservas/comprovante", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${tokenUpload}` },
+          body: form,
+        });
+        const uploadPayload = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok) {
+          throw new Error(uploadPayload?.error || "Não foi possível enviar o comprovante.");
+        }
+        comprovanteUrl = String(uploadPayload?.path || "");
+        if (!comprovanteUrl) throw new Error("O servidor não retornou o comprovante enviado.");
       }
 
       if (valor > 0 && formaPagamentoReserva === "pix" && !pix?.copia_e_cola) {
