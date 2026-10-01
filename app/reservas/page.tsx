@@ -48,6 +48,16 @@ type DependenteReserva = {
   ativo: boolean;
 };
 
+type SocioReserva = {
+  id: string;
+  matricula: number | string | null;
+  nome: string;
+  cpf: string | null;
+  responsavel_id?: string | null;
+  parentesco?: string | null;
+  situacao?: string | null;
+};
+
 type ContaBancaria = { id:string; nome:string; banco:string|null; ativo:boolean };
 
 type Reserva = {
@@ -114,7 +124,7 @@ export default function ReservasPage() {
   const [socioId, setSocioId] = useState("");
   const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
   const [dependenteId, setDependenteId] = useState("");
-  const [socios, setSocios] = useState<Array<{ id: string; matricula: number | null; nome: string; cpf: string | null }>>([]);
+  const [socios, setSocios] = useState<SocioReserva[]>([]);
   const [dependentes, setDependentes] = useState<DependenteReserva[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [buscaSocio, setBuscaSocio] = useState("");
@@ -162,7 +172,7 @@ export default function ReservasPage() {
             if (reservasDb.length) {
               const convertidas: Reserva[] = reservasDb.map((r: any) => ({
                 id: String(r.id),
-                espacoId: espacos.find((e) => e.nome === String(r.espaco_nome || ""))?.id || String(r.espaco_id),
+                espacoId: String(r.espaco_id),
                 data: String(r.data),
                 horario: String(r.horario),
                 nome: String(r.nome),
@@ -186,14 +196,83 @@ export default function ReservasPage() {
 
       void (async () => {
         try {
-          const [sociosResult, dependentesResult] = await Promise.all([
-            supabase.from("socios").select("id,matricula,nome,cpf").order("nome", { ascending: true }),
-            supabase.from("dependentes").select("id,socio_id,matricula,nome,parentesco,ativo").order("nome", { ascending: true }),
+          // A consulta de membros usa a mesma API protegida por service-role
+          // para todos os perfis de leitura. Não consultamos diretamente as
+          // tabelas socios/dependentes aqui, pois a RLS pode devolver resultados
+          // diferentes para Funcionário, Administrador e Administrador Master.
+          const { data: sessaoMembros } = await supabase.auth.getSession();
+          const tokenMembros = sessaoMembros.session?.access_token || "";
+          if (!tokenMembros) throw new Error("Sessão não encontrada.");
+
+          const headers = { Authorization: `Bearer ${tokenMembros}` };
+
+          // As duas fontes são protegidas no servidor e usam Service Role.
+          // /api/socios traz os cadastros atuais e /api/dependentes/migrar
+          // preserva os dependentes legados que ainda estão na tabela
+          // dependentes. Assim Funcionário, Administrador e Master recebem
+          // a mesma visão sem depender da RLS do navegador.
+          const [respostaSocios, respostaDependentes] = await Promise.all([
+            fetch("/api/socios", { headers, cache: "no-store" }),
+            fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
           ]);
-          if (sociosResult.error) throw sociosResult.error;
-          if (dependentesResult.error) throw dependentesResult.error;
-          setSocios(sociosResult.data || []);
-          setDependentes((dependentesResult.data || []).filter((d: DependenteReserva) => d.ativo !== false) as DependenteReserva[]);
+
+          const [payloadSocios, payloadDependentes] = await Promise.all([
+            respostaSocios.json().catch(() => ({})),
+            respostaDependentes.json().catch(() => ({})),
+          ]);
+
+          if (!respostaSocios.ok) {
+            throw new Error(payloadSocios?.error || "Não foi possível carregar os sócios.");
+          }
+          if (!respostaDependentes.ok) {
+            throw new Error(payloadDependentes?.error || "Não foi possível carregar os dependentes.");
+          }
+
+          const todos = Array.isArray(payloadSocios?.socios) ? payloadSocios.socios : [];
+          const dependentesLegados = Array.isArray(payloadDependentes?.dependentes)
+            ? payloadDependentes.dependentes
+            : [];
+
+          const titulares: SocioReserva[] = todos
+            .filter((s: any) => !s.responsavel_id)
+            .map((s: any) => ({
+              id: String(s.id),
+              matricula: s.matricula ?? null,
+              nome: String(s.nome || ""),
+              cpf: s.cpf ?? null,
+              responsavel_id: null,
+              parentesco: s.parentesco ?? null,
+              situacao: s.situacao ?? null,
+            }));
+
+          const dependentesMap = new Map<string, DependenteReserva>();
+          const adicionarDependente = (d: any, socioId: string) => {
+            const ativo = d.ativo !== false && String(d.situacao || "").toLowerCase() !== "inativo";
+            if (!ativo || !socioId) return;
+            const chave = String(d.id || `${socioId}|${d.cpf || ""}|${d.nome || ""}`);
+            if (dependentesMap.has(chave)) return;
+            dependentesMap.set(chave, {
+              id: String(d.id),
+              socio_id: socioId,
+              matricula: d.matricula == null ? null : String(d.matricula),
+              nome: String(d.nome || ""),
+              parentesco: d.parentesco ?? null,
+              ativo: true,
+            });
+          };
+
+          // Dependentes que já estão na tabela socios.
+          for (const s of todos) {
+            if (s.responsavel_id) adicionarDependente(s, String(s.responsavel_id));
+          }
+
+          // Dependentes legados que ainda estão na tabela dependentes.
+          for (const d of dependentesLegados) {
+            adicionarDependente(d, String(d.socio_id || ""));
+          }
+
+          setSocios(titulares);
+          setDependentes(Array.from(dependentesMap.values()));
         } catch (error) {
           console.error("Erro ao carregar titulares/dependentes para reservas:", error);
           setSocios([]);
@@ -386,6 +465,18 @@ export default function ReservasPage() {
           alert("O comprovante deve ter no máximo 8 MB.");
           return;
         }
+
+        const extensao = arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
+        const caminho = `reservas/${crypto.randomUUID()}.${extensao}`;
+        const upload = await supabase.storage
+          .from("comprovantes-financeiro")
+          .upload(caminho, arquivoComprovante, {
+            upsert: false,
+            contentType: arquivoComprovante.type,
+          });
+
+        if (upload.error) throw upload.error;
+        comprovanteUrl = caminho;
       }
 
       if (valor > 0 && formaPagamentoReserva === "pix" && !pix?.copia_e_cola) {
@@ -440,33 +531,6 @@ export default function ReservasPage() {
         const resultado = await resposta.json().catch(() => ({}));
         if (!resposta.ok) throw new Error(resultado.error || "Não foi possível gravar a reserva no banco.");
         if (resultado.reserva?.id) novaReserva.id = String(resultado.reserva.id);
-
-        if (arquivoComprovante && novaReserva.id) {
-          const { data: sessaoComprovante } = await supabase.auth.getSession();
-          const tokenComprovante = sessaoComprovante.session?.access_token || "";
-          const formComprovante = new FormData();
-          formComprovante.append("origem_tipo", "reserva");
-          formComprovante.append("origem_id", novaReserva.id);
-          formComprovante.append("arquivo", arquivoComprovante);
-
-          const envio = await fetch("/api/reservas/comprovante", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${tokenComprovante}` },
-            body: formComprovante,
-          });
-          const resultadoComprovante = await envio.json().catch(() => ({}));
-          if (!envio.ok) throw new Error(resultadoComprovante.error || "Não foi possível enviar o comprovante.");
-          comprovanteUrl = resultadoComprovante.url || null;
-          novaReserva.comprovante_url = comprovanteUrl;
-        }
-      } else if (arquivoComprovante) {
-        // No modo público a reserva não passa pelo endpoint autenticado.
-        // O comprovante fica sem upload automático para não abrir o Storage publicamente.
-        comprovanteUrl = null;
-      }
-
-      if (editandoReservaId && arquivoComprovante && publico) {
-        throw new Error("O envio de comprovante está disponível somente com sessão autenticada.");
       }
 
       if (editandoReservaId) {
@@ -501,8 +565,7 @@ export default function ReservasPage() {
         : "Reserva registrada com sucesso.");
     } catch (error) {
       console.error(error);
-      const detalhe = error instanceof Error ? error.message : "Erro desconhecido.";
-      alert(`Não foi possível concluir a reserva/comprovante: ${detalhe}`);
+      alert("Não foi possível enviar o comprovante. Você pode confirmar a reserva sem anexar o arquivo.");
     } finally {
       setEnviandoComprovante(false);
     }
@@ -518,10 +581,6 @@ export default function ReservasPage() {
 
   async function abrirComprovante(path: string | null | undefined) {
     if (!path) return;
-    if (/^https?:\/\//i.test(path)) {
-      window.open(path, "_blank");
-      return;
-    }
     const { data, error } = await supabase.storage
       .from("comprovantes-financeiro")
       .createSignedUrl(path, 60 * 10);
