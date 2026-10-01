@@ -39,15 +39,6 @@ type Espaco = {
 
 type Recibo={id:string;numero:string;tipo:string;nome:string;matricula:number|string|null;detalhe:string;periodo:string;valor:number;pagamento:string;operador:string;dataHora:string;status:string};
 
-type DependenteReserva = {
-  id: string;
-  socio_id: string;
-  matricula: string | null;
-  nome: string;
-  parentesco: string | null;
-  ativo: boolean;
-};
-
 type SocioReserva = {
   id: string;
   matricula: number | string | null;
@@ -56,6 +47,15 @@ type SocioReserva = {
   responsavel_id?: string | null;
   parentesco?: string | null;
   situacao?: string | null;
+};
+
+type DependenteReserva = {
+  id: string;
+  socio_id: string;
+  matricula: string | null;
+  nome: string;
+  parentesco: string | null;
+  ativo: boolean;
 };
 
 type ContaBancaria = { id:string; nome:string; banco:string|null; ativo:boolean };
@@ -112,6 +112,14 @@ function normalizarEspacos(lista: Espaco[]): Espaco[] {
   }));
 }
 
+function normalizarTexto(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 export default function ReservasPage() {
   const [publico, setPublico] = useState(false);
   const [aba, setAba] = useState<"reservar" | "reservas" | "admin">("reservar");
@@ -165,116 +173,78 @@ export default function ReservasPage() {
             cache: "no-store",
           });
           const resultado = await resposta.json().catch(() => ({}));
-          if (resposta.ok) {
-            const reservasDb = Array.isArray(resultado.reservas) ? resultado.reservas : [];
-            const contasDb = Array.isArray(resultado.contas_bancarias) ? resultado.contas_bancarias : [];
-            setContasBancarias(contasDb);
-            if (reservasDb.length) {
-              const convertidas: Reserva[] = reservasDb.map((r: any) => ({
-                id: String(r.id),
-                espacoId: String(r.espaco_id),
-                data: String(r.data),
-                horario: String(r.horario),
-                nome: String(r.nome),
-                socioId: r.socio_id || undefined,
-                dependenteId: r.dependente_id || undefined,
-                matricula: r.matricula ?? null,
-                tipoPessoa: r.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
-                valor: Number(r.valor || 0),
-                status: r.status,
-                pagamento: r.pagamento,
-                comprovante_url: r.comprovante_url || null,
-                comprovante_nome: r.comprovante_nome || null,
-              }));
-              setReservas(convertidas);
-            }
-          }
-        } catch (error) {
-          console.warn("Não foi possível carregar reservas do banco:", error);
-        }
-      })();
+          if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar as reservas.");
 
-      void (async () => {
-        try {
-          // A consulta de membros usa a mesma API protegida por service-role
-          // para todos os perfis de leitura. Não consultamos diretamente as
-          // tabelas socios/dependentes aqui, pois a RLS pode devolver resultados
-          // diferentes para Funcionário, Administrador e Administrador Master.
-          const { data: sessaoMembros } = await supabase.auth.getSession();
-          const tokenMembros = sessaoMembros.session?.access_token || "";
-          if (!tokenMembros) throw new Error("Sessão não encontrada.");
+          const reservasDb = Array.isArray(resultado.reservas) ? resultado.reservas : [];
+          const contasDb = Array.isArray(resultado.contas_bancarias) ? resultado.contas_bancarias : [];
+          const espacosDb = Array.isArray(resultado.espacos) ? resultado.espacos : [];
+          const sociosDb = Array.isArray(resultado.socios) ? resultado.socios : [];
+          const dependentesDb = Array.isArray(resultado.dependentes) ? resultado.dependentes : [];
 
-          const headers = { Authorization: `Bearer ${tokenMembros}` };
+          setContasBancarias(contasDb);
 
-          // As duas fontes são protegidas no servidor e usam Service Role.
-          // /api/socios traz os cadastros atuais e /api/dependentes/migrar
-          // preserva os dependentes legados que ainda estão na tabela
-          // dependentes. Assim Funcionário, Administrador e Master recebem
-          // a mesma visão sem depender da RLS do navegador.
-          const [respostaSocios, respostaDependentes] = await Promise.all([
-            fetch("/api/socios", { headers, cache: "no-store" }),
-            fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
-          ]);
-
-          const [payloadSocios, payloadDependentes] = await Promise.all([
-            respostaSocios.json().catch(() => ({})),
-            respostaDependentes.json().catch(() => ({})),
-          ]);
-
-          if (!respostaSocios.ok) {
-            throw new Error(payloadSocios?.error || "Não foi possível carregar os sócios.");
-          }
-          if (!respostaDependentes.ok) {
-            throw new Error(payloadDependentes?.error || "Não foi possível carregar os dependentes.");
+          // Substitui SOMENTE o id local pelo UUID que realmente existe no banco.
+          // Nome, preço e regras continuam vindo da configuração da tela.
+          if (espacosDb.length) {
+            const porNome = new Map<string, any>();
+            for (const item of espacosDb) porNome.set(normalizarTexto(item.nome), item);
+            setEspacos((atuais) =>
+              atuais.map((e) => {
+                const real = porNome.get(normalizarTexto(e.nome));
+                return real?.id ? { ...e, id: String(real.id) } : e;
+              }),
+            );
           }
 
-          const todos = Array.isArray(payloadSocios?.socios) ? payloadSocios.socios : [];
-          const dependentesLegados = Array.isArray(payloadDependentes?.dependentes)
-            ? payloadDependentes.dependentes
-            : [];
-
-          const titulares: SocioReserva[] = todos
-            .filter((s: any) => !s.responsavel_id)
-            .map((s: any) => ({
+          setSocios(
+            sociosDb.map((s: any) => ({
               id: String(s.id),
               matricula: s.matricula ?? null,
               nome: String(s.nome || ""),
               cpf: s.cpf ?? null,
-              responsavel_id: null,
+              responsavel_id: s.responsavel_id ?? null,
               parentesco: s.parentesco ?? null,
               situacao: s.situacao ?? null,
-            }));
-
-          const dependentesMap = new Map<string, DependenteReserva>();
-          const adicionarDependente = (d: any, socioId: string) => {
-            const ativo = d.ativo !== false && String(d.situacao || "").toLowerCase() !== "inativo";
-            if (!ativo || !socioId) return;
-            const chave = String(d.id || `${socioId}|${d.cpf || ""}|${d.nome || ""}`);
-            if (dependentesMap.has(chave)) return;
-            dependentesMap.set(chave, {
+            })),
+          );
+          // A API já unifica a tabela legada `dependentes` com os registros
+          // de `socios` que possuem responsavel_id. Mantemos aqui somente a
+          // normalização para que Funcionário, Administrador e Master recebam
+          // exatamente a mesma lista.
+          setDependentes(
+            dependentesDb.map((d: any) => ({
               id: String(d.id),
-              socio_id: socioId,
+              socio_id: String(d.socio_id),
               matricula: d.matricula == null ? null : String(d.matricula),
               nome: String(d.nome || ""),
               parentesco: d.parentesco ?? null,
-              ativo: true,
-            });
-          };
+              ativo: d.ativo !== false,
+            })),
+          );
 
-          // Dependentes que já estão na tabela socios.
-          for (const s of todos) {
-            if (s.responsavel_id) adicionarDependente(s, String(s.responsavel_id));
-          }
-
-          // Dependentes legados que ainda estão na tabela dependentes.
-          for (const d of dependentesLegados) {
-            adicionarDependente(d, String(d.socio_id || ""));
-          }
-
-          setSocios(titulares);
-          setDependentes(Array.from(dependentesMap.values()));
+          // Sempre sincroniza com o banco, inclusive quando ele estiver vazio.
+          // Isso evita mostrar reservas antigas do localStorage como se fossem atuais.
+          setReservas(
+            reservasDb.map((r: any) => ({
+              id: String(r.id),
+              espacoId: String(r.espaco_id),
+              data: String(r.data),
+              horario: String(r.horario),
+              nome: String(r.nome || ""),
+              socioId: r.socio_id || undefined,
+              dependenteId: r.dependente_id || undefined,
+              matricula: r.matricula ?? null,
+              tipoPessoa: r.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
+              valor: Number(r.valor || 0),
+              status: r.status,
+              pagamento: r.pagamento,
+              comprovante_url: r.comprovante_url || null,
+              comprovante_nome: r.comprovante_nome || null,
+            })),
+          );
         } catch (error) {
-          console.error("Erro ao carregar titulares/dependentes para reservas:", error);
+          console.warn("Não foi possível carregar reservas do banco:", error);
+          setReservas([]);
           setSocios([]);
           setDependentes([]);
         }
@@ -465,18 +435,6 @@ export default function ReservasPage() {
           alert("O comprovante deve ter no máximo 8 MB.");
           return;
         }
-
-        const extensao = arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `reservas/${crypto.randomUUID()}.${extensao}`;
-        const upload = await supabase.storage
-          .from("comprovantes-financeiro")
-          .upload(caminho, arquivoComprovante, {
-            upsert: false,
-            contentType: arquivoComprovante.type,
-          });
-
-        if (upload.error) throw upload.error;
-        comprovanteUrl = caminho;
       }
 
       if (valor > 0 && formaPagamentoReserva === "pix" && !pix?.copia_e_cola) {
@@ -531,6 +489,33 @@ export default function ReservasPage() {
         const resultado = await resposta.json().catch(() => ({}));
         if (!resposta.ok) throw new Error(resultado.error || "Não foi possível gravar a reserva no banco.");
         if (resultado.reserva?.id) novaReserva.id = String(resultado.reserva.id);
+
+        if (arquivoComprovante && novaReserva.id) {
+          const { data: sessaoComprovante } = await supabase.auth.getSession();
+          const tokenComprovante = sessaoComprovante.session?.access_token || "";
+          const formComprovante = new FormData();
+          formComprovante.append("origem_tipo", "reserva");
+          formComprovante.append("origem_id", novaReserva.id);
+          formComprovante.append("arquivo", arquivoComprovante);
+
+          const envio = await fetch("/api/reservas/comprovante", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${tokenComprovante}` },
+            body: formComprovante,
+          });
+          const resultadoComprovante = await envio.json().catch(() => ({}));
+          if (!envio.ok) throw new Error(resultadoComprovante.error || "Não foi possível enviar o comprovante.");
+          comprovanteUrl = resultadoComprovante.url || null;
+          novaReserva.comprovante_url = comprovanteUrl;
+        }
+      } else if (arquivoComprovante) {
+        // No modo público a reserva não passa pelo endpoint autenticado.
+        // O comprovante fica sem upload automático para não abrir o Storage publicamente.
+        comprovanteUrl = null;
+      }
+
+      if (editandoReservaId && arquivoComprovante && publico) {
+        throw new Error("O envio de comprovante está disponível somente com sessão autenticada.");
       }
 
       if (editandoReservaId) {
@@ -565,7 +550,8 @@ export default function ReservasPage() {
         : "Reserva registrada com sucesso.");
     } catch (error) {
       console.error(error);
-      alert("Não foi possível enviar o comprovante. Você pode confirmar a reserva sem anexar o arquivo.");
+      const detalhe = error instanceof Error ? error.message : "Erro desconhecido.";
+      alert(`Não foi possível concluir a reserva/comprovante: ${detalhe}`);
     } finally {
       setEnviandoComprovante(false);
     }
@@ -581,6 +567,10 @@ export default function ReservasPage() {
 
   async function abrirComprovante(path: string | null | undefined) {
     if (!path) return;
+    if (/^https?:\/\//i.test(path)) {
+      window.open(path, "_blank");
+      return;
+    }
     const { data, error } = await supabase.storage
       .from("comprovantes-financeiro")
       .createSignedUrl(path, 60 * 10);
@@ -640,20 +630,30 @@ export default function ReservasPage() {
   const dependentesDoSocio = useMemo(() => {
     if (!socioId) return [];
 
-    const titular = socios.find((s) => String(s.id) === String(socioId));
-    const matricula = String(titular?.matricula ?? "").trim().toUpperCase();
+    const responsavel = socios.find((s) => String(s.id) === String(socioId));
+    const matricula = String(responsavel?.matricula ?? "").trim().toUpperCase();
     const baseFamiliar = matricula.endsWith("A") ? matricula.slice(0, -1) : matricula;
+    const ehResponsavelPagante = (m: string) => /^SD\d+A$/.test(m);
 
-    // Primeiro usa o vínculo direto pelo socio_id.
-    const diretos = dependentes.filter((d) => String(d.socio_id) === String(socioId));
+    // SD....A possui mensalidade própria e é responsável pela própria família.
+    // Mesmo que o cadastro histórico tenha responsavel_id apontando para o pai/mãe,
+    // ele não pode aparecer como dependente da família anterior nas Reservas.
+    const diretos = dependentes.filter((d) => {
+      if (String(d.socio_id) !== String(socioId)) return false;
+      return !ehResponsavelPagante(String(d.matricula ?? "").trim().toUpperCase());
+    });
 
-    // Fallback importante: as matrículas familiares seguem A/B/C/D...
-    // Assim, mesmo que algum vínculo antigo esteja diferente, SD0056B/C/D
-    // continua aparecendo para o titular SD0056A.
+    // Mantém o fallback para vínculos históricos por matrícula, mas nunca absorve
+    // outro SD....A como dependente.
     const porMatricula = baseFamiliar
       ? dependentes.filter((d) => {
           const m = String(d.matricula ?? "").trim().toUpperCase();
-          return m.startsWith(baseFamiliar) && m !== matricula && /[A-Z]$/.test(m);
+          return (
+            m.startsWith(baseFamiliar) &&
+            m !== matricula &&
+            /[A-Z]$/.test(m) &&
+            !ehResponsavelPagante(m)
+          );
         })
       : [];
 
@@ -799,7 +799,8 @@ export default function ReservasPage() {
                               const m = String(d.matricula ?? "").trim().toUpperCase();
                               const direto = String(d.socio_id) === String(s.id);
                               const porMatricula = !!baseFamiliar && m.startsWith(baseFamiliar) && m !== titularMatricula && /[A-Z]$/.test(m);
-                              return direto || porMatricula;
+                              // SD....A é pagante e responsável pela própria família.
+                              return (direto || porMatricula) && !/^SD\d+A$/.test(m);
                             }).reduce<DependenteReserva[]>((lista, d) => {
                               if (!lista.some((x) => String(x.id) === String(d.id))) lista.push(d);
                               return lista;
