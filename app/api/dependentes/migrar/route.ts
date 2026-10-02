@@ -5,7 +5,8 @@ export const dynamic = "force-dynamic";
 
 const ROLES_LEITURA = [
   "funcionario",
-  "administrador", 
+  "administrador",
+  
   "administrador_master",
 ];
 
