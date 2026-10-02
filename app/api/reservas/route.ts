@@ -9,6 +9,31 @@ function erroBanco(error: any) {
     .join(" — ");
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function resolverEspacoId(db: any, informado: string, nome: string) {
+  const valor = informado.trim();
+  if (UUID_RE.test(valor)) {
+    const { data, error } = await db
+      .from("espacos")
+      .select("id")
+      .eq("id", valor)
+      .limit(1);
+    if (error) throw error;
+    if (data?.[0]?.id) return String(data[0].id);
+  }
+
+  const { data, error } = await db
+    .from("espacos")
+    .select("id,nome")
+    .eq("nome", nome.trim())
+    .limit(1);
+  if (error) throw error;
+  if (data?.[0]?.id) return String(data[0].id);
+
+  throw new Error(`O espaço "${nome}" não foi encontrado na tabela de espaços.`);
+}
+
 function dividirHorario(horario: string) {
   const [inicio, fim] = horario.split("-").map((v) => v.trim());
   return { inicio: inicio || horario.trim(), fim: fim || inicio || horario.trim() };
@@ -108,7 +133,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Espaço, data, horário e nome são obrigatórios." }, { status: 400 });
     }
 
-    const espacoId = espacoInformado;
+    const espacoId = await resolverEspacoId(db, espacoInformado, espacoNome);
     if (!["pix", "dinheiro", "transferencia", "pendente"].includes(pagamento)) {
       return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
     }
