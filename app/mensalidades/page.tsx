@@ -272,7 +272,7 @@ export default function Page() {
     }
   }
 
-  async function alterarMensalidadeDoModal(acao: "marcar_sem_saldo" | "estornar") {
+  async function alterarMensalidadeDoModal(acao: "baixar" | "marcar_sem_saldo" | "estornar") {
     const registro = mesHistoricoSelecionado
       ? historicoPorMes.get(mesHistoricoSelecionado) || null
       : null;
@@ -285,7 +285,12 @@ export default function Page() {
     const competenciaTexto = `${String(mesHistoricoSelecionado || 1).padStart(2, "0")}/${anoHistoricoSocio}`;
     const nome = registro.socio?.nome || socioSelecionado?.socio?.nome || "este associado";
 
-    if (acao === "marcar_sem_saldo") {
+    if (acao === "baixar") {
+      const ok = window.confirm(
+        `Confirmar pagamento da mensalidade de ${competenciaTexto} de ${nome}?\n\nA baixa será registrada no Financeiro.`
+      );
+      if (!ok) return;
+    } else if (acao === "marcar_sem_saldo") {
       const ok = window.confirm(
         `Marcar a mensalidade de ${competenciaTexto} de ${nome} como S.S — Sem saldo?\n\nNenhum lançamento financeiro será criado.`
       );
