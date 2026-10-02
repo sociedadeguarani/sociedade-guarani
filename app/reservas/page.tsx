@@ -126,9 +126,9 @@ export default function ReservasPage() {
 
       const espacosDb = Array.isArray(resultado?.espacos) ? resultado.espacos : [];
       const contasDb = Array.isArray(resultado?.contas_bancarias) ? resultado.contas_bancarias : [];
-      const espacosNormalizados = espacosDb
+      const espacosNormalizados: Espaco[] = espacosDb
         .map((item: Record<string, unknown>) => normalizarEspaco(item))
-        .filter((item: Espaco) => item.id && item.nome);
+        .filter((item: Espaco) => Boolean(item.id && item.nome));
 
       setEspacos(espacosNormalizados);
       setContasBancarias(contasDb.map((item: Record<string, unknown>) => ({
@@ -139,7 +139,7 @@ export default function ReservasPage() {
       })));
 
       if (espacosNormalizados.length) {
-        setEspacoId((atual) => espacosNormalizados.some((e) => e.id === atual) ? atual : espacosNormalizados[0].id);
+        setEspacoId((atual) => espacosNormalizados.some((e: Espaco) => e.id === atual) ? atual : espacosNormalizados[0].id);
       }
 
       if (!modoPublico) {
