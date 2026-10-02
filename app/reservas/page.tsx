@@ -100,6 +100,9 @@ export default function ReservasPage() {
   const [reservaPixConfirmacao, setReservaPixConfirmacao] = useState<Reserva | null>(null);
   const [contaPixConfirmacao, setContaPixConfirmacao] = useState("");
   const [confirmandoPix, setConfirmandoPix] = useState(false);
+  const [carregandoReservas, setCarregandoReservas] = useState(false);
+  const [carregandoPessoas, setCarregandoPessoas] = useState(false);
+  const [pessoasCarregadas, setPessoasCarregadas] = useState(false);
 
   const podeConfigurar = perfil === "administrador" || perfil === "administrador_master";
 
@@ -113,23 +116,21 @@ export default function ReservasPage() {
     setErro("");
     try {
       const token = await tokenAtual();
-      const params = modoPublico ? "?publico=1" : "?status=";
+      const params = modoPublico ? "?publico=1&dados=base" : "?dados=base";
       const resposta = await fetch(`/api/reservas${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         cache: "no-store",
       });
       const resultado = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar as reservas.");
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar os espaços.");
 
       const espacosDb = Array.isArray(resultado?.espacos) ? resultado.espacos : [];
-      const reservasDb = Array.isArray(resultado?.reservas) ? resultado.reservas : [];
       const contasDb = Array.isArray(resultado?.contas_bancarias) ? resultado.contas_bancarias : [];
-
       const espacosNormalizados = espacosDb
         .map((item: Record<string, unknown>) => normalizarEspaco(item))
         .filter((item: Espaco) => item.id && item.nome);
+
       setEspacos(espacosNormalizados);
-      setReservas(reservasDb.map((item: Record<string, unknown>) => recorteReserva(item)).filter((item: Reserva) => item.id));
       setContasBancarias(contasDb.map((item: Record<string, unknown>) => ({
         id: String(item.id ?? ""),
         nome: String(item.nome ?? ""),
@@ -137,76 +138,103 @@ export default function ReservasPage() {
         ativo: item.ativo !== false,
       })));
 
-      if (!espacoId && espacosNormalizados[0]) setEspacoId(espacosNormalizados[0].id);
+      if (espacosNormalizados.length) {
+        setEspacoId((atual) => espacosNormalizados.some((e) => e.id === atual) ? atual : espacosNormalizados[0].id);
+      }
 
       if (!modoPublico) {
-        const [perfilResponse, sociosResponse, carteirinhasResponse] = await Promise.all([
-          fetch("/api/login/perfil", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
-          fetch("/api/socios", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
-          fetch("/api/carteirinhas", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
-        ]);
-
+        const perfilResponse = await fetch("/api/login/perfil", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
         const perfilPayload = await perfilResponse.json().catch(() => ({}));
         if (perfilResponse.ok) setPerfil((perfilPayload?.usuario?.perfil || "") as Perfil);
-
-        const sociosPayload = await sociosResponse.json().catch(() => ({}));
-        if (!sociosResponse.ok) throw new Error(sociosPayload?.error || "Não foi possível carregar os sócios.");
-        const sociosDb = Array.isArray(sociosPayload?.socios) ? sociosPayload.socios : [];
-        setSocios(
-          sociosDb
-            .filter((row: Record<string, unknown>) => {
-              const matricula = String(row.matricula ?? "").trim().toUpperCase();
-              return !row.responsavel_id || /^SD\d+A$/.test(matricula);
-            })
-            .map((row: Record<string, unknown>) => normalizarSocio(row)),
-        );
-
-        const carteirinhasPayload = await carteirinhasResponse.json().catch(() => ({}));
-        const dependentesLegados = Array.isArray(carteirinhasPayload?.dependentes) ? carteirinhasPayload.dependentes : [];
-        const porId = new Map<string, DependenteReserva>();
-
-        for (const row of sociosDb as Record<string, unknown>[]) {
-          const matricula = String(row.matricula ?? "").trim().toUpperCase();
-          if (!row.responsavel_id || /^SD\d+A$/.test(matricula)) continue;
-          if (String(row.situacao || "").toLowerCase() === "inativo") continue;
-          porId.set(String(row.id), {
-            id: String(row.id),
-            socio_id: String(row.responsavel_id),
-            matricula: row.matricula == null ? null : String(row.matricula),
-            nome: String(row.nome || ""),
-            parentesco: row.parentesco == null ? null : String(row.parentesco),
-            ativo: true,
-          });
-        }
-
-        for (const row of dependentesLegados as Record<string, unknown>[]) {
-          const matricula = String(row.matricula ?? "").trim().toUpperCase();
-          if (/^SD\d+A$/.test(matricula) || row.ativo === false) continue;
-          porId.set(String(row.id), {
-            id: String(row.id),
-            socio_id: String(row.socio_id),
-            matricula: row.matricula == null ? null : String(row.matricula),
-            nome: String(row.nome || ""),
-            parentesco: row.parentesco == null ? null : String(row.parentesco),
-            ativo: true,
-          });
-        }
-        setDependentes(Array.from(porId.values()));
+        setReservas([]);
       } else {
         setPerfil("");
         setSocios([]);
         setDependentes([]);
+        setReservas([]);
       }
     } catch (error) {
       setErro(error instanceof Error ? error.message : "Não foi possível carregar as reservas.");
-      if (!modoPublico) {
-        setReservas([]);
-        setEspacos([]);
-      }
     } finally {
       setCarregando(false);
     }
   }
+
+  async function carregarReservas(opcoes?: { data?: string; espacoId?: string; todas?: boolean }) {
+    if (publico) return;
+    setCarregandoReservas(true);
+    try {
+      const token = await tokenAtual();
+      const params = new URLSearchParams({ dados: "reservas" });
+      if (!opcoes?.todas) {
+        if (opcoes?.data) params.set("data", opcoes.data);
+        if (opcoes?.espacoId) params.set("espaco_id", opcoes.espacoId);
+      }
+      const resposta = await fetch(`/api/reservas?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar as reservas.");
+      const lista = Array.isArray(resultado?.reservas) ? resultado.reservas : [];
+      setReservas(lista.map((item: Record<string, unknown>) => recorteReserva(item)).filter((item: Reserva) => item.id));
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar as reservas.");
+    } finally {
+      setCarregandoReservas(false);
+    }
+  }
+
+  async function carregarPessoas() {
+    if (publico || pessoasCarregadas || carregandoPessoas) return;
+    setCarregandoPessoas(true);
+    try {
+      const token = await tokenAtual();
+      const [sociosResponse, carteirinhasResponse] = await Promise.all([
+        fetch("/api/socios", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+        fetch("/api/carteirinhas", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+      ]);
+      const sociosPayload = await sociosResponse.json().catch(() => ({}));
+      if (!sociosResponse.ok) throw new Error(sociosPayload?.error || "Não foi possível carregar os sócios.");
+      const sociosDb = Array.isArray(sociosPayload?.socios) ? sociosPayload.socios : [];
+      setSocios(
+        sociosDb
+          .filter((row: Record<string, unknown>) => {
+            const matricula = String(row.matricula ?? "").trim().toUpperCase();
+            return !row.responsavel_id || /^SD\d+A$/.test(matricula);
+          })
+          .map((row: Record<string, unknown>) => normalizarSocio(row)),
+      );
+
+      const carteirinhasPayload = await carteirinhasResponse.json().catch(() => ({}));
+      const dependentesLegados = Array.isArray(carteirinhasPayload?.dependentes) ? carteirinhasPayload.dependentes : [];
+      const porId = new Map<string, DependenteReserva>();
+      for (const row of sociosDb as Record<string, unknown>[]) {
+        const matricula = String(row.matricula ?? "").trim().toUpperCase();
+        if (!row.responsavel_id || /^SD\d+A$/.test(matricula)) continue;
+        if (String(row.situacao || "").toLowerCase() === "inativo") continue;
+        porId.set(String(row.id), {
+          id: String(row.id), socio_id: String(row.responsavel_id), matricula: row.matricula == null ? null : String(row.matricula),
+          nome: String(row.nome || ""), parentesco: row.parentesco == null ? null : String(row.parentesco), ativo: true,
+        });
+      }
+      for (const row of dependentesLegados as Record<string, unknown>[]) {
+        const matricula = String(row.matricula ?? "").trim().toUpperCase();
+        if (/^SD\d+A$/.test(matricula) || row.ativo === false) continue;
+        porId.set(String(row.id), {
+          id: String(row.id), socio_id: String(row.socio_id), matricula: row.matricula == null ? null : String(row.matricula),
+          nome: String(row.nome || ""), parentesco: row.parentesco == null ? null : String(row.parentesco), ativo: true,
+        });
+      }
+      setDependentes(Array.from(porId.values()));
+      setPessoasCarregadas(true);
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar os sócios.");
+    } finally {
+      setCarregandoPessoas(false);
+    }
+  }
+
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -216,6 +244,16 @@ export default function ReservasPage() {
     void recarregarDados(modoPublico);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (publico || aba !== "reservas") return;
+    void carregarReservas({ todas: true });
+  }, [aba, publico]);
+
+  useEffect(() => {
+    if (publico || aba !== "reservar" || !data || !espacoId) return;
+    void carregarReservas({ data, espacoId });
+  }, [aba, publico, data, espacoId]);
 
   useEffect(() => {
     if (!espacos.some((item) => item.id === espacoId)) {
@@ -439,7 +477,7 @@ export default function ReservasPage() {
         reservaSalva = { ...reservaSalva, comprovante_url: resultadoComprovante.url || null, status: "pendente", pagamento: "pix" };
       }
 
-      await recarregarDados();
+      await carregarReservas({ todas: true });
       setRecibo({
         id: reservaSalva.id,
         numero: `RS-${reservaSalva.id.slice(0, 6).toUpperCase() || Date.now().toString().slice(-6)}`,
@@ -490,7 +528,7 @@ export default function ReservasPage() {
       });
       const resultado = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível cancelar a reserva.");
-      await recarregarDados();
+      await carregarReservas({ todas: true });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Não foi possível cancelar a reserva.");
     }
@@ -511,7 +549,7 @@ export default function ReservasPage() {
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível confirmar o PIX.");
       setReservaPixConfirmacao(null);
       setContaPixConfirmacao("");
-      await recarregarDados();
+      await carregarReservas({ todas: true });
       alert("PIX confirmado. A entrada foi registrada no Financeiro.");
     } catch (error) {
       alert(error instanceof Error ? error.message : "Não foi possível confirmar o PIX.");
@@ -666,7 +704,11 @@ export default function ReservasPage() {
 
                     <section className="rounded-2xl border bg-white p-5 shadow-sm">
                       <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-extrabold text-[#005a3c]">2. Escolha o espaço</h2><p className="mt-1 text-sm text-gray-500">Os espaços abaixo vêm diretamente do banco.</p></div><span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-bold text-[#005a3c]">{espacosDisponiveis.length} disponíveis</span></div>
-                      {!espacosDisponiveis.length ? (
+                      {carregando && !espacos.length ? (
+                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-28 animate-pulse rounded-2xl border border-[#dfe7e2] bg-gray-50" />)}
+                        </div>
+                      ) : !espacosDisponiveis.length ? (
                         <div className="mt-5 rounded-xl border border-yellow-200 bg-yellow-50 p-5 text-center text-sm font-semibold text-yellow-800">Nenhum espaço liberado está cadastrado no banco.</div>
                       ) : (
                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -679,7 +721,7 @@ export default function ReservasPage() {
                       <h2 className="text-xl font-extrabold text-[#005a3c]">3. Responsável</h2>
                       {tipoPessoa === "socio" && !publico ? (
                         <div className="relative mt-4">
-                          <div className="flex items-center gap-2 rounded-xl border px-3 py-3 focus-within:border-[#005a3c]"><Users className="h-5 w-5 text-gray-400" /><input value={buscaSocio} onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setDependenteId(""); setMatriculaResponsavel(null); setNome(""); }} placeholder="Buscar sócio por nome ou matrícula..." className="w-full outline-none" /></div>
+                          <div className="flex items-center gap-2 rounded-xl border px-3 py-3 focus-within:border-[#005a3c]"><Users className="h-5 w-5 text-gray-400" /><input value={buscaSocio} onFocus={() => void carregarPessoas()} onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setDependenteId(""); setMatriculaResponsavel(null); setNome(""); }} placeholder={carregandoPessoas ? "Carregando sócios..." : "Buscar sócio por nome ou matrícula..."} className="w-full outline-none" /></div>
                           {buscaSocio && !socioId && <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">{sociosFiltrados.length ? sociosFiltrados.map((s) => {
                             const titularMatricula = String(s.matricula ?? "").trim().toUpperCase();
                             const baseFamiliar = titularMatricula.endsWith("A") ? titularMatricula.slice(0, -1) : titularMatricula;
@@ -703,7 +745,33 @@ export default function ReservasPage() {
                 </section>
               )}
 
-              {!publico && aba === "reservas" && <ReservasTabela filtradas={filtradas} espacos={espacos} reservasHoje={estatisticas.hoje} confirmadas={estatisticas.confirmadas} pendentes={estatisticas.pendentes} canceladas={estatisticas.canceladas} busca={busca} filtroStatus={filtroStatus} filtroData={filtroData} onBusca={setBusca} onFiltroStatus={setFiltroStatus} onFiltroData={setFiltroData} onLimparFiltros={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }} onComprovante={(path) => void abrirComprovante(path)} onEditar={editarReserva} onCancelar={cancelarReserva} onRecibo={setRecibo} onConfirmarPix={(reserva) => { setReservaPixConfirmacao(reserva); setContaPixConfirmacao(contasBancarias[0]?.id || ""); }} podeConfirmarPix={podeConfigurar} operadorAtual={operadorAtual} />}
+              {!publico && aba === "reservas" ? (
+                <div className="relative">
+                  {carregandoReservas && <div className="mb-3 rounded-xl bg-[#e8f3ee] px-4 py-2 text-sm font-semibold text-[#005a3c]">Atualizando reservas...</div>}
+                  <ReservasTabela
+                    filtradas={filtradas}
+                    espacos={espacos}
+                    reservasHoje={estatisticas.hoje}
+                    confirmadas={estatisticas.confirmadas}
+                    pendentes={estatisticas.pendentes}
+                    canceladas={estatisticas.canceladas}
+                    busca={busca}
+                    filtroStatus={filtroStatus}
+                    filtroData={filtroData}
+                    onBusca={setBusca}
+                    onFiltroStatus={setFiltroStatus}
+                    onFiltroData={setFiltroData}
+                    onLimparFiltros={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }}
+                    onComprovante={(path) => void abrirComprovante(path)}
+                    onEditar={editarReserva}
+                    onCancelar={cancelarReserva}
+                    onRecibo={setRecibo}
+                    onConfirmarPix={(reserva) => { setReservaPixConfirmacao(reserva); setContaPixConfirmacao(contasBancarias[0]?.id || ""); }}
+                    podeConfirmarPix={podeConfigurar}
+                    operadorAtual={operadorAtual}
+                  />
+                </div>
+              ) : null}
 
               {!publico && aba === "admin" && podeConfigurar && <ConfiguracaoEspacos espacos={espacos} salvandoId={salvandoEspacoId} onSalvar={salvarEspaco} />}
 
