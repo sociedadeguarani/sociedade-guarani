@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, Paperclip, X } from "lucide-react";
 import type { ContaBancaria, Reserva } from "../types";
 import { dataBR, moeda } from "../utils";
 
@@ -10,6 +10,8 @@ interface Props {
   contasBancarias: ContaBancaria[];
   contaBancariaId: string;
   salvando: boolean;
+  arquivo: File | null;
+  onArquivo: (value: File | null) => void;
   onContaBancaria: (value: string) => void;
   onConfirmar: () => void;
   onFechar: () => void;
@@ -21,6 +23,8 @@ export default function ConfirmarPixReserva({
   contasBancarias,
   contaBancariaId,
   salvando,
+  arquivo,
+  onArquivo,
   onContaBancaria,
   onConfirmar,
   onFechar,
@@ -49,10 +53,21 @@ export default function ConfirmarPixReserva({
         {reserva.comprovante_url ? (
           <div className="mt-4 rounded-xl border border-[#b9dcca] bg-[#e8f3ee] p-3 text-sm">
             <b className="text-[#005a3c]">Comprovante anexado.</b>
-            <div className="mt-1 text-gray-600">Abra o comprovante na tela de reservas para conferir antes de confirmar.</div>
+            <div className="mt-1 text-gray-600">Você pode conferir o arquivo na lista antes de confirmar.</div>
           </div>
         ) : (
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Esta reserva ainda não possui comprovante. A confirmação continuará bloqueada.</div>
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+            Esta reserva ainda não possui comprovante. Você pode anexá-lo aqui antes de confirmar o PIX.
+          </div>
+        )}
+
+        {!reserva.comprovante_url && (
+          <label className="mt-4 block cursor-pointer rounded-2xl border-2 border-dashed border-[#cfe3d8] bg-[#f8fbf9] p-4 hover:bg-[#f1f8f4]">
+            <span className="flex items-center gap-2 font-bold text-[#005a3c]"><Paperclip className="h-4 w-4" /> Anexar comprovante agora</span>
+            <span className="mt-1 block text-xs text-gray-500">JPG, PNG, WEBP ou PDF — até 8 MB.</span>
+            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="mt-3 block w-full text-sm" onChange={(e) => onArquivo(e.target.files?.[0] || null)} disabled={salvando} />
+            {arquivo && <span className="mt-2 block text-xs font-semibold text-[#005a3c]">Selecionado: {arquivo.name}</span>}
+          </label>
         )}
 
         <label className="mt-4 block text-sm font-bold text-gray-700">Conta bancária que recebeu o PIX
@@ -64,7 +79,7 @@ export default function ConfirmarPixReserva({
 
         <div className="mt-5 flex gap-2">
           <button type="button" onClick={onFechar} className="flex-1 rounded-xl border px-4 py-3 font-bold">Cancelar</button>
-          <button type="button" onClick={onConfirmar} disabled={salvando || !contaBancariaId || !reserva.comprovante_url} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{salvando ? "Confirmando..." : "Confirmar PIX"}</button>
+          <button type="button" onClick={onConfirmar} disabled={salvando || !contaBancariaId || (!reserva.comprovante_url && !arquivo)} className="flex-1 rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{salvando ? "Confirmando..." : "Confirmar PIX"}</button>
         </div>
       </div>
     </div>
