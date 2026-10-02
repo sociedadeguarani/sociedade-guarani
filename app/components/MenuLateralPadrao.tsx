@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
   Users,
@@ -170,6 +170,7 @@ function normalizarPerfil(value: unknown): Perfil {
 
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
+  const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil>("associado");
   const [abertoMobile, setAbertoMobile] = useState(false);
 
@@ -195,9 +196,7 @@ export default function MenuLateralPadrao() {
   );
 
   function irPara(rota: string) {
-    if (pathname !== rota) {
-      window.location.href = rota;
-    }
+    if (pathname !== rota) router.push(rota);
   }
 
   const conteudoMenu = (
