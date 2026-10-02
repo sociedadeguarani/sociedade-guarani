@@ -23,6 +23,21 @@ function normalizarPagamento(value: unknown) {
   return pagamento;
 }
 
+function normalizarTexto(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function inferirCategoriaEspaco(nome: string) {
+  const texto = normalizarTexto(nome);
+  if (texto.includes("quadra") || texto.includes("cancha") || texto.includes("campo")) return "esporte";
+  if (texto.includes("salao") || texto.includes("ctg")) return "eventos";
+  return "lazer";
+}
+
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master"]);
   if ("response" in auth) return auth.response;
@@ -40,7 +55,7 @@ export async function GET(request: Request) {
     let query = db
       .from("reservas")
       .select(
-        "id,espaco_id,socio_id,dependente_id,responsavel_nome,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,espacos(id,nome,categoria)",
+        "id,espaco_id,socio_id,dependente_id,responsavel_nome,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,espacos(id,nome)",
       )
       .order("data_reserva", { ascending: false })
       .order("hora_inicio", { ascending: false });
@@ -65,7 +80,7 @@ export async function GET(request: Request) {
         id: String(row.id ?? ""),
         espaco_id: row.espaco_id == null ? null : String(row.espaco_id),
         espaco_nome: String(rel?.nome ?? row.espaco_nome ?? "Espaço não informado"),
-        categoria: rel?.categoria == null ? null : String(rel.categoria),
+        categoria: inferirCategoriaEspaco(String(rel?.nome ?? row.espaco_nome ?? "")),
         socio_id: row.socio_id == null ? null : String(row.socio_id),
         dependente_id: row.dependente_id == null ? null : String(row.dependente_id),
         responsavel_nome: String(row.responsavel_nome ?? ""),
@@ -105,4 +120,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
