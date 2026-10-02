@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export async function GET(request: Request) {
-  // Financeiro é exclusivo da administração. O Administrador Master herda
-  // automaticamente as permissões do Administrador em requireRoles().
   const auth = await requireRoles(request, ["administrador"]);
   if ("response" in auth) return auth.response;
 
