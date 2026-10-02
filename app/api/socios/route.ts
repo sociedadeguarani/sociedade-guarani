@@ -27,15 +27,20 @@ export async function GET(request: Request) {
     const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
     if ("response" in auth) return auth.response;
     const db = getServiceClient();
+    const url = new URL(request.url);
+    if (url.searchParams.get("resumo") === "1") {
+      const [total, ativos, inativos] = await Promise.all([
+        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true),
+        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "ativo"),
+        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "inativo"),
+      ]);
+      const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
+      if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
+      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0 });
+    }
     const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-
-    const socios = data || [];
-    if (new URL(request.url).searchParams.get("resumo") === "1") {
-      return NextResponse.json({ total: socios.length });
-    }
-
-    return NextResponse.json({ socios });
+    return NextResponse.json({ socios: data || [] });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
@@ -71,21 +76,14 @@ export async function POST(request: Request) {
       possui_mensalidade: ehDependente ? false : possuiMensalidade,
       ...(ehDependente ? { valor_mensalidade: 0 } : {}),
     };
-    const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
-    const { data, error } = await auth.supabase.from("socios").insert(base).select("*").single();
+    const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
+    if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
+    const { data, error } = await auth.supabase.from("socios").insert(dadosCompletos).select("*").single();
     if (error) {
       if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
       return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
     }
-    const extras = limparObjeto({ ...dadosNormalizados }, COLUNAS_EXTRAS);
-    const avisos: string[] = [];
-    for (const [campo, valor] of Object.entries(extras)) {
-      if (campo === "foto_url" && !valor) continue;
-      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", data.id);
-      if (extraError) avisos.push(`${campo}: ${erroBanco(extraError)}`);
-    }
-    const { data: final } = await auth.supabase.from("socios").select("*").eq("id", data.id).single();
-    return NextResponse.json({ socio: final || data, avisos });
+    return NextResponse.json({ socio: data, avisos: [] });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
   }
@@ -117,15 +115,10 @@ export async function PUT(request: Request) {
       possui_mensalidade: ehDependente ? false : possuiMensalidade,
       ...(ehDependente ? { valor_mensalidade: 0 } : {}),
     };
-    const base = limparObjeto(dadosNormalizados, COLUNAS_BASE);
-    const { error } = await auth.supabase.from("socios").update(base).eq("id", id);
+    const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
+    if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
+    const { data, error } = await auth.supabase.from("socios").update(dadosCompletos).eq("id", id).select("*").single();
     if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
-    const extras = limparObjeto(dadosNormalizados, COLUNAS_EXTRAS);
-    for (const [campo, valor] of Object.entries(extras)) {
-      const { error: extraError } = await auth.supabase.from("socios").update({ [campo]: valor }).eq("id", id);
-      if (extraError) console.error(`Erro no campo ${campo}:`, extraError);
-    }
-    const { data } = await auth.supabase.from("socios").select("*").eq("id", id).single();
     return NextResponse.json({ socio: data });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar sócio." }, { status: 500 });
