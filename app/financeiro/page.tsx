@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
-import { Campo, Info, Modal, Resumo } from "./components/FinanceiroUI";
+import { Campo, Modal, Resumo } from "./components/FinanceiroUI";
 
 type Socio = {
   id: string;
@@ -43,18 +43,6 @@ type Mensalidade = {
   valor: number;
   data_vencimento: string | null;
   situacao: string | null;
-  data_pagamento: string | null;
-  tipo_pagamento: string | null;
-  valor_base?: number | null;
-  tarifa_pagamento?: number | null;
-  multa?: number | null;
-  juros?: number | null;
-  desconto?: number | null;
-  total_cobrado?: number | null;
-  comprovante_url: string | null;
-  observacoes: string | null;
-  numero_recibo?: string | null;
-  created_at?: string;
 };
 
 type PessoaFinanceira = {
@@ -134,35 +122,8 @@ function formatarCompetencia(valor: string) {
   return p.length === 2 ? `${p[1]}/${p[0]}` : valor;
 }
 
-function primeiroDia(valor: string) {
-  return `${valor}-01`;
-}
-
-function vencimentoCompetencia(competencia: string, dia: number) {
-  const [ano, mes] = competencia.split("-").map(Number);
-  const ultimo = new Date(ano, mes, 0).getDate();
-  const seguro = Math.min(Math.max(Number(dia || 10), 1), ultimo);
-  return `${competencia}-${String(seguro).padStart(2, "0")}`;
-}
-
-function situacaoRotulo(situacao: string | null | undefined) {
-  if (situacao === "pago") return "Pago";
-  if (situacao === "isento") return "Isento";
-  if (situacao === "em_atraso") return "Em atraso";
-  return "Em aberto";
-}
-
-function situacaoClasse(situacao: string | null | undefined) {
-  if (situacao === "pago") return "bg-green-100 text-green-700";
-  if (situacao === "isento") return "bg-gray-100 text-gray-600";
-  if (situacao === "em_atraso") return "bg-red-100 text-red-700";
-  return "bg-yellow-100 text-yellow-700";
-}
-
-function ehPagadorSocio(s: Socio) {
-  if (s.situacao?.toLowerCase() === "inativo") return false;
-  if (!s.responsavel_id) return s.possui_mensalidade === true;
-  return s.possui_mensalidade === true && /^SD\d{1,6}A$/i.test(String(s.matricula || "").trim());
+function ehUrlAbsoluta(valor: string) {
+  return /^https?:\/\//i.test(valor);
 }
 
 function nivelAtraso(meses: number) {
@@ -188,43 +149,11 @@ function nivelAtraso(meses: number) {
 }
 
 export default function FinanceiroPage() {
-  const hoje = new Date();
-  const [competencia, setCompetencia] = useState(
-    `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`
-  );
-
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [gerando, setGerando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
-  const [filtroAtraso, setFiltroAtraso] = useState<
-    "todos" | "atrasados" | "verde" | "amarelo" | "vermelho"
-  >("todos");
-
-  const [pagamento, setPagamento] = useState<Mensalidade | null>(null);
-  const [mesesPagamento, setMesesPagamento] = useState<Mensalidade[]>([]);
-  const [mesesSelecionados, setMesesSelecionados] = useState<string[]>([]);
-  const [carregandoMesesPagamento, setCarregandoMesesPagamento] = useState(false);
-  const [valorPagamento, setValorPagamento] = useState("");
-  const [dataPagamento, setDataPagamento] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
-  const [tipoPagamento, setTipoPagamento] = useState("pix");
-  const [observacoes, setObservacoes] = useState("");
-  const [arquivo, setArquivo] = useState<File | null>(null);
-  const [salvandoPagamento, setSalvandoPagamento] = useState(false);
-
-  const [edicao, setEdicao] = useState<Mensalidade | null>(null);
-  const [edicaoValor, setEdicaoValor] = useState("");
-  const [edicaoVencimento, setEdicaoVencimento] = useState("");
-  const [edicaoSituacao, setEdicaoSituacao] = useState("em_aberto");
-
-  const [reciboItens, setReciboItens] = useState<Mensalidade[]>([]);
-  const [processandoEstorno, setProcessandoEstorno] = useState(false);
-
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
   const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
@@ -259,13 +188,18 @@ export default function FinanceiroPage() {
   const [transData, setTransData] = useState(new Date().toISOString().slice(0, 10));
   const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
   const [transObservacoes, setTransObservacoes] = useState("");
-  const [contaPagamentoId, setContaPagamentoId] = useState("");
 
   // Filtros do fluxo de caixa
   const [fluxoInicio, setFluxoInicio] = useState("");
   const [fluxoFim, setFluxoFim] = useState("");
   const [fluxoConta, setFluxoConta] = useState("");
   const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
+  const [fluxoForma, setFluxoForma] = useState<"todos" | "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "outro">("todos");
+  const [movimentoEstornandoId, setMovimentoEstornandoId] = useState<string | null>(null);
+  const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(true);
+  const [salvandoConta, setSalvandoConta] = useState(false);
+  const [salvandoMovimento, setSalvandoMovimento] = useState(false);
+  const [salvandoTransferencia, setSalvandoTransferencia] = useState(false);
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
     const responsaveis = new Map<string, Socio>(
@@ -335,94 +269,10 @@ export default function FinanceiroPage() {
     return resultado;
   }, [socios, dependentes]);
 
-  // Mapa usado para identificar os lançamentos já existentes.
-  // Importante: ele inclui TODOS os sócios/dependentes, e não somente
-  // quem está marcado atualmente com possui_mensalidade = true.
-  // Assim, lançamentos antigos continuam mostrando corretamente o nome
-  // mesmo que a configuração financeira do cadastro tenha mudado depois.
-  const mapaPessoa = useMemo(() => {
-    const map = new Map<string, PessoaFinanceira>();
-
-    const responsaveis = new Map<string, Socio>(
-      socios.map((s) => [s.id, s] as [string, Socio])
-    );
-
-    for (const s of socios) {
-      map.set(`socio:${s.id}`, {
-        chave: `socio:${s.id}`,
-        socio_id: s.id,
-        dependente_id: null,
-        nome: s.nome,
-        matricula: s.matricula,
-        cpf: s.cpf,
-        foto_url: s.foto_url,
-        responsavel_nome: s.responsavel_id
-          ? responsaveis.get(s.responsavel_id)?.nome || null
-          : null,
-        possui_mensalidade: Boolean(s.possui_mensalidade),
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: Number(s.dia_vencimento || 10),
-        tipo_pagamento: s.tipo_pagamento || "pix",
-      });
-    }
-
-    for (const d of dependentes) {
-      const responsavel = responsaveis.get(d.socio_id);
-
-      map.set(`dependente:${d.id}`, {
-        chave: `dependente:${d.id}`,
-        socio_id: d.socio_id,
-        dependente_id: d.id,
-        nome: d.nome,
-        matricula: responsavel?.matricula || null,
-        cpf: d.cpf,
-        foto_url: null,
-        responsavel_nome: responsavel?.nome || null,
-        possui_mensalidade: Boolean(d.possui_mensalidade),
-        valor_mensalidade: Number(d.valor_mensalidade || 0),
-        dia_vencimento: Number(d.dia_vencimento || 10),
-        tipo_pagamento: d.tipo_pagamento || "pix",
-      });
-    }
-
-    return map;
-  }, [socios, dependentes]);
-
-  const pessoaDoLancamento = (item: Mensalidade) => {
-    if (item.dependente_id) {
-      return (
-        mapaPessoa.get(`dependente:${item.dependente_id}`) ||
-        mapaPessoa.get(`socio:${item.socio_id}`) ||
-        null
-      );
-    }
-
-    return mapaPessoa.get(`socio:${item.socio_id}`) || null;
-  };
-
-  const mensalidadesCompetencia = useMemo(
-    () =>
-      mensalidades
-        .filter((m) => m.competencia?.slice(0, 7) === competencia)
-        .filter((m) => {
-          const socio = socios.find((s) => s.id === m.socio_id);
-          if (!socio) return true;
-          return ehPagadorSocio(socio);
-        })
-        .sort((a, b) =>
-          String(a.data_vencimento || "").localeCompare(
-            String(b.data_vencimento || "")
-          )
-        ),
-    [mensalidades, competencia]
-  );
-
   const lancamentosPorPessoa = useMemo(() => {
     const map = new Map<string, Mensalidade[]>();
     for (const m of mensalidades) {
-      const chave = m.dependente_id
-        ? `dependente:${m.dependente_id}`
-        : `socio:${m.socio_id}`;
+      const chave = m.dependente_id ? `dependente:${m.dependente_id}` : `socio:${m.socio_id}`;
       const lista = map.get(chave);
       if (lista) lista.push(m);
       else map.set(chave, [m]);
@@ -433,30 +283,21 @@ export default function FinanceiroPage() {
   const historicoPorPessoa = useMemo(() => {
     const map = new Map<string, number>();
     const hojeIso = new Date().toISOString().slice(0, 10);
-
     for (const [chave, lancamentos] of lancamentosPorPessoa) {
       const atrasadas = lancamentos.filter((m) => {
         if (m.situacao === "pago" || m.situacao === "isento") return false;
-        return Boolean(
-          m.situacao === "em_atraso" ||
-            (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso)
-        );
+        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso));
       }).length;
       if (atrasadas > 0) map.set(chave, atrasadas);
     }
-
     return map;
   }, [lancamentosPorPessoa]);
 
-  const atrasoPessoas = useMemo(() => {
-    return pessoas
-      .map((p) => ({
-        pessoa: p,
-        meses: historicoPorPessoa.get(p.chave) || 0,
-        nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0),
-      }))
-      .filter((x) => x.meses >= 3);
-  }, [pessoas, historicoPorPessoa]);
+  const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
+    pessoa: p,
+    meses: historicoPorPessoa.get(p.chave) || 0,
+    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0),
+  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa]);
 
   const quantidadeAtrasados = atrasoPessoas.length;
   const amarelos = atrasoPessoas.filter((x) => x.meses === 2).length;
@@ -464,617 +305,98 @@ export default function FinanceiroPage() {
 
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-
-    return atrasoPessoas
-      .map((x) => {
-        const hojeIso = new Date().toISOString().slice(0, 10);
-        const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || [])
-          .filter((m) => {
-            if (m.situacao === "pago" || m.situacao === "isento") return false;
-            return Boolean(
-              m.situacao === "em_atraso" ||
-                (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso)
-            );
-          })
-          .sort((a, b) =>
-            String(b.competencia || "").localeCompare(
-              String(a.competencia || "")
-            )
-          );
-
-        const valorDevido = lancamentos.reduce(
-          (soma, item) => soma + Number(item.valor || 0),
-          0
-        );
-
-        const correspondeBusca =
-          !termo ||
-          x.pessoa.nome.toLowerCase().includes(termo) ||
-          String(x.pessoa.matricula || "").includes(termo) ||
-          String(x.pessoa.cpf || "").includes(termo) ||
-          String(x.pessoa.responsavel_nome || "")
-            .toLowerCase()
-            .includes(termo);
-
-        return {
-          ...x,
-          lancamentos,
-          valorDevido,
-          competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)),
-          ultimaCompetencia: lancamentos[0]?.competencia || null,
-          correspondeBusca,
-        };
-      })
-      .filter((x) => x.correspondeBusca);
+    return atrasoPessoas.map((x) => {
+      const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || []).filter((m) => {
+        if (m.situacao === "pago" || m.situacao === "isento") return false;
+        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < new Date().toISOString().slice(0, 10)));
+      }).sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
+      const valorDevido = lancamentos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
+      const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
+      return { ...x, lancamentos, valorDevido, competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentos[0]?.competencia || null, correspondeBusca };
+    }).filter((x) => x.correspondeBusca);
   }, [atrasoPessoas, busca, lancamentosPorPessoa]);
 
-  const filtradas = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
+  const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
+  const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
 
-    return mensalidadesCompetencia.filter((item) => {
-      const pessoa = pessoaDoLancamento(item);
-
-      const correspondeBusca =
-        !termo ||
-        !pessoa ||
-        pessoa.nome.toLowerCase().includes(termo) ||
-        String(pessoa.matricula || "").includes(termo) ||
-        String(pessoa.cpf || "").toLowerCase().includes(termo);
-
-      if (!correspondeBusca) return false;
-
-      if (filtroAtraso === "todos") return true;
-
-      // O filtro pode chegar aqui mesmo quando o lançamento não encontrou
-      // um cadastro correspondente. Nesse caso, não tentamos acessar
-      // pessoa.chave para evitar erro de TypeScript/null em produção.
-      if (!pessoa) return false;
-
-      const meses = historicoPorPessoa.get(pessoa.chave) || 0;
-
-      if (filtroAtraso === "atrasados") return meses >= 3;
-      if (filtroAtraso === "verde") return meses <= 1;
-      if (filtroAtraso === "amarelo") return meses === 2;
-      return meses >= 3;
-    });
-  }, [
-    mensalidadesCompetencia,
-    busca,
-    filtroAtraso,
-    historicoPorPessoa,
-  ]);
-
-  const totalLancado = mensalidadesCompetencia.reduce(
-    (s, m) => s + Number(m.valor || 0),
-    0
-  );
-  const totalRecebido = mensalidadesCompetencia
-    .filter((m) => m.situacao === "pago")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-  const totalAberto = mensalidadesCompetencia
-    .filter((m) => m.situacao === "em_aberto")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-  const totalAtrasado = mensalidadesCompetencia
-    .filter((m) => m.situacao === "em_atraso")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-
-  async function carregarTudo() {
-    setCarregando(true);
-
-    const [sociosResult, dependentesResult, mensalidadesResult, contasResult, movimentosResult] =
-      await Promise.all([
-        supabase
-          .from("socios")
-          .select(
-            "id,matricula,nome,cpf,whatsapp,telefone,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento"
-          )
-          .order("matricula", { ascending: true }),
-        supabase
-          .from("dependentes")
-          .select(
-            "id,socio_id,nome,cpf,telefone,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento"
-          )
-          .order("nome", { ascending: true }),
-        supabase
-          .from("mensalidades")
-          .select("*")
-          .order("competencia", { ascending: false })
-          .order("data_vencimento", { ascending: true }),
+  async function carregarFinanceiro() {
+    setCarregandoFinanceiro(true);
+    try {
+      const [contasResult, movimentosResult] = await Promise.all([
         supabase
           .from("contas_bancarias")
-          .select("*")
+          .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
           .eq("ativo", true)
           .order("nome", { ascending: true }),
         supabase
           .from("movimentacoes_financeiras")
-          .select("*")
+          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
           .order("data_movimentacao", { ascending: false })
           .order("created_at", { ascending: false }),
       ]);
 
-    const erros = [
-      sociosResult.error,
-      dependentesResult.error,
-      mensalidadesResult.error,
-      contasResult.error,
-      movimentosResult.error,
-    ].filter(Boolean);
+      if (contasResult.error) throw contasResult.error;
+      if (movimentosResult.error) throw movimentosResult.error;
 
-    if (sociosResult.error) console.error(sociosResult.error);
-    if (dependentesResult.error) console.error(dependentesResult.error);
-    if (mensalidadesResult.error) console.error(mensalidadesResult.error);
-    if (contasResult.error) console.error(contasResult.error);
-    if (movimentosResult.error) console.error(movimentosResult.error);
-
-    if (sociosResult.data) setSocios(sociosResult.data as Socio[]);
-    if (dependentesResult.data)
-      setDependentes(dependentesResult.data as Dependente[]);
-    if (mensalidadesResult.data)
-      setMensalidades(mensalidadesResult.data as Mensalidade[]);
-    if (contasResult.data) setContasBancarias(contasResult.data as ContaBancaria[]);
-    if (movimentosResult.data) setMovimentosFinanceiros(movimentosResult.data as MovimentoFinanceiro[]);
-
-    if (erros.length > 0) {
-      setMensagem(
-        "Não foi possível carregar uma parte do financeiro. Verifique as permissões do Supabase."
-      );
-    }
-
-    setCarregando(false);
-  }
-
-  useEffect(() => {
-    let ativo = true;
-
-    async function iniciar() {
-      const { data } = await supabase.auth.getSession();
-
-      if (!ativo) return;
-
-      if (!data.session) {
-        window.location.href = "/login";
-        return;
-      }
-
-      await carregarTudo();
-    }
-
-    void iniciar();
-
-    return () => {
-      ativo = false;
-    };
-  }, []);
-
-  async function atualizarAtrasos() {
-    const hojeIso = new Date().toISOString().slice(0, 10);
-    const ids = mensalidades
-      .filter(
-        (m) =>
-          m.situacao === "em_aberto" &&
-          m.data_vencimento &&
-          m.data_vencimento.slice(0, 10) < hojeIso
-      )
-      .map((m) => m.id);
-
-    if (ids.length === 0) return;
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .update({ situacao: "em_atraso" })
-      .in("id", ids);
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    const idsSet = new Set(ids);
-    setMensalidades((lista) =>
-      lista.map((m) => (idsSet.has(m.id) ? { ...m, situacao: "em_atraso" } : m))
-    );
-  }
-
-  async function gerarMensalidades() {
-    setGerando(true);
-    setMensagem("");
-
-    try {
-      await atualizarAtrasos();
-
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão não encontrada.");
-
-      const [anoGeracao, mesGeracao] = competencia.split("-").map(Number);
-      if (!anoGeracao || !mesGeracao) throw new Error("Competência inválida.");
-
-      // O módulo Mensalidades é a única fonte de verdade para geração.
-      // Assim o Financeiro não cria registros paralelos, não gera isentos
-      // automaticamente e respeita possui_mensalidade/tipo_pagamento.
-      const response = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          acao: "gerar",
-          ano: anoGeracao,
-          mes: mesGeracao,
-        }),
-      });
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Não foi possível gerar as mensalidades.");
-
-      await carregarTudo();
-      setMensagem(
-        result.message ||
-          `${Number(result.criadas || 0)} mensalidade(s) gerada(s) para ${formatarCompetencia(competencia)}.`
-      );
+      setContasBancarias((contasResult.data || []) as ContaBancaria[]);
+      setMovimentosFinanceiros((movimentosResult.data || []) as MovimentoFinanceiro[]);
     } catch (error) {
-      console.error(error);
       setMensagem(
-        `Não foi possível gerar as mensalidades. ${
-          error instanceof Error ? error.message : ""
+        `Não foi possível carregar o Financeiro. ${
+          error instanceof Error ? error.message : "Erro desconhecido."
         }`
       );
     } finally {
-      setGerando(false);
+      setCarregandoFinanceiro(false);
     }
-  }
-
-  async function abrirPagamento(item: Mensalidade) {
-    setContaPagamentoId("");
-    setPagamento(item);
-    setValorPagamento(String(Number(item.valor || 0)));
-    setDataPagamento(new Date().toISOString().slice(0, 10));
-    setTipoPagamento(item.tipo_pagamento || "pix");
-    setObservacoes("");
-    setArquivo(null);
-    setMesesPagamento([]);
-    setMesesSelecionados([item.id]);
-    setCarregandoMesesPagamento(true);
-
-    try {
-      let query = supabase
-        .from("mensalidades")
-        .select("*")
-        .eq("socio_id", item.socio_id)
-        .order("competencia", { ascending: false });
-
-      query = item.dependente_id
-        ? query.eq("dependente_id", item.dependente_id)
-        : query.is("dependente_id", null);
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      const pendentes = ((data || []) as Mensalidade[]).filter(
-        (m) => m.situacao !== "pago" && m.situacao !== "isento"
-      );
-
-      const lista = pendentes.some((m) => m.id === item.id)
-        ? pendentes
-        : [item, ...pendentes];
-
-      setMesesPagamento(lista);
-      setMesesSelecionados([item.id]);
-      setValorPagamento(String(Number(item.valor || 0)));
-    } catch (error) {
-      console.error(error);
-      setMesesPagamento([item]);
-      setMesesSelecionados([item.id]);
-      setMensagem(
-        `Não foi possível carregar as mensalidades pendentes. ${
-          error instanceof Error ? error.message : ""
-        }`
-      );
-    } finally {
-      setCarregandoMesesPagamento(false);
-    }
-  }
-
-  function alternarMesPagamento(id: string) {
-    setMesesSelecionados((atual) => {
-      const nova = atual.includes(id)
-        ? atual.filter((itemId) => itemId !== id)
-        : [...atual, id];
-
-      const total = mesesPagamento
-        .filter((m) => nova.includes(m.id))
-        .reduce((soma, m) => soma + Number(m.valor || 0), 0);
-
-      setValorPagamento(String(total));
-      return nova;
-    });
-  }
-
-  async function confirmarPagamento() {
-    if (!pagamento) return;
-
-    const selecionadas = mesesPagamento.filter((m) =>
-      mesesSelecionados.includes(m.id)
-    );
-
-    if (selecionadas.length === 0) {
-      setMensagem("Selecione pelo menos uma competência.");
-      return;
-    }
-
-    if (!contaPagamentoId) {
-      setMensagem("Selecione a conta da Sociedade que recebeu o pagamento.");
-      return;
-    }
-
-    setSalvandoPagamento(true);
-    setMensagem("");
-
-    try {
-      let comprovante = selecionadas[0].comprovante_url;
-
-      if (arquivo) {
-        const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
-        const caminho = `mensalidades/pagamento-${selecionadas[0].id}-${Date.now()}.${ext}`;
-
-        const upload = await supabase.storage
-          .from("comprovantes-financeiro")
-          .upload(caminho, arquivo, {
-            upsert: true,
-            contentType: arquivo.type || "application/octet-stream",
-          });
-
-        if (upload.error) throw upload.error;
-        comprovante = caminho;
-      }
-
-      const valorEsperado = selecionadas.reduce(
-        (soma, m) => soma + Number(m.total_cobrado ?? m.valor ?? 0),
-        0
-      );
-      const totalInformado = Number(String(valorPagamento || "0").replace(",", "."));
-
-      if (Math.abs(totalInformado - valorEsperado) > 0.01) {
-        throw new Error(
-          `O valor informado (${formatarMoeda(totalInformado)}) deve ser igual ao total cobrado das competências selecionadas (${formatarMoeda(valorEsperado)}).`
-        );
-      }
-
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão não encontrada.");
-
-      const response = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          acao: "baixar",
-          ids: selecionadas.map((m) => m.id),
-          data_pagamento: dataPagamento || new Date().toISOString().slice(0, 10),
-          tipo_pagamento: tipoPagamento || null,
-          conta_recebimento_id: contaPagamentoId,
-          comprovante_url: comprovante || null,
-          observacoes: observacoes || null,
-        }),
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Não foi possível registrar o pagamento.");
-      }
-
-      const numero = await gerarNumeroRecibo(selecionadas[0]);
-      const atualizadas = selecionadas.map((m) => ({
-        ...m,
-        situacao: "pago",
-        data_pagamento: dataPagamento || null,
-        tipo_pagamento: tipoPagamento || m.tipo_pagamento || null,
-        comprovante_url: comprovante || null,
-        observacoes: observacoes || null,
-        numero_recibo: numero,
-      }));
-
-      const { error: reciboError } = await supabase
-        .from("mensalidades")
-        .update({ numero_recibo: numero })
-        .in("id", selecionadas.map((m) => m.id));
-      if (reciboError) throw reciboError;
-
-      setMensalidades((lista) =>
-        lista.map((m) => atualizadas.find((a) => a.id === m.id) || m)
-      );
-
-      setMensagem(
-        selecionadas.length === 1
-          ? "Pagamento registrado e lançado no Financeiro."
-          : `${selecionadas.length} mensalidades pagas e lançadas no Financeiro.`
-      );
-
-      setPagamento(null);
-      setMesesPagamento([]);
-      setMesesSelecionados([]);
-      setReciboItens(atualizadas);
-      await carregarTudo();
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        `Não foi possível registrar o pagamento. ${
-          error instanceof Error ? error.message : ""
-        }`
-      );
-    } finally {
-      setSalvandoPagamento(false);
-    }
-  }
-
-  async function salvarEdicao() {
-    if (!edicao) return;
-    if (edicao.situacao === "pago") {
-      setMensagem("Mensalidade já paga não pode ser editada por esta tela para evitar divergência no Financeiro. Estorne a baixa e faça a correção antes de pagar novamente.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .update({
-        valor: Number(edicaoValor || 0),
-        data_vencimento: edicaoVencimento || null,
-        situacao: edicaoSituacao,
-      })
-      .eq("id", edicao.id);
-
-    if (error) {
-      setMensagem(`Não foi possível atualizar a mensalidade. ${error.message}`);
-      return;
-    }
-
-    setMensalidades((lista) =>
-      lista.map((m) =>
-        m.id === edicao.id
-          ? {
-              ...m,
-              valor: Number(edicaoValor || 0),
-              data_vencimento: edicaoVencimento || null,
-              situacao: edicaoSituacao,
-            }
-          : m
-      )
-    );
-    setEdicao(null);
-    setMensagem("Mensalidade atualizada.");
-  }
-
-  async function gerarNumeroRecibo(item: Mensalidade) {
-    if (item.numero_recibo) return item.numero_recibo;
-
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("numero_recibo")
-      .eq("competencia", item.competencia)
-      .not("numero_recibo", "is", null);
-
-    if (error) throw error;
-
-    const maior = (data || [])
-      .map((row) => {
-        const valor = String(row.numero_recibo || "");
-        const match = valor.match(/-(\d+)$/);
-        return match ? Number(match[1]) : 0;
-      })
-      .reduce((max, atual) => Math.max(max, atual), 0);
-
-    const numero = `REC-${item.competencia.slice(0, 7).replace("-", "")}-${String(
-      maior + 1
-    ).padStart(3, "0")}`;
-
-    const { error: updateError } = await supabase
-      .from("mensalidades")
-      .update({ numero_recibo: numero })
-      .eq("id", item.id);
-
-    if (updateError) throw updateError;
-
-    setMensalidades((lista) =>
-      lista.map((m) =>
-        m.id === item.id ? { ...m, numero_recibo: numero } : m
-      )
-    );
-
-    return numero;
-  }
-
-  async function abrirRecibo(item: Mensalidade) {
-    if (item.situacao !== "pago") return;
-
-    try {
-      const numero = await gerarNumeroRecibo(item);
-      setReciboItens([{ ...item, numero_recibo: numero }]);
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        `Não foi possível gerar o recibo. ${
-          error instanceof Error ? error.message : ""
-        }`
-      );
-    }
-  }
-
-  async function estornarPagamento(item: Mensalidade) {
-    if (item.situacao !== "pago") return;
-
-    const confirmar = window.confirm(
-      "Deseja estornar este pagamento? A mensalidade voltará para Em aberto."
-    );
-
-    if (!confirmar) return;
-
-    setProcessandoEstorno(true);
-    setMensagem("");
-
-    try {
-      const { error } = await supabase
-        .from("mensalidades")
-        .update({
-          situacao: "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: null,
-          comprovante_url: null,
-          observacoes: "Pagamento estornado.",
-        })
-        .eq("id", item.id);
-
-      if (error) throw error;
-
-      setMensalidades((lista) =>
-        lista.map((m) =>
-          m.id === item.id
-            ? {
-                ...m,
-                situacao: "em_aberto",
-                data_pagamento: null,
-                tipo_pagamento: null,
-                comprovante_url: null,
-                observacoes: "Pagamento estornado.",
-              }
-            : m
-        )
-      );
-
-      setMensagem("Pagamento estornado com sucesso.");
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        `Não foi possível estornar o pagamento. ${
-          error instanceof Error ? error.message : ""
-        }`
-      );
-    } finally {
-      setProcessandoEstorno(false);
-    }
-  }
-
-  function imprimirRecibo() {
-    window.print();
   }
 
   async function abrirComprovante(path: string | null) {
     if (!path) return;
-
-    const { data, error } = await supabase.storage
-      .from("comprovantes-financeiro")
-      .createSignedUrl(path, 600);
-
-    if (error || !data?.signedUrl) {
-      setMensagem("Não foi possível abrir o comprovante.");
+    if (ehUrlAbsoluta(path)) {
+      window.open(path, "_blank", "noopener,noreferrer");
       return;
     }
-
-    window.open(data.signedUrl, "_blank");
+    const { data, error } = await supabase.storage
+      .from("comprovantes-financeiro")
+      .createSignedUrl(path, 10 * 60);
+    if (error || !data?.signedUrl) {
+      setMensagem(`Não foi possível abrir o comprovante. ${error?.message || "Arquivo não encontrado."}`);
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
+
+  async function carregarInadimplencia() {
+    if (inadimplenciaCarregada || carregandoInadimplencia) return;
+    setCarregandoInadimplencia(true);
+    try {
+      const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
+        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
+        supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
+        supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao").order("competencia", { ascending: false }),
+      ]);
+      if (sociosResult.error) throw sociosResult.error;
+      if (dependentesResult.error) throw dependentesResult.error;
+      if (mensalidadesResult.error) throw mensalidadesResult.error;
+      setSocios((sociosResult.data || []) as Socio[]);
+      setDependentes((dependentesResult.data || []) as Dependente[]);
+      setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
+      setInadimplenciaCarregada(true);
+    } catch (error) {
+      setMensagem(
+        `Não foi possível carregar a inadimplência. ${
+          error instanceof Error ? error.message : "Erro desconhecido."
+        }`
+      );
+    } finally {
+      setCarregandoInadimplencia(false);
+    }
+  }
+
+  useEffect(() => {
+    void carregarFinanceiro();
+  }, []);
 
   const saldosPorConta = useMemo(() => {
     const saldos = new Map<string, number>(
@@ -1118,6 +440,12 @@ export default function FinanceiroPage() {
     [saldosPorConta]
   );
 
+  const estornosPorOrigem = useMemo(() => new Set(
+    movimentosFinanceiros
+      .filter((m) => String(m.origem_tipo || "").startsWith("estorno_") && m.origem_id)
+      .map((m) => String(m.origem_id))
+  ), [movimentosFinanceiros]);
+
   const movimentosFluxo = useMemo(() => {
     return movimentosFinanceiros.filter((m) => {
       const data = String(m.data_movimentacao || "").slice(0, 10);
@@ -1133,9 +461,10 @@ export default function FinanceiroPage() {
       ) return false;
 
       if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
+      if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
       return true;
     });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, abaFinanceira]);
+  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, abaFinanceira]);
 
   const entradasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "entrada")
@@ -1147,16 +476,128 @@ export default function FinanceiroPage() {
     .filter((m) => m.tipo === "transferencia")
     .reduce((sum, m) => sum + Number(m.valor || 0), 0);
 
+  function selecionarAbaFinanceira(aba: typeof abaFinanceira) {
+    setAbaFinanceira(aba);
+    if (aba === "entradas") setFluxoTipo("entrada");
+    else if (aba === "saidas") setFluxoTipo("saida");
+    else if (aba === "fluxo") { setFluxoTipo("todos"); setFluxoForma("todos"); }
+    if (aba === "aluguéis") {
+      setMovTipo("entrada");
+      setMovCategoria("Aluguel");
+    }
+    if (aba === "inadimplencia") void carregarInadimplencia();
+  }
+
+  async function estornarReserva(movimento: MovimentoFinanceiro) {
+    if (movimento.origem_tipo !== "reserva" || !movimento.origem_id) return;
+    const motivo = window.prompt(
+      `Motivo do estorno da reserva de ${formatarMoeda(movimento.valor)}:`,
+      "Cancelamento da reserva e devolução do pagamento."
+    );
+    if (motivo === null) return;
+    const ok = window.confirm(
+      `Confirmar estorno do pagamento de ${formatarMoeda(movimento.valor)}?\n\nA reserva será cancelada e o estorno ficará registrado no Financeiro.`
+    );
+    if (!ok) return;
+
+    setMovimentoEstornandoId(movimento.id);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Sessão expirada.");
+      const response = await fetch("/api/reservas", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id: movimento.origem_id, acao: "estornar_pagamento", motivo: motivo.trim() || "Não informado" }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar a reserva.");
+      await carregarFinanceiro();
+      setMensagem(result.message || "Pagamento da reserva estornado e reserva cancelada.");
+    } catch (error) {
+      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar a reserva.");
+    } finally {
+      setMovimentoEstornandoId(null);
+    }
+  }
+
+  async function estornarMovimento(movimento: MovimentoFinanceiro) {
+    const origem = String(movimento.origem_tipo || "").toLowerCase();
+    if (!["manual", "transferencia"].includes(origem)) {
+      setMensagem("Este lançamento está vinculado a outro módulo. Use o estorno no módulo de origem para manter os registros sincronizados.");
+      return;
+    }
+    const motivo = window.prompt(
+      `Motivo do estorno de ${formatarMoeda(movimento.valor)}:`,
+      "Correção de lançamento."
+    );
+    if (motivo === null) return;
+    const ok = window.confirm(`Confirmar estorno de ${movimento.tipo === "entrada" ? "entrada" : movimento.tipo === "saida" ? "saída" : "transferência"} de ${formatarMoeda(movimento.valor)}?\n\nO histórico original será preservado.`);
+    if (!ok) return;
+    setMovimentoEstornandoId(movimento.id);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Sessão expirada.");
+      const response = await fetch("/api/financeiro", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "estornar_movimento", id: movimento.id, motivo: motivo.trim() || "Não informado" }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar o lançamento.");
+      await carregarFinanceiro();
+      setMensagem(result.message || "Estorno registrado com sucesso.");
+    } catch (error) {
+      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar o lançamento.");
+    } finally {
+      setMovimentoEstornandoId(null);
+    }
+  }
+
+  function abrirNovaMovimentacao(tipo: "entrada" | "saida" = "saida") {
+    setMovTipo(tipo);
+    setMovConta((atual) => atual || contasBancarias[0]?.id || "");
+    setMovCategoria(tipo === "entrada" ? "Recebimento" : "Despesa");
+    setMovDescricao("");
+    setMovValor("");
+    setMovData(new Date().toISOString().slice(0, 10));
+    setMovForma("pix");
+    setMovObservacoes("");
+    setMovArquivo(null);
+    setMostrarMovimentoModal(true);
+  }
+
+  function abrirNovaTransferencia() {
+    setTransOrigem(contasBancarias[0]?.id || "");
+    setTransDestino(contasBancarias[1]?.id || "");
+    setTransValor("");
+    setTransData(new Date().toISOString().slice(0, 10));
+    setTransDescricao("Transferência entre contas");
+    setTransObservacoes("");
+    setMostrarTransferenciaModal(true);
+  }
+
   async function salvarContaBancaria() {
+    if (salvandoConta) return;
     if (!contaNome.trim()) { setMensagem("Informe o nome da conta."); return; }
-    const payload = { nome: contaNome.trim(), banco: contaBanco || null, agencia: contaAgencia || null, conta: contaNumero || null, saldo_inicial: Number(contaSaldoInicial || 0), data_saldo_inicial: contaDataSaldo || null, ativo: true, observacoes: contaObservacoes || null };
-    const result = contaEditando
-      ? await supabase.from("contas_bancarias").update(payload).eq("id", contaEditando.id).select("*").single()
-      : await supabase.from("contas_bancarias").insert(payload).select("*").single();
-    if (result.error) { setMensagem(`Não foi possível salvar a conta. ${result.error.message}`); return; }
-    if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? result.data as ContaBancaria : c));
-    else setContasBancarias((lista) => [...lista, result.data as ContaBancaria].sort((a,b)=>a.nome.localeCompare(b.nome)));
-    setMostrarContaModal(false); setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes(""); setMensagem("Conta bancária salva com sucesso.");
+    const saldoInicial = Number(String(contaSaldoInicial || "0").replace(",", "."));
+    if (!Number.isFinite(saldoInicial)) { setMensagem("Informe um saldo inicial válido."); return; }
+    const payload = { nome: contaNome.trim(), banco: contaBanco || null, agencia: contaAgencia || null, conta: contaNumero || null, saldo_inicial: saldoInicial, data_saldo_inicial: contaDataSaldo || null, ativo: true, observacoes: contaObservacoes || null };
+    setSalvandoConta(true);
+    try {
+      const result = contaEditando
+        ? await supabase.from("contas_bancarias").update(payload).eq("id", contaEditando.id).select("*").single()
+        : await supabase.from("contas_bancarias").insert(payload).select("*").single();
+      if (result.error) throw result.error;
+      if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? result.data as ContaBancaria : c));
+      else setContasBancarias((lista) => [...lista, result.data as ContaBancaria].sort((a,b)=>a.nome.localeCompare(b.nome)));
+      setMostrarContaModal(false); setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes(""); setMensagem("Conta bancária salva com sucesso.");
+    } catch (error) {
+      setMensagem(`Não foi possível salvar a conta. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+    } finally {
+      setSalvandoConta(false);
+    }
   }
 
   function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
@@ -1217,25 +658,43 @@ export default function FinanceiroPage() {
   }
 
   async function salvarMovimentoFinanceiro() {
-    if (!movConta || !movDescricao.trim() || Number(movValor || 0) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
-    let comprovante: string | null = null;
-    if (movArquivo) { const ext = movArquivo.name.split(".").pop()?.toLowerCase() || "bin"; const caminho = `movimentos/${Date.now()}-${movArquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; const up = await supabase.storage.from("comprovantes-financeiro").upload(caminho, movArquivo, { upsert: true, contentType: movArquivo.type || "application/octet-stream" }); if (up.error) { setMensagem(`Não foi possível enviar o comprovante. ${up.error.message}`); return; } comprovante = caminho; }
-    const payload = { conta_bancaria_id: movConta, conta_destino_id: null, grupo_transferencia: null, tipo: movTipo, categoria: movCategoria || null, descricao: movDescricao.trim(), valor: Number(movValor), data_movimentacao: movData, forma_pagamento: movForma || null, origem_tipo: "manual", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: comprovante, conciliado: false, data_conciliacao: null, observacoes: movObservacoes || null };
-    const { data, error } = await supabase.from("movimentacoes_financeiras").insert(payload).select("*").single();
-    if (error) { setMensagem(`Não foi possível registrar a movimentação. ${error.message}`); return; }
-    setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarMovimentoModal(false); setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null); setMensagem("Movimentação registrada com sucesso.");
+    if (salvandoMovimento) return;
+    if (!movConta || !movDescricao.trim() || Number(String(movValor || "0").replace(",", ".")) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
+    const valor = Number(String(movValor).replace(",", "."));
+    if (!Number.isFinite(valor) || valor <= 0) { setMensagem("Informe um valor válido."); return; }
+    setSalvandoMovimento(true);
+    try {
+      let comprovante: string | null = null;
+      if (movArquivo) { const ext = movArquivo.name.split(".").pop()?.toLowerCase() || "bin"; const caminho = `movimentos/${Date.now()}-${movArquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; const up = await supabase.storage.from("comprovantes-financeiro").upload(caminho, movArquivo, { upsert: true, contentType: movArquivo.type || "application/octet-stream" }); if (up.error) throw up.error; comprovante = caminho; }
+      const payload = { conta_bancaria_id: movConta, conta_destino_id: null, grupo_transferencia: null, tipo: movTipo, categoria: movCategoria || null, descricao: movDescricao.trim(), valor, data_movimentacao: movData, forma_pagamento: movForma || null, origem_tipo: "manual", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: comprovante, conciliado: false, data_conciliacao: null, observacoes: movObservacoes || null };
+      const { data, error } = await supabase.from("movimentacoes_financeiras").insert(payload).select("*").single();
+      if (error) throw error;
+      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarMovimentoModal(false); setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null); setMensagem("Movimentação registrada com sucesso.");
+    } catch (error) {
+      setMensagem(`Não foi possível registrar a movimentação. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+    } finally {
+      setSalvandoMovimento(false);
+    }
   }
 
   async function salvarTransferencia() {
-    if (!transOrigem || !transDestino || transOrigem === transDestino || Number(transValor || 0) <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
-    const grupo = crypto.randomUUID();
-    const base = { grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao: transDescricao || "Transferência entre contas", valor: Number(transValor), data_movimentacao: transData, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes: transObservacoes || null };
-    const { data, error } = await supabase.from("movimentacoes_financeiras").insert({ ...base, conta_bancaria_id: transOrigem, conta_destino_id: transDestino }).select("*").single();
-    if (error) { setMensagem(`Não foi possível registrar a transferência. ${error.message}`); return; }
-    setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
+    if (salvandoTransferencia) return;
+    const valor = Number(String(transValor || "0").replace(",", "."));
+    if (!transOrigem || !transDestino || transOrigem === transDestino || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
+    setSalvandoTransferencia(true);
+    try {
+      const grupo = crypto.randomUUID();
+      const base = { grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao: transDescricao || "Transferência entre contas", valor, data_movimentacao: transData, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes: transObservacoes || null };
+      const { data, error } = await supabase.from("movimentacoes_financeiras").insert({ ...base, conta_bancaria_id: transOrigem, conta_destino_id: transDestino }).select("*").single();
+      if (error) throw error;
+      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
+    } catch (error) {
+      setMensagem(`Não foi possível registrar a transferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+    } finally {
+      setSalvandoTransferencia(false);
+    }
   }
 
-  async function abrirPagamentoComConta(item: Mensalidade) { setContaPagamentoId(""); await abrirPagamento(item); }
 
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
@@ -1258,19 +717,32 @@ export default function FinanceiroPage() {
 
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => void carregarFinanceiro()}
+                disabled={carregandoFinanceiro}
+                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-60"
+              >
+                {carregandoFinanceiro ? "Atualizando..." : "↻ Atualizar"}
+              </button>
+              <button
                 onClick={() => setAbaFinanceira("contas")}
-                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"
+                className={`rounded-xl border border-[#cfe3d8] px-4 py-3 text-sm font-bold ${abaFinanceira === "contas" ? "bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-[#005a3c]"}`}
               >
                 🏦 Contas bancárias
               </button>
               <button
                 onClick={() => setAbaFinanceira("fluxo")}
-                className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"
+                className={`rounded-xl px-4 py-3 text-sm font-bold shadow-sm ${abaFinanceira === "fluxo" ? "bg-[#005a3c] text-white" : "border border-[#cfe3d8] bg-white text-[#005a3c]"}`}
               >
                 📊 Fluxo de caixa
               </button>
             </div>
           </div>
+
+          {carregandoFinanceiro && contasBancarias.length === 0 && movimentosFinanceiros.length === 0 && (
+            <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
+              Carregando contas e movimentações...
+            </div>
+          )}
 
           {mensagem && (
             <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
@@ -1282,7 +754,7 @@ export default function FinanceiroPage() {
             <Resumo
               titulo="Saldo em bancos"
               valor={formatarMoeda(saldoTotalBancos)}
-              subtitulo={`${contasBancarias.length} conta(s) ativa(s)}`}
+              subtitulo={`${contasBancarias.length} conta(s) ativa(s)`}
               destaque
             />
             <Resumo
@@ -1314,17 +786,7 @@ export default function FinanceiroPage() {
               ].map(([id, icone, label]) => (
                 <button
                   key={id}
-                  onClick={() => {
-                    const aba = id as typeof abaFinanceira;
-                    setAbaFinanceira(aba);
-                    if (aba === "entradas") setFluxoTipo("entrada");
-                    else if (aba === "saidas") setFluxoTipo("saida");
-                    else if (aba === "fluxo") setFluxoTipo("todos");
-                    if (aba === "aluguéis") {
-                      setMovTipo("entrada");
-                      setMovCategoria("Aluguel");
-                    }
-                  }}
+                  onClick={() => selecionarAbaFinanceira(id as typeof abaFinanceira)}
                   className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-semibold transition ${
                     abaFinanceira === id
                       ? "text-[#005a3c]"
@@ -1350,7 +812,7 @@ export default function FinanceiroPage() {
                   subtitulo="Sócios e dependentes"
                 />
                 <Resumo
-                  titulo="3 ou 4 meses"
+                  titulo="2 meses"
                   valor={String(amarelos)}
                   subtitulo="Atenção"
                 />
@@ -1513,7 +975,7 @@ export default function FinanceiroPage() {
                 <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
                   <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
-                    <div className="flex gap-2"><button onClick={() => setMostrarMovimentoModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
+                    <div className="flex gap-2"><button onClick={() => abrirNovaMovimentacao("saida")} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
                   </div>
                   {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
                 </div>
@@ -1542,18 +1004,18 @@ export default function FinanceiroPage() {
                       <button
                         onClick={() => {
                           if (abaFinanceira === "aluguéis") {
-                            setMovTipo("entrada");
+                            abrirNovaMovimentacao("entrada");
                             setMovCategoria("Aluguel");
-                            setMovDescricao("");
+                          } else {
+                            abrirNovaMovimentacao("saida");
                           }
-                          setMostrarMovimentoModal(true);
                         }}
                         className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
                       >
                         ＋ {abaFinanceira === "aluguéis" ? "Novo aluguel" : "Nova movimentação"}
                       </button>
                       {abaFinanceira === "fluxo" && (
-                        <button onClick={() => setMostrarTransferenciaModal(true)} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
+                        <button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
                           ↔ Transferência
                         </button>
                       )}
@@ -1567,7 +1029,7 @@ export default function FinanceiroPage() {
                         <p className="text-xs text-gray-500">Consulte por período, banco e tipo de movimentação.</p>
                       </div>
                       <button
-                        onClick={() => { setFluxoInicio(""); setFluxoFim(""); setFluxoConta(""); setFluxoTipo("todos"); }}
+                        onClick={() => { setFluxoInicio(""); setFluxoFim(""); setFluxoConta(""); setFluxoTipo("todos"); setFluxoForma("todos"); }}
                         className="rounded-lg border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]"
                       >
                         Limpar filtros
@@ -1595,6 +1057,18 @@ export default function FinanceiroPage() {
                           <option value="entrada">Entradas</option>
                           <option value="saida">Saídas</option>
                           <option value="transferencia">Transferências</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label>
+                        <select value={fluxoForma} onChange={(e) => setFluxoForma(e.target.value as typeof fluxoForma)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
+                          <option value="todos">Todas</option>
+                          <option value="pix">PIX</option>
+                          <option value="debito_em_conta">Débito em conta</option>
+                          <option value="boleto">Boleto</option>
+                          <option value="dinheiro">Dinheiro</option>
+                          <option value="transferencia">Transferência</option>
+                          <option value="outro">Outro</option>
                         </select>
                       </div>
                     </div>
@@ -1626,6 +1100,7 @@ export default function FinanceiroPage() {
                           <th className="px-4 py-3">Valor</th>
                           <th className="px-4 py-3">Conciliação</th>
                           <th className="px-4 py-3">Comprovante</th>
+                          <th className="px-4 py-3">Ação</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -1651,10 +1126,27 @@ export default function FinanceiroPage() {
                                 <button onClick={() => void abrirComprovante(m.comprovante_url)} className="font-bold text-[#005a3c] underline">Abrir</button>
                               ) : "—"}
                             </td>
+                            <td className="px-4 py-3 text-sm">
+                              {estornosPorOrigem.has(m.id) ? (
+                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">↩ Estornado</span>
+                              ) : m.origem_tipo === "reserva" ? (
+                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarReserva(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
+                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar reserva"}
+                                </button>
+                              ) : m.origem_tipo === "manual" || m.origem_tipo === "transferencia" ? (
+                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarMovimento(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
+                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar"}
+                                </button>
+                              ) : String(m.origem_tipo || "").startsWith("estorno_") ? (
+                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">Estornado</span>
+                              ) : (
+                                <span className="text-xs text-gray-400">Módulo de origem</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                         {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
+                          <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1678,7 +1170,7 @@ export default function FinanceiroPage() {
             <Campo label="Saldo inicial" type="number" value={contaSaldoInicial} onChange={setContaSaldoInicial} />
             <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Salvar conta</button></div>
+            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoConta} onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoConta ? "Salvando..." : "Salvar conta"}</button></div>
           </div>
         </Modal>
       )}
@@ -1724,7 +1216,7 @@ export default function FinanceiroPage() {
             <div><label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label><select value={movForma} onChange={(e)=>setMovForma(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3">{FORMAS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
             <div><label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label><input type="file" accept="image/*,.pdf" onChange={(e)=>setMovArquivo(e.target.files?.[0]||null)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm" /></div>
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={movObservacoes} onChange={(e)=>setMovObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarMovimentoModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarMovimentoFinanceiro()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Registrar movimentação</button></div>
+            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarMovimentoModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoMovimento} onClick={()=>void salvarMovimentoFinanceiro()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoMovimento ? "Registrando..." : "Registrar movimentação"}</button></div>
           </div>
         </Modal>
       )}
@@ -1739,319 +1231,12 @@ export default function FinanceiroPage() {
             <Campo label="Descrição" value={transDescricao} onChange={setTransDescricao} />
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
             <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">Transferir</button></div>
+            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoTransferencia} onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoTransferencia ? "Transferindo..." : "Transferir"}</button></div>
           </div>
         </Modal>
       )}
 
-      {pagamento && (
-        <Modal titulo="Registrar pagamento" fechar={() => setPagamento(null)}>
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-4">
-              <p className="text-xs text-gray-500">Associado</p>
-              <p className="font-bold text-[#003d2b]">
-                {pessoaDoLancamento(pagamento)?.nome || "Associado"}
-              </p>
-              <p className="mt-1 text-sm text-gray-600">
-                Marque os meses que estão sendo pagos neste mesmo pagamento.
-              </p>
-            </div>
 
-            <div className="rounded-2xl border border-[#d5e0da] p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-[#003d2b]">Competências do pagamento</p>
-                  <p className="text-xs text-gray-500">
-                    Você pode marcar 2, 3 ou vários meses juntos.
-                  </p>
-                </div>
-                <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-bold text-[#005a3c]">
-                  {mesesSelecionados.length} mês(es)
-                </span>
-              </div>
-
-              {carregandoMesesPagamento ? (
-                <div className="rounded-xl bg-gray-50 p-4 text-center text-sm text-gray-500">
-                  Carregando meses...
-                </div>
-              ) : (
-                <div className="max-h-64 space-y-2 overflow-y-auto">
-                  {mesesPagamento.map((mes) => {
-                    const selecionado = mesesSelecionados.includes(mes.id);
-                    const vencido =
-                      mes.data_vencimento &&
-                      new Date(`${mes.data_vencimento}T23:59:59`).getTime() < Date.now();
-
-                    return (
-                      <label
-                        key={mes.id}
-                        className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${
-                          selecionado
-                            ? "border-[#005a3c] bg-[#f0f8f4]"
-                            : "border-gray-200"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selecionado}
-                          onChange={() => alternarMesPagamento(mes.id)}
-                          className="h-5 w-5 accent-[#005a3c]"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-[#003d2b]">
-                              {formatarCompetencia(mes.competencia)}
-                            </span>
-                            {vencido && (
-                              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
-                                Em atraso
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500">
-                            Vencimento: {formatarData(mes.data_vencimento)}
-                          </p>
-                        </div>
-                        <span className="font-bold text-[#005a3c]">
-                          {formatarMoeda(mes.valor)}
-                        </span>
-                      </label>
-                    );
-                  })}
-                  {mesesPagamento.length === 0 && (
-                    <p className="rounded-xl bg-gray-50 p-4 text-center text-sm text-gray-500">
-                      Nenhuma mensalidade pendente encontrada.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-3 flex items-center justify-between border-t pt-3">
-                <span className="text-sm font-semibold text-gray-600">Total</span>
-                <span className="text-xl font-extrabold text-[#005a3c]">
-                  {formatarMoeda(
-                    mesesPagamento
-                      .filter((m) => mesesSelecionados.includes(m.id))
-                      .reduce((soma, m) => soma + Number(m.valor || 0), 0)
-                  )}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <Campo label="Valor pago" type="number" value={valorPagamento} onChange={setValorPagamento} />
-              <Campo label="Data do pagamento" type="date" value={dataPagamento} onChange={setDataPagamento} />
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label>
-                <select
-                  value={tipoPagamento}
-                  onChange={(e) => setTipoPagamento(e.target.value)}
-                  className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none"
-                >
-                  {FORMAS.map(([valor, label]) => (
-                    <option key={valor} value={valor}>{label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label>
-                <input
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={(e) => setArquivo(e.target.files?.[0] || null)}
-                  className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Conta bancária da entrada</label>
-                <select value={contaPagamentoId} onChange={(e) => setContaPagamentoId(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none">
-                  <option value="">Não registrar saldo bancário</option>
-                  {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
-                </select>
-                <p className="mt-1 text-xs text-gray-500">Selecione a conta para que o recebimento seja somado automaticamente ao saldo.</p>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label>
-                <textarea
-                  rows={3}
-                  value={observacoes}
-                  onChange={(e) => setObservacoes(e.target.value)}
-                  placeholder="Ex.: Pagamento conjunto de agosto e setembro."
-                  className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-yellow-50 p-3 text-xs text-yellow-800">
-              <strong>Atenção:</strong> todas as competências marcadas serão quitadas
-              com a mesma data, forma de pagamento e comprovante.
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setPagamento(null)} className="rounded-xl border px-5 py-3 font-semibold">
-                Cancelar
-              </button>
-              <button
-                onClick={() => void confirmarPagamento()}
-                disabled={salvandoPagamento || carregandoMesesPagamento || mesesSelecionados.length === 0}
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60"
-              >
-                {salvandoPagamento ? "Salvando..." : "Confirmar pagamento"}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {reciboItens.length > 0 && (
-        <Modal titulo="Recibo de pagamento" fechar={() => setReciboItens([])}>
-          <div id="recibo-impressao" className="space-y-5">
-            <div className="border-b pb-4 text-center">
-              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-2">
-                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-full w-full object-contain" />
-              </div>
-              <h3 className="text-xl font-extrabold text-[#003d2b]">SOCIEDADE GUARANI</h3>
-              <p className="text-sm text-gray-500">Recibo de pagamento de mensalidade</p>
-            </div>
-
-            <div className="rounded-2xl bg-[#f7faf8] p-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs text-gray-500">Recibo</p>
-                  <p className="font-bold text-[#003d2b]">{reciboItens[0].numero_recibo || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500">Associado</p>
-                  <p className="font-bold">{pessoaDoLancamento(reciboItens[0])?.nome || "Associado"}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2 border-t pt-4">
-                <p className="text-sm font-bold text-[#003d2b]">Competências pagas</p>
-                {reciboItens.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between text-sm">
-                    <span>{formatarCompetencia(item.competencia)}</span>
-                    <strong>{formatarMoeda(item.valor)}</strong>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between border-t pt-3 text-lg font-extrabold text-[#005a3c]">
-                  <span>Total pago</span>
-                  <span>
-                    {formatarMoeda(
-                      reciboItens.reduce((soma, item) => soma + Number(item.valor || 0), 0)
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs text-gray-500">Data</p>
-                  <p className="font-bold">{formatarData(reciboItens[0].data_pagamento)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500">Forma</p>
-                  <p className="font-bold">
-                    {FORMAS.find(([valor]) => valor === reciboItens[0].tipo_pagamento)?.[1] ||
-                      reciboItens[0].tipo_pagamento || "—"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <p className="text-center text-sm text-gray-500">
-              Pagamento registrado no sistema da Sociedade Recreativa Guarani.
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setReciboItens([])} className="rounded-xl border px-5 py-3 font-semibold">
-                Fechar
-              </button>
-              <button onClick={() => window.print()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">
-                🖨️ Imprimir / Salvar PDF
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {edicao && (
-        <Modal
-          titulo="Editar mensalidade"
-          fechar={() => setEdicao(null)}
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            <Campo
-              label="Valor"
-              type="number"
-              value={edicaoValor}
-              onChange={setEdicaoValor}
-            />
-            <Campo
-              label="Vencimento"
-              type="date"
-              value={edicaoVencimento}
-              onChange={setEdicaoVencimento}
-            />
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Situação
-              </label>
-              <select
-                value={edicaoSituacao}
-                onChange={(e) => setEdicaoSituacao(e.target.value)}
-                className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"
-              >
-                <option value="em_aberto">Em aberto</option>
-                <option value="em_atraso">Em atraso</option>
-                <option value="pago">Pago</option>
-                <option value="isento">Isento</option>
-              </select>
-            </div>
-
-            <div className="flex items-end justify-end gap-3 md:col-span-2">
-              <button
-                onClick={() => setEdicao(null)}
-                className="rounded-xl border px-5 py-3 font-semibold"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => void salvarEdicao()}
-                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
-              >
-                Salvar alterações
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      <style jsx global>{`
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-
-          #recibo-impressao,
-          #recibo-impressao * {
-            visibility: visible !important;
-          }
-
-          #recibo-impressao {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            padding: 30px !important;
-            background: white !important;
-          }
-        }
-      `}</style>
     </main>
   );
 }
