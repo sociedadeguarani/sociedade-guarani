@@ -254,7 +254,7 @@ export async function GET(request: Request) {
     const publico = url.searchParams.get("publico") === "1";
 
     if (!publico) {
-      const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
+      const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
       if ("response" in auth) return auth.response;
     }
 
@@ -312,7 +312,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
+  const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
   if ("response" in auth) return auth.response;
 
   try {
@@ -401,7 +401,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
+  const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
   if ("response" in auth) return auth.response;
 
   try {
