@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -359,6 +360,7 @@ export default function RelatoriosPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <Link href="/relatorios/reservas" className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm">📅 Relatório de Reservas</Link>
             <button onClick={() => void carregar()} disabled={carregando} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60">
               {carregando ? "Atualizando..." : "↻ Gerar / Atualizar relatório"}
             </button>
