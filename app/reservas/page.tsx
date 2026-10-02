@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { Clock3, Settings, UserRound, UserRoundCheck, Users } from "lucide-react";
@@ -146,6 +147,7 @@ export default function ReservasPage() {
         const perfilResponse = await fetch("/api/login/perfil", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
         const perfilPayload = await perfilResponse.json().catch(() => ({}));
         if (perfilResponse.ok) setPerfil((perfilPayload?.usuario?.perfil || "") as Perfil);
+        setReservas([]);
       } else {
         setPerfil("");
         setSocios([]);
@@ -238,16 +240,8 @@ export default function ReservasPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const modoPublico = params.get("publico") === "1";
-    const statusInicial = params.get("status");
-
     setPublico(modoPublico);
-    if (modoPublico) {
-      setTipoPessoa("nao_socio");
-    } else if (statusInicial === "pendente" || statusInicial === "confirmada" || statusInicial === "cancelada") {
-      setAba("reservas");
-      setFiltroStatus(statusInicial);
-    }
-
+    if (modoPublico) setTipoPessoa("nao_socio");
     void recarregarDados(modoPublico);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -680,6 +674,7 @@ export default function ReservasPage() {
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservar" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Nova reserva</button>
                 <button onClick={() => setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservas" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Reservas</button>
+                <Link href="/relatorios/reservas" className="rounded-xl bg-white px-4 py-2.5 font-bold shadow-sm">📊 Relatório</Link>
                 {podeConfigurar && <button onClick={() => setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "admin" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}><Settings className="mr-2 inline h-4 w-4" />Configurar espaços</button>}
               </div>
             )}
