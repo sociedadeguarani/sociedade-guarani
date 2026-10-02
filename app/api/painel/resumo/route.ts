@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
-  const auth = await requireRoles(request, ["associado", "funcionario", "funcionario_inventario", "administrador"]);
+  const auth = await requireRoles(request, ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"]);
   if ("response" in auth) return auth.response;
   try {
     const db = getServiceClient();
