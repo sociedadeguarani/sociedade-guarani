@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     if (interno) {
       const auth = await requireRoles(request, [
         "administrador",
-        "administrador_normal",
+        
         "administrador_master",
         "funcionario",
       ]);
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
     const resultado = await usuarioAutenticado(request);
     if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
-    if (!["administrador", "administrador_normal", "administrador_master"].includes(resultado.perfil)) {
+    if (!["administrador", "administrador_master"].includes(resultado.perfil)) {
       return NextResponse.json({ error: "Somente administradores podem realizar esta operação." }, { status: 403 });
     }
 
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master"]);
     if ("response" in auth) return auth.response;
     const body = await request.json();
     const id = String(body.id || "").trim();
@@ -119,7 +119,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "administrador_normal", "administrador_master"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master"]);
     if ("response" in auth) return auth.response;
     const body = await request.json();
     const id = String(body.id || "").trim();
