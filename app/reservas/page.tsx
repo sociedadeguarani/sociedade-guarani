@@ -181,8 +181,18 @@ export default function ReservasPage() {
 
           setContasBancarias(contasDb);
           if (espacosDb.length) {
-            const porNome = new Map(espacosDb.map((e: any) => [normalizarTexto(e.nome), String(e.id)]));
-            setEspacos((atuais) => atuais.map((e) => ({ ...e, id: porNome.get(normalizarTexto(e.nome)) || e.id })));
+            const porNome = new Map<string, string>();
+            espacosDb.forEach((e: any) => {
+              const nomeNormalizado = normalizarTexto(e?.nome);
+              const id = e?.id == null ? "" : String(e.id);
+              if (nomeNormalizado && id) porNome.set(nomeNormalizado, id);
+            });
+            setEspacos((atuais) =>
+              atuais.map((e) => ({
+                ...e,
+                id: porNome.get(normalizarTexto(e.nome)) ?? e.id,
+              }))
+            );
           }
 
           // A lista de pessoas da Reserva deve usar a mesma fonte autenticada
