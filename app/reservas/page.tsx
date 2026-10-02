@@ -120,6 +120,32 @@ function normalizarTexto(valor: unknown) {
     .toLowerCase();
 }
 
+function aliasesEspaco(nome: string) {
+  const n = normalizarTexto(nome);
+  const grupos: string[][] = [
+    ["quadra de futebol", "quadra futebol 7", "futebol", "futebol 7"],
+    ["quadra de volei", "quadra volei", "volei"],
+    ["quadra de areia", "areia"],
+    ["quadra 48", "cancha 48", "cancha48"],
+    ["quiosque 1", "quiosque 01", "quiosque a"],
+    ["quiosque 2", "quiosque 02", "quiosque b"],
+    ["quiosque 3", "quiosque 03", "quiosque c"],
+    ["salao pequeno de vidro", "salao social pequeno", "salao pequeno"],
+    ["salao social grande", "salao grande"],
+    ["salao ctg", "ctg"],
+  ];
+  return grupos.find((g) => g.includes(n)) || [n];
+}
+
+function mesmoEspaco(a: string, b: string) {
+  const x = normalizarTexto(a);
+  const y = normalizarTexto(b);
+  if (x === y) return true;
+  const ax = aliasesEspaco(x);
+  const ay = aliasesEspaco(y);
+  return ax.includes(y) || ay.includes(x) || ax.some((v) => ay.includes(v));
+}
+
 export default function ReservasPage() {
   const [publico, setPublico] = useState(false);
   const [aba, setAba] = useState<"reservar" | "reservas" | "admin">("reservar");
@@ -155,11 +181,20 @@ export default function ReservasPage() {
     setPublico(modoPublico);
     if (modoPublico) setTipoPessoa("nao_socio");
 
+    let configuracaoLocal: Espaco[] = INICIAIS;
     try {
+      const e = localStorage.getItem("guarani_espacos_reservas");
       const r = localStorage.getItem("guarani_reservas");
+      if (e) {
+        const salvo = JSON.parse(e);
+        if (Array.isArray(salvo) && salvo.length) {
+          configuracaoLocal = normalizarEspacos(salvo);
+          setEspacos(configuracaoLocal);
+        }
+      }
       if (r) setReservas(JSON.parse(r));
     } catch {
-      // O banco continua sendo a fonte oficial das reservas.
+      // Usa a configuração inicial enquanto o banco é consultado.
     }
 
     if (!modoPublico) {
@@ -178,18 +213,47 @@ export default function ReservasPage() {
           const espacosDb = Array.isArray(resultado.espacos) ? resultado.espacos : [];
 
           setContasBancarias(contasDb);
-          // Os espaços exibidos e usados na reserva vêm diretamente da tabela
-          // `espacos`. Não misturamos mais cadastro local com IDs do banco.
-          setEspacos(normalizarEspacos(espacosDb.map((e: any) => ({
-            id: String(e.id || ""),
-            nome: String(e.nome || ""),
-            categoria: e.categoria === "esporte" || e.categoria === "eventos" ? e.categoria : "lazer",
-            cobranca: e.cobranca === "diaria" ? "diaria" : "hora",
-            precoSocio: Number(e.precoSocio ?? e.preco_socio ?? e.valorSocio ?? e.valor_socio ?? 0) || 0,
-            precoNaoSocio: Number(e.precoNaoSocio ?? e.preco_nao_socio ?? e.valorNaoSocio ?? e.valor_nao_socio ?? 0) || 0,
-            permiteNaoSocio: Boolean(e.permiteNaoSocio ?? e.permite_nao_socio ?? e.nao_socio_permitido ?? false),
-            capacidade: e.capacidade == null ? undefined : String(e.capacidade),
-          })).filter((e: Espaco) => e.id && e.nome)));
+
+          // O banco define o UUID/nome oficial. A configuração salva no navegador
+          // preserva preços e regras já ajustados pela administração.
+          const espacosSincronizados = espacosDb
+            .map((item: any) => {
+              const nomeBanco = String(item.nome || "").trim();
+              const configurado = configuracaoLocal.find((e) => mesmoEspaco(e.nome, nomeBanco))
+                || INICIAIS.find((e) => mesmoEspaco(e.nome, nomeBanco));
+              const precoSocioBanco = item.precoSocio ?? item.preco_socio ?? item.valorSocio ?? item.valor_socio;
+              const precoNaoSocioBanco = item.precoNaoSocio ?? item.preco_nao_socio ?? item.valorNaoSocio ?? item.valor_nao_socio;
+              const cobrancaBanco = normalizarTexto(item.cobranca ?? item.tipo_cobranca ?? item.unidade_cobranca);
+              const categoriaBanco = normalizarTexto(item.categoria);
+              const cobranca: "hora" | "diaria" = cobrancaBanco.includes("diar")
+                ? "diaria"
+                : cobrancaBanco.includes("hora")
+                  ? "hora"
+                  : configurado?.cobranca || "hora";
+              const registro: Espaco = {
+                id: String(item.id || ""),
+                nome: nomeBanco,
+                categoria: categoriaBanco === "esporte" || categoriaBanco === "eventos" || categoriaBanco === "lazer"
+                  ? categoriaBanco
+                  : configurado?.categoria || "lazer",
+                cobranca,
+                precoSocio: precoSocioBanco != null && Number(precoSocioBanco) > 0
+                  ? Number(precoSocioBanco)
+                  : (configurado?.precoSocio ?? 0),
+                precoNaoSocio: precoNaoSocioBanco != null && Number(precoNaoSocioBanco) > 0
+                  ? Number(precoNaoSocioBanco)
+                  : (configurado?.precoNaoSocio ?? 0),
+                permiteNaoSocio: Boolean(item.permiteNaoSocio ?? item.permite_nao_socio ?? item.nao_socio_permitido ?? configurado?.permiteNaoSocio ?? false),
+                capacidade: item.capacidade == null ? configurado?.capacidade : String(item.capacidade),
+              };
+              return normalizarEspacos([registro])[0];
+            })
+            .filter((item: Espaco | undefined): item is Espaco => Boolean(item?.id && item.nome));
+
+          if (espacosSincronizados.length) {
+            setEspacos(espacosSincronizados);
+            setEspacoId((atual) => espacosSincronizados.some((e) => e.id === atual) ? atual : espacosSincronizados[0].id);
+          }
 
           // A lista de pessoas da Reserva deve usar a mesma fonte autenticada
           // para todos os perfis. /api/socios usa Service Role no servidor e
@@ -304,6 +368,10 @@ export default function ReservasPage() {
       })();
     }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("guarani_espacos_reservas", JSON.stringify(espacos));
+  }, [espacos]);
 
   useEffect(() => {
     localStorage.setItem("guarani_reservas", JSON.stringify(reservas));
@@ -511,28 +579,29 @@ export default function ReservasPage() {
         const contaPadrao = contasBancarias.find((c) => `${c.nome} ${c.banco || ""}`.toLowerCase().includes("sicredi")) || contasBancarias[0];
         const { data: sessaoReserva } = await supabase.auth.getSession();
         const tokenReserva = sessaoReserva.session?.access_token || "";
-        const payloadReserva = {
-          id: editandoReservaId || undefined,
-          espaco_id: novaReserva.espacoId,
-          espaco_nome: espaco.nome,
-          data: novaReserva.data,
-          horario: novaReserva.horario,
-          nome: novaReserva.nome,
-          socio_id: novaReserva.socioId || null,
-          dependente_id: novaReserva.dependenteId || null,
-          matricula: novaReserva.matricula ?? null,
-          tipo_pessoa: novaReserva.tipoPessoa,
-          valor: novaReserva.valor,
-          status: novaReserva.status,
-          pagamento: novaReserva.pagamento,
-          comprovante_url: novaReserva.comprovante_url || null,
-          comprovante_nome: novaReserva.comprovante_nome || null,
-          conta_bancaria_id: novaReserva.pagamento === "pix" ? null : contaPadrao?.id || null,
-        };
         const resposta = await fetch("/api/reservas", {
-          method: editandoReservaId ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenReserva}` },
-          body: JSON.stringify(editandoReservaId ? { ...payloadReserva, acao: "editar" } : payloadReserva),
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenReserva}`,
+          },
+          body: JSON.stringify({
+            espaco_id: novaReserva.espacoId,
+            espaco_nome: espaco.nome,
+            data: novaReserva.data,
+            horario: novaReserva.horario,
+            nome: novaReserva.nome,
+            socio_id: novaReserva.socioId || null,
+            dependente_id: novaReserva.dependenteId || null,
+            matricula: novaReserva.matricula ?? null,
+            tipo_pessoa: novaReserva.tipoPessoa,
+            valor: novaReserva.valor,
+            status: novaReserva.status,
+            pagamento: novaReserva.pagamento,
+            comprovante_url: novaReserva.comprovante_url || null,
+            comprovante_nome: novaReserva.comprovante_nome || null,
+            conta_bancaria_id: novaReserva.pagamento === "pix" ? null : contaPadrao?.id || null,
+          }),
         });
         const resultado = await resposta.json().catch(() => ({}));
         if (!resposta.ok) throw new Error(resultado.error || "Não foi possível gravar a reserva no banco.");
@@ -629,22 +698,9 @@ export default function ReservasPage() {
     window.open(data.signedUrl, "_blank");
   }
 
-  async function cancelar(id: string) {
-    if (!confirm("Deseja realmente cancelar esta reserva?")) return;
-    try {
-      if (!publico) {
-        const { data: sessao } = await supabase.auth.getSession();
-        const resposta = await fetch("/api/reservas", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessao.session?.access_token || ""}` },
-          body: JSON.stringify({ id, acao: "cancelar" }),
-        });
-        const resultado = await resposta.json().catch(() => ({}));
-        if (!resposta.ok) throw new Error(resultado.error || "Não foi possível cancelar a reserva.");
-      }
+  function cancelar(id: string) {
+    if (confirm("Deseja realmente cancelar esta reserva?")) {
       setReservas((v) => v.map((r) => (r.id === id ? { ...r, status: "cancelada" } : r)));
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Não foi possível cancelar a reserva.");
     }
   }
 
