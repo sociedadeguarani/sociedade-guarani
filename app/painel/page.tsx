@@ -63,92 +63,21 @@ export default function PainelPage() {
 
         const headers = { Authorization: `Bearer ${session.access_token}` };
 
-        // Consultas independentes em paralelo: o painel não espera uma tela
-        // terminar para começar a próxima.
-        const [sociosResponse, dependentesResponse, reservasResponse, notificacoesResponse] =
-          await Promise.all([
-            fetch("/api/socios", { headers, cache: "no-store" }),
-            fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
-            fetch("/api/reservas?status=pendente", { headers, cache: "no-store" }),
-            fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", { headers, cache: "no-store" }),
-          ]);
-
-        const [sociosJson, dependentesJson, reservasJson, notificacoesJson] = await Promise.all([
-          sociosResponse.json().catch(() => ({})),
-          dependentesResponse.json().catch(() => ({})),
-          reservasResponse.json().catch(() => ({})),
-          notificacoesResponse.json().catch(() => ({})),
-        ]);
+        // O painel usa um resumo enxuto em vez de baixar todos os registros.
+        const resumoResponse = await fetch("/api/painel/resumo", { headers, cache: "no-store" });
+        const resumo = await resumoResponse.json().catch(() => ({}));
 
         if (!ativo) return;
 
-        if (sociosResponse.ok) {
-          const todosSocios = Array.isArray(sociosJson.socios) ? sociosJson.socios : [];
-
-          // A tela /socios usa exatamente esta regra: entram somente
-          // os cadastros com mensalidade própria. Dependentes familiares
-          // comuns não entram na contagem de Sócios.
-          const sociosOficiais = todosSocios.filter((s: any) =>
-            s?.possui_mensalidade === true
-          );
-
-          setTotalSocios(sociosOficiais.length);
-          setSociosAtivos(
-            sociosOficiais.filter((s: any) =>
-              String(s?.situacao || "").toLowerCase() === "ativo"
-            ).length
-          );
-          setSociosInativos(
-            sociosOficiais.filter((s: any) =>
-              String(s?.situacao || "").toLowerCase() === "inativo"
-            ).length
-          );
-
-          // Dependentes antigos ainda podem existir em `socios`. Eles precisam
-          // ser somados aos já migrados para `dependentes`, mas sem duplicar.
-          const dependentesAntigos = todosSocios
-            .filter((s: any) => Boolean(s?.responsavel_id) && s?.possui_mensalidade !== true)
-            .map((s: any) => ({
-              socio_id: String(s.responsavel_id),
-              nome: String(s.nome || ""),
-              cpf: String(s.cpf || ""),
-            }));
-
-          const dependentesMigrados = Array.isArray(dependentesJson.dependentes)
-            ? dependentesJson.dependentes
-            : [];
-
-          const chaveDependente = (d: any) => {
-            const responsavel = String(d?.socio_id || "");
-            const cpf = String(d?.cpf || "").replace(/\D/g, "");
-            const nome = String(d?.nome || "").trim().toLowerCase().replace(/\s+/g, " ");
-            return `${responsavel}|${cpf}|${nome}`;
-          };
-
-          const unicos = new Set<string>();
-          for (const d of [...dependentesMigrados, ...dependentesAntigos]) {
-            unicos.add(chaveDependente(d));
-          }
-          setTotalDependentes(unicos.size);
+        if (resumoResponse.ok) {
+          setTotalSocios(Number(resumo.socios || 0));
+          setSociosAtivos(Number(resumo.sociosAtivos || 0));
+          setSociosInativos(Number(resumo.sociosInativos || 0));
+          setTotalDependentes(Number(resumo.dependentes || 0));
+          setReservasPendentes(Number(resumo.reservasPendentes || 0));
+          setPixPendentes(Number(resumo.pixPendentes || 0));
         }
 
-        if (reservasResponse.ok) {
-          const lista = Array.isArray(reservasJson.reservas)
-            ? reservasJson.reservas
-            : [];
-          setReservasPendentes(lista.filter((r: any) => r.status === "pendente").length);
-        }
-
-        if (notificacoesResponse.ok) {
-          const lista = Array.isArray(notificacoesJson.notificacoes)
-            ? notificacoesJson.notificacoes
-            : [];
-          const pendentes = lista.filter((n: any) =>
-            String(n.comprovante_status || "").toLowerCase() === "pendente" ||
-            String(n.origem_tipo || "").toLowerCase() === "pagamento"
-          );
-          setPixPendentes(pendentes.length);
-        }
       } catch {
         // Os cards individuais permanecem com “—” quando uma fonte falhar.
       } finally {
