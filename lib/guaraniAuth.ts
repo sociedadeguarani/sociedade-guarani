@@ -26,10 +26,8 @@ export function normalizarPerfil(value: unknown, nome?: unknown) {
   // ADMINISTRADOR
   if (
     codigo === "administrador" ||
-    codigo === "administrador_normal" ||
     codigo === "admin" ||
     rotulo === "administrador" ||
-    rotulo === "administrador normal" ||
     rotulo === "admin"
   ) {
     return "administrador";
