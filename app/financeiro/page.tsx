@@ -166,22 +166,22 @@ function ehPagadorSocio(s: Socio) {
 }
 
 function nivelAtraso(meses: number) {
-  if (meses >= 5) {
+  if (meses >= 3) {
     return {
-      texto: "5+ meses",
+      texto: `${meses} ${meses === 1 ? "mês" : "meses"}`,
       classe: "bg-red-100 text-red-700 ring-1 ring-red-200",
       ponto: "bg-red-500",
     };
   }
-  if (meses >= 3) {
+  if (meses === 2) {
     return {
-      texto: `${meses} ${meses === 1 ? "mês" : "meses"}`,
+      texto: "2 meses",
       classe: "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200",
       ponto: "bg-yellow-500",
     };
   }
   return {
-    texto: "Até 2 meses",
+    texto: "Em dia",
     classe: "bg-green-100 text-green-700 ring-1 ring-green-200",
     ponto: "bg-green-500",
   };
@@ -459,8 +459,8 @@ export default function FinanceiroPage() {
   }, [pessoas, historicoPorPessoa]);
 
   const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.meses >= 3 && x.meses <= 4).length;
-  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 5).length;
+  const amarelos = atrasoPessoas.filter((x) => x.meses === 2).length;
+  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
 
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -533,9 +533,9 @@ export default function FinanceiroPage() {
       const meses = historicoPorPessoa.get(pessoa.chave) || 0;
 
       if (filtroAtraso === "atrasados") return meses >= 3;
-      if (filtroAtraso === "verde") return meses <= 2;
-      if (filtroAtraso === "amarelo") return meses >= 3 && meses <= 4;
-      return meses >= 5;
+      if (filtroAtraso === "verde") return meses <= 1;
+      if (filtroAtraso === "amarelo") return meses === 2;
+      return meses >= 3;
     });
   }, [
     mensalidadesCompetencia,
@@ -1355,7 +1355,7 @@ export default function FinanceiroPage() {
                   subtitulo="Atenção"
                 />
                 <Resumo
-                  titulo="5+ meses"
+                  titulo="3+ meses"
                   valor={String(vermelhos)}
                   subtitulo="Inadimplência crítica"
                 />
@@ -1382,7 +1382,7 @@ export default function FinanceiroPage() {
                         : "✓ Nenhum sócio em atraso"}
                     </p>
                     <p className="mt-1 text-sm text-gray-600">
-                      🟢 Até 2 meses · 🟡 3–4 meses · 🔴 5 meses ou mais.
+                      🟢 0–1 mês · 🟡 2 meses · 🔴 3 meses ou mais.
                     </p>
                   </div>
                   <button
@@ -1419,10 +1419,10 @@ export default function FinanceiroPage() {
                     🟢 Em dia: não aparece nesta lista
                   </span>
                   <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 3–4 meses: {amarelos}
+                    🟡 2 meses: {amarelos}
                   </span>
                   <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 5+ meses: {vermelhos}
+                    🔴 3+ meses: {vermelhos}
                   </span>
                 </div>
 
