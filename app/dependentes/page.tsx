@@ -176,7 +176,7 @@ export default function DependentesPage() {
           tipo_pagamento: d.tipo_pagamento ?? null,
           situacao_financeira: d.situacao_financeira ?? null,
           data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          source: d.source === "socios" ? "socios" as const : "dependentes" as const,
+          source: "dependentes" as const,
         }));
 
       setSocios(sociosData.map((s: any) => ({
@@ -203,7 +203,7 @@ export default function DependentesPage() {
       setPerfilUsuario(
         perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil === "admin" || perfil === "administrador" ? "administrador" :
         perfil
       );
     } catch {}
