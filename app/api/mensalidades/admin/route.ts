@@ -537,8 +537,7 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          const tipoPagamento =
-            s.tipo_pagamento || config?.tipo_pagamento || null;
+          const tipoPagamento = s.tipo_pagamento || null;
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
           const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
@@ -770,10 +769,7 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          const tipoPagamento =
-            s.tipo_pagamento ||
-            config?.tipo_pagamento ||
-            null;
+          const tipoPagamento = s.tipo_pagamento || null;
 
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
@@ -1344,11 +1340,15 @@ export async function POST(request: Request) {
 
       function cobrancaPermiteSS(registro: any) {
         const socio = mapaSociosSS.get(String(registro.socio_id));
-        const pagamento = normalizarTexto(
-          registro.tipo_pagamento || socio?.tipo_pagamento || ""
-        ).replace(/[\s-]+/g, "_");
+        const pagamentoAssociado = normalizarTexto(socio?.tipo_pagamento || "").replace(/[\s-]+/g, "_");
+        const pagamentoRegistro = normalizarTexto(registro.tipo_pagamento || "").replace(/[\s-]+/g, "_");
+        const pagamento = pagamentoAssociado || pagamentoRegistro;
+        const contaId = String(
+          registro.conta_pagadora_id || socio?.conta_bancaria_id || ""
+        ).trim();
 
         if (pagamento === "boleto") return true;
+
         if (
           pagamento === "debito_em_conta" ||
           pagamento === "debito" ||
@@ -1358,7 +1358,7 @@ export async function POST(request: Request) {
           pagamento === "bb" ||
           pagamento === "banco_do_brasil"
         ) {
-          return true;
+          return Boolean(contaId);
         }
 
         return false;
