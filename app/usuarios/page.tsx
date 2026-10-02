@@ -77,7 +77,7 @@ export default function UsuariosPage() {
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
       if (!form.perfil_id && data.perfis?.length) {
-        const inicial = data.perfis.find((p: Perfil) => p.codigo === "administrador" || String(p.nome || "").trim().toLowerCase() === "administrador");
+        const inicial = data.perfis.find((p: Perfil) => ["administrador"].includes(p.nome));
         setForm((f) => ({ ...f, perfil_id: inicial?.id || data.perfis[0].id }));
       }
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar."); }
@@ -92,7 +92,7 @@ export default function UsuariosPage() {
   }, [usuarios, busca, filtroPerfil]);
 
   function abrirNovo() {
-    const inicial = perfis.find((p) => p.codigo === "administrador" || String(p.nome || "").trim().toLowerCase() === "administrador");
+    const inicial = perfis.find((p) => ["administrador"].includes(p.nome));
     setErro(""); setMensagem("");
     const perfilInicial = inicial || perfis[0];
     setForm({ nome: "", email: "", senha: "", perfil_id: perfilInicial?.id || "", socio_id: "", ativo: true });
