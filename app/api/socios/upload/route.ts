@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export async function POST(request: Request) {
   try {
-    const acesso = await usuarioAutenticado(request);
-    if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (!["administrador", "funcionario"].includes(acesso.perfil)) return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
+    const acesso = await requireRoles(request, ["administrador", "funcionario"]);
+    if ("response" in acesso) return acesso.response;
 
     const form = await request.formData();
     const socioId = String(form.get("socio_id") || "").trim();
