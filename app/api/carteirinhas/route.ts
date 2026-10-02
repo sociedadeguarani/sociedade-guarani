@@ -58,7 +58,7 @@ export async function GET(request: Request) {
   const modoDependentes = new URL(request.url).searchParams.get("modo") === "dependentes";
   const auth = await requireRoles(request, [
     "administrador",
-    "administrador_normal",
+    
     "administrador_master",
     "funcionario",
     "associado",
