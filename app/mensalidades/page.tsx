@@ -420,7 +420,7 @@ export default function Page() {
     const pagamento = normalizarPagamento(m.tipo_pagamento || m.socio?.tipo_pagamento);
 
     // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
-    if (pagamento === "pix" || pagamento === "botero") return "pix";
+    if (pagamento === "pix") return "pix";
     if (pagamento === "boleto") return "boleto";
     if (pagamento === "dinheiro") return "dinheiro";
     if (pagamento === "transferencia") return "transferencia";
@@ -471,8 +471,30 @@ export default function Page() {
   }
 
   function podeMarcarSemSaldo(item: M) {
-    const cobranca = tipoCobranca(item);
-    return cobranca === "banrisul" || cobranca === "sicredi" || cobranca === "bb" || cobranca === "boleto";
+    // S.S. é uma característica da cobrança DESTE associado.
+    // Só é permitido para boleto ou débito em conta com banco vinculado.
+    const pagamentoAssociado = normalizarPagamento(item.socio?.tipo_pagamento);
+    const pagamentoRegistro = normalizarPagamento(item.tipo_pagamento);
+    const pagamento = pagamentoAssociado || pagamentoRegistro;
+    const contaId = String(
+      item.conta_pagadora_id || item.socio?.conta_bancaria_id || ""
+    ).trim();
+
+    if (pagamento === "boleto") return true;
+
+    if (
+      pagamento === "debito_em_conta" ||
+      pagamento === "debito" ||
+      pagamento === "debito_em_conta_bancaria" ||
+      pagamento === "banrisul" ||
+      pagamento === "sicredi" ||
+      pagamento === "bb" ||
+      pagamento === "banco_do_brasil"
+    ) {
+      return Boolean(contaId);
+    }
+
+    return false;
   }
 
   function situacaoVisual(item: M) {
@@ -1426,7 +1448,7 @@ const selecionadasBaixa = useMemo(
                       {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
                         const registro = historicoPorMes.get(numeroMes);
                         const situacao = registro?.situacao || "nao_gerada";
-                        const semSaldo = Boolean(registro && ehSemSaldo(registro));
+                        const semSaldo = Boolean(registro && ehSemSaldo(registro) && podeMarcarSemSaldo(registro));
                         const pago = Boolean(registro && !semSaldo && situacao === "pago");
                         const isento = Boolean(registro && !semSaldo && situacao === "isento");
                         const naoGerada = !registro;
