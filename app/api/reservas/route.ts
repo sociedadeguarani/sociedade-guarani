@@ -466,6 +466,100 @@ export async function PATCH(request: Request) {
       }
     }
 
+    if (acao === "estornar_pagamento") {
+      if (!['administrador', 'administrador_master'].includes(auth.usuario.perfil)) {
+        return NextResponse.json({ error: "Somente administradores podem estornar pagamentos de reservas." }, { status: 403 });
+      }
+
+      if (!["confirmada", "utilizada"].includes(String(reserva.situacao))) {
+        return NextResponse.json({ error: "Somente reservas confirmadas podem ter o pagamento estornado." }, { status: 409 });
+      }
+
+      const { data: movimento, error: movimentoError } = await db
+        .from("movimentacoes_financeiras")
+        .select("id,conta_bancaria_id,tipo,valor,forma_pagamento,conciliado,descricao")
+        .eq("origem_tipo", "reserva")
+        .eq("origem_id", id)
+        .maybeSingle();
+
+      if (movimentoError) throw movimentoError;
+      if (!movimento) {
+        return NextResponse.json({ error: "Não encontrei o lançamento financeiro desta reserva." }, { status: 404 });
+      }
+      if (String(movimento.tipo) !== "entrada") {
+        return NextResponse.json({ error: "O lançamento da reserva não é uma entrada válida para estorno." }, { status: 409 });
+      }
+
+      const { data: estornoExistente, error: estornoBuscaError } = await db
+        .from("movimentacoes_financeiras")
+        .select("id")
+        .eq("origem_tipo", "estorno_reserva")
+        .eq("origem_id", id)
+        .limit(1)
+        .maybeSingle();
+
+      if (estornoBuscaError) throw estornoBuscaError;
+      if (estornoExistente) {
+        return NextResponse.json({ error: "Esta reserva já possui estorno financeiro." }, { status: 409 });
+      }
+
+      const valorEstorno = Number(movimento.valor || 0);
+      if (!(valorEstorno > 0)) {
+        return NextResponse.json({ error: "O valor do lançamento não é válido para estorno." }, { status: 400 });
+      }
+
+      const agora = new Date().toISOString();
+      const motivoEstorno = String(body.motivo || "Não informado").trim().slice(0, 500);
+      const { data: movimentoEstorno, error: inserirEstornoError } = await db
+        .from("movimentacoes_financeiras")
+        .insert({
+          conta_bancaria_id: movimento.conta_bancaria_id,
+          conta_destino_id: null,
+          grupo_transferencia: null,
+          tipo: "saida",
+          categoria: "Estorno de Reserva",
+          descricao: `Estorno de reserva - ${String(reserva.responsavel_nome || "Responsável")}`,
+          valor: valorEstorno,
+          data_movimentacao: agora.slice(0, 10),
+          forma_pagamento: movimento.forma_pagamento || null,
+          origem_tipo: "estorno_reserva",
+          origem_id: id,
+          socio_id: reserva.socio_id || null,
+          dependente_id: reserva.dependente_id || null,
+          comprovante_url: null,
+          conciliado: false,
+          data_conciliacao: null,
+          created_by: auth.usuario.id,
+          observacoes: `Estorno do pagamento da reserva ${id}. Lançamento original: ${movimento.id}. Reservado por ${auth.usuario.nome_exibicao || "Administrador"}. Motivo: ${motivoEstorno}.`,
+        })
+        .select("*")
+        .single();
+
+      if (inserirEstornoError) throw inserirEstornoError;
+
+      try {
+        const { data: atualizada, error: atualizarReservaError } = await db
+          .from("reservas")
+          .update({
+            situacao: "cancelada",
+            motivo_recusa: "Pagamento estornado pela administração.",
+          })
+          .eq("id", id)
+          .select("*")
+          .single();
+
+        if (atualizarReservaError) throw atualizarReservaError;
+        return NextResponse.json({
+          reserva: normalizarReserva(atualizada),
+          movimento: movimentoEstorno,
+          message: "Pagamento estornado e reserva cancelada com sucesso.",
+        });
+      } catch (updateError) {
+        if (movimentoEstorno?.id) await db.from("movimentacoes_financeiras").delete().eq("id", movimentoEstorno.id);
+        throw updateError;
+      }
+    }
+
     if (acao === "cancelar") {
       const movimento = await verificarMovimentacao(db, id);
       if (movimento) {
