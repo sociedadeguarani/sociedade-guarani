@@ -56,7 +56,7 @@ export default function InventarioPage() {
     finally { setCarregando(false); }
   }
   useEffect(() => { setPerfil((localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase()); void carregar(); }, []);
-  const administrador = ["administrador", "admin", "administrador_normal", "administrador_master", "master"].includes(perfil);
+  const administrador = ["administrador", "admin", "administrador_master", "master"].includes(perfil);
 
   const itensFiltrados = useMemo(() => itens.filter((i) => `${i.nome} ${i.categoria} ${i.localizacao || ""} ${i.numero_patrimonio || ""}`.toLowerCase().includes(busca.toLowerCase())), [itens, busca]);
   const emprestimosAtivos = emprestimos.filter((e) => e.status === "emprestado" || e.status === "atrasado");
