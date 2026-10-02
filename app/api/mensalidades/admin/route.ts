@@ -304,6 +304,7 @@ export async function GET(request: Request) {
       url.searchParams.get("ano") || new Date().getFullYear()
     );
     const mes = Number(url.searchParams.get("mes") || 0);
+    const socioId = String(url.searchParams.get("socio_id") || "").trim();
 
     const db = getServiceClient();
 
@@ -316,6 +317,14 @@ export async function GET(request: Request) {
 
     if (mes >= 1 && mes <= 12) {
       consultaMensalidades = consultaMensalidades.eq("competencia", primeiroDia(ano, mes));
+    }
+
+    // Ao abrir o histórico de um associado, é obrigatório filtrar no banco
+    // pelo socio_id. Sem esse filtro, a tela recebia as mensalidades do ano
+    // de todos os associados e o mapa por mês acabava escolhendo o registro
+    // de outra pessoa, fazendo o controle interno parecer igual para todos.
+    if (socioId) {
+      consultaMensalidades = consultaMensalidades.eq("socio_id", socioId);
     }
 
     // Consultas independentes são feitas em paralelo para reduzir o tempo
