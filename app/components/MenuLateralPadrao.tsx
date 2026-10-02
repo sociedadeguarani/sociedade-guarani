@@ -151,8 +151,7 @@ function normalizarPerfil(value: unknown): Perfil {
 
   if (
     perfil === "administrador" ||
-    perfil === "admin" ||
-    perfil === "administrador_normal"
+    perfil === "admin"
   ) {
     return "administrador";
   }
