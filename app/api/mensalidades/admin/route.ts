@@ -75,6 +75,30 @@ function dataVencimento(competencia: string, dia: unknown) {
   return `${competencia.slice(0, 8)}${String(d).padStart(2, "0")}`;
 }
 
+function atualizarSituacaoAtraso(mensalidade: any) {
+  if (mensalidade?.situacao !== "em_aberto" || !mensalidade?.data_vencimento) {
+    return mensalidade;
+  }
+
+  const texto = normalizarTexto(
+    `${mensalidade.motivo || ""} ${mensalidade.observacoes || ""}`
+  );
+
+  // Registros marcados como S.S. continuam identificados como S.S.
+  if (texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo")) {
+    return mensalidade;
+  }
+
+  const vencimento = new Date(`${String(mensalidade.data_vencimento).slice(0, 10)}T23:59:59`);
+  if (Number.isNaN(vencimento.getTime())) return mensalidade;
+
+  if (vencimento.getTime() < Date.now()) {
+    return { ...mensalidade, situacao: "em_atraso" };
+  }
+
+  return mensalidade;
+}
+
 function escolherConfiguracao(
   configuracoes: any[],
   tipoSocio: string,
@@ -343,7 +367,7 @@ export async function GET(request: Request) {
     );
 
     const mensalidadesComSocio = (mensalidades || []).map((m: any) => ({
-      ...m,
+      ...atualizarSituacaoAtraso(m),
       socio: mapaSocios.get(String(m.socio_id)) || null,
     }));
 
@@ -835,11 +859,37 @@ export async function POST(request: Request) {
       const dataPagamento =
         body.data_pagamento ||
         new Date().toISOString().slice(0, 10);
-      const tipoPagamento = body.tipo_pagamento || "dinheiro";
+      const tipoPagamento = String(body.tipo_pagamento || "").trim() || null;
+      const comprovanteUrl =
+        body.comprovante_url === undefined
+          ? null
+          : body.comprovante_url || null;
+      const observacoesPagamento =
+        body.observacoes === undefined ? null : body.observacoes || null;
+
+      const FORMAS_PAGAMENTO_PERMITIDAS = new Set([
+        "pix",
+        "dinheiro",
+        "transferencia",
+        "debito_em_conta",
+        "boleto",
+        "cartao",
+        "outro",
+        "banrisul",
+        "sicredi",
+        "bb",
+      ]);
+
+      if (tipoPagamento && !FORMAS_PAGAMENTO_PERMITIDAS.has(tipoPagamento)) {
+        return NextResponse.json(
+          { error: `Forma de pagamento inválida: ${tipoPagamento}.` },
+          { status: 400 }
+        );
+      }
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id")
+        .select("id,socio_id,competencia,situacao,valor,valor_base,data_vencimento,tipo_pagamento,conta_pagadora_id,comprovante_url,observacoes")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -964,10 +1014,13 @@ export async function POST(request: Request) {
       for (const registro of registrosParaBaixar) {
         const socio = mapaSociosBaixa.get(String(registro.socio_id));
         const contaId =
-          registro.conta_pagadora_id || socio?.conta_bancaria_id || null;
+          body.conta_recebimento_id ||
+          registro.conta_pagadora_id ||
+          socio?.conta_bancaria_id ||
+          null;
 
         const formaPagamento =
-          body.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
+          tipoPagamento || registro.tipo_pagamento || "dinheiro";
 
         const valorBase = Number(
           registro.valor_base ?? registro.valor ?? 0
@@ -994,7 +1047,8 @@ export async function POST(request: Request) {
             desconto: calculado.desconto,
             total_cobrado: calculado.total_cobrado,
             dias_atraso: calculado.dias_atraso,
-            observacoes: body.observacoes || null,
+            comprovante_url: comprovanteUrl,
+            observacoes: observacoesPagamento,
           })
           .eq("id", registro.id);
 
@@ -1024,10 +1078,10 @@ export async function POST(request: Request) {
             origem_id: registro.id,
             socio_id: registro.socio_id,
             dependente_id: null,
-            comprovante_url: null,
+            comprovante_url: comprovanteUrl,
             conciliado: false,
             data_conciliacao: null,
-            observacoes: body.observacoes || null,
+            observacoes: observacoesPagamento,
           });
 
         // A tarifa paga pelo associado é registrada separadamente
@@ -1068,6 +1122,8 @@ export async function POST(request: Request) {
                 situacao: registro.situacao,
                 data_pagamento: null,
                 tipo_pagamento: registro.tipo_pagamento || null,
+                comprovante_url: registro.comprovante_url || null,
+                observacoes: registro.observacoes || null,
                 tarifa_pagamento: null,
                 total_cobrado: null,
               })
@@ -1086,6 +1142,8 @@ export async function POST(request: Request) {
               situacao: registro.situacao,
               data_pagamento: null,
               tipo_pagamento: registro.tipo_pagamento || null,
+              comprovante_url: registro.comprovante_url || null,
+              observacoes: registro.observacoes || null,
             })
             .eq("id", registro.id);
 
@@ -1239,6 +1297,122 @@ export async function POST(request: Request) {
         entradas_removidas: pendentes.length,
         estornos_conciliados: conciliados.length,
         message: "Pagamento estornado com sucesso. A mensalidade voltou para Em aberto.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * MARCAR SEM SALDO (S.S.)
+     * =====================================================
+     * S.S. é exclusivo para cobranças por débito em conta ou boleto.
+     * PIX, dinheiro, transferência e demais formas permanecem em aberto/atraso.
+     */
+    if (acao === "marcar_sem_saldo") {
+      const ids: string[] = Array.isArray(body.ids)
+        ? body.ids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+
+      if (ids.length === 0) {
+        return NextResponse.json(
+          { error: "Selecione ao menos uma mensalidade." },
+          { status: 400 }
+        );
+      }
+
+      const { data: registros, error: erroBusca } = await db
+        .from("mensalidades")
+        .select("id,socio_id,situacao,tipo_pagamento,conta_pagadora_id")
+        .in("id", ids);
+
+      if (erroBusca) throw erroBusca;
+
+      const registrosEncontrados = registros || [];
+      const socioIds = Array.from(
+        new Set(registrosEncontrados.map((r: any) => String(r.socio_id)).filter(Boolean))
+      );
+
+      const { data: sociosSS, error: erroSociosSS } = await db
+        .from("socios")
+        .select("id,tipo_pagamento,conta_bancaria_id")
+        .in("id", socioIds);
+
+      if (erroSociosSS) throw erroSociosSS;
+
+      const mapaSociosSS = new Map<string, any>(
+        (sociosSS || []).map((s: any) => [String(s.id), s])
+      );
+
+      function cobrancaPermiteSS(registro: any) {
+        const socio = mapaSociosSS.get(String(registro.socio_id));
+        const pagamento = normalizarTexto(
+          registro.tipo_pagamento || socio?.tipo_pagamento || ""
+        ).replace(/[\s-]+/g, "_");
+
+        if (pagamento === "boleto") return true;
+        if (
+          pagamento === "debito_em_conta" ||
+          pagamento === "debito" ||
+          pagamento === "debito_em_conta_bancaria" ||
+          pagamento === "banrisul" ||
+          pagamento === "sicredi" ||
+          pagamento === "bb" ||
+          pagamento === "banco_do_brasil"
+        ) {
+          return true;
+        }
+
+        return false;
+      }
+
+      const inelegiveis = registrosEncontrados.filter(
+        (r: any) => !cobrancaPermiteSS(r)
+      );
+
+      if (inelegiveis.length > 0) {
+        const nomes = inelegiveis
+          .map((r: any) => {
+            const socio = mapaSociosSS.get(String(r.socio_id));
+            return socio?.nome || r.id;
+          })
+          .join(", ");
+
+        return NextResponse.json(
+          {
+            error:
+              `S.S. é permitido somente para débito em conta ou boleto. Não foi possível marcar: ${nomes}.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const idsElegiveis = registrosEncontrados
+        .filter((r: any) => r.situacao !== "pago" && r.situacao !== "isento")
+        .map((r: any) => String(r.id));
+
+      if (idsElegiveis.length === 0) {
+        return NextResponse.json({
+          ok: true,
+          marcadas: 0,
+          message: "Nenhuma mensalidade elegível para marcar como S.S.",
+        });
+      }
+
+      const { error: erroUpdate } = await db
+        .from("mensalidades")
+        .update({
+          situacao: "em_aberto",
+          data_pagamento: null,
+          motivo: "S.S",
+          observacoes: "S.S — Sem saldo",
+        })
+        .in("id", idsElegiveis);
+
+      if (erroUpdate) throw erroUpdate;
+
+      return NextResponse.json({
+        ok: true,
+        marcadas: idsElegiveis.length,
+        message: `${idsElegiveis.length} mensalidade(s) marcada(s) como S.S. — Sem saldo.`,
       });
     }
 
