@@ -5,6 +5,7 @@ import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import RegistrarPagamentoMensalidade from "./components/RegistrarPagamentoMensalidade";
 
 type Socio = {
   id: string;
@@ -149,8 +150,8 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
-function statusMensalidade(item: M) {
-  if (ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
+function statusMensalidade(item: M, semSaldoPermitido = false) {
+  if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
   return status(item.situacao);
 }
 
@@ -211,6 +212,7 @@ export default function Page() {
   const [anoHistoricoSocio, setAnoHistoricoSocio] = useState(hoje.getFullYear());
   const [tipoBaixaSelecionada, setTipoBaixaSelecionada] = useState<"pago" | "sem_saldo">("pago");
   const [processandoBaixa, setProcessandoBaixa] = useState(false);
+  const [pagamentoMensalidade, setPagamentoMensalidade] = useState<M | null>(null);
 
 
   async function h() {
@@ -270,7 +272,7 @@ export default function Page() {
     }
   }
 
-  async function alterarMensalidadeDoModal(acao: "baixar" | "marcar_sem_saldo" | "estornar") {
+  async function alterarMensalidadeDoModal(acao: "marcar_sem_saldo" | "estornar") {
     const registro = mesHistoricoSelecionado
       ? historicoPorMes.get(mesHistoricoSelecionado) || null
       : null;
@@ -283,12 +285,7 @@ export default function Page() {
     const competenciaTexto = `${String(mesHistoricoSelecionado || 1).padStart(2, "0")}/${anoHistoricoSocio}`;
     const nome = registro.socio?.nome || socioSelecionado?.socio?.nome || "este associado";
 
-    if (acao === "baixar") {
-      const ok = window.confirm(
-        `Confirmar pagamento da mensalidade de ${competenciaTexto} de ${nome}?\n\nA baixa será registrada no Financeiro.`
-      );
-      if (!ok) return;
-    } else if (acao === "marcar_sem_saldo") {
+    if (acao === "marcar_sem_saldo") {
       const ok = window.confirm(
         `Marcar a mensalidade de ${competenciaTexto} de ${nome} como S.S — Sem saldo?\n\nNenhum lançamento financeiro será criado.`
       );
@@ -415,7 +412,7 @@ export default function Page() {
   }
 
   function tipoCobranca(m: M) {
-    const pagamento = normalizarPagamento(m.tipo_pagamento);
+    const pagamento = normalizarPagamento(m.tipo_pagamento || m.socio?.tipo_pagamento);
 
     // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
     if (pagamento === "pix" || pagamento === "botero") return "pix";
@@ -468,6 +465,21 @@ export default function Page() {
     return "sem_pagamento";
   }
 
+  function podeMarcarSemSaldo(item: M) {
+    const cobranca = tipoCobranca(item);
+    return cobranca === "banrisul" || cobranca === "sicredi" || cobranca === "bb" || cobranca === "boleto";
+  }
+
+  function situacaoVisual(item: M) {
+    if (item.situacao === "em_aberto" && item.data_vencimento) {
+      const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
+      if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < Date.now()) {
+        return "em_atraso";
+      }
+    }
+    return item.situacao;
+  }
+
   const socioPorId = useMemo(() => {
     const mapa = new Map<string, Socio>();
     socios.forEach((s) => mapa.set(String(s.id), s));
@@ -504,8 +516,11 @@ export default function Page() {
         socio: s,
       }));
 
-    return [...lista, ...virtuais];
-  }, [lista, sociosElegiveis, ano, mes]);
+    return [...lista, ...virtuais].map((item) => ({
+      ...item,
+      situacao: situacaoVisual(item),
+    }));
+  }, [lista, sociosElegiveis, ano, mes, contas]);
 
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
@@ -810,10 +825,10 @@ const selecionadasBaixa = useMemo(
   // prioridade visual, depois Isento, Pago, Atrasada e Em aberto.
   const historicoPorMes = useMemo(() => {
     const prioridade = (item: M) => {
-      if (ehSemSaldo(item)) return 50;
+      if (ehSemSaldo(item) && podeMarcarSemSaldo(item)) return 50;
       if (item.situacao === "isento") return 40;
       if (item.situacao === "pago") return 30;
-      if (item.situacao === "em_atraso") return 20;
+      if (situacaoVisual(item) === "em_atraso") return 20;
       if (item.situacao === "em_aberto") return 10;
       return 0;
     };
@@ -845,7 +860,7 @@ const selecionadasBaixa = useMemo(
     }
 
     return mapa;
-  }, [historicoSocio, anoHistoricoSocio]);
+  }, [historicoSocio, anoHistoricoSocio, contas]);
 
   function abrirConfiguracao() {
     setAbaConfig("mensalidades");
@@ -1125,7 +1140,7 @@ const selecionadasBaixa = useMemo(
                     </tr>
                   ) : (
                     filtrada.map((x) => {
-                    const st = statusMensalidade(x);
+                    const st = statusMensalidade(x, podeMarcarSemSaldo(x));
                     const acrescimos =
                       Number(x.multa || 0) + Number(x.juros || 0);
 
@@ -1362,7 +1377,7 @@ const selecionadasBaixa = useMemo(
                       Controle de mensalidades — {anoHistoricoSocio}
                     </h3>
                     <p className="mt-1 text-xs text-gray-500">
-                      X = pago · SS = sem saldo · I = isento · em branco = em aberto
+                      X = pago · SS = sem saldo (débito/boleto) · I = isento · em atraso = vencida
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1473,13 +1488,23 @@ const selecionadasBaixa = useMemo(
                         Detalhes — {String(mesHistoricoSelecionado || mes).padStart(2, "0")}/{anoHistoricoSocio}
                       </h3>
                       <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${
-                        registroMes?.situacao === "pago"
-                          ? "bg-green-100 text-green-700"
-                          : registroMes
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-gray-100 text-gray-500"
+                        !registroMes
+                          ? "bg-gray-100 text-gray-500"
+                          : ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
+                            ? "bg-amber-100 text-amber-700"
+                            : situacaoVisual(registroMes) === "pago"
+                              ? "bg-green-100 text-green-700"
+                              : situacaoVisual(registroMes) === "em_atraso"
+                                ? "bg-red-100 text-red-700"
+                                : situacaoVisual(registroMes) === "isento"
+                                  ? "bg-gray-100 text-gray-500"
+                                  : "bg-yellow-100 text-yellow-700"
                       }`}>
-                        {registroMes ? status(registroMes.situacao)[0] : "Não gerada"}
+                        {registroMes
+                          ? (ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
+                              ? "S.S"
+                              : status(situacaoVisual(registroMes))[0])
+                          : "Não gerada"}
                       </span>
                     </div>
 
@@ -1504,7 +1529,7 @@ const selecionadasBaixa = useMemo(
                         </div>
                       </div>
 
-                      <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+                      <div className="mt-4 border-t pt-4">
                         {registroMes.situacao === "pago" ? (
                           <button
                             type="button"
@@ -1513,22 +1538,33 @@ const selecionadasBaixa = useMemo(
                           >
                             ↩ Estornar pagamento
                           </button>
-                        ) : !ehSemSaldo(registroMes) && registroMes.situacao !== "isento" ? (
+                        ) : registroMes.situacao !== "isento" ? (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => void alterarMensalidadeDoModal("baixar")}
-                              className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white hover:bg-[#004a31]"
-                            >
-                              ✓ Dar baixa — Pago
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void alterarMensalidadeDoModal("marcar_sem_saldo")}
-                              className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
-                            >
-                              SS — Sem saldo
-                            </button>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setErro("");
+                                  setMsg("");
+                                  setPagamentoMensalidade(registroMes);
+                                }}
+                                className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white hover:bg-[#004a31]"
+                              >
+                                💰 Dar baixa / Registrar pagamento
+                              </button>
+                              {podeMarcarSemSaldo(registroMes) && (
+                                <button
+                                  type="button"
+                                  onClick={() => void alterarMensalidadeDoModal("marcar_sem_saldo")}
+                                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                                >
+                                  SS — Sem saldo
+                                </button>
+                              )}
+                            </div>
+                            <p className="mt-2 text-xs text-gray-500">
+                              Forma de cobrança: <b>{tipoCobranca(registroMes) === "banrisul" ? "Débito Banrisul" : tipoCobranca(registroMes) === "sicredi" ? "Débito Sicredi" : tipoCobranca(registroMes) === "bb" ? "Débito Banco do Brasil" : tipoCobranca(registroMes) === "boleto" ? "Boleto" : tipoCobranca(registroMes) === "pix" ? "PIX" : "Outra / não definida"}</b>. S.S. é usado somente para débito em conta ou boleto.
+                            </p>
                           </>
                         ) : null}
                       </div>
@@ -1559,6 +1595,27 @@ const selecionadasBaixa = useMemo(
             </div>
           </div>
         </div>
+      )}
+
+      {pagamentoMensalidade && (
+        <RegistrarPagamentoMensalidade
+          key={pagamentoMensalidade.id}
+          registro={pagamentoMensalidade}
+          contas={contas}
+          onClose={() => setPagamentoMensalidade(null)}
+          onError={(mensagem) => {
+            if (mensagem) setErro(mensagem);
+          }}
+          onSuccess={async (mensagem) => {
+            setMsg(mensagem);
+            setErro("");
+            setPagamentoMensalidade(null);
+            await carregar();
+            if (socioSelecionado) {
+              await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
+            }
+          }}
+        />
       )}
 
       {abrindoPrevia && previas.length > 0 && (
@@ -1648,8 +1705,9 @@ const selecionadasBaixa = useMemo(
                   </button>
                   <button
                     type="button"
+                    disabled={!selecionadasBaixa.length || !selecionadasBaixa.every((item) => podeMarcarSemSaldo(item))}
                     onClick={() => setTipoBaixaSelecionada("sem_saldo")}
-                    className={`rounded-xl border-2 p-4 text-left transition ${
+                    className={`rounded-xl border-2 p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
                       tipoBaixaSelecionada === "sem_saldo"
                         ? "border-amber-400 bg-amber-50"
                         : "border-gray-200 bg-white hover:bg-gray-50"
