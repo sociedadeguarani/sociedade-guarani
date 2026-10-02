@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { Clock3, Settings, UserRound, UserRoundCheck, Users } from "lucide-react";
@@ -101,6 +100,7 @@ export default function ReservasPage() {
   const [reservaPixConfirmacao, setReservaPixConfirmacao] = useState<Reserva | null>(null);
   const [contaPixConfirmacao, setContaPixConfirmacao] = useState("");
   const [confirmandoPix, setConfirmandoPix] = useState(false);
+  const [arquivoConfirmacaoPix, setArquivoConfirmacaoPix] = useState<File | null>(null);
   const [carregandoReservas, setCarregandoReservas] = useState(false);
   const [carregandoPessoas, setCarregandoPessoas] = useState(false);
   const [pessoasCarregadas, setPessoasCarregadas] = useState(false);
@@ -538,9 +538,26 @@ export default function ReservasPage() {
   async function confirmarPixAdmin() {
     if (!reservaPixConfirmacao) return;
     if (!contaPixConfirmacao) return alert("Selecione a conta bancária que recebeu o PIX.");
+    if (!reservaPixConfirmacao.comprovante_url && !arquivoConfirmacaoPix) return alert("Anexe o comprovante antes de confirmar o PIX.");
     setConfirmandoPix(true);
     try {
       const token = await tokenAtual();
+      if (!token) throw new Error("Sessão expirada.");
+
+      if (!reservaPixConfirmacao.comprovante_url && arquivoConfirmacaoPix) {
+        const permitido = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+        if (!permitido.includes(arquivoConfirmacaoPix.type)) throw new Error("Envie JPG, PNG, WEBP ou PDF.");
+        if (arquivoConfirmacaoPix.size > 8 * 1024 * 1024) throw new Error("O comprovante deve ter no máximo 8 MB.");
+        const form = new FormData();
+        form.append("origem_tipo", "reserva");
+        form.append("origem_id", reservaPixConfirmacao.id);
+        form.append("arquivo", arquivoConfirmacaoPix);
+        const envio = await fetch("/api/reservas/comprovante", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+        const dadosEnvio = await envio.json().catch(() => ({}));
+        if (!envio.ok) throw new Error(dadosEnvio?.error || "Não foi possível anexar o comprovante.");
+        setReservaPixConfirmacao((atual) => atual ? { ...atual, comprovante_url: dadosEnvio.url || atual.comprovante_url } : atual);
+      }
+
       const resposta = await fetch("/api/reservas", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -550,6 +567,7 @@ export default function ReservasPage() {
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível confirmar o PIX.");
       setReservaPixConfirmacao(null);
       setContaPixConfirmacao("");
+      setArquivoConfirmacaoPix(null);
       await carregarReservas({ todas: true });
       alert("PIX confirmado. A entrada foi registrada no Financeiro.");
     } catch (error) {
@@ -674,7 +692,6 @@ export default function ReservasPage() {
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservar" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Nova reserva</button>
                 <button onClick={() => setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservas" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Reservas</button>
-                <Link href="/relatorios/reservas" className="rounded-xl bg-white px-4 py-2.5 font-bold shadow-sm">📊 Relatório</Link>
                 {podeConfigurar && <button onClick={() => setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "admin" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}><Settings className="mr-2 inline h-4 w-4" />Configurar espaços</button>}
               </div>
             )}
