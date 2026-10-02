@@ -81,8 +81,8 @@ export async function GET(request: Request) {
 }
 
 function situacaoMensalidadePorQuantidade(quantidade: number) {
-  if (quantidade <= 2) return { texto: "Em dia", cor: "verde" };
-  if (quantidade <= 4) return { texto: "Atenção", cor: "amarelo" };
+  if (quantidade <= 1) return { texto: "Em dia", cor: "verde" };
+  if (quantidade === 2) return { texto: "Atenção", cor: "amarelo" };
   return { texto: "Crítico", cor: "vermelho" };
 }
 
