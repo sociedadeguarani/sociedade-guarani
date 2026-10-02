@@ -146,7 +146,6 @@ export default function ReservasPage() {
         const perfilResponse = await fetch("/api/login/perfil", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
         const perfilPayload = await perfilResponse.json().catch(() => ({}));
         if (perfilResponse.ok) setPerfil((perfilPayload?.usuario?.perfil || "") as Perfil);
-        setReservas([]);
       } else {
         setPerfil("");
         setSocios([]);
