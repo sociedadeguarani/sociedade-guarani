@@ -236,9 +236,9 @@ export default function InadimplenciaPage() {
           competencias: Array.from(g.competencias),
           meses,
           nivel:
-            meses >= 5
+            meses >= 3
               ? ("vermelho" as const)
-              : meses >= 3
+              : meses === 2
                 ? ("amarelo" as const)
                 : ("verde" as const),
         };
@@ -370,7 +370,7 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">0 a 2 meses</p>
+                <p className="text-sm text-gray-500">0 a 1 mês</p>
                 <p className="mt-2 text-3xl font-extrabold text-green-600">
                   {verdes}
                 </p>
@@ -378,7 +378,7 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-yellow-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">3 ou 4 meses</p>
+                <p className="text-sm text-gray-500">2 meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-yellow-600">
                   {amarelos}
                 </p>
@@ -386,7 +386,7 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">5+ meses</p>
+                <p className="text-sm text-gray-500">3+ meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-red-600">
                   {vermelhos}
                 </p>
@@ -420,8 +420,8 @@ export default function InadimplenciaPage() {
                   {[
                     ["todos", "Todos"],
                     ["verde", "🟢 0–2 meses"],
-                    ["amarelo", "🟡 3–4 meses"],
-                    ["vermelho", "🔴 5+ meses"],
+                    ["amarelo", "🟡 2 meses"],
+                    ["vermelho", "🔴 3+ meses"],
                   ].map(([valor, label]) => (
                     <button
                       key={valor}
@@ -443,10 +443,10 @@ export default function InadimplenciaPage() {
                   🟢 0–2 meses: Em dia
                 </span>
                 <span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-700">
-                  🟡 3–4 meses em atraso
+                  🟡 2 meses em atraso
                 </span>
                 <span className="rounded-full bg-red-50 px-3 py-2 text-red-700">
-                  🔴 5 meses ou mais
+                  🔴 3 meses ou mais
                 </span>
               </div>
             </div>
