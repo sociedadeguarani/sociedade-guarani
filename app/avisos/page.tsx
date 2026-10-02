@@ -309,6 +309,16 @@ export default function AvisosPage(){
     await carregar();
   }
 
+  // Reservas pendentes já têm um bloco próprio acima. Algumas instalações
+  // também criam uma notificação para a mesma reserva; ocultamos somente
+  // essa cópia para que a mesma pendência não apareça duas vezes.
+  const idsReservasPendentes = new Set(reservasPendentes.map((r)=>String(r.id)));
+  const notificacoesVisiveis = notificacoes.filter((n)=>{
+    const origem = String(n.origem_tipo || "").trim().toLowerCase();
+    const ehOrigemReserva = ["reserva","reserva_pagamento","pagamento_reserva"].includes(origem);
+    return !(ehOrigemReserva && n.origem_id && idsReservasPendentes.has(String(n.origem_id)));
+  });
+
   return <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
     <MenuLateralPadrao/><CabecalhoPadrao/>
     <main className="px-5 py-6 lg:pl-[265px] lg:pr-8">
@@ -357,7 +367,7 @@ export default function AvisosPage(){
               Aqui ficam reservas e pagamentos que precisam ser conferidos antes de considerar tudo concluído.
             </p>
           </div>
-          {notificacoes.length>0&&
+          {notificacoesVisiveis.length>0&&
             <button
               disabled={processando==="todas"}
               onClick={marcarTodas}
@@ -385,12 +395,12 @@ export default function AvisosPage(){
           </div>)}
         </div>}
 
-        {notificacoes.length===0
+        {notificacoesVisiveis.length===0
           ?<div className="rounded-xl border border-[#dfe7e2] bg-[#f7faf8] px-4 py-4 text-sm text-gray-500">
               {reservasPendentes.length===0?"Nenhuma pendência aguardando conferência.":"Nenhuma outra pendência de pagamento."}
             </div>
           :<div className="space-y-3">
-            {notificacoes.map(n=>{
+            {notificacoesVisiveis.map(n=>{
               const ehPagamento=n.tipo==="comprovante_pagamento";
               const ehReserva=!ehPagamento && (
                 n.titulo.toLowerCase().includes("reserva") ||
