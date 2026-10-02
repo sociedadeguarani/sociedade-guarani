@@ -455,7 +455,7 @@ export default function DependentesPage() {
                       {dependentesFiltrados.map((d) => {
                         const socio = socioPorId[d.socio_id];
                         const statusResponsavel = statusResponsaveis[d.socio_id] || "em_dia";
-                        const statusLabel = statusResponsavel === "muito_atrasado" ? "5+ meses" : statusResponsavel === "atrasado" ? "3–4 meses" : "Até 2 meses";
+                        const statusLabel = statusResponsavel === "muito_atrasado" ? "3+ meses" : statusResponsavel === "atrasado" ? "2 meses" : "0–1 mês";
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -466,7 +466,7 @@ export default function DependentesPage() {
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 0–1 mês" : statusResponsavel === "atrasado" ? "🟡 2 meses" : "🔴 3+ meses"}</span></td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4">
                               {!somenteConsulta && (
