@@ -25,6 +25,7 @@ type Mensalidade = {
   situacao: string | null;
   data_pagamento: string | null;
   tipo_pagamento: string | null;
+  conta_pagadora_id?: string | null;
   comprovante_url?: string | null;
   observacoes?: string | null;
   socio?: {
