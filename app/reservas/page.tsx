@@ -239,8 +239,16 @@ export default function ReservasPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const modoPublico = params.get("publico") === "1";
+    const statusInicial = params.get("status");
+
     setPublico(modoPublico);
-    if (modoPublico) setTipoPessoa("nao_socio");
+    if (modoPublico) {
+      setTipoPessoa("nao_socio");
+    } else if (statusInicial === "pendente" || statusInicial === "confirmada" || statusInicial === "cancelada") {
+      setAba("reservas");
+      setFiltroStatus(statusInicial);
+    }
+
     void recarregarDados(modoPublico);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
