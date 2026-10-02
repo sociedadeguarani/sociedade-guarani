@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
-  const perfisPermitidos = ["funcionario", "administrador_normal", "administrador_master", "administrador"];
+  const perfisPermitidos = ["funcionario", "administrador_master", "administrador"];
   const ehEquipe = perfisPermitidos.includes(auth.perfil);
   const usuario = auth.usuario;
   const db = getServiceClient();
