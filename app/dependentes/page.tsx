@@ -176,7 +176,7 @@ export default function DependentesPage() {
           tipo_pagamento: d.tipo_pagamento ?? null,
           situacao_financeira: d.situacao_financeira ?? null,
           data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          source: "dependentes" as const,
+          source: d.source === "socios" ? "socios" as const : "dependentes" as const,
         }));
 
       setSocios(sociosData.map((s: any) => ({
