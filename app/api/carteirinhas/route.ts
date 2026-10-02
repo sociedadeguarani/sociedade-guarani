@@ -35,10 +35,10 @@ function statusPorMensalidades(mensalidades: any[]) {
 }
 
 function statusFinanceiro(quantidade: number, dias: number) {
-  if (quantidade <= 2) {
+  if (quantidade <= 1) {
     return { financeiro_status: "em_dia", dias_atraso: dias, meses_atraso: quantidade };
   }
-  if (quantidade <= 4) {
+  if (quantidade === 2) {
     return { financeiro_status: "atrasado", dias_atraso: dias, meses_atraso: quantidade };
   }
   return { financeiro_status: "muito_atrasado", dias_atraso: dias, meses_atraso: quantidade };
