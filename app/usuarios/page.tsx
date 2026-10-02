@@ -27,7 +27,6 @@ const PERMISSOES = [
 const DEFAULT_PERMISSOES: Record<string, string[]> = {
   administrador: PERMISSOES.map(([chave]) => chave),
   administrador_master: PERMISSOES.map(([chave]) => chave),
-  administrador_normal: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
@@ -37,7 +36,6 @@ const visual: Record<string, { label: string; desc: string; icon: typeof Crown }
   administrador_master: { label: "Administrador Master", desc: "Pode criar e gerenciar usuários do sistema.", icon: Crown },
   master: { label: "Administrador Master", desc: "Pode criar e gerenciar usuários do sistema.", icon: Crown },
   administrador: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
-  administrador_normal: { label: "Administrador", desc: "Acesso administrativo normal.", icon: ShieldCheck },
   funcionario: { label: "Funcionário", desc: "Acesso conforme permissões.", icon: ShieldCheck },
   funcionario_inventario: { label: "Funcionário — Inventário", desc: "Cadastra itens, controla empréstimos e devoluções.", icon: Boxes },
   associado: { label: "Associado", desc: "Acesso aos próprios dados.", icon: UserRound },
@@ -79,7 +77,7 @@ export default function UsuariosPage() {
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
       if (!form.perfil_id && data.perfis?.length) {
-        const inicial = data.perfis.find((p: Perfil) => ["administrador", "administrador_normal"].includes(p.nome));
+        const inicial = data.perfis.find((p: Perfil) => p.codigo === "administrador" || String(p.nome || "").trim().toLowerCase() === "administrador");
         setForm((f) => ({ ...f, perfil_id: inicial?.id || data.perfis[0].id }));
       }
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar."); }
@@ -94,7 +92,7 @@ export default function UsuariosPage() {
   }, [usuarios, busca, filtroPerfil]);
 
   function abrirNovo() {
-    const inicial = perfis.find((p) => ["administrador", "administrador_normal"].includes(p.nome));
+    const inicial = perfis.find((p) => p.codigo === "administrador" || String(p.nome || "").trim().toLowerCase() === "administrador");
     setErro(""); setMensagem("");
     const perfilInicial = inicial || perfis[0];
     setForm({ nome: "", email: "", senha: "", perfil_id: perfilInicial?.id || "", socio_id: "", ativo: true });
