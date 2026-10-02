@@ -11,27 +11,48 @@ function erroBanco(error: any) {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function normalizarNomeEspaco(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 async function resolverEspacoId(db: any, informado: string, nome: string) {
   const valor = informado.trim();
   if (UUID_RE.test(valor)) {
     const { data, error } = await db
       .from("espacos")
-      .select("id")
+      .select("id,nome")
       .eq("id", valor)
       .limit(1);
     if (error) throw error;
     if (data?.[0]?.id) return String(data[0].id);
   }
 
+  const nomeNormalizado = normalizarNomeEspaco(nome || valor);
   const { data, error } = await db
     .from("espacos")
     .select("id,nome")
-    .eq("nome", nome.trim())
-    .limit(1);
+    .order("nome", { ascending: true });
   if (error) throw error;
-  if (data?.[0]?.id) return String(data[0].id);
 
-  throw new Error(`O espaço "${nome}" não foi encontrado na tabela de espaços.`);
+  const encontrado = (data || []).find((item: any) => normalizarNomeEspaco(item.nome) === nomeNormalizado);
+  if (encontrado?.id) return String(encontrado.id);
+
+  const nomeFinal = String(nome || valor).trim();
+  if (!nomeFinal) throw new Error("Espaço não informado.");
+
+  const { data: criado, error: erroCriacao } = await db
+    .from("espacos")
+    .insert({ nome: nomeFinal })
+    .select("id,nome")
+    .single();
+  if (!erroCriacao && criado?.id) return String(criado.id);
+
+  throw new Error(`O espaço "${nomeFinal}" não está cadastrado no banco e não foi possível sincronizá-lo. ${erroBanco(erroCriacao)}`);
 }
 
 function dividirHorario(horario: string) {
@@ -97,13 +118,12 @@ export async function GET(request: Request) {
       })),
     );
 
-    const { data: contas } = await db
-      .from("contas_bancarias")
-      .select("id,nome,banco,ativo")
-      .eq("ativo", true)
-      .order("nome");
+    const [{ data: contas }, { data: espacosDb }] = await Promise.all([
+      db.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome"),
+      db.from("espacos").select("id,nome").order("nome"),
+    ]);
 
-    return NextResponse.json({ reservas, contas_bancarias: contas || [] });
+    return NextResponse.json({ reservas, contas_bancarias: contas || [], espacos: espacosDb || [] });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : erroBanco(error) || "Erro ao carregar reservas." },
@@ -275,6 +295,33 @@ export async function PATCH(request: Request) {
         .single();
       if (error) throw error;
       return NextResponse.json({ reserva: normalizarReserva(atualizada), message: "Reserva cancelada." });
+    }
+
+    if (acao === "editar") {
+      const espacoId = await resolverEspacoId(db, String(body.espaco_id || ""), String(body.espaco_nome || ""));
+      const { inicio, fim } = dividirHorario(String(body.horario || ""));
+      const pagamento = String(body.pagamento || "pendente").trim();
+      const valor = Number(body.valor || 0);
+      const situacao = body.status === "cancelada" ? "cancelada" : body.status === "confirmada" ? "confirmada" : pagamento === "pix" ? "solicitada" : "confirmada";
+      const { data: atualizada, error } = await db.from("reservas").update({
+        espaco_id: espacoId,
+        socio_id: body.socio_id || null,
+        dependente_id: body.dependente_id || null,
+        responsavel_nome: String(body.nome || "").trim(),
+        data_reserva: String(body.data || "").trim(),
+        hora_inicio: inicio,
+        hora_fim: fim,
+        valor,
+        situacao,
+        tipo_pagamento: pagamento,
+        matricula: body.matricula == null ? null : String(body.matricula),
+        tipo_pessoa: body.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
+      }).eq("id", id).select("*").single();
+      if (error) {
+        if (String(error.code) === "23505") return NextResponse.json({ error: "Este espaço e horário já estão reservados." }, { status: 409 });
+        throw error;
+      }
+      return NextResponse.json({ reserva: normalizarReserva(atualizada), message: "Reserva atualizada." });
     }
 
     return NextResponse.json({ error: "Ação de reserva inválida." }, { status: 400 });
