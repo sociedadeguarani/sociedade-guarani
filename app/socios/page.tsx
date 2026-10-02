@@ -294,7 +294,7 @@ export default function Home() {
       setPerfilUsuario(
         perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil === "admin" || perfil === "administrador" ? "administrador" :
         perfil
       );
     } catch {}
