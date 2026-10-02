@@ -32,15 +32,6 @@ export function Resumo({
   );
 }
 
-export function Info({ titulo, texto }: { titulo: string; texto: string }) {
-  return (
-    <div className="rounded-xl bg-[#f7faf8] p-4">
-      <p className="font-bold text-[#005a3c]">{titulo}</p>
-      <p className="mt-1 text-sm text-gray-500">{texto}</p>
-    </div>
-  );
-}
-
 export function Campo({
   label,
   type = "text",
