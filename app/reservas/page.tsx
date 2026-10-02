@@ -177,8 +177,13 @@ export default function ReservasPage() {
 
           const reservasDb = Array.isArray(resultado.reservas) ? resultado.reservas : [];
           const contasDb = Array.isArray(resultado.contas_bancarias) ? resultado.contas_bancarias : [];
+          const espacosDb = Array.isArray(resultado.espacos) ? resultado.espacos : [];
 
           setContasBancarias(contasDb);
+          if (espacosDb.length) {
+            const porNome = new Map(espacosDb.map((e: any) => [normalizarTexto(e.nome), String(e.id)]));
+            setEspacos((atuais) => atuais.map((e) => ({ ...e, id: porNome.get(normalizarTexto(e.nome)) || e.id })));
+          }
 
           // A lista de pessoas da Reserva deve usar a mesma fonte autenticada
           // para todos os perfis. /api/socios usa Service Role no servidor e
@@ -504,29 +509,28 @@ export default function ReservasPage() {
         const contaPadrao = contasBancarias.find((c) => `${c.nome} ${c.banco || ""}`.toLowerCase().includes("sicredi")) || contasBancarias[0];
         const { data: sessaoReserva } = await supabase.auth.getSession();
         const tokenReserva = sessaoReserva.session?.access_token || "";
+        const payloadReserva = {
+          id: editandoReservaId || undefined,
+          espaco_id: novaReserva.espacoId,
+          espaco_nome: espaco.nome,
+          data: novaReserva.data,
+          horario: novaReserva.horario,
+          nome: novaReserva.nome,
+          socio_id: novaReserva.socioId || null,
+          dependente_id: novaReserva.dependenteId || null,
+          matricula: novaReserva.matricula ?? null,
+          tipo_pessoa: novaReserva.tipoPessoa,
+          valor: novaReserva.valor,
+          status: novaReserva.status,
+          pagamento: novaReserva.pagamento,
+          comprovante_url: novaReserva.comprovante_url || null,
+          comprovante_nome: novaReserva.comprovante_nome || null,
+          conta_bancaria_id: novaReserva.pagamento === "pix" ? null : contaPadrao?.id || null,
+        };
         const resposta = await fetch("/api/reservas", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${tokenReserva}`,
-          },
-          body: JSON.stringify({
-            espaco_id: novaReserva.espacoId,
-            espaco_nome: espaco.nome,
-            data: novaReserva.data,
-            horario: novaReserva.horario,
-            nome: novaReserva.nome,
-            socio_id: novaReserva.socioId || null,
-            dependente_id: novaReserva.dependenteId || null,
-            matricula: novaReserva.matricula ?? null,
-            tipo_pessoa: novaReserva.tipoPessoa,
-            valor: novaReserva.valor,
-            status: novaReserva.status,
-            pagamento: novaReserva.pagamento,
-            comprovante_url: novaReserva.comprovante_url || null,
-            comprovante_nome: novaReserva.comprovante_nome || null,
-            conta_bancaria_id: novaReserva.pagamento === "pix" ? null : contaPadrao?.id || null,
-          }),
+          method: editandoReservaId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenReserva}` },
+          body: JSON.stringify(editandoReservaId ? { ...payloadReserva, acao: "editar" } : payloadReserva),
         });
         const resultado = await resposta.json().catch(() => ({}));
         if (!resposta.ok) throw new Error(resultado.error || "Não foi possível gravar a reserva no banco.");
@@ -623,9 +627,22 @@ export default function ReservasPage() {
     window.open(data.signedUrl, "_blank");
   }
 
-  function cancelar(id: string) {
-    if (confirm("Deseja realmente cancelar esta reserva?")) {
+  async function cancelar(id: string) {
+    if (!confirm("Deseja realmente cancelar esta reserva?")) return;
+    try {
+      if (!publico) {
+        const { data: sessao } = await supabase.auth.getSession();
+        const resposta = await fetch("/api/reservas", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessao.session?.access_token || ""}` },
+          body: JSON.stringify({ id, acao: "cancelar" }),
+        });
+        const resultado = await resposta.json().catch(() => ({}));
+        if (!resposta.ok) throw new Error(resultado.error || "Não foi possível cancelar a reserva.");
+      }
       setReservas((v) => v.map((r) => (r.id === id ? { ...r, status: "cancelada" } : r)));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível cancelar a reserva.");
     }
   }
 
