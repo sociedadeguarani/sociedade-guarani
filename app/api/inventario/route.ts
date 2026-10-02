@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     const supabase = admin();
 
     if (body.acao === "criar_categoria" || body.acao === "criar_localizacao") {
-      if (!["administrador", "administrador_normal", "administrador_master", "master", "admin"].includes(perfil)) {
+      if (!["administrador", "administrador_master", "master", "admin"].includes(perfil)) {
         return NextResponse.json({ error: "Sem permissão para cadastrar categorias ou localizações." }, { status: 403 });
       }
       const nome = String(body.nome || "").trim();
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     if (body.acao === "criar_item" || body.acao === "editar_item") {
-      if (!["administrador", "administrador_normal", "administrador_master", "master", "admin"].includes(perfil)) return NextResponse.json({ error: "Funcionário não pode criar ou editar itens." }, { status: 403 });
+      if (!["administrador", "administrador_master", "master", "admin"].includes(perfil)) return NextResponse.json({ error: "Funcionário não pode criar ou editar itens." }, { status: 403 });
       if (!body.nome?.trim()) return NextResponse.json({ error: "Informe o nome do item." }, { status: 400 });
       const quantidade = Math.max(1, Number(body.quantidade_total || 1));
       let patrimonio = body.numero_patrimonio || null;
