@@ -156,12 +156,10 @@ export default function ReservasPage() {
     if (modoPublico) setTipoPessoa("nao_socio");
 
     try {
-      const e = localStorage.getItem("guarani_espacos_reservas");
       const r = localStorage.getItem("guarani_reservas");
-      if (e) setEspacos(normalizarEspacos(JSON.parse(e)));
       if (r) setReservas(JSON.parse(r));
     } catch {
-      // Mantém os valores iniciais.
+      // O banco continua sendo a fonte oficial das reservas.
     }
 
     if (!modoPublico) {
@@ -180,20 +178,18 @@ export default function ReservasPage() {
           const espacosDb = Array.isArray(resultado.espacos) ? resultado.espacos : [];
 
           setContasBancarias(contasDb);
-          if (espacosDb.length) {
-            const porNome = new Map<string, string>();
-            espacosDb.forEach((e: any) => {
-              const nomeNormalizado = normalizarTexto(e?.nome);
-              const id = e?.id == null ? "" : String(e.id);
-              if (nomeNormalizado && id) porNome.set(nomeNormalizado, id);
-            });
-            setEspacos((atuais) =>
-              atuais.map((e) => ({
-                ...e,
-                id: porNome.get(normalizarTexto(e.nome)) ?? e.id,
-              }))
-            );
-          }
+          // Os espaços exibidos e usados na reserva vêm diretamente da tabela
+          // `espacos`. Não misturamos mais cadastro local com IDs do banco.
+          setEspacos(normalizarEspacos(espacosDb.map((e: any) => ({
+            id: String(e.id || ""),
+            nome: String(e.nome || ""),
+            categoria: e.categoria === "esporte" || e.categoria === "eventos" ? e.categoria : "lazer",
+            cobranca: e.cobranca === "diaria" ? "diaria" : "hora",
+            precoSocio: Number(e.precoSocio ?? e.preco_socio ?? e.valorSocio ?? e.valor_socio ?? 0) || 0,
+            precoNaoSocio: Number(e.precoNaoSocio ?? e.preco_nao_socio ?? e.valorNaoSocio ?? e.valor_nao_socio ?? 0) || 0,
+            permiteNaoSocio: Boolean(e.permiteNaoSocio ?? e.permite_nao_socio ?? e.nao_socio_permitido ?? false),
+            capacidade: e.capacidade == null ? undefined : String(e.capacidade),
+          })).filter((e: Espaco) => e.id && e.nome)));
 
           // A lista de pessoas da Reserva deve usar a mesma fonte autenticada
           // para todos os perfis. /api/socios usa Service Role no servidor e
@@ -308,10 +304,6 @@ export default function ReservasPage() {
       })();
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("guarani_espacos_reservas", JSON.stringify(espacos));
-  }, [espacos]);
 
   useEffect(() => {
     localStorage.setItem("guarani_reservas", JSON.stringify(reservas));
