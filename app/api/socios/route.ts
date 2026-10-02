@@ -24,7 +24,7 @@ function erroBanco(error: unknown) {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["funcionario", "administrador_normal", "administrador_master", "administrador"]);
+    const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
     if ("response" in auth) return auth.response;
     const db = getServiceClient();
     const url = new URL(request.url);
