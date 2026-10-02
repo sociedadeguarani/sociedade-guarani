@@ -29,10 +29,8 @@ function normalizarPerfil(codigo?: string | null, nome?: string | null) {
   // ADMINISTRADOR
   if (
     valorCodigo === "administrador" ||
-    valorCodigo === "administrador_normal" ||
     valorCodigo === "admin" ||
     valorNome === "administrador" ||
-    valorNome === "administrador normal" ||
     valorNome === "admin"
   ) {
     return "administrador";
