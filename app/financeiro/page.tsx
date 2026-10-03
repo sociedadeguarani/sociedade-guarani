@@ -82,6 +82,7 @@ type MovimentoFinanceiro = {
   descricao: string;
   valor: number;
   data_movimentacao: string;
+  created_at: string | null;
   forma_pagamento: string | null;
   origem_tipo: string | null;
   origem_id: string | null;
@@ -115,6 +116,13 @@ function formatarData(data: string | null | undefined) {
   if (!data) return "—";
   const p = data.slice(0, 10).split("-");
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : data;
+}
+
+function formatarHora(data: string | null | undefined) {
+  if (!data) return "—";
+  const d = new Date(data);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatarCompetencia(valor: string) {
@@ -156,6 +164,7 @@ export default function FinanceiroPage() {
   const [busca, setBusca] = useState("");
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
+  const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
   const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
@@ -330,7 +339,7 @@ export default function FinanceiroPage() {
           .order("nome", { ascending: true }),
         supabase
           .from("movimentacoes_financeiras")
-          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
+          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
           .order("data_movimentacao", { ascending: false })
           .order("created_at", { ascending: false }),
       ]);
@@ -338,8 +347,43 @@ export default function FinanceiroPage() {
       if (contasResult.error) throw contasResult.error;
       if (movimentosResult.error) throw movimentosResult.error;
 
+      const movimentos = (movimentosResult.data || []) as MovimentoFinanceiro[];
       setContasBancarias((contasResult.data || []) as ContaBancaria[]);
-      setMovimentosFinanceiros((movimentosResult.data || []) as MovimentoFinanceiro[]);
+      setMovimentosFinanceiros(movimentos);
+
+      // Busca somente as pessoas que aparecem nos movimentos carregados.
+      // Isso evita trazer os 300+ associados/centenas de dependentes só para exibir o nome.
+      const socioIds = Array.from(new Set(movimentos.map((m) => m.socio_id).filter(Boolean))) as string[];
+      const dependenteIds = Array.from(new Set(movimentos.map((m) => m.dependente_id).filter(Boolean))) as string[];
+
+      if (!socioIds.length && !dependenteIds.length) {
+        setPessoasMovimentos(new Map());
+      } else {
+        const [sociosRes, dependentesRes] = await Promise.all([
+          socioIds.length
+            ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds)
+            : Promise.resolve({ data: [], error: null }),
+          dependenteIds.length
+            ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (sociosRes.error) throw sociosRes.error;
+        if (dependentesRes.error) throw dependentesRes.error;
+
+        const socioRows = (sociosRes.data || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
+        const dependenteRows = (dependentesRes.data || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
+        const socioMap = new Map(socioRows.map((s) => [s.id, s]));
+        const mapa = new Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>();
+
+        for (const s of socioRows) {
+          mapa.set(`socio:${s.id}`, { nome: s.nome, matricula: s.matricula, tipo: "socio" });
+        }
+        for (const d of dependenteRows) {
+          const responsavel = d.socio_id ? socioMap.get(d.socio_id) : null;
+          mapa.set(`dependente:${d.id}`, { nome: d.nome, matricula: responsavel?.matricula ?? null, tipo: "dependente", responsavelNome: responsavel?.nome ?? null });
+        }
+        setPessoasMovimentos(mapa);
+      }
     } catch (error) {
       setMensagem(
         `Não foi possível carregar o Financeiro. ${
@@ -434,6 +478,12 @@ export default function FinanceiroPage() {
 
   const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
   const contasPorId = useMemo(() => new Map(contasBancarias.map((conta) => [conta.id, conta])), [contasBancarias]);
+
+  const pessoaDoMovimento = (movimento: MovimentoFinanceiro) => {
+    if (movimento.dependente_id) return pessoasMovimentos.get(`dependente:${movimento.dependente_id}`) || null;
+    if (movimento.socio_id) return pessoasMovimentos.get(`socio:${movimento.socio_id}`) || null;
+    return null;
+  };
 
   const saldoTotalBancos = useMemo(
     () => Array.from(saldosPorConta.values()).reduce((sum: number, saldo: number) => sum + saldo, 0),
@@ -1093,7 +1143,8 @@ export default function FinanceiroPage() {
                     <table className="w-full min-w-[1050px]">
                       <thead className="bg-[#e8f3ee]">
                         <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Data</th>
+                          <th className="px-4 py-3">Data / hora</th>
+                          <th className="px-4 py-3">Associado</th>
                           <th className="px-4 py-3">Conta</th>
                           <th className="px-4 py-3">Descrição</th>
                           <th className="px-4 py-3">Tipo</th>
@@ -1106,7 +1157,23 @@ export default function FinanceiroPage() {
                       <tbody className="divide-y">
                         {movimentosFluxo.map((m) => (
                           <tr key={m.id} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-3 text-sm">{formatarData(m.data_movimentacao)}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="font-semibold">{formatarData(m.data_movimentacao)}</div>
+                              <div className="text-xs text-gray-500">{formatarHora(m.created_at)}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const pessoa = pessoaDoMovimento(m);
+                                if (!pessoa) return <span className="text-gray-400">—</span>;
+                                return (
+                                  <div>
+                                    <div className="font-semibold">{pessoa.nome}</div>
+                                    <div className="text-xs text-gray-500">{pessoa.tipo === "dependente" ? "Dependente" : "Associado"}{pessoa.matricula ? ` • ${pessoa.matricula}` : ""}</div>
+                                    {pessoa.tipo === "dependente" && pessoa.responsavelNome ? <div className="text-xs text-gray-400">Resp.: {pessoa.responsavelNome}</div> : null}
+                                  </div>
+                                );
+                              })()}
+                            </td>
                             <td className="px-4 py-3 font-semibold">{contasPorId.get(m.conta_bancaria_id)?.nome || "—"}</td>
                             <td className="px-4 py-3">
                               <p className="font-semibold">{m.descricao}</p>
@@ -1146,7 +1213,7 @@ export default function FinanceiroPage() {
                           </tr>
                         ))}
                         {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
+                          <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
                         )}
                       </tbody>
                     </table>
