@@ -208,6 +208,8 @@ export default function FinanceiroPage() {
   const [fluxoForma, setFluxoForma] = useState<"todos" | "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "outro">("todos");
   const [fluxoConciliacao, setFluxoConciliacao] = useState<"todos" | "pendente" | "conciliado">("todos");
   const [movimentoEstornandoId, setMovimentoEstornandoId] = useState<string | null>(null);
+  const [movimentoEstornoSelecionado, setMovimentoEstornoSelecionado] = useState<{ movimento: MovimentoFinanceiro; tipo: "movimento" | "reserva" } | null>(null);
+  const [motivoEstorno, setMotivoEstorno] = useState("Não informado");
   const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(true);
   const [salvandoConta, setSalvandoConta] = useState(false);
   const [salvandoMovimento, setSalvandoMovimento] = useState(false);
@@ -579,6 +581,13 @@ export default function FinanceiroPage() {
     };
   }
 
+  function infoEstorno(movimento: MovimentoFinanceiro) {
+    const texto = String(movimento.observacoes || "");
+    const match = texto.match(/\[ESTORNO_FINANCEIRO\]\s*([^|]+)\s*\|\s*por:\s*([^|]+)\s*\|\s*usuario_id:\s*([^|]+)\s*\|\s*motivo:\s*(.*)$/i);
+    if (!match) return null;
+    return { instante: match[1].trim(), usuario: match[2].trim(), motivo: match[4].trim() };
+  }
+
   function selecionarAbaFinanceira(aba: typeof abaFinanceira) {
     setAbaFinanceira(aba);
     if (aba === "entradas") setFluxoTipo("entrada");
@@ -591,68 +600,44 @@ export default function FinanceiroPage() {
     if (aba === "inadimplencia") void carregarInadimplencia();
   }
 
-  async function estornarReserva(movimento: MovimentoFinanceiro) {
-    if (movimento.origem_tipo !== "reserva" || !movimento.origem_id) return;
-    const motivo = window.prompt(
-      `Motivo do estorno da reserva de ${formatarMoeda(movimento.valor)}:`,
-      "Cancelamento da reserva e devolução do pagamento."
-    );
-    if (motivo === null) return;
-    const ok = window.confirm(
-      `Confirmar estorno do pagamento de ${formatarMoeda(movimento.valor)}?\n\nA reserva será cancelada e o estorno ficará registrado no Financeiro.`
-    );
-    if (!ok) return;
-
-    setMovimentoEstornandoId(movimento.id);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão expirada.");
-      const response = await fetch("/api/reservas", {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ id: movimento.origem_id, acao: "estornar_pagamento", motivo: motivo.trim() || "Não informado" }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar a reserva.");
-      await carregarFinanceiro();
-      setMensagem(result.message || "Pagamento da reserva estornado e reserva cancelada.");
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar a reserva.");
-    } finally {
-      setMovimentoEstornandoId(null);
-    }
+  function abrirEstorno(movimento: MovimentoFinanceiro, tipo: "movimento" | "reserva") {
+    setMovimentoEstornoSelecionado({ movimento, tipo });
+    setMotivoEstorno(tipo === "reserva" ? "Cancelamento da reserva e devolução do pagamento." : "Correção de lançamento.");
   }
 
-  async function estornarMovimento(movimento: MovimentoFinanceiro) {
-    const origem = String(movimento.origem_tipo || "").toLowerCase();
-    if (!["manual", "transferencia"].includes(origem)) {
-      setMensagem("Este lançamento está vinculado a outro módulo. Use o estorno no módulo de origem para manter os registros sincronizados.");
+  async function confirmarEstorno() {
+    const selecionado = movimentoEstornoSelecionado;
+    if (!selecionado || movimentoEstornandoId === selecionado.movimento.id) return;
+    const motivo = motivoEstorno.trim();
+    if (!motivo) {
+      setMensagem("Informe o motivo do estorno.");
       return;
     }
-    const motivo = window.prompt(
-      `Motivo do estorno de ${formatarMoeda(movimento.valor)}:`,
-      "Correção de lançamento."
-    );
-    if (motivo === null) return;
-    const ok = window.confirm(`Confirmar estorno de ${movimento.tipo === "entrada" ? "entrada" : movimento.tipo === "saida" ? "saída" : "transferência"} de ${formatarMoeda(movimento.valor)}?\n\nO histórico original será preservado.`);
-    if (!ok) return;
+    const { movimento, tipo } = selecionado;
     setMovimentoEstornandoId(movimento.id);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão expirada.");
-      const response = await fetch("/api/financeiro", {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "estornar_movimento", id: movimento.id, motivo: motivo.trim() || "Não informado" }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar o lançamento.");
+      let result: { message?: string };
+      if (tipo === "reserva") {
+        if (movimento.origem_tipo !== "reserva" || !movimento.origem_id) throw new Error("Reserva de origem não encontrada.");
+        result = await apiFinanceiro("/api/reservas", {
+          method: "PATCH",
+          body: JSON.stringify({ id: movimento.origem_id, acao: "estornar_pagamento", motivo }),
+        });
+      } else {
+        const origem = String(movimento.origem_tipo || "").toLowerCase();
+        if (!["manual", "transferencia"].includes(origem)) {
+          throw new Error("Este lançamento está vinculado a outro módulo. Use o estorno no módulo de origem para manter os registros sincronizados.");
+        }
+        result = await apiFinanceiro("/api/financeiro", {
+          method: "PATCH",
+          body: JSON.stringify({ acao: "estornar_movimento", id: movimento.id, motivo }),
+        });
+      }
       await carregarFinanceiro();
-      setMensagem(result.message || "Estorno registrado com sucesso.");
+      setMovimentoEstornoSelecionado(null);
+      setMensagem(result?.message || "Estorno registrado com sucesso.");
     } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar o lançamento.");
+      setMensagem(error instanceof Error ? error.message : "Não foi possível registrar o estorno.");
     } finally {
       setMovimentoEstornandoId(null);
     }
@@ -1309,13 +1294,24 @@ export default function FinanceiroPage() {
                             </td>
                             <td className="px-4 py-3 text-sm">
                               {estornosPorOrigem.has(m.id) ? (
-                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">↩ Estornado</span>
+                                (() => {
+                                  const estorno = movimentosFinanceiros.find((x) => x.origem_tipo === "estorno_movimento" && x.origem_id === m.id);
+                                  const info = estorno ? infoEstorno(estorno) : null;
+                                  return (
+                                    <div>
+                                      <div className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">↩ Estornado</div>
+                                      {info?.instante ? <div className="mt-1 text-xs text-gray-500">{formatarData(info.instante)} {formatarHora(info.instante)}</div> : null}
+                                      {info?.usuario ? <div className="text-xs text-gray-400">por {info.usuario}</div> : null}
+                                      {info?.motivo ? <div className="mt-1 max-w-xs text-xs text-gray-400">Motivo: {info.motivo}</div> : null}
+                                    </div>
+                                  );
+                                })()
                               ) : m.origem_tipo === "reserva" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarReserva(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
+                                <button disabled={movimentoEstornandoId === m.id} onClick={() => abrirEstorno(m, "reserva")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
                                   {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar reserva"}
                                 </button>
                               ) : m.origem_tipo === "manual" || m.origem_tipo === "transferencia" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarMovimento(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
+                                <button disabled={movimentoEstornandoId === m.id} onClick={() => abrirEstorno(m, "movimento")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
                                   {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar"}
                                 </button>
                               ) : String(m.origem_tipo || "").startsWith("estorno_") ? (
@@ -1409,6 +1405,37 @@ export default function FinanceiroPage() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setMovimentoConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
               <button disabled={salvandoConciliacao} onClick={() => void confirmarConcilacao()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConciliacao ? "Conciliando..." : "✓ Confirmar conciliação"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {movimentoEstornoSelecionado && (
+        <Modal
+          titulo={movimentoEstornoSelecionado.tipo === "reserva" ? "Estornar pagamento da reserva" : "Estornar lançamento financeiro"}
+          fechar={() => movimentoEstornandoId ? undefined : setMovimentoEstornoSelecionado(null)}
+        >
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-amber-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Estorno</p>
+              <p className="mt-1 text-lg font-extrabold text-[#003d2b]">{movimentoEstornoSelecionado.movimento.descricao}</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div><p className="text-xs text-gray-500">Data original</p><p className="font-bold">{formatarData(movimentoEstornoSelecionado.movimento.data_movimentacao)}</p></div>
+                <div><p className="text-xs text-gray-500">Valor</p><p className="font-bold text-[#b45309]">{formatarMoeda(movimentoEstornoSelecionado.movimento.valor)}</p></div>
+                <div><p className="text-xs text-gray-500">Tipo</p><p className="font-bold">{movimentoEstornoSelecionado.movimento.tipo === "entrada" ? "Entrada" : movimentoEstornoSelecionado.movimento.tipo === "saida" ? "Saída" : "Transferência"}</p></div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              O lançamento original <strong>não será apagado</strong>. Será criado um lançamento compensatório de estorno, mantendo o histórico.
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Motivo do estorno <span className="text-red-600">*</span></label>
+              <textarea rows={4} value={motivoEstorno} onChange={(e) => setMotivoEstorno(e.target.value)} maxLength={500} placeholder="Informe o motivo do estorno..." className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
+              <p className="mt-1 text-xs text-gray-400">O motivo será registrado junto com o usuário e o horário.</p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button disabled={Boolean(movimentoEstornandoId)} onClick={() => setMovimentoEstornoSelecionado(null)} className="rounded-xl border px-5 py-3 font-semibold disabled:opacity-50">Cancelar</button>
+              <button disabled={Boolean(movimentoEstornandoId)} onClick={() => void confirmarEstorno()} className="rounded-xl bg-[#a16207] px-5 py-3 font-bold text-white disabled:opacity-50">{movimentoEstornandoId ? "Estornando..." : "↩ Confirmar estorno"}</button>
             </div>
           </div>
         </Modal>
