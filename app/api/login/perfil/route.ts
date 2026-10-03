@@ -1,72 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { normalizarPerfil } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
-function normalizarPerfil(codigo?: string | null, nome?: string | null) {
-  const valorCodigo = String(codigo || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  const valorNome = String(nome || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  // ADMINISTRADOR MASTER — nível máximo
-  if (
-    valorCodigo === "administrador_master" ||
-    valorCodigo === "master" ||
-    valorNome === "administrador master" ||
-    valorNome === "master"
-  ) {
-    return "administrador_master";
-  }
-
-  // ADMINISTRADOR
-  if (
-    valorCodigo === "administrador" ||
-    valorCodigo === "admin" ||
-    valorNome === "administrador" ||
-    valorNome === "admin"
-  ) {
-    return "administrador";
-  }
-
-  // FUNCIONÁRIO INVENTÁRIO
-  if (
-    valorCodigo === "funcionario_inventario" ||
-    valorNome.includes("funcionario - inventario") ||
-    valorNome.includes("funcionario inventario") ||
-    valorNome.includes("funcionário - inventário") ||
-    valorNome.includes("funcionário inventário")
-  ) {
-    return "funcionario_inventario";
-  }
-
-  // FUNCIONÁRIO
-  if (
-    valorCodigo === "funcionario" ||
-    valorCodigo === "funcionário" ||
-    valorNome === "funcionario" ||
-    valorNome === "funcionário"
-  ) {
-    return "funcionario";
-  }
-
-  // ASSOCIADO
-  if (
-    valorCodigo === "associado" ||
-    valorNome === "associado"
-  ) {
-    return "associado";
-  }
-
-  return "";
-}
 
 export async function GET(request: NextRequest) {
   try {
