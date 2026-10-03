@@ -206,11 +206,16 @@ export default function FinanceiroPage() {
   const [fluxoConta, setFluxoConta] = useState("");
   const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
   const [fluxoForma, setFluxoForma] = useState<"todos" | "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "outro">("todos");
+  const [fluxoConciliacao, setFluxoConciliacao] = useState<"todos" | "pendente" | "conciliado">("todos");
   const [movimentoEstornandoId, setMovimentoEstornandoId] = useState<string | null>(null);
   const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(true);
   const [salvandoConta, setSalvandoConta] = useState(false);
   const [salvandoMovimento, setSalvandoMovimento] = useState(false);
   const [salvandoTransferencia, setSalvandoTransferencia] = useState(false);
+  const [movimentoConferindo, setMovimentoConferindo] = useState<MovimentoFinanceiro | null>(null);
+  const [dataConciliacao, setDataConciliacao] = useState(new Date().toISOString().slice(0, 10));
+  const [observacaoConciliacao, setObservacaoConciliacao] = useState("");
+  const [salvandoConciliacao, setSalvandoConciliacao] = useState(false);
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
     const responsaveis = new Map<string, Socio>(
@@ -515,9 +520,11 @@ export default function FinanceiroPage() {
 
       if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
       if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
+      if (fluxoConciliacao === "pendente" && m.conciliado) return false;
+      if (fluxoConciliacao === "conciliado" && !m.conciliado) return false;
       return true;
     });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, abaFinanceira]);
+  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
 
   const entradasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "entrada")
@@ -528,12 +535,55 @@ export default function FinanceiroPage() {
   const transferenciasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "transferencia")
     .reduce((sum, m) => sum + Number(m.valor || 0), 0);
+  const conciliacoesPendentes = movimentosFinanceiros.filter((m) => !m.conciliado).length;
+
+  function abrirConcilacao(movimento: MovimentoFinanceiro) {
+    setMovimentoConferindo(movimento);
+    setDataConciliacao(new Date().toISOString().slice(0, 10));
+    setObservacaoConciliacao("");
+  }
+
+  async function confirmarConcilacao() {
+    if (!movimentoConferindo || salvandoConciliacao) return;
+    setSalvandoConciliacao(true);
+    try {
+      const result = await apiFinanceiro("/api/financeiro", {
+        method: "PATCH",
+        body: JSON.stringify({
+          acao: "conciliar_movimento",
+          id: movimentoConferindo.id,
+          data_conciliacao: dataConciliacao,
+          observacao: observacaoConciliacao || "Conferido no extrato bancário.",
+        }),
+      });
+      const movimentoAtualizado = result.movimento as MovimentoFinanceiro;
+      setMovimentosFinanceiros((lista) => lista.map((m) => m.id === movimentoAtualizado.id ? movimentoAtualizado : m));
+      setMovimentoConferindo(null);
+      setMensagem(result.message || "Conciliação registrada com sucesso.");
+    } catch (error) {
+      setMensagem(error instanceof Error ? error.message : "Não foi possível registrar a conciliação.");
+    } finally {
+      setSalvandoConciliacao(false);
+    }
+  }
+
+  function infoConciliacao(movimento: MovimentoFinanceiro) {
+    if (!movimento.conciliado) return null;
+    const texto = String(movimento.observacoes || "");
+    const match = texto.match(/\[CONCILIACAO_BANCARIA\]\s*([^|]+)\s*\|\s*por:\s*([^|]+)\s*\|\s*email:\s*([^|]*)/i);
+    return {
+      data: movimento.data_conciliacao,
+      instante: match?.[1]?.trim() || null,
+      usuario: match?.[2]?.trim() || null,
+      email: match?.[3]?.trim() || null,
+    };
+  }
 
   function selecionarAbaFinanceira(aba: typeof abaFinanceira) {
     setAbaFinanceira(aba);
     if (aba === "entradas") setFluxoTipo("entrada");
     else if (aba === "saidas") setFluxoTipo("saida");
-    else if (aba === "fluxo") { setFluxoTipo("todos"); setFluxoForma("todos"); }
+    else if (aba === "fluxo") { setFluxoTipo("todos"); setFluxoForma("todos"); setFluxoConciliacao("todos"); }
     if (aba === "aluguéis") {
       setMovTipo("entrada");
       setMovCategoria("Aluguel");
@@ -1140,10 +1190,23 @@ export default function FinanceiroPage() {
                           <option value="outro">Outro</option>
                         </select>
                       </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-gray-700">Conciliação</label>
+                        <select value={fluxoConciliacao} onChange={(e) => setFluxoConciliacao(e.target.value as typeof fluxoConciliacao)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
+                          <option value="todos">Todas</option>
+                          <option value="pendente">Aguardando conciliação</option>
+                          <option value="conciliado">Conciliados</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mb-5 grid gap-3 sm:grid-cols-3">
+                  <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                      <p className="text-xs font-semibold text-gray-500">Aguardando conciliação</p>
+                      <p className="mt-1 text-xl font-extrabold text-amber-700">{conciliacoesPendentes}</p>
+                      <p className="mt-1 text-xs text-gray-500">lançamentos ainda não conferidos</p>
+                    </div>
                     <div className="rounded-xl border border-green-100 bg-green-50 p-4">
                       <p className="text-xs font-semibold text-gray-500">Entradas no filtro</p>
                       <p className="mt-1 text-xl font-extrabold text-green-700">{formatarMoeda(entradasPeriodo)}</p>
@@ -1219,7 +1282,26 @@ export default function FinanceiroPage() {
                             <td className={`px-4 py-3 font-bold ${m.tipo === "entrada" ? "text-green-700" : m.tipo === "saida" ? "text-red-700" : "text-blue-700"}`}>
                               {m.tipo === "saida" ? "− " : m.tipo === "entrada" ? "+ " : "↔ "}{formatarMoeda(m.valor)}
                             </td>
-                            <td className="px-4 py-3 text-sm">{m.conciliado ? "✅ Conferido" : "⏳ Pendente"}</td>
+                            <td className="px-4 py-3 text-sm">
+                              {m.conciliado ? (
+                                (() => {
+                                  const info = infoConciliacao(m);
+                                  const quando = info?.data ? formatarData(info.data) : "—";
+                                  return (
+                                    <div>
+                                      <div className="font-semibold text-green-700">✅ Conciliado</div>
+                                      <div className="text-xs text-gray-500">{quando}{info?.instante ? ` · ${formatarHora(info.instante)}` : ""}</div>
+                                      {info?.usuario ? <div className="text-xs text-gray-400">por {info.usuario}</div> : null}
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                <div className="space-y-2">
+                                  <div className="font-semibold text-amber-700">⏳ Aguardando conciliação</div>
+                                  <button onClick={() => abrirConcilacao(m)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conciliar</button>
+                                </div>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-sm">
                               {m.comprovante_url ? (
                                 <button onClick={() => void abrirComprovante(m.comprovante_url)} className="font-bold text-[#005a3c] underline">Abrir</button>
@@ -1298,6 +1380,35 @@ export default function FinanceiroPage() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
               <button disabled={salvandoConferencia} onClick={() => void salvarConferenciaSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConferencia ? "Salvando..." : "Conferir e salvar saldo"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {movimentoConferindo && (
+        <Modal titulo="Conciliar lançamento bancário" fechar={() => setMovimentoConferindo(null)}>
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-[#e8f3ee] p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Lançamento</p>
+              <p className="mt-1 text-lg font-extrabold text-[#003d2b]">{movimentoConferindo.descricao}</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div><p className="text-xs text-gray-500">Data</p><p className="font-bold">{formatarData(movimentoConferindo.data_movimentacao)}</p></div>
+                <div><p className="text-xs text-gray-500">Conta</p><p className="font-bold">{contasPorId.get(movimentoConferindo.conta_bancaria_id)?.nome || "—"}</p></div>
+                <div><p className="text-xs text-gray-500">Valor</p><p className="font-bold text-[#005a3c]">{formatarMoeda(movimentoConferindo.valor)}</p></div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <strong>Confirme somente depois de conferir o extrato bancário.</strong> A conciliação não altera o valor do lançamento e não cria uma nova entrada ou saída.
+            </div>
+            <Campo label="Data da conciliação" type="date" value={dataConciliacao} onChange={setDataConciliacao} />
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação (opcional)</label>
+              <textarea rows={3} value={observacaoConciliacao} onChange={(e) => setObservacaoConciliacao(e.target.value)} placeholder="Ex.: crédito conferido no extrato do Sicredi." className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
+            </div>
+            <div className="rounded-xl bg-[#f7faf8] p-3 text-xs text-gray-500">O sistema registrará a data, o horário e o usuário que realizou a conciliação.</div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setMovimentoConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
+              <button disabled={salvandoConciliacao} onClick={() => void confirmarConcilacao()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConciliacao ? "Conciliando..." : "✓ Confirmar conciliação"}</button>
             </div>
           </div>
         </Modal>
