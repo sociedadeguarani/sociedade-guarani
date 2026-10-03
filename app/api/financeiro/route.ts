@@ -12,7 +12,7 @@ export async function GET(request: Request) {
 
     let movimentos = supabase
       .from("movimentacoes_financeiras")
-      .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at")
+      .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at,created_by")
       .order("data_movimentacao", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -226,14 +226,64 @@ export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const acao = String(body.acao || "").trim().toLowerCase();
-    if (acao !== "estornar_movimento") {
-      return NextResponse.json({ error: "Ação financeira inválida." }, { status: 400 });
-    }
 
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Lançamento não informado." }, { status: 400 });
 
     const supabase = getServiceClient();
+
+    if (acao === "conciliar_movimento") {
+      const dataConciliacao = String(body.data_conciliacao || "").trim();
+      const observacao = String(body.observacao || "").trim().slice(0, 500);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataConciliacao)) {
+        return NextResponse.json({ error: "Informe uma data de conciliação válida." }, { status: 400 });
+      }
+
+      const { data: movimento, error: buscaError } = await supabase
+        .from("movimentacoes_financeiras")
+        .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at,created_by")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (buscaError) throw buscaError;
+      if (!movimento) return NextResponse.json({ error: "Lançamento não encontrado." }, { status: 404 });
+      if (movimento.conciliado) return NextResponse.json({ error: "Este lançamento já está conciliado." }, { status: 409 });
+
+      const instante = new Date().toISOString();
+      const nomeUsuario = auth.usuario.nome_exibicao || "Administrador";
+      const emailUsuario = auth.authUser.email || "";
+      const blocoAuditoria = `[CONCILIACAO_BANCARIA] ${instante} | por: ${nomeUsuario} | email: ${emailUsuario} | observação: ${observacao || "Conferido no extrato bancário."}`;
+      const novasObservacoes = [String(movimento.observacoes || "").trim(), blocoAuditoria].filter(Boolean).join("\n");
+
+      const { data: atualizado, error: atualizarError } = await supabase
+        .from("movimentacoes_financeiras")
+        .update({
+          conciliado: true,
+          data_conciliacao: dataConciliacao,
+          observacoes: novasObservacoes,
+        })
+        .eq("id", id)
+        .eq("conciliado", false)
+        .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,created_by,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
+        .maybeSingle();
+
+      if (atualizarError) throw atualizarError;
+      if (!atualizado) {
+        return NextResponse.json({ error: "O lançamento foi conciliado por outra operação. Atualize a tela." }, { status: 409 });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        movimento: atualizado,
+        conciliado_por: { nome: nomeUsuario, email: emailUsuario || null },
+        message: "Conciliação registrada com sucesso. O lançamento foi conferido no extrato.",
+      });
+    }
+
+    if (acao !== "estornar_movimento") {
+      return NextResponse.json({ error: "Ação financeira inválida." }, { status: 400 });
+    }
+
     const { data: original, error: buscaError } = await supabase
       .from("movimentacoes_financeiras")
       .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
