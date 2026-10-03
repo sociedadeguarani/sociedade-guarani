@@ -118,7 +118,6 @@ export async function usuarioAutenticado(request: Request) {
     .maybeSingle();
 
   if (usuarioError) {
-    console.error("Falha ao consultar usuarios_sistema:", usuarioError);
     return {
       error: "Não foi possível validar seu acesso.",
       status: 500 as const,
