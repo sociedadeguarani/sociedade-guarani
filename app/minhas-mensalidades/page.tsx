@@ -109,11 +109,6 @@ export default function MinhasMensalidadesPage() {
     setMensagemPagamento("");
   }
 
-  function selecionarTodas() {
-    setSelecionadas(selecionaveis.map((m) => m.id));
-    setMensagemPagamento("");
-  }
-
   function limparSelecao() {
     setSelecionadas([]);
     setArquivoLote(null);
