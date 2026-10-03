@@ -251,8 +251,8 @@ export async function PATCH(request: Request) {
 
       const instante = new Date().toISOString();
       const nomeUsuario = auth.usuario.nome_exibicao || "Administrador";
-      const emailUsuario = auth.authUser.email || "";
-      const blocoAuditoria = `[CONCILIACAO_BANCARIA] ${instante} | por: ${nomeUsuario} | email: ${emailUsuario} | observação: ${observacao || "Conferido no extrato bancário."}`;
+      const usuarioId = auth.usuario.id;
+      const blocoAuditoria = `[CONCILIACAO_BANCARIA] ${instante} | por: ${nomeUsuario} | usuario_id: ${usuarioId} | observação: ${observacao || "Conferido no extrato bancário."}`;
       const novasObservacoes = [String(movimento.observacoes || "").trim(), blocoAuditoria].filter(Boolean).join("\n");
 
       const { data: atualizado, error: atualizarError } = await supabase
@@ -275,7 +275,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({
         ok: true,
         movimento: atualizado,
-        conciliado_por: { nome: nomeUsuario, email: emailUsuario || null },
+        conciliado_por: { nome: nomeUsuario, usuario_id: usuarioId },
         message: "Conciliação registrada com sucesso. O lançamento foi conferido no extrato.",
       });
     }
