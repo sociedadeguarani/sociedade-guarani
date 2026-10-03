@@ -1,1344 +1,2323 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
-import { Campo, Modal, Resumo } from "./components/FinanceiroUI";
+import RegistrarPagamentoMensalidade from "./components/RegistrarPagamentoMensalidade";
 
 type Socio = {
   id: string;
-  matricula: string | number | null;
   nome: string;
-  cpf: string | null;
-  whatsapp: string | null;
-  telefone: string | null;
-  foto_url: string | null;
-  situacao: string | null;
-  responsavel_id: string | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
+  matricula?: string | number | null;
+  cpf?: string | null;
+  categoria?: string | null;
+  tipo_socio?: string | null;
+  responsavel_id?: string | null;
+  possui_mensalidade?: boolean | null;
+  situacao?: string | null;
+  ativo?: boolean | null;
+  tipo_pagamento?: string | null;
+  conta_bancaria_id?: string | null;
 };
 
-type Dependente = {
+type M = {
   id: string;
   socio_id: string;
-  nome: string;
-  cpf: string | null;
-  telefone: string | null;
-  ativo: boolean | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
-};
-
-type Mensalidade = {
-  id: string;
-  socio_id: string;
-  dependente_id: string | null;
   competencia: string;
   valor: number;
+  valor_base?: number | null;
+  tarifa_pagamento?: number | null;
+  multa?: number | null;
+  juros?: number | null;
+  desconto?: number | null;
+  total_cobrado?: number | null;
   data_vencimento: string | null;
   situacao: string | null;
-};
-
-type PessoaFinanceira = {
-  chave: string;
-  socio_id: string;
-  dependente_id: string | null;
-  nome: string;
-  matricula: string | number | null;
-  cpf: string | null;
-  foto_url: string | null;
-  responsavel_nome: string | null;
-  possui_mensalidade: boolean;
-  valor_mensalidade: number;
-  dia_vencimento: number;
-  tipo_pagamento: string;
-};
-
-type ContaBancaria = {
-  id: string;
-  nome: string;
-  banco: string | null;
-  agencia: string | null;
-  conta: string | null;
-  saldo_inicial: number;
-  data_saldo_inicial: string | null;
-  ativo: boolean;
+  data_pagamento: string | null;
+  tipo_pagamento: string | null;
   observacoes: string | null;
+  motivo: string | null;
+  conta_pagadora_id?: string | null;
+  socio?: any;
+  updated_at?: string | null;
 };
 
-type MovimentoFinanceiro = {
+type C = {
   id: string;
-  conta_bancaria_id: string;
-  conta_destino_id: string | null;
-  grupo_transferencia: string | null;
-  tipo: "entrada" | "saida" | "transferencia";
-  categoria: string | null;
-  descricao: string;
+  tipo_socio: string;
+  nome: string;
   valor: number;
-  data_movimentacao: string;
-  created_at: string | null;
-  created_by: string | null;
-  forma_pagamento: string | null;
-  origem_tipo: string | null;
-  origem_id: string | null;
-  socio_id: string | null;
-  dependente_id: string | null;
-  comprovante_url: string | null;
-  conciliado: boolean;
-  data_conciliacao: string | null;
-  observacoes: string | null;
+  vigencia_inicio: string;
+  ativo: boolean;
 };
 
+type T = {
+  id?: string;
+  tipo_pagamento: string;
+  nome: string;
+  valor_tarifa: number;
+  ativo: boolean;
+};
+
+type Conta = {
+  id: string;
+  nome: string;
+  banco?: string | null;
+};
+
+type Cobranca = {
+  id?: string;
+  nome: string;
+  multa_tipo: "percentual" | "valor";
+  multa_valor: number;
+  juros_tipo: "percentual_dia" | "percentual_mes" | "valor_dia" | "valor_mes";
+  juros_valor: number;
+  desconto_tipo: "percentual" | "valor";
+  desconto_valor: number;
+  dias_tolerancia: number;
+  ativo: boolean;
+};
+
+type PreviaGeracao = {
+  competencia: string;
+  total_cobraveis: number;
+  ja_existentes: number;
+  quantidade_nova: number;
+  valor_base: number;
+  tarifa_pagamento: number;
+  multa: number;
+  juros: number;
+  desconto: number;
+  total_cobrado: number;
+};
+
+const nomes: Record<string, string> = {
+  patrimonial_familiar: "Patrimonial Familiar",
+  patrimonial_individual: "Patrimonial Individual",
+  dependente_patrimonial_familiar_mensalidade:
+    "Dependente Patrimonial com Mensalidade",
+  dependente_patrimonial_individual_mensalidade:
+    "Dependente Patrimonial Individual com Mensalidade",
+  contribuinte_familiar: "Contribuinte Familiar",
+  contribuinte_individual: "Contribuinte Individual",
+  dependente_contribuinte_familiar_mensalidade:
+    "Dependente Contribuinte com Mensalidade",
+  dependente_contribuinte_individual_mensalidade:
+    "Dependente Contribuinte Individual com Mensalidade",
+  transitorio: "Transitório",
+  remido: "Remido",
+};
+
+const tiposPagamento = [
+  { value: "banrisul", label: "Débito Banrisul" },
+  { value: "sicredi", label: "Débito Sicredi" },
+  { value: "bb", label: "Débito Banco do Brasil" },
+  { value: "boleto", label: "Boleto" },
+  { value: "pix", label: "Pix" },
+  { value: "dinheiro", label: "Dinheiro" },
+  { value: "transferencia", label: "Transferência" },
+  { value: "outro", label: "Outro" },
+];
 
 
-const FORMAS = [
-  ["pix", "PIX"],
-  ["debito_em_conta", "Débito em conta"],
-  ["boleto", "Boleto"],
-  ["dinheiro", "Dinheiro"],
-  ["transferencia", "Transferência"],
-  ["outro", "Outro"],
-] as const;
-
-function formatarMoeda(valor: number | string | null | undefined) {
-  return Number(valor || 0).toLocaleString("pt-BR", {
+function moeda(v: number | null | undefined) {
+  return Number(v || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
 }
 
-function formatarData(data: string | null | undefined) {
-  if (!data) return "—";
-  const p = data.slice(0, 10).split("-");
-  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : data;
+function data(v: string | null) {
+  if (!v) return "—";
+  const [a, m, d] = v.slice(0, 10).split("-");
+  return `${d}/${m}/${a}`;
 }
 
-function formatarHora(data: string | null | undefined) {
-  if (!data) return "—";
-  const d = new Date(data);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+function status(s: string | null) {
+  if (s === "nao_gerada") return ["Não gerada", "bg-gray-100 text-gray-600"];
+  if (s === "pago") return ["Pago", "bg-green-100 text-green-700"];
+  if (s === "isento") return ["Isento", "bg-gray-100 text-gray-600"];
+  if (s === "em_atraso")
+    return ["Atrasada", "bg-red-100 text-red-700"];
+  return ["Em aberto", "bg-yellow-100 text-yellow-700"];
 }
 
-function formatarCompetencia(valor: string) {
-  const p = valor.slice(0, 7).split("-");
-  return p.length === 2 ? `${p[1]}/${p[0]}` : valor;
+function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
+  if (item.situacao === "pago") return false;
+  const texto = String(item.motivo || item.observacoes || "").toLowerCase();
+  return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
-function ehUrlAbsoluta(valor: string) {
-  return /^https?:\/\//i.test(valor);
+function statusMensalidade(item: M, semSaldoPermitido = false) {
+  if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
+  return status(item.situacao);
 }
 
-function nivelAtraso(meses: number) {
-  if (meses >= 3) {
-    return {
-      texto: `${meses} ${meses === 1 ? "mês" : "meses"}`,
-      classe: "bg-red-100 text-red-700 ring-1 ring-red-200",
-      ponto: "bg-red-500",
-    };
-  }
-  if (meses === 2) {
-    return {
-      texto: "2 meses",
-      classe: "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200",
-      ponto: "bg-yellow-500",
-    };
-  }
-  return {
-    texto: "Em dia",
-    classe: "bg-green-100 text-green-700 ring-1 ring-green-200",
-    ponto: "bg-green-500",
-  };
-}
+const cobrancaInicial: Cobranca = {
+  nome: "Configuração padrão",
+  multa_tipo: "percentual",
+  multa_valor: 0,
+  juros_tipo: "percentual_mes",
+  juros_valor: 0,
+  desconto_tipo: "valor",
+  desconto_valor: 0,
+  dias_tolerancia: 0,
+  ativo: true,
+};
 
-export default function FinanceiroPage() {
-  const [socios, setSocios] = useState<Socio[]>([]);
-  const [dependentes, setDependentes] = useState<Dependente[]>([]);
-  const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
-  const [mensagem, setMensagem] = useState("");
+export default function Page() {
+  const hoje = new Date();
+
+  const [ano, setAno] = useState(hoje.getFullYear());
+  const [mes, setMes] = useState(hoje.getMonth() + 1);
   const [busca, setBusca] = useState("");
-  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
-  const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
-  const [usuariosMovimentos, setUsuariosMovimentos] = useState<Map<string, { nome: string; email: string | null }>>(new Map());
-  const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
-  const [mostrarContaModal, setMostrarContaModal] = useState(false);
-  const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
-  const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
-  const [contaEditando, setContaEditando] = useState<ContaBancaria | null>(null);
-  const [contaNome, setContaNome] = useState("");
-  const [contaBanco, setContaBanco] = useState("");
-  const [contaAgencia, setContaAgencia] = useState("");
-  const [contaNumero, setContaNumero] = useState("");
-  const [contaSaldoInicial, setContaSaldoInicial] = useState("0");
-  const [contaDataSaldo, setContaDataSaldo] = useState(new Date().toISOString().slice(0, 10));
-  const [contaObservacoes, setContaObservacoes] = useState("");
-  const [contaConferindo, setContaConferindo] = useState<ContaBancaria | null>(null);
-  const [saldoConferido, setSaldoConferido] = useState("");
-  const [dataConferencia, setDataConferencia] = useState(new Date().toISOString().slice(0, 10));
-  const [observacaoConferencia, setObservacaoConferencia] = useState("");
-  const [salvandoConferencia, setSalvandoConferencia] = useState(false);
-  const [movTipo, setMovTipo] = useState<"entrada" | "saida">("saida");
-  const [movConta, setMovConta] = useState("");
-  const [movCategoria, setMovCategoria] = useState("");
-  const [movDescricao, setMovDescricao] = useState("");
-  const [movValor, setMovValor] = useState("");
-  const [movData, setMovData] = useState(new Date().toISOString().slice(0, 10));
-  const [movForma, setMovForma] = useState("pix");
-  const [movObservacoes, setMovObservacoes] = useState("");
-  const [movArquivo, setMovArquivo] = useState<File | null>(null);
-  const [transOrigem, setTransOrigem] = useState("");
-  const [transDestino, setTransDestino] = useState("");
-  const [transValor, setTransValor] = useState("");
-  const [transData, setTransData] = useState(new Date().toISOString().slice(0, 10));
-  const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
-  const [transObservacoes, setTransObservacoes] = useState("");
+  const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
+  const [lista, setLista] = useState<M[]>([]);
+  const [socios, setSocios] = useState<Socio[]>([]);
+  const [configs, setConfigs] = useState<C[]>([]);
+  const [tarifas, setTarifas] = useState<T[]>([]);
+  const [contas, setContas] = useState<Conta[]>([]);
+  const [cobranca, setCobranca] = useState<Cobranca>(cobrancaInicial);
 
-  // Filtros do fluxo de caixa
-  const [fluxoInicio, setFluxoInicio] = useState("");
-  const [fluxoFim, setFluxoFim] = useState("");
-  const [fluxoConta, setFluxoConta] = useState("");
-  const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
-  const [fluxoForma, setFluxoForma] = useState<"todos" | "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "outro">("todos");
-  const [movimentoEstornandoId, setMovimentoEstornandoId] = useState<string | null>(null);
-  const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(true);
-  const [salvandoConta, setSalvandoConta] = useState(false);
-  const [salvandoMovimento, setSalvandoMovimento] = useState(false);
-  const [salvandoTransferencia, setSalvandoTransferencia] = useState(false);
+  const [sel, setSel] = useState<string[]>([]);
+  const [selGeracao, setSelGeracao] = useState<string[]>([]);
+  const [erro, setErro] = useState("");
+  const [msg, setMsg] = useState("");
 
-  const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map<string, Socio>(
-      socios.map((s) => [s.id, s] as [string, Socio])
-    );
-    const cpfsSociosDependentes = new Set(
-      socios
-        .filter((s) => Boolean(s.responsavel_id) && s.cpf)
-        .map((s) => s.cpf!.replace(/\D/g, ""))
-        .filter(Boolean)
-    );
-    const resultado: PessoaFinanceira[] = [];
+  const [modal, setModal] = useState(false);
+  const [abaConfig, setAbaConfig] = useState<"mensalidades" | "tarifas" | "atrasos">(
+    "mensalidades"
+  );
 
-    for (const s of socios) {
-      if (s.situacao?.toLowerCase() === "inativo") continue;
-      if (!s.possui_mensalidade) continue;
+  const [edit, setEdit] = useState<C | null>(null);
+  const [novo, setNovo] = useState({
+    tipo_socio: "",
+    nome: "",
+    valor: "0",
+    vigencia_inicio: `${hoje.getFullYear()}-01-01`,
+  });
 
-      resultado.push({
-        chave: `socio:${s.id}`,
-        socio_id: s.id,
-        dependente_id: null,
-        nome: s.nome,
-        matricula: s.matricula,
-        cpf: s.cpf,
-        foto_url: s.foto_url,
-        responsavel_nome: s.responsavel_id
-          ? responsaveis.get(s.responsavel_id)?.nome || null
-          : null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: Number(s.dia_vencimento || 10),
-        tipo_pagamento: s.tipo_pagamento || "pix",
-      });
+  const [salvandoConfig, setSalvandoConfig] = useState(false);
+
+  const [previas, setPrevias] = useState<PreviaGeracao[]>([]);
+  const [abrindoPrevia, setAbrindoPrevia] = useState(false);
+  const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
+  const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
+  const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
+  const [historicoSocio, setHistoricoSocio] = useState<M[]>([]);
+  const [carregandoHistoricoSocio, setCarregandoHistoricoSocio] = useState(false);
+  const [mesHistoricoSelecionado, setMesHistoricoSelecionado] = useState<number | null>(null);
+  const [anoHistoricoSocio, setAnoHistoricoSocio] = useState(hoje.getFullYear());
+  const [tipoBaixaSelecionada, setTipoBaixaSelecionada] = useState<"pago" | "sem_saldo">("pago");
+  const [processandoBaixa, setProcessandoBaixa] = useState(false);
+  const [pagamentoMensalidade, setPagamentoMensalidade] = useState<M | null>(null);
+
+
+  async function h() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) throw Error("Sessão não encontrada.");
+
+    return {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  async function carregarHistoricoSocio(item: M | null, anoConsulta = anoHistoricoSocio) {
+    if (!item?.socio_id) {
+      setHistoricoSocio([]);
+      setMesHistoricoSelecionado(null);
+      return;
     }
 
-    for (const d of dependentes) {
-      if (d.ativo === false || !d.possui_mensalidade) continue;
-
-      const responsavel = responsaveis.get(d.socio_id);
-
-      // Evita duplicação quando o mesmo dependente já estiver
-      // cadastrado também na tabela socios com a mesma pessoa.
-      const cpfDependente = d.cpf?.replace(/\D/g, "");
-      const duplicado = Boolean(
-        cpfDependente &&
-          cpfsSociosDependentes.has(cpfDependente)
-      );
-
-      if (duplicado) continue;
-
-      resultado.push({
-        chave: `dependente:${d.id}`,
-        socio_id: d.socio_id,
-        dependente_id: d.id,
-        nome: d.nome,
-        matricula: responsavel?.matricula || null,
-        cpf: d.cpf,
-        foto_url: null,
-        responsavel_nome: responsavel?.nome || null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(d.valor_mensalidade || 0),
-        dia_vencimento: Number(d.dia_vencimento || 10),
-        tipo_pagamento: d.tipo_pagamento || "pix",
-      });
-    }
-
-    return resultado;
-  }, [socios, dependentes]);
-
-  const lancamentosPorPessoa = useMemo(() => {
-    const map = new Map<string, Mensalidade[]>();
-    for (const m of mensalidades) {
-      const chave = m.dependente_id ? `dependente:${m.dependente_id}` : `socio:${m.socio_id}`;
-      const lista = map.get(chave);
-      if (lista) lista.push(m);
-      else map.set(chave, [m]);
-    }
-    return map;
-  }, [mensalidades]);
-
-  const historicoPorPessoa = useMemo(() => {
-    const map = new Map<string, number>();
-    const hojeIso = new Date().toISOString().slice(0, 10);
-    for (const [chave, lancamentos] of lancamentosPorPessoa) {
-      const atrasadas = lancamentos.filter((m) => {
-        if (m.situacao === "pago" || m.situacao === "isento") return false;
-        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso));
-      }).length;
-      if (atrasadas > 0) map.set(chave, atrasadas);
-    }
-    return map;
-  }, [lancamentosPorPessoa]);
-
-  const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
-    pessoa: p,
-    meses: historicoPorPessoa.get(p.chave) || 0,
-    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0),
-  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa]);
-
-  const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.meses === 2).length;
-  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
-
-  const inadimplenciaDetalhada = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    return atrasoPessoas.map((x) => {
-      const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || []).filter((m) => {
-        if (m.situacao === "pago" || m.situacao === "isento") return false;
-        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < new Date().toISOString().slice(0, 10)));
-      }).sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
-      const valorDevido = lancamentos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
-      const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
-      return { ...x, lancamentos, valorDevido, competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentos[0]?.competencia || null, correspondeBusca };
-    }).filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, busca, lancamentosPorPessoa]);
-
-  const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
-  const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
-
-  async function carregarFinanceiro() {
-    setCarregandoFinanceiro(true);
+    setCarregandoHistoricoSocio(true);
     try {
-      const [contasResult, movimentosResult] = await Promise.all([
-        supabase
-          .from("contas_bancarias")
-          .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
-          .eq("ativo", true)
-          .order("nome", { ascending: true }),
-        supabase
-          .from("movimentacoes_financeiras")
-          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,created_by,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
-          .order("data_movimentacao", { ascending: false })
-          .order("created_at", { ascending: false }),
-      ]);
-
-      if (contasResult.error) throw contasResult.error;
-      if (movimentosResult.error) throw movimentosResult.error;
-
-      const movimentos = (movimentosResult.data || []) as MovimentoFinanceiro[];
-      setContasBancarias((contasResult.data || []) as ContaBancaria[]);
-      setMovimentosFinanceiros(movimentos);
-
-      // Busca somente as pessoas que aparecem nos movimentos carregados.
-      // Isso evita trazer os 300+ associados/centenas de dependentes só para exibir o nome.
-      const socioIds = Array.from(new Set(movimentos.map((m) => m.socio_id).filter(Boolean))) as string[];
-      const dependenteIds = Array.from(new Set(movimentos.map((m) => m.dependente_id).filter(Boolean))) as string[];
-      const usuarioIds = Array.from(new Set(movimentos.map((m) => m.created_by).filter(Boolean))) as string[];
-
-      if (!socioIds.length && !dependenteIds.length && !usuarioIds.length) {
-        setPessoasMovimentos(new Map());
-        setUsuariosMovimentos(new Map());
-      } else {
-        const [sociosRes, dependentesRes, usuariosRes] = await Promise.all([
-          socioIds.length
-            ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds)
-            : Promise.resolve({ data: [], error: null }),
-          dependenteIds.length
-            ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds)
-            : Promise.resolve({ data: [], error: null }),
-          usuarioIds.length
-            ? supabase.from("usuarios_sistema").select("id,nome_exibicao,email").in("id", usuarioIds)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
-        if (sociosRes.error) throw sociosRes.error;
-        if (dependentesRes.error) throw dependentesRes.error;
-        if (usuariosRes.error) throw usuariosRes.error;
-
-        const socioRows = (sociosRes.data || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
-        const dependenteRows = (dependentesRes.data || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
-        const socioMap = new Map(socioRows.map((s) => [s.id, s]));
-        const mapa = new Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>();
-
-        for (const s of socioRows) {
-          mapa.set(`socio:${s.id}`, { nome: s.nome, matricula: s.matricula, tipo: "socio" });
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${anoConsulta}&mes=0&socio_id=${encodeURIComponent(String(item.socio_id))}`,
+        {
+          headers: await h(),
+          cache: "no-store",
         }
-        for (const d of dependenteRows) {
-          const responsavel = d.socio_id ? socioMap.get(d.socio_id) : null;
-          mapa.set(`dependente:${d.id}`, { nome: d.nome, matricula: responsavel?.matricula ?? null, tipo: "dependente", responsavelNome: responsavel?.nome ?? null });
-        }
-        setPessoasMovimentos(mapa);
-        const usuarioMap = new Map<string, { nome: string; email: string | null }>();
-        for (const u of ((usuariosRes.data || []) as Array<{ id: string; nome_exibicao: string | null; email: string | null }>)) {
-          usuarioMap.set(String(u.id), { nome: u.nome_exibicao || "Usuário sem nome", email: u.email || null });
-        }
-        setUsuariosMovimentos(usuarioMap);
+      );
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível carregar o histórico.");
+
+      setHistoricoSocio(Array.isArray(d.mensalidades) ? d.mensalidades : []);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
+    } catch (e) {
+      console.error(e);
+      setHistoricoSocio([]);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
+    } finally {
+      setCarregandoHistoricoSocio(false);
+    }
+  }
+
+  async function abrirDetalhesSocio(item: M) {
+    setSocioSelecionado(item);
+    setAnoHistoricoSocio(ano);
+    setTipoBaixaSelecionada("pago");
+    await carregarHistoricoSocio(item, ano);
+  }
+
+  async function trocarAnoHistoricoSocio(novoAno: number) {
+    setAnoHistoricoSocio(novoAno);
+    if (socioSelecionado) {
+      await carregarHistoricoSocio(socioSelecionado, novoAno);
+    }
+  }
+
+  async function alterarMensalidadeDoModal(acao: "baixar" | "marcar_sem_saldo" | "estornar") {
+    const registro = mesHistoricoSelecionado
+      ? historicoPorMes.get(mesHistoricoSelecionado) || null
+      : null;
+
+    if (!registro || String(registro.id).startsWith("virtual-")) {
+      setErro("Esta competência ainda não possui uma mensalidade gerada.");
+      return;
+    }
+
+    const competenciaTexto = `${String(mesHistoricoSelecionado || 1).padStart(2, "0")}/${anoHistoricoSocio}`;
+    const nome = registro.socio?.nome || socioSelecionado?.socio?.nome || "este associado";
+
+    if (acao === "baixar") {
+      const ok = window.confirm(
+        `Confirmar pagamento da mensalidade de ${competenciaTexto} de ${nome}?\n\nA baixa será registrada no Financeiro.`
+      );
+      if (!ok) return;
+    } else if (acao === "marcar_sem_saldo") {
+      const ok = window.confirm(
+        `Marcar a mensalidade de ${competenciaTexto} de ${nome} como S.S — Sem saldo?\n\nNenhum lançamento financeiro será criado.`
+      );
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(
+        `Estornar o pagamento da mensalidade de ${competenciaTexto} de ${nome}?`
+      );
+      if (!ok) return;
+    }
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const body = acao === "baixar"
+        ? {
+            acao: "baixar",
+            ids: [registro.id],
+            data_pagamento: new Date().toISOString().slice(0, 10),
+          }
+        : acao === "marcar_sem_saldo"
+          ? {
+              acao: "marcar_sem_saldo",
+              ids: [registro.id],
+              motivo: "S.S",
+              observacoes: "S.S — Sem saldo",
+            }
+          : { acao: "estornar", id: registro.id };
+
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível atualizar a mensalidade.");
+
+      setMsg(d.message || "Mensalidade atualizada com sucesso.");
+      await carregar();
+      if (socioSelecionado) {
+        await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
       }
-    } catch (error) {
-      setMensagem(
-        `Não foi possível carregar o Financeiro. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
-      );
-    } finally {
-      setCarregandoFinanceiro(false);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível atualizar a mensalidade.");
     }
   }
 
-  async function abrirComprovante(path: string | null) {
-    if (!path) return;
-    if (ehUrlAbsoluta(path)) {
-      window.open(path, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const { data, error } = await supabase.storage
-      .from("comprovantes-financeiro")
-      .createSignedUrl(path, 10 * 60);
-    if (error || !data?.signedUrl) {
-      setMensagem(`Não foi possível abrir o comprovante. ${error?.message || "Arquivo não encontrado."}`);
-      return;
-    }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
-
-  async function carregarInadimplencia() {
-    if (inadimplenciaCarregada || carregandoInadimplencia) return;
-    setCarregandoInadimplencia(true);
+  async function carregar() {
     try {
-      const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
-        supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
-        supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao").order("competencia", { ascending: false }),
-      ]);
-      if (sociosResult.error) throw sociosResult.error;
-      if (dependentesResult.error) throw dependentesResult.error;
-      if (mensalidadesResult.error) throw mensalidadesResult.error;
-      setSocios((sociosResult.data || []) as Socio[]);
-      setDependentes((dependentesResult.data || []) as Dependente[]);
-      setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
-      setInadimplenciaCarregada(true);
-    } catch (error) {
-      setMensagem(
-        `Não foi possível carregar a inadimplência. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
+      setErro("");
+
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${ano}&mes=${mes}`,
+        {
+          headers: await h(),
+          cache: "no-store",
+        }
       );
-    } finally {
-      setCarregandoInadimplencia(false);
+
+      const d = await r.json();
+
+      if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
+
+      setLista(d.mensalidades || []);
+      setSocios(d.socios || []);
+      setConfigs(d.configuracoes || []);
+      setTarifas(d.tarifas || []);
+      setCobranca(d.cobranca || cobrancaInicial);
+
+      const { data: contasData } = await supabase
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .order("nome");
+
+      setContas(contasData || []);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     }
   }
 
   useEffect(() => {
-    void carregarFinanceiro();
-  }, []);
+    void carregar();
+  }, [ano, mes]);
 
-  const saldosPorConta = useMemo(() => {
-    const saldos = new Map<string, number>(
-      contasBancarias.map((c) => [c.id, Number(c.saldo_inicial || 0)])
-    );
+  function socioElegivelParaGeracao(s: Socio) {
+    if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
+    if (!s.responsavel_id) return s.possui_mensalidade === true;
 
-    for (const m of movimentosFinanceiros) {
-      const valor = Number(m.valor || 0);
-      if (m.tipo === "transferencia") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
-        if (m.conta_destino_id) {
-          saldos.set(
-            m.conta_destino_id,
-            (saldos.get(m.conta_destino_id) || 0) + valor
-          );
-        }
-      } else if (m.tipo === "entrada") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) + valor
-        );
-      } else if (m.tipo === "saida") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
+    const categoria = String(s.categoria || "").trim().toLowerCase();
+    if (categoria) {
+      return categoria.includes("c/ mensalidade") || categoria.includes("com mensalidade");
+    }
+
+    return [
+      "dependente_patrimonial_familiar_mensalidade",
+      "dependente_patrimonial_individual_mensalidade",
+      "dependente_contribuinte_familiar_mensalidade",
+      "dependente_contribuinte_individual_mensalidade",
+    ].includes(String(s.tipo_socio || ""));
+  }
+
+  const sociosElegiveis = useMemo(
+    () => socios.filter(socioElegivelParaGeracao),
+    [socios]
+  );
+
+  function normalizarPagamento(valor: unknown) {
+    return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_");
+  }
+
+  function normalizarBanco(valor: unknown) {
+    return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s_-]+/g, " ");
+  }
+
+  function tipoCobranca(m: M) {
+    const pagamento = normalizarPagamento(m.tipo_pagamento || m.socio?.tipo_pagamento);
+
+    // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
+    if (pagamento === "pix") return "pix";
+    if (pagamento === "boleto") return "boleto";
+    if (pagamento === "dinheiro") return "dinheiro";
+    if (pagamento === "transferencia") return "transferencia";
+    if (pagamento === "outro") return "outro";
+
+    // Alguns cadastros antigos gravam o banco diretamente no tipo_pagamento.
+    if (pagamento === "banrisul" || pagamento === "bergs" || pagamento.includes("banrisul")) {
+      return "banrisul";
+    }
+    if (pagamento === "sicredi" || pagamento.includes("sicredi")) {
+      return "sicredi";
+    }
+    if (
+      pagamento === "bb" ||
+      pagamento === "banco_do_brasil" ||
+      pagamento.includes("banco_do_brasil") ||
+      pagamento === "debito_bb"
+    ) {
+      return "bb";
+    }
+
+    // O cadastro atual normalmente grava apenas "debito_em_conta".
+    // Também inferimos pelo banco quando o tipo_pagamento veio vazio,
+    // usando primeiro a conta gravada na própria mensalidade e depois
+    // a conta atual do associado.
+    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
+
+    if (
+      pagamento === "debito_em_conta" ||
+      pagamento === "debito" ||
+      pagamento === "debito_em_conta_bancaria" ||
+      !pagamento
+    ) {
+      if (banco.includes("banrisul") || banco.includes("bergs")) return "banrisul";
+      if (banco.includes("sicredi")) return "sicredi";
+      if (
+        banco === "bb" ||
+        banco.includes(" bb ") ||
+        banco.includes("banco do brasil")
+      ) {
+        return "bb";
       }
     }
 
-    return saldos;
-  }, [contasBancarias, movimentosFinanceiros]);
+    return "sem_pagamento";
+  }
 
-  const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
-  const contasPorId = useMemo(() => new Map(contasBancarias.map((conta) => [conta.id, conta])), [contasBancarias]);
+  function podeMarcarSemSaldo(item: M) {
+    // S.S. é uma característica da cobrança DESTE associado.
+    // Só é permitido para boleto ou débito em conta com banco vinculado.
+    const pagamentoAssociado = normalizarPagamento(item.socio?.tipo_pagamento);
+    const pagamentoRegistro = normalizarPagamento(item.tipo_pagamento);
+    const pagamento = pagamentoAssociado || pagamentoRegistro;
+    const contaId = String(
+      item.conta_pagadora_id || item.socio?.conta_bancaria_id || ""
+    ).trim();
 
-  const pessoaDoMovimento = (movimento: MovimentoFinanceiro) => {
-    if (movimento.dependente_id) return pessoasMovimentos.get(`dependente:${movimento.dependente_id}`) || null;
-    if (movimento.socio_id) return pessoasMovimentos.get(`socio:${movimento.socio_id}`) || null;
-    return null;
-  };
+    if (pagamento === "boleto") return true;
 
-  const usuarioDoMovimento = (movimento: MovimentoFinanceiro) => {
-    if (!movimento.created_by) return null;
-    return usuariosMovimentos.get(movimento.created_by) || null;
-  };
+    if (
+      pagamento === "debito_em_conta" ||
+      pagamento === "debito" ||
+      pagamento === "debito_em_conta_bancaria" ||
+      pagamento === "banrisul" ||
+      pagamento === "sicredi" ||
+      pagamento === "bb" ||
+      pagamento === "banco_do_brasil"
+    ) {
+      return Boolean(contaId);
+    }
 
-  const saldoTotalBancos = useMemo(
-    () => Array.from(saldosPorConta.values()).reduce((sum: number, saldo: number) => sum + saldo, 0),
-    [saldosPorConta]
+    return false;
+  }
+
+  function situacaoVisual(item: M) {
+    if (item.situacao === "em_aberto" && item.data_vencimento) {
+      const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
+      if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < Date.now()) {
+        return "em_atraso";
+      }
+    }
+    return item.situacao;
+  }
+
+  const socioPorId = useMemo(() => {
+    const mapa = new Map<string, Socio>();
+    socios.forEach((s) => mapa.set(String(s.id), s));
+    return mapa;
+  }, [socios]);
+
+  const linhasExibicao = useMemo<M[]>(() => {
+    const existentes = new Map<string, M>();
+    lista.forEach((m) => existentes.set(String(m.socio_id), m));
+
+    // Quando a competência ainda não foi gerada, mostramos os associados
+    // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
+    // vazio e o administrador consegue conferir os 329 associados antes de gerar.
+    const virtuais: M[] = sociosElegiveis
+      .filter((s) => !existentes.has(String(s.id)))
+      .map((s) => ({
+        id: `virtual-${s.id}-${ano}-${mes}`,
+        socio_id: String(s.id),
+        competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
+        valor: 0,
+        valor_base: null,
+        tarifa_pagamento: null,
+        multa: 0,
+        juros: 0,
+        desconto: 0,
+        total_cobrado: null,
+        data_vencimento: null,
+        situacao: "nao_gerada",
+        data_pagamento: null,
+        tipo_pagamento: s.tipo_pagamento || null,
+        observacoes: null,
+        motivo: "Mensalidade ainda não gerada",
+        conta_pagadora_id: s.conta_bancaria_id || null,
+        socio: s,
+      }));
+
+    return [...lista, ...virtuais].map((item) => ({
+      ...item,
+      situacao: situacaoVisual(item),
+    }));
+  }, [lista, sociosElegiveis, ano, mes, contas]);
+
+  const filtrada = useMemo(() => {
+    const q = busca.toLowerCase().trim();
+
+    return linhasExibicao.filter((x) => {
+      const bateBusca =
+        !q ||
+        `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
+          .toLowerCase()
+          .includes(q);
+
+      // Linhas ainda não geradas não devem desaparecer quando um filtro
+      // de banco é aplicado: o banco/tipo de cobrança vem do cadastro do sócio.
+      const cobrancaAtual = tipoCobranca(x);
+      const bateCobranca =
+        cobrancasSelecionadas.length === 0 ||
+        cobrancasSelecionadas.includes(cobrancaAtual);
+
+      return bateBusca && bateCobranca;
+    });
+  }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
+const selecionadasBaixa = useMemo(
+    () =>
+      linhasExibicao.filter(
+        (item) =>
+          sel.includes(item.id) &&
+          item.situacao !== "pago" &&
+          item.situacao !== "nao_gerada"
+      ),
+    [linhasExibicao, sel]
   );
 
-  const estornosPorOrigem = useMemo(() => new Set(
-    movimentosFinanceiros
-      .filter((m) => String(m.origem_tipo || "").startsWith("estorno_") && m.origem_id)
-      .map((m) => String(m.origem_id))
-  ), [movimentosFinanceiros]);
+  const resumoBaixa = useMemo(() => {
+    const porConta = new Map<string, { nome: string; banco?: string | null; quantidade: number; valor: number }>();
+    let receita = 0;
+    let tarifas = 0;
+    let totalCobrado = 0;
 
-  const movimentosFluxo = useMemo(() => {
-    return movimentosFinanceiros.filter((m) => {
-      const data = String(m.data_movimentacao || "").slice(0, 10);
-      if (fluxoInicio && data < fluxoInicio) return false;
-      if (fluxoFim && data > fluxoFim) return false;
-      if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
+    for (const item of selecionadasBaixa) {
+      const socio = socioPorId.get(String(item.socio_id));
+      const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id || "";
+      const conta = contas.find((c) => String(c.id) === String(contaId));
+      const nomeConta = conta?.nome || "Conta não identificada";
+      const chave = String(contaId || nomeConta);
 
-      if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
-      if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
-      if (
-        abaFinanceira === "aluguéis" &&
-        !String(m.categoria || "").toLowerCase().includes("alug")
-      ) return false;
+      receita += Number(item.valor_base ?? item.valor ?? 0);
+      tarifas += Number(item.tarifa_pagamento ?? 0);
+      totalCobrado += Number(item.total_cobrado ?? item.valor_base ?? item.valor ?? 0);
 
-      if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
-      if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
-      return true;
-    });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, abaFinanceira]);
-
-  const entradasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "entrada")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const saidasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "saida")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const transferenciasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "transferencia")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-
-  function selecionarAbaFinanceira(aba: typeof abaFinanceira) {
-    setAbaFinanceira(aba);
-    if (aba === "entradas") setFluxoTipo("entrada");
-    else if (aba === "saidas") setFluxoTipo("saida");
-    else if (aba === "fluxo") { setFluxoTipo("todos"); setFluxoForma("todos"); }
-    if (aba === "aluguéis") {
-      setMovTipo("entrada");
-      setMovCategoria("Aluguel");
+      const atual = porConta.get(chave) || {
+        nome: nomeConta,
+        banco: conta?.banco,
+        quantidade: 0,
+        valor: 0,
+      };
+      atual.quantidade += 1;
+      atual.valor += Number(item.valor_base ?? item.valor ?? 0);
+      porConta.set(chave, atual);
     }
-    if (aba === "inadimplencia") void carregarInadimplencia();
-  }
 
-  async function estornarReserva(movimento: MovimentoFinanceiro) {
-    if (movimento.origem_tipo !== "reserva" || !movimento.origem_id) return;
-    const motivo = window.prompt(
-      `Motivo do estorno da reserva de ${formatarMoeda(movimento.valor)}:`,
-      "Cancelamento da reserva e devolução do pagamento."
-    );
-    if (motivo === null) return;
-    const ok = window.confirm(
-      `Confirmar estorno do pagamento de ${formatarMoeda(movimento.valor)}?\n\nA reserva será cancelada e o estorno ficará registrado no Financeiro.`
-    );
-    if (!ok) return;
+    return {
+      quantidade: selecionadasBaixa.length,
+      receita,
+      tarifas,
+      totalCobrado,
+      contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
+    };
+  }, [selecionadasBaixa, socioPorId, contas]);
 
-    setMovimentoEstornandoId(movimento.id);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão expirada.");
-      const response = await fetch("/api/reservas", {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ id: movimento.origem_id, acao: "estornar_pagamento", motivo: motivo.trim() || "Não informado" }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar a reserva.");
-      await carregarFinanceiro();
-      setMensagem(result.message || "Pagamento da reserva estornado e reserva cancelada.");
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar a reserva.");
-    } finally {
-      setMovimentoEstornandoId(null);
-    }
-  }
 
-  async function estornarMovimento(movimento: MovimentoFinanceiro) {
-    const origem = String(movimento.origem_tipo || "").toLowerCase();
-    if (!["manual", "transferencia"].includes(origem)) {
-      setMensagem("Este lançamento está vinculado a outro módulo. Use o estorno no módulo de origem para manter os registros sincronizados.");
-      return;
-    }
-    const motivo = window.prompt(
-      `Motivo do estorno de ${formatarMoeda(movimento.valor)}:`,
-      "Correção de lançamento."
-    );
-    if (motivo === null) return;
-    const ok = window.confirm(`Confirmar estorno de ${movimento.tipo === "entrada" ? "entrada" : movimento.tipo === "saida" ? "saída" : "transferência"} de ${formatarMoeda(movimento.valor)}?\n\nO histórico original será preservado.`);
-    if (!ok) return;
-    setMovimentoEstornandoId(movimento.id);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sessão expirada.");
-      const response = await fetch("/api/financeiro", {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "estornar_movimento", id: movimento.id, motivo: motivo.trim() || "Não informado" }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result?.error || "Não foi possível estornar o lançamento.");
-      await carregarFinanceiro();
-      setMensagem(result.message || "Estorno registrado com sucesso.");
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível estornar o lançamento.");
-    } finally {
-      setMovimentoEstornandoId(null);
-    }
-  }
-
-  function abrirNovaMovimentacao(tipo: "entrada" | "saida" = "saida") {
-    setMovTipo(tipo);
-    setMovConta((atual) => atual || contasBancarias[0]?.id || "");
-    setMovCategoria(tipo === "entrada" ? "Recebimento" : "Despesa");
-    setMovDescricao("");
-    setMovValor("");
-    setMovData(new Date().toISOString().slice(0, 10));
-    setMovForma("pix");
-    setMovObservacoes("");
-    setMovArquivo(null);
-    setMostrarMovimentoModal(true);
-  }
-
-  function abrirNovaTransferencia() {
-    setTransOrigem(contasBancarias[0]?.id || "");
-    setTransDestino(contasBancarias[1]?.id || "");
-    setTransValor("");
-    setTransData(new Date().toISOString().slice(0, 10));
-    setTransDescricao("Transferência entre contas");
-    setTransObservacoes("");
-    setMostrarTransferenciaModal(true);
-  }
-
-  async function salvarContaBancaria() {
-    if (salvandoConta) return;
-    if (!contaNome.trim()) { setMensagem("Informe o nome da conta."); return; }
-    const saldoInicial = Number(String(contaSaldoInicial || "0").replace(",", "."));
-    if (!Number.isFinite(saldoInicial)) { setMensagem("Informe um saldo inicial válido."); return; }
-    const payload = { nome: contaNome.trim(), banco: contaBanco || null, agencia: contaAgencia || null, conta: contaNumero || null, saldo_inicial: saldoInicial, data_saldo_inicial: contaDataSaldo || null, ativo: true, observacoes: contaObservacoes || null };
-    setSalvandoConta(true);
-    try {
-      const result = contaEditando
-        ? await supabase.from("contas_bancarias").update(payload).eq("id", contaEditando.id).select("*").single()
-        : await supabase.from("contas_bancarias").insert(payload).select("*").single();
-      if (result.error) throw result.error;
-      if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? result.data as ContaBancaria : c));
-      else setContasBancarias((lista) => [...lista, result.data as ContaBancaria].sort((a,b)=>a.nome.localeCompare(b.nome)));
-      setMostrarContaModal(false); setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes(""); setMensagem("Conta bancária salva com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível salvar a conta. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoConta(false);
-    }
-  }
-
-  function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
-  function editarConta(c: ContaBancaria) { setContaEditando(c); setContaNome(c.nome); setContaBanco(c.banco || ""); setContaAgencia(c.agencia || ""); setContaNumero(c.conta || ""); setContaSaldoInicial(String(c.saldo_inicial || 0)); setContaDataSaldo(c.data_saldo_inicial || new Date().toISOString().slice(0,10)); setContaObservacoes(c.observacoes || ""); setMostrarContaModal(true); }
-
-  function abrirConferenciaSaldo(c: ContaBancaria) {
-    setContaConferindo(c);
-    setSaldoConferido(saldoConta(c).toFixed(2));
-    setDataConferencia(new Date().toISOString().slice(0, 10));
-    setObservacaoConferencia("Conferência do saldo bancário");
-  }
-
-  async function salvarConferenciaSaldo() {
-    if (!contaConferindo) return;
-
-    const saldoInformado = Number(String(saldoConferido).replace(",", "."));
-    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
-      setMensagem("Informe um saldo bancário válido.");
+  async function confirmarBaixaSelecionadas() {
+    if (processandoBaixa) return;
+    if (selecionadasBaixa.length === 0) {
+      setErro("Selecione ao menos uma mensalidade em aberto para baixar.");
       return;
     }
 
-    const saldoAtual = saldoConta(contaConferindo);
-    const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
-
-    setSalvandoConferencia(true);
+    setProcessandoBaixa(true);
+    setAbrirConfirmacaoBaixa(false);
 
     try {
-      const { error } = await supabase
-        .from("conferencias_bancarias")
-        .insert({
-          conta_bancaria_id: contaConferindo.id,
-          saldo_sistema: saldoAtual,
-          saldo_banco: saldoInformado,
-          diferenca,
-          data_conferencia: dataConferencia,
-          observacao:
-            observacaoConferencia ||
-            "Conferência do saldo bancário",
+      if (tipoBaixaSelecionada === "sem_saldo") {
+        await post({
+          acao: "marcar_sem_saldo",
+          ids: selecionadasBaixa.map((item) => item.id),
+          motivo: "S.S",
+          observacoes: "S.S — Sem saldo",
+        });
+        setTipoBaixaSelecionada("pago");
+        return;
+      }
+
+      await post({
+        acao: "baixar",
+        ids: selecionadasBaixa.map((item) => item.id),
+        data_pagamento: new Date().toISOString().slice(0, 10),
+      });
+      setTipoBaixaSelecionada("pago");
+    } finally {
+      setProcessandoBaixa(false);
+    }
+  }
+
+  async function post(body: any) {
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify(body),
+      });
+
+      const d = await r.json();
+
+      if (!r.ok) throw Error(d.error || "Erro.");
+
+      setMsg(d.message || "Concluído.");
+      setSel([]);
+      setSelGeracao([]);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro.");
+    }
+  }
+
+  async function estornarBaixa(item: M) {
+    if (item.situacao !== "pago") return;
+
+    const confirmar = window.confirm(
+      `Deseja estornar a baixa de ${item.socio?.nome || "este associado"}?\n\nA mensalidade voltará para Em aberto e a entrada financeira pendente será removida.`
+    );
+
+    if (!confirmar) return;
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "estornar",
+          id: item.id,
+        }),
+      });
+
+      const d = await r.json();
+
+      if (!r.ok) throw Error(d.error || "Não foi possível estornar a baixa.");
+
+      setMsg(d.message || "Pagamento estornado com sucesso.");
+      setSel((atual) => atual.filter((id) => id !== item.id));
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
+    }
+  }
+
+  function alternarGeracaoSocio(id: string) {
+    setSelGeracao((atual) =>
+      atual.includes(id)
+        ? atual.filter((x) => x !== id)
+        : [...atual, id]
+    );
+  }
+
+  function selecionarTodosParaGeracao() {
+    const ids = filtrada
+      .filter((x) => x.situacao === "nao_gerada")
+      .map((x) => String(x.socio_id));
+    setSelGeracao(ids);
+  }
+
+  async function gerarSelecionados() {
+    if (selGeracao.length === 0) {
+      setErro("Selecione ao menos um associado sem mensalidade gerada.");
+      return;
+    }
+
+    setErro("");
+    setMsg("");
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "gerar",
+          ano,
+          mes,
+          socio_ids: selGeracao,
+        }),
+      });
+
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível gerar as mensalidades selecionadas.");
+
+      setSelGeracao([]);
+      setMsg(
+        d.message ||
+          `${Number(d.criadas || selGeracao.length)} mensalidade(s) gerada(s) para os associados selecionados.`
+      );
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível gerar as mensalidades selecionadas."
+      );
+    }
+  }
+
+  async function previsualizarGeracao() {
+    setErro("");
+    setMsg("");
+    setAbrindoPrevia(true);
+    setPrevias([]);
+
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "previsualizar",
+          ano,
+          mes,
+        }),
+      });
+
+      const d = await r.json();
+      if (!r.ok) {
+        throw Error(d.error || `Não foi possível gerar a prévia de ${String(mes).padStart(2, "0")}/${ano}.`);
+      }
+
+      setPrevias([d]);
+    } catch (e) {
+      setAbrindoPrevia(false);
+      setPrevias([]);
+      setErro(e instanceof Error ? e.message : "Erro ao gerar prévia.");
+    }
+  }
+
+  async function confirmarGeracao() {
+    if (previas.length === 0) return;
+
+    setConfirmandoGeracao(true);
+    setErro("");
+    setMsg("");
+
+    try {
+      let criadasTotal = 0;
+      const resultados: string[] = [];
+
+      for (const item of previas) {
+        if (item.quantidade_nova <= 0) {
+          resultados.push(`${item.competencia.slice(0, 7)}: nenhuma nova`);
+          continue;
+        }
+
+        const [anoGeracao, mesGeracao] = item.competencia.slice(0, 7).split("-").map(Number);
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({
+            acao: "gerar",
+            ano: anoGeracao,
+            mes: mesGeracao,
+          }),
         });
 
-      if (error) throw error;
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar ${mesGeracao}/${anoGeracao}.`);
+        const criadas = Number(d.criadas || item.quantidade_nova || 0);
+        criadasTotal += criadas;
+        resultados.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${criadas} gerada(s)`);
+      }
 
-      setMensagem(
-        diferenca === 0
-          ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
-          : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`
-      );
-      setContaConferindo(null);
-    } catch (error) {
-      setMensagem(
-        `Não foi possível registrar a conferência. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
-      );
+      setAbrindoPrevia(false);
+      setPrevias([]);
+      setMsg(`Geração concluída: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`);
+      setSel([]);
+      setSelGeracao([]);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao gerar competências.");
     } finally {
-      setSalvandoConferencia(false);
+      setConfirmandoGeracao(false);
     }
   }
 
-  async function salvarMovimentoFinanceiro() {
-    if (salvandoMovimento) return;
-    if (!movConta || !movDescricao.trim() || Number(String(movValor || "0").replace(",", ".")) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
-    const valor = Number(String(movValor).replace(",", "."));
-    if (!Number.isFinite(valor) || valor <= 0) { setMensagem("Informe um valor válido."); return; }
-    setSalvandoMovimento(true);
+  function fecharPrevia() {
+    if (confirmandoGeracao) return;
+    setAbrindoPrevia(false);
+    setPrevias([]);
+  }
+
+  // Uma única fonte de verdade para o histórico anual.
+  // Se houver mais de um lançamento na mesma competência, S.S. tem
+  // prioridade visual, depois Isento, Pago, Atrasada e Em aberto.
+  const historicoPorMes = useMemo(() => {
+    const prioridade = (item: M) => {
+      if (ehSemSaldo(item) && podeMarcarSemSaldo(item)) return 50;
+      if (item.situacao === "isento") return 40;
+      if (item.situacao === "pago") return 30;
+      if (situacaoVisual(item) === "em_atraso") return 20;
+      if (item.situacao === "em_aberto") return 10;
+      return 0;
+    };
+
+    const mapa = new Map<number, M>();
+
+    for (const item of historicoSocio) {
+      const competencia = String(item.competencia || "").slice(0, 10);
+      const partes = competencia.split("-");
+      const anoItem = Number(partes[0]);
+      const mesItem = Number(partes[1]);
+
+      if (anoItem !== Number(anoHistoricoSocio) || mesItem < 1 || mesItem > 12) continue;
+
+      const atual = mapa.get(mesItem);
+      if (!atual) {
+        mapa.set(mesItem, item);
+        continue;
+      }
+
+      const prioridadeAtual = prioridade(atual);
+      const prioridadeNovo = prioridade(item);
+      const dataAtual = String(atual.updated_at || atual.data_pagamento || "");
+      const dataNovo = String(item.updated_at || item.data_pagamento || "");
+
+      if (prioridadeNovo > prioridadeAtual || (prioridadeNovo === prioridadeAtual && dataNovo > dataAtual)) {
+        mapa.set(mesItem, item);
+      }
+    }
+
+    return mapa;
+  }, [historicoSocio, anoHistoricoSocio, contas]);
+
+  function abrirConfiguracao() {
+    setAbaConfig("mensalidades");
+    setEdit(null);
+    setNovo({
+      tipo_socio: "",
+      nome: "",
+      valor: "0",
+      vigencia_inicio: `${ano}-01-01`,
+    });
+    setModal(true);
+  }
+
+  async function salvarCobranca() {
+    setSalvandoConfig(true);
+
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const usuarioAtualId = sessionData.session?.user?.id || null;
-      let comprovante: string | null = null;
-      if (movArquivo) { const ext = movArquivo.name.split(".").pop()?.toLowerCase() || "bin"; const caminho = `movimentos/${Date.now()}-${movArquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; const up = await supabase.storage.from("comprovantes-financeiro").upload(caminho, movArquivo, { upsert: true, contentType: movArquivo.type || "application/octet-stream" }); if (up.error) throw up.error; comprovante = caminho; }
-      const payload = { created_by: usuarioAtualId, conta_bancaria_id: movConta, conta_destino_id: null, grupo_transferencia: null, tipo: movTipo, categoria: movCategoria || null, descricao: movDescricao.trim(), valor, data_movimentacao: movData, forma_pagamento: movForma || null, origem_tipo: "manual", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: comprovante, conciliado: false, data_conciliacao: null, observacoes: movObservacoes || null };
-      const { data, error } = await supabase.from("movimentacoes_financeiras").insert(payload).select("*").single();
-      if (error) throw error;
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarMovimentoModal(false); setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null); setMensagem("Movimentação registrada com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível registrar a movimentação. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+      await post({
+        acao: "cobranca_editar",
+        ...cobranca,
+        multa_valor: Number(cobranca.multa_valor || 0),
+        juros_valor: Number(cobranca.juros_valor || 0),
+        desconto_valor: Number(cobranca.desconto_valor || 0),
+        dias_tolerancia: Number(cobranca.dias_tolerancia || 0),
+      });
+      setModal(false);
     } finally {
-      setSalvandoMovimento(false);
+      setSalvandoConfig(false);
     }
   }
 
-  async function salvarTransferencia() {
-    if (salvandoTransferencia) return;
-    const valor = Number(String(transValor || "0").replace(",", "."));
-    if (!transOrigem || !transDestino || transOrigem === transDestino || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
-    setSalvandoTransferencia(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const usuarioAtualId = sessionData.session?.user?.id || null;
-      const grupo = crypto.randomUUID();
-      const base = { created_by: usuarioAtualId, grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao: transDescricao || "Transferência entre contas", valor, data_movimentacao: transData, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes: transObservacoes || null };
-      const { data, error } = await supabase.from("movimentacoes_financeiras").insert({ ...base, conta_bancaria_id: transOrigem, conta_destino_id: transDestino }).select("*").single();
-      if (error) throw error;
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível registrar a transferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoTransferencia(false);
-    }
+  async function salvarTarifa(t: T) {
+    await post({
+      acao: "tarifa_editar",
+      id: t.id,
+      tipo_pagamento: t.tipo_pagamento,
+      nome: t.nome,
+      valor_tarifa: Number(t.valor_tarifa || 0),
+      ativo: Boolean(t.ativo),
+    });
   }
-
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+    <div className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#17382c]">
       <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-      <div className="min-h-[calc(100vh-80px)]">
-        <MenuLateralPadrao />
-
-                <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
-          <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+      <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
+        <div className="mx-auto max-w-[1400px] space-y-6">
+          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-end">
             <div>
-              <p className="text-sm font-medium text-gray-500">Administração</p>
-              <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
-                Financeiro
-              </h2>
-              <p className="mt-1 text-gray-500">
-                Contas bancárias, receitas, despesas e fluxo de caixa.
+              <p className="text-sm text-gray-500">Financeiro</p>
+              <h1 className="text-2xl font-black text-[#005a3c] sm:text-3xl">
+                Mensalidades
+              </h1>
+              <p className="text-sm text-gray-500">
+                Lançamento, cobrança e controle das mensalidades.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <button
-                onClick={() => void carregarFinanceiro()}
-                disabled={carregandoFinanceiro}
-                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-60"
+                onClick={() => void previsualizarGeracao()}
+                className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
-                {carregandoFinanceiro ? "Atualizando..." : "↻ Atualizar"}
+                ⚡ Gerar {String(mes).padStart(2, "0")}/{ano}
               </button>
+
               <button
-                onClick={() => setAbaFinanceira("contas")}
-                className={`rounded-xl border border-[#cfe3d8] px-4 py-3 text-sm font-bold ${abaFinanceira === "contas" ? "bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-[#005a3c]"}`}
+                onClick={abrirConfiguracao}
+                className="w-full rounded-xl border bg-white px-4 py-3 text-center font-bold sm:w-auto"
               >
-                🏦 Contas bancárias
-              </button>
-              <button
-                onClick={() => setAbaFinanceira("fluxo")}
-                className={`rounded-xl px-4 py-3 text-sm font-bold shadow-sm ${abaFinanceira === "fluxo" ? "bg-[#005a3c] text-white" : "border border-[#cfe3d8] bg-white text-[#005a3c]"}`}
-              >
-                📊 Fluxo de caixa
+                <Settings2 className="mr-2 inline h-4 w-4" />
+                Configuração
               </button>
             </div>
           </div>
 
-          {carregandoFinanceiro && contasBancarias.length === 0 && movimentosFinanceiros.length === 0 && (
-            <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              Carregando contas e movimentações...
+          {msg && (
+            <div className="rounded-xl bg-green-50 p-4 font-bold text-green-700">
+              {msg}
             </div>
           )}
 
-          {mensagem && (
-            <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              {mensagem}
+          {erro && (
+            <div className="rounded-xl bg-red-50 p-4 font-bold text-red-700">
+              {erro}
             </div>
           )}
 
-          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Resumo
-              titulo="Saldo em bancos"
-              valor={formatarMoeda(saldoTotalBancos)}
-              subtitulo={`${contasBancarias.length} conta(s) ativa(s)`}
-              destaque
-            />
-            <Resumo
-              titulo="Entradas"
-              valor={formatarMoeda(entradasPeriodo)}
-              subtitulo="Movimentações financeiras"
-            />
-            <Resumo
-              titulo="Saídas"
-              valor={formatarMoeda(saidasPeriodo)}
-              subtitulo="Movimentações financeiras"
-            />
-            <Resumo
-              titulo="Resultado"
-              valor={formatarMoeda(entradasPeriodo - saidasPeriodo)}
-              subtitulo="Entradas − saídas"
-            />
-          </div>
-
-          <div className="mb-6 border-b border-[#dfe9e3]">
-            <div className="flex flex-wrap gap-1 overflow-x-auto">
-              {[
-                ["aluguéis", "🏠", "Aluguéis"],
-                ["entradas", "💵", "Entradas"],
-                ["saidas", "💸", "Saídas"],
-                ["inadimplencia", "🚨", `Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
-                ["contas", "🏦", "Contas bancárias"],
-                ["fluxo", "📊", "Fluxo de caixa"],
-              ].map(([id, icone, label]) => (
-                <button
-                  key={id}
-                  onClick={() => selecionarAbaFinanceira(id as typeof abaFinanceira)}
-                  className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-semibold transition ${
-                    abaFinanceira === id
-                      ? "text-[#005a3c]"
-                      : "text-[#8a9a92] hover:text-[#005a3c]"
-                  }`}
+          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <label className="min-w-[260px] flex-1">
+                <span className="text-sm font-bold text-gray-600">Ano</span>
+                <select
+                  value={ano}
+                  onChange={(e) => setAno(Number(e.target.value))}
+                  className="mt-2 w-full rounded-xl border p-3 font-bold"
                 >
-                  <span className="text-base">{icone}</span>
-                  {label}
-                  {abaFinanceira === id && (
-                    <span className="absolute inset-x-2 -bottom-px h-[3px] rounded-full bg-[#005a3c]" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
+                  {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          {abaFinanceira === "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Resumo
-                  titulo="Total inadimplentes"
-                  valor={String(quantidadeAtrasados)}
-                  subtitulo="Sócios e dependentes"
-                />
-                <Resumo
-                  titulo="2 meses"
-                  valor={String(amarelos)}
-                  subtitulo="Atenção"
-                />
-                <Resumo
-                  titulo="3+ meses"
-                  valor={String(vermelhos)}
-                  subtitulo="Inadimplência crítica"
-                />
-                <Resumo
-                  titulo="Valor total devido"
-                  valor={formatarMoeda(
-                    inadimplenciaDetalhada.reduce(
-                      (soma, item) => soma + item.valorDevido,
-                      0
-                    )
-                  )}
-                  subtitulo="Mensalidades vencidas"
+              <label className="min-w-[260px] flex-1">
+                <span className="text-sm font-bold text-gray-600">Mês da competência exibida</span>
+                <select
+                  value={mes}
+                  onChange={(e) => setMes(Number(e.target.value))}
+                  className="mt-2 w-full rounded-xl border p-3 font-bold"
+                >
+                  {[
+                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+                  ].map((nomeMes, i) => (
+                    <option key={nomeMes} value={i + 1}>
+                      {String(i + 1).padStart(2, "0")} — {nomeMes}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
+                <span className="text-gray-500">Visualizando:</span>{" "}
+                <b className="text-[#005a3c]">{String(mes).padStart(2, "0")}/{ano}</b>
+                <span className="ml-2 text-gray-500">(carrega automaticamente)</span>
+              </div>
+            </div>
+          </section>
+
+          <div className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
+            <div className="space-y-3">
+              <div className="flex w-full items-center gap-2 rounded-xl border px-3">
+                <Search className="h-4 w-4 shrink-0 text-gray-400" />
+                <input
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Nome ou matrícula..."
+                  className="w-full py-3 outline-none"
                 />
               </div>
 
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-sm font-bold text-gray-600">
+                  Tipo de cobrança:
+                </span>
+                {[
+                  ["banrisul", "Banrisul"],
+                  ["sicredi", "Sicredi"],
+                  ["bb", "Banco do Brasil"],
+                  ["boleto", "Boleto"],
+                  ["pix", "PIX"],
+                  ["sem_pagamento", "Sem pagamento"],
+                ].map(([valor, label]) => {
+                  const ativo = cobrancasSelecionadas.includes(valor);
+                  return (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() =>
+                        setCobrancasSelecionadas((atual) =>
+                          ativo
+                            ? atual.filter((x) => x !== valor)
+                            : [...atual, valor]
+                        )
+                      }
+                      className={`rounded-full border px-3 py-1.5 text-xs font-bold ${
+                        ativo
+                          ? "border-[#005a3c] bg-[#005a3c] text-white"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+                {cobrancasSelecionadas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCobrancasSelecionadas([])}
+                    className="rounded-full px-3 py-1.5 text-xs font-bold text-gray-500 underline"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-xl bg-[#f7faf8] p-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="text-xs text-gray-500">
+                  Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
+                </div>
+
+                <div className="flex w-full flex-wrap gap-2 lg:w-auto">
+                <button
+                  type="button"
+                  onClick={selecionarTodosParaGeracao}
+                  disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
+                  className="rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 font-bold text-[#005a3c] disabled:opacity-40"
+                >
+                  Selecionar pendentes
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!selGeracao.length}
+                  onClick={() => void gerarSelecionados()}
+                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                >
+                  ⚡ Gerar selecionadas ({selGeracao.length})
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!selecionadasBaixa.length}
+                  onClick={() => {
+                    setTipoBaixaSelecionada("pago");
+                    setAbrirConfirmacaoBaixa(true);
+                  }}
+                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                >
+                  💰 Baixar selecionadas ({selecionadasBaixa.length})
+                </button>
+                </div>
+              </div>
+            </div>
+
+            {(selGeracao.length > 0 || sel.length > 0) && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[#eef7f2] p-3 text-sm font-bold text-[#005a3c]">
+                {selGeracao.length > 0 && (
+                  <span>⚡ {selGeracao.length} para gerar</span>
+                )}
+                {selecionadasBaixa.length > 0 && (
+                  <span>💰 {selecionadasBaixa.length} para baixar</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSel([]);
+                    setSelGeracao([]);
+                    setAbrirConfirmacaoBaixa(false);
+                  }}
+                  className="ml-auto text-xs font-bold underline"
+                >
+                  Limpar seleção
+                </button>
+              </div>
+            )}
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[1200px] text-sm">
+                <thead className="bg-[#e8f3ee]">
+                  <tr>
+                    <th className="p-3">✓</th>
+                    <th className="p-3 text-left">Associado</th>
+                    <th className="p-3 text-left">Matrícula</th>
+                    <th className="p-3 text-left">Tipo</th>
+                    <th className="p-3 text-left">Vencimento</th>
+                    <th className="p-3 text-left">Base</th>
+                    <th className="p-3 text-left">Tarifa</th>
+                    <th className="p-3 text-left">Acréscimos</th>
+                    <th className="p-3 text-left">Total cobrado</th>
+                    <th className="p-3 text-left">Situação</th>
+                    <th className="p-3 text-left">Motivo</th>
+                    <th className="sticky right-0 z-20 bg-[#e8f3ee] p-3 text-left shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">Ações</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y">
+                  {filtrada.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="p-6 text-center text-gray-500">
+                        Nenhum associado encontrado com os filtros atuais.
+                      </td>
+                    </tr>
+                  ) : (
+                    filtrada.map((x) => {
+                    const st = statusMensalidade(x, podeMarcarSemSaldo(x));
+                    const acrescimos =
+                      Number(x.multa || 0) + Number(x.juros || 0);
+
+                    return (
+                      <tr key={x.id}>
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            disabled={x.situacao === "pago"}
+                            checked={
+                              x.situacao === "nao_gerada"
+                                ? selGeracao.includes(String(x.socio_id))
+                                : x.situacao === "pago"
+                                  ? false
+                                  : sel.includes(x.id)
+                            }
+                            onChange={() => {
+                              if (x.situacao === "nao_gerada") {
+                                alternarGeracaoSocio(String(x.socio_id));
+                                return;
+                              }
+
+                              if (x.situacao === "pago") return;
+
+                              setSel((s) =>
+                                s.includes(x.id)
+                                  ? s.filter((i) => i !== x.id)
+                                  : [...s, x.id]
+                              );
+                            }}
+                          />
+                        </td>
+
+                        <td className="p-3 font-bold">
+                          <button
+                            type="button"
+                            onClick={() => void abrirDetalhesSocio(x)}
+                            className="text-left text-[#005a3c] underline-offset-2 hover:underline"
+                          >
+                            {x.socio?.nome || "—"}
+                          </button>
+                        </td>
+
+                        <td className="p-3">{x.socio?.matricula || "—"}</td>
+
+                        <td className="p-3">
+                          {nomes[x.socio?.tipo_socio] ||
+                            x.socio?.tipo_socio ||
+                            "—"}
+                        </td>
+
+                        <td className="p-3">
+                          {data(x.data_vencimento)}
+                        </td>
+
+                        <td className="p-3 font-bold">
+                          {moeda(x.valor_base ?? x.valor)}
+                        </td>
+
+                        <td className="p-3">
+                          {moeda(x.tarifa_pagamento)}
+                        </td>
+
+                        <td className="p-3">
+                          {moeda(acrescimos)}
+                        </td>
+
+                        <td className="p-3 font-black text-[#005a3c]">
+                          {moeda(
+                            x.total_cobrado ??
+                              Number(x.valor_base ?? x.valor) +
+                                Number(x.tarifa_pagamento || 0) +
+                                Number(x.multa || 0) +
+                                Number(x.juros || 0) -
+                                Number(x.desconto || 0)
+                          )}
+                        </td>
+
+                        <td className="p-3">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${st[1]}`}
+                          >
+                            {st[0]}
+                          </span>
+                        </td>
+
+                        <td className="p-3">
+                          {x.motivo || x.observacoes || "—"}
+                        </td>
+
+                        <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
+                          {x.situacao === "nao_gerada" ? (
+                            <span className="text-xs font-semibold text-gray-400">Gere a competência primeiro</span>
+                          ) : x.situacao === "pago" ? (
+                            <button
+                              type="button"
+                              onClick={() => void estornarBaixa(x)}
+                              className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 hover:bg-yellow-100"
+                            >
+                              ↩️ Estornar baixa
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="font-black text-xl text-[#005a3c]">
+                  Tipos e valores
+                </h2>
+                <p className="text-sm text-gray-500">
+                  O valor base da mensalidade permanece separado das tarifas.
+                </p>
+              </div>
+
+              <button
+                onClick={abrirConfiguracao}
+                className="rounded-xl border px-4 py-2 font-bold"
+              >
+                <Settings2 className="mr-2 inline h-4 w-4" />
+                Editar configurações
+              </button>
+            </div>
+
+            <div className="divide-y">
+              {configs.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 py-3"
+                >
                   <div>
-                    <p className="text-lg font-extrabold text-red-700">
-                      {quantidadeAtrasados > 0
-                        ? `⚠️ ${quantidadeAtrasados} ${
-                            quantidadeAtrasados === 1 ? "sócio" : "sócios"
-                          } em atraso`
-                        : "✓ Nenhum sócio em atraso"}
-                    </p>
-                    <p className="mt-1 text-sm text-gray-600">
-                      🟢 0–1 mês · 🟡 2 meses · 🔴 3 meses ou mais.
+                    <span className="font-bold">{c.nome}</span>
+                    <div className="text-xs text-gray-500">
+                      {c.tipo_socio} · vigente {data(c.vigencia_inicio)} ·{" "}
+                      {c.ativo ? "Ativo" : "Inativo"}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <b>{moeda(c.valor)}</b>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEdit(c);
+                        setNovo({
+                          tipo_socio: c.tipo_socio,
+                          nome: c.nome,
+                          valor: String(c.valor),
+                          vigencia_inicio: c.vigencia_inicio,
+                        });
+                        setAbaConfig("mensalidades");
+                        setModal(true);
+                      }}
+                      className="rounded-lg border px-3 py-2 text-xs font-bold"
+                    >
+                      Editar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {socioSelecionado && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500">
+                  Cadastro do associado
+                </p>
+                <h2 className="text-xl font-black text-[#005a3c] sm:text-2xl">
+                  {socioSelecionado.socio?.nome || "Associado"}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Matrícula {socioSelecionado.socio?.matricula || "—"} · {ano}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSocioSelecionado(null);
+                  setHistoricoSocio([]);
+                  setMesHistoricoSelecionado(null);
+                  setAnoHistoricoSocio(ano);
+                }}
+                className="rounded-full p-2 hover:bg-gray-100"
+                aria-label="Fechar"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div className="grid gap-3 sm:grid-cols-4">
+                {[
+                  ["Matrícula", socioSelecionado.socio?.matricula],
+                  ["CPF", socioSelecionado.socio?.cpf],
+                  ["Categoria", socioSelecionado.socio?.categoria],
+                  [
+                    "Tipo de sócio",
+                    nomes[socioSelecionado.socio?.tipo_socio] ||
+                      socioSelecionado.socio?.tipo_socio,
+                  ],
+                ].map(([label, valor]) => (
+                  <div key={label} className="rounded-xl border bg-gray-50 p-3">
+                    <div className="text-[10px] font-bold uppercase text-gray-500">
+                      {label}
+                    </div>
+                    <div className="mt-1 break-words text-sm font-bold">
+                      {valor || "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <section className="rounded-2xl border border-[#cfe6da] bg-[#f7fbf8] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-[#005a3c]">
+                      Controle de mensalidades — {anoHistoricoSocio}
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      X = pago · SS = sem saldo (débito/boleto) · I = isento · em atraso = vencida
                     </p>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-gray-500">Ano</label>
+                    <select
+                      value={anoHistoricoSocio}
+                      onChange={(e) => void trocarAnoHistoricoSocio(Number(e.target.value))}
+                      className="rounded-xl border bg-white px-3 py-2 text-sm font-black text-[#005a3c]"
+                    >
+                      {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                    {carregandoHistoricoSocio && (
+                      <span className="text-xs font-bold text-gray-500">Carregando...</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <div className="min-w-[760px] rounded-xl border bg-white">
+                    <div className="grid grid-cols-13 border-b bg-[#eaf4ee] text-center text-xs font-black text-[#005a3c]"
+                         style={{ gridTemplateColumns: "minmax(180px,1.5fr) repeat(12,minmax(42px,1fr))" }}>
+                      <div className="px-2 py-3 text-left">Competência</div>
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => (
+                        <div key={numeroMes} className="px-1 py-3">
+                          {String(numeroMes).padStart(2, "0")}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-13 text-center"
+                         style={{ gridTemplateColumns: "minmax(180px,1.5fr) repeat(12,minmax(42px,1fr))" }}>
+                      <div className="border-r px-2 py-3 text-left">
+                        <div className="font-black text-[#005a3c]">Mensalidade</div>
+                        <div className="mt-1 text-[11px] text-gray-500">
+                          Clique em um mês para ver os detalhes
+                        </div>
+                      </div>
+
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
+                        const registro = historicoPorMes.get(numeroMes);
+                        const situacao = registro?.situacao || "nao_gerada";
+                        const semSaldo = Boolean(registro && ehSemSaldo(registro) && podeMarcarSemSaldo(registro));
+                        const pago = Boolean(registro && !semSaldo && situacao === "pago");
+                        const isento = Boolean(registro && !semSaldo && situacao === "isento");
+                        const naoGerada = !registro;
+                        const selecionado = mesHistoricoSelecionado === numeroMes;
+
+                        return (
+                          <button
+                            key={numeroMes}
+                            type="button"
+                            onClick={() => setMesHistoricoSelecionado(numeroMes)}
+                            title={
+                              pago
+                                ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Pago`
+                                : semSaldo
+                                  ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Sem saldo`
+                                  : naoGerada
+                                    ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Não gerada`
+                                    : `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Em aberto`
+                            }
+                            className={`border-l px-1 py-3 text-center transition ${
+                              selecionado ? "bg-[#d9eee2] ring-2 ring-inset ring-[#00704a]" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <span
+                              className={`mx-auto flex h-8 w-8 items-center justify-center rounded-lg text-sm font-black ${
+                                pago
+                                  ? "bg-green-100 text-green-700"
+                                  : semSaldo
+                                    ? "bg-amber-100 text-amber-700"
+                                    : isento
+                                      ? "bg-gray-100 text-gray-500"
+                                      : naoGerada
+                                        ? "bg-gray-50 text-gray-300"
+                                        : "bg-white text-gray-300"
+                              }`}
+                            >
+                              {pago ? "X" : semSaldo ? "SS" : isento ? "I" : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-green-700">X Pago</span>
+                  <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">SS Sem saldo</span>
+                  <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-500">I Isento</span>
+                  <span className="rounded-full border bg-white px-3 py-1 text-gray-400">Em aberto / PIX pendente</span>
+                  <span className="rounded-full bg-gray-50 px-3 py-1 text-gray-400">Não gerada</span>
+                </div>
+              </section>
+
+              {(() => {
+                const registroMes = mesHistoricoSelecionado
+                  ? historicoPorMes.get(mesHistoricoSelecionado) || null
+                  : null;
+
+                return (
+                  <section className="rounded-2xl border border-[#cfe6da] bg-[#f4faf7] p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <h3 className="font-black text-[#005a3c]">
+                        Detalhes — {String(mesHistoricoSelecionado || mes).padStart(2, "0")}/{anoHistoricoSocio}
+                      </h3>
+                      <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${
+                        !registroMes
+                          ? "bg-gray-100 text-gray-500"
+                          : ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
+                            ? "bg-amber-100 text-amber-700"
+                            : situacaoVisual(registroMes) === "pago"
+                              ? "bg-green-100 text-green-700"
+                              : situacaoVisual(registroMes) === "em_atraso"
+                                ? "bg-red-100 text-red-700"
+                                : situacaoVisual(registroMes) === "isento"
+                                  ? "bg-gray-100 text-gray-500"
+                                  : "bg-yellow-100 text-yellow-700"
+                      }`}>
+                        {registroMes
+                          ? (ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
+                              ? "S.S"
+                              : status(situacaoVisual(registroMes))[0])
+                          : "Não gerada"}
+                      </span>
+                    </div>
+
+                    {registroMes ? (
+                      <>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                        <div>
+                          <span className="text-xs text-gray-500">Valor base</span>
+                          <p className="font-bold">{moeda(registroMes.valor_base ?? registroMes.valor)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Tarifa</span>
+                          <p className="font-bold">{moeda(registroMes.tarifa_pagamento)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Total cobrado</span>
+                          <p className="font-black text-[#005a3c]">{moeda(registroMes.total_cobrado)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">Pagamento</span>
+                          <p className="font-bold">{data(registroMes.data_pagamento)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 border-t pt-4">
+                        {registroMes.situacao === "pago" ? (
+                          <button
+                            type="button"
+                            onClick={() => void alterarMensalidadeDoModal("estornar")}
+                            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                          >
+                            ↩ Estornar pagamento
+                          </button>
+                        ) : registroMes.situacao !== "isento" ? (
+                          <>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setErro("");
+                                  setMsg("");
+                                  setPagamentoMensalidade(registroMes);
+                                }}
+                                className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white hover:bg-[#004a31]"
+                              >
+                                💰 Dar baixa / Registrar pagamento
+                              </button>
+                              {podeMarcarSemSaldo(registroMes) && (
+                                <button
+                                  type="button"
+                                  onClick={() => void alterarMensalidadeDoModal("marcar_sem_saldo")}
+                                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                                >
+                                  SS — Sem saldo
+                                </button>
+                              )}
+                            </div>
+                            <p className="mt-2 text-xs text-gray-500">
+                              Forma de cobrança: <b>{tipoCobranca(registroMes) === "banrisul" ? "Débito Banrisul" : tipoCobranca(registroMes) === "sicredi" ? "Débito Sicredi" : tipoCobranca(registroMes) === "bb" ? "Débito Banco do Brasil" : tipoCobranca(registroMes) === "boleto" ? "Boleto" : tipoCobranca(registroMes) === "pix" ? "PIX" : "Outra / não definida"}</b>. S.S. é usado somente para débito em conta ou boleto.
+                            </p>
+                          </>
+                        ) : null}
+                      </div>
+                      </>
+                    ) : (
+                      <p className="mt-3 rounded-xl bg-white p-3 text-sm text-gray-500">
+                        Essa competência ainda não possui lançamento para este associado.
+                      </p>
+                    )}
+                  </section>
+                );
+              })()}
+            </div>
+
+            <div className="flex justify-end border-t bg-gray-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setSocioSelecionado(null);
+                  setHistoricoSocio([]);
+                  setMesHistoricoSelecionado(null);
+                  setAnoHistoricoSocio(ano);
+                }}
+                className="rounded-xl bg-[#005a3c] px-5 py-2 font-bold text-white"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pagamentoMensalidade && (
+        <RegistrarPagamentoMensalidade
+          key={pagamentoMensalidade.id}
+          registro={pagamentoMensalidade}
+          contas={contas}
+          onClose={() => setPagamentoMensalidade(null)}
+          onError={(mensagem) => {
+            if (mensagem) setErro(mensagem);
+          }}
+          onSuccess={async (mensagem) => {
+            setMsg(mensagem);
+            setErro("");
+            setPagamentoMensalidade(null);
+            await carregar();
+            if (socioSelecionado) {
+              await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
+            }
+          }}
+        />
+      )}
+
+      {abrindoPrevia && previas.length > 0 && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">Prévia da geração — {previas.length} competência(s)</h2>
+                <p className="mt-1 text-sm text-gray-500">Confira todos os meses antes de gravar. Nenhum lançamento foi criado ainda.</p>
+              </div>
+              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"><X /></button>
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-xl border">
+              <table className="w-full text-sm">
+                <thead className="bg-[#eef7f2]"><tr><th className="p-3 text-left">Competência</th><th className="p-3 text-right">Pagadores</th><th className="p-3 text-right">Novos</th><th className="p-3 text-right">Existentes</th><th className="p-3 text-right">Base</th><th className="p-3 text-right">Total cobrado</th></tr></thead>
+                <tbody className="divide-y">
+                  {previas.map((p) => (
+                    <tr key={p.competencia}>
+                      <td className="p-3 font-bold text-[#005a3c]">{p.competencia.slice(5, 7)}/{p.competencia.slice(0, 4)}</td>
+                      <td className="p-3 text-right">{p.total_cobraveis}</td>
+                      <td className="p-3 text-right font-black text-[#005a3c]">{p.quantidade_nova}</td>
+                      <td className="p-3 text-right">{p.ja_existentes}</td>
+                      <td className="p-3 text-right">{moeda(p.valor_base)}</td>
+                      <td className="p-3 text-right font-black">{moeda(p.total_cobrado)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50">
+                  <tr><td className="p-3 font-black">TOTAL</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.total_cobraveis,0)}</td><td className="p-3 text-right font-black text-[#005a3c]">{previas.reduce((s,p) => s+p.quantidade_nova,0)}</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.ja_existentes,0)}</td><td className="p-3 text-right font-black">{moeda(previas.reduce((s,p) => s+p.valor_base,0))}</td><td className="p-3 text-right font-black text-[#005a3c]">{moeda(previas.reduce((s,p) => s+p.total_cobrado,0))}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">Atenção: a geração será feita mês a mês. Se uma competência já tiver registros, eles não serão duplicados.</div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40">Cancelar</button>
+              <button type="button" onClick={() => void confirmarGeracao()} disabled={confirmandoGeracao || previas.every((p) => p.quantidade_nova === 0)} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração dos meses"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abrirConfirmacaoBaixa && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAbrirConfirmacaoBaixa(false);
+          }}
+        >
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b p-5">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">
+                  Confirmar baixa
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Confira os lançamentos antes de registrar no Financeiro.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAbrirConfirmacaoBaixa(false)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div>
+                <p className="mb-2 text-sm font-black text-[#005a3c]">Como deseja registrar esta baixa?</p>
+                <div className="grid gap-3 sm:grid-cols-2">
                   <button
-                    onClick={() =>
-                      (window.location.href = "/relatorios/inadimplencia")
-                    }
-                    className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
+                    type="button"
+                    onClick={() => setTipoBaixaSelecionada("pago")}
+                    className={`rounded-xl border-2 p-4 text-left transition ${
+                      tipoBaixaSelecionada === "pago"
+                        ? "border-[#005a3c] bg-[#eef7f2]"
+                        : "border-gray-200 bg-white hover:bg-gray-50"
+                    }`}
                   >
-                    📊 Relatório completo
+                    <div className="font-black text-[#005a3c]">✓ Pago</div>
+                    <div className="mt-1 text-xs text-gray-500">Registra a entrada no Financeiro e marca X.</div>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selecionadasBaixa.length || !selecionadasBaixa.every((item) => podeMarcarSemSaldo(item))}
+                    onClick={() => setTipoBaixaSelecionada("sem_saldo")}
+                    className={`rounded-xl border-2 p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      tipoBaixaSelecionada === "sem_saldo"
+                        ? "border-amber-400 bg-amber-50"
+                        : "border-gray-200 bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-black text-amber-700">SS · Sem saldo</div>
+                    <div className="mt-1 text-xs text-gray-500">Não lança no Financeiro e marca SS no histórico.</div>
                   </button>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-lg font-extrabold text-[#003d2b]">
-                      Lista de inadimplentes
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      Controle quem está em atraso e quantos meses estão pendentes.
-                    </p>
-                  </div>
-                  <input
-                    value={busca}
-                    onChange={(e) => setBusca(e.target.value)}
-                    placeholder="Buscar nome, matrícula ou responsável..."
-                    className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-sm outline-none focus:border-[#005a3c] sm:max-w-md"
-                  />
+              {tipoBaixaSelecionada === "pago" ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl bg-[#eef7f2] p-3">
+                  <p className="text-xs font-bold text-gray-500">Mensalidades</p>
+                  <p className="mt-1 text-xl font-black text-[#005a3c]">{resumoBaixa.quantidade}</p>
                 </div>
-
-                <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
-                  <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">
-                    🟢 Em dia: não aparece nesta lista
-                  </span>
-                  <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 2 meses: {amarelos}
-                  </span>
-                  <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 3+ meses: {vermelhos}
-                  </span>
+                <div className="rounded-xl bg-[#eef7f2] p-3">
+                  <p className="text-xs font-bold text-gray-500">Receita</p>
+                  <p className="mt-1 text-lg font-black text-[#005a3c]">{moeda(resumoBaixa.receita)}</p>
                 </div>
-
-                {inadimplenciaDetalhada.length === 0 ? (
-                  <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
-                    <div className="text-4xl">✅</div>
-                    <p className="mt-3 font-bold text-gray-700">
-                      Nenhum inadimplente encontrado
-                    </p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Quando houver mensalidades vencidas, elas aparecerão aqui.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[900px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Pessoa</th>
-                          <th className="px-4 py-3">Matrícula</th>
-                          <th className="px-4 py-3">Responsável</th>
-                          <th className="px-4 py-3">Meses</th>
-                          <th className="px-4 py-3">Competências</th>
-                          <th className="px-4 py-3">Valor devido</th>
-                          <th className="px-4 py-3 text-right">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {inadimplenciaDetalhada.map((item) => (
-                          <tr key={item.pessoa.chave} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-4">
-                              <p className="font-bold text-[#173d2e]">
-                                {item.pessoa.nome}
-                              </p>
-                              {item.pessoa.dependente_id && (
-                                <p className="text-xs text-gray-500">Dependente</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.matricula || "—"}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.responsavel_nome || "Titular"}
-                            </td>
-                            <td className="px-4 py-4">
-                              <span
-                                className={`rounded-full px-3 py-1.5 text-xs font-extrabold ${item.nivel.classe}`}
-                              >
-                                {item.meses}{" "}
-                                {item.meses === 1 ? "mês" : "meses"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              {item.competencias.join(", ")}
-                            </td>
-                            <td className="px-4 py-4 font-extrabold text-red-600">
-                              {formatarMoeda(item.valorDevido)}
-                            </td>
-                            <td className="px-4 py-4 text-right">
-                              <button
-                                onClick={() => {
-                                  window.location.href = "/socios";
-                                }}
-                                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]"
-                              >
-                                Abrir cadastro
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <div className="rounded-xl bg-[#fff8e6] p-3">
+                  <p className="text-xs font-bold text-gray-500">Tarifas</p>
+                  <p className="mt-1 text-lg font-black text-amber-700">{moeda(resumoBaixa.tarifas)}</p>
+                </div>
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-xs font-bold text-gray-500">Total cobrado</p>
+                  <p className="mt-1 text-lg font-black text-gray-800">{moeda(resumoBaixa.totalCobrado)}</p>
+                </div>
               </div>
-            </div>
-          )}
-
-          {abaFinanceira !== "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Resumo titulo="Entradas no período" valor={formatarMoeda(entradasPeriodo)} subtitulo="Conforme filtro aplicado" />
-                <Resumo titulo="Saídas no período" valor={formatarMoeda(saidasPeriodo)} subtitulo="Conforme filtro aplicado" />
-                <Resumo titulo="Resultado do período" valor={formatarMoeda(entradasPeriodo - saidasPeriodo)} subtitulo="Entradas − saídas" />
-              </div>
-
-              {abaFinanceira === "contas" && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
-                    <div className="flex gap-2"><button onClick={() => abrirNovaMovimentacao("saida")} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
-                  </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <div className="font-black text-amber-800">SS — Sem saldo</div>
+                  <p className="mt-1">Nenhuma receita, tarifa ou entrada financeira será lançada. O registro ficará em aberto apenas para controle e aparecerá como <b>SS</b> no histórico anual.</p>
                 </div>
               )}
 
-              {["fluxo", "entradas", "saidas", "aluguéis"].includes(abaFinanceira) && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-[#003d2b]">
-                        {abaFinanceira === "aluguéis"
-                          ? "Aluguéis recebidos"
-                          : abaFinanceira === "entradas"
-                            ? "Entradas financeiras"
-                            : abaFinanceira === "saidas"
-                              ? "Saídas financeiras"
-                              : "Livro de movimentações"}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {abaFinanceira === "aluguéis"
-                          ? "Registre e acompanhe os valores recebidos pelo aluguel dos espaços da Sociedade."
-                          : "Entradas, saídas e transferências ficam registradas para prestação de contas."}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          if (abaFinanceira === "aluguéis") {
-                            abrirNovaMovimentacao("entrada");
-                            setMovCategoria("Aluguel");
-                          } else {
-                            abrirNovaMovimentacao("saida");
-                          }
-                        }}
-                        className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
-                      >
-                        ＋ {abaFinanceira === "aluguéis" ? "Novo aluguel" : "Nova movimentação"}
-                      </button>
-                      {abaFinanceira === "fluxo" && (
-                        <button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
-                          ↔ Transferência
-                        </button>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="mb-5 rounded-2xl bg-[#f7faf8] p-4">
-                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              {tipoBaixaSelecionada === "pago" && (
+              <div className="rounded-xl border">
+                <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Contas de destino</div>
+                <div className="divide-y">
+                  {resumoBaixa.contas.map((conta) => (
+                    <div key={`${conta.nome}-${conta.banco || ""}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                       <div>
-                        <p className="font-bold text-[#003d2b]">Filtros do fluxo de caixa</p>
-                        <p className="text-xs text-gray-500">Consulte por período, banco e tipo de movimentação.</p>
+                        <p className="font-bold">{conta.nome}</p>
+                        {conta.banco && <p className="text-xs text-gray-500">{conta.banco}</p>}
                       </div>
-                      <button
-                        onClick={() => { setFluxoInicio(""); setFluxoFim(""); setFluxoConta(""); setFluxoTipo("todos"); setFluxoForma("todos"); }}
-                        className="rounded-lg border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]"
-                      >
-                        Limpar filtros
-                      </button>
+                      <div className="text-right">
+                        <p className="font-black text-[#005a3c]">{moeda(conta.valor)}</p>
+                        <p className="text-xs text-gray-500">{conta.quantidade} mensalidade(s)</p>
+                      </div>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <Campo label="Data inicial" type="date" value={fluxoInicio} onChange={setFluxoInicio} />
-                      <Campo label="Data final" type="date" value={fluxoFim} onChange={setFluxoFim} />
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Conta</label>
-                        <select value={fluxoConta} onChange={(e) => setFluxoConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="">Todas as contas</option>
-                          {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                        </select>
+                  ))}
+                </div>
+              </div>
+              )}
+
+              <div className="max-h-48 overflow-y-auto rounded-xl border">
+                <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Associados selecionados</div>
+                <div className="divide-y">
+                  {selecionadasBaixa.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-bold">
+                          {item.socio?.nome || socioPorId.get(String(item.socio_id))?.nome || "Associado"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {item.socio?.matricula || socioPorId.get(String(item.socio_id))?.matricula || "Sem matrícula"}
+                        </p>
                       </div>
+                      <span className="shrink-0 font-black">
+                        {moeda(Number(item.valor_base ?? item.valor ?? 0))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`${tipoBaixaSelecionada === "sem_saldo" ? "rounded-xl bg-amber-50 p-3 text-sm text-amber-800" : "rounded-xl bg-blue-50 p-3 text-sm text-blue-800"}`}>
+                {tipoBaixaSelecionada === "sem_saldo"
+                  ? "S.S significa Sem Saldo. Nenhuma entrada financeira será criada; a mensalidade continuará em aberto e ficará identificada como SS no histórico anual."
+                  : "A baixa registra a receita da mensalidade no Financeiro e, quando houver, a tarifa bancária separadamente. Mensalidades já pagas não entram nesta operação."}
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t bg-gray-50 p-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setAbrirConfirmacaoBaixa(false)}
+                className="rounded-xl border bg-white px-5 py-3 font-bold text-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!selecionadasBaixa.length || processandoBaixa}
+                onClick={() => void confirmarBaixaSelecionadas()}
+                className={`rounded-xl px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40 ${tipoBaixaSelecionada === "sem_saldo" ? "bg-amber-600" : "bg-[#005a3c]"}`}
+              >
+                {processandoBaixa
+                  ? "⏳ Processando..."
+                  : tipoBaixaSelecionada === "sem_saldo"
+                    ? "Confirmar S.S — Sem saldo"
+                    : "Confirmar baixa no Financeiro"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-black text-[#005a3c]">
+                  Configuração financeira
+                </h2>
+                <p className="text-sm text-gray-500">
+                  Valores e regras usados para calcular a cobrança.
+                </p>
+              </div>
+
+              <button onClick={() => setModal(false)}>
+                <X />
+              </button>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2 border-b pb-3">
+              <button
+                onClick={() => setAbaConfig("mensalidades")}
+                className={`rounded-xl px-4 py-2 font-bold ${
+                  abaConfig === "mensalidades"
+                    ? "bg-[#005a3c] text-white"
+                    : "border bg-white"
+                }`}
+              >
+                <CreditCard className="mr-2 inline h-4 w-4" />
+                Mensalidades
+              </button>
+
+              <button
+                onClick={() => setAbaConfig("tarifas")}
+                className={`rounded-xl px-4 py-2 font-bold ${
+                  abaConfig === "tarifas"
+                    ? "bg-[#005a3c] text-white"
+                    : "border bg-white"
+                }`}
+              >
+                <CreditCard className="mr-2 inline h-4 w-4" />
+                Tarifas
+              </button>
+
+              <button
+                onClick={() => setAbaConfig("atrasos")}
+                className={`rounded-xl px-4 py-2 font-bold ${
+                  abaConfig === "atrasos"
+                    ? "bg-[#005a3c] text-white"
+                    : "border bg-white"
+                }`}
+              >
+                <Percent className="mr-2 inline h-4 w-4" />
+                Multa, juros e desconto
+              </button>
+            </div>
+
+            {abaConfig === "mensalidades" && (
+              <div className="mt-5">
+                <div className="mb-4 rounded-xl bg-blue-50 p-4 text-sm text-blue-800">
+                  <b>Valor base:</b> é o valor que pertence à mensalidade da
+                  Sociedade. A tarifa bancária será calculada separadamente.
+                </div>
+
+                <div className="space-y-3">
+                  {configs.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex flex-col gap-3 rounded-xl border p-4 md:flex-row md:items-center md:justify-between"
+                    >
                       <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label>
-                        <select
-                          value={abaFinanceira === "entradas" ? "entrada" : abaFinanceira === "saidas" ? "saida" : fluxoTipo}
-                          disabled={abaFinanceira === "entradas" || abaFinanceira === "saidas"}
-                          onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)}
-                          className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 disabled:bg-gray-100"
+                        <div className="font-bold">{c.nome}</div>
+                        <div className="text-xs text-gray-500">
+                          {c.tipo_socio}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span className="font-black">{moeda(c.valor)}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEdit(c);
+                            setNovo({
+                              tipo_socio: c.tipo_socio,
+                              nome: c.nome,
+                              valor: String(c.valor),
+                              vigencia_inicio: c.vigencia_inicio,
+                            });
+                          }}
+                          className="rounded-lg border px-3 py-2 text-xs font-bold"
                         >
-                          <option value="todos">Todos</option>
-                          <option value="entrada">Entradas</option>
-                          <option value="saida">Saídas</option>
-                          <option value="transferencia">Transferências</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label>
-                        <select value={fluxoForma} onChange={(e) => setFluxoForma(e.target.value as typeof fluxoForma)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="todos">Todas</option>
-                          <option value="pix">PIX</option>
-                          <option value="debito_em_conta">Débito em conta</option>
-                          <option value="boleto">Boleto</option>
-                          <option value="dinheiro">Dinheiro</option>
-                          <option value="transferencia">Transferência</option>
-                          <option value="outro">Outro</option>
-                        </select>
+                          Editar
+                        </button>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="mb-5 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-green-100 bg-green-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Entradas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-green-700">{formatarMoeda(entradasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-red-100 bg-red-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Saídas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-red-700">{formatarMoeda(saidasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Transferências no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-blue-700">{formatarMoeda(transferenciasPeriodo)}</p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Data / hora</th>
-                          <th className="px-4 py-3">Associado</th>
-                          <th className="px-4 py-3">Registrado por</th>
-                          <th className="px-4 py-3">Conta</th>
-                          <th className="px-4 py-3">Descrição</th>
-                          <th className="px-4 py-3">Tipo</th>
-                          <th className="px-4 py-3">Valor</th>
-                          <th className="px-4 py-3">Conciliação</th>
-                          <th className="px-4 py-3">Comprovante</th>
-                          <th className="px-4 py-3">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {movimentosFluxo.map((m) => (
-                          <tr key={m.id} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-3 text-sm">
-                              <div className="font-semibold">{formatarData(m.data_movimentacao)}</div>
-                              <div className="text-xs text-gray-500">{formatarHora(m.created_at)}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              {(() => {
-                                const pessoa = pessoaDoMovimento(m);
-                                if (!pessoa) return <span className="text-gray-400">—</span>;
-                                return (
-                                  <div>
-                                    <div className="font-semibold">{pessoa.nome}</div>
-                                    <div className="text-xs text-gray-500">{pessoa.tipo === "dependente" ? "Dependente" : "Associado"}{pessoa.matricula ? ` • ${pessoa.matricula}` : ""}</div>
-                                    {pessoa.tipo === "dependente" && pessoa.responsavelNome ? <div className="text-xs text-gray-400">Resp.: {pessoa.responsavelNome}</div> : null}
-                                  </div>
-                                );
-                              })()}
-                            </td>
-                            <td className="px-4 py-3">
-                              {(() => {
-                                const usuario = usuarioDoMovimento(m);
-                                if (!usuario) return <span className="text-xs text-gray-400">Não identificado</span>;
-                                return (
-                                  <div>
-                                    <div className="font-semibold">{usuario.nome}</div>
-                                    {usuario.email ? <div className="text-xs text-gray-400">{usuario.email}</div> : null}
-                                  </div>
-                                );
-                              })()}
-                            </td>
-                            <td className="px-4 py-3 font-semibold">{contasPorId.get(m.conta_bancaria_id)?.nome || "—"}</td>
-                            <td className="px-4 py-3">
-                              <p className="font-semibold">{m.descricao}</p>
-                              <p className="text-xs text-gray-500">{m.categoria || "Sem categoria"}</p>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${m.tipo === "entrada" ? "bg-green-100 text-green-700" : m.tipo === "saida" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
-                                {m.tipo === "entrada" ? "Entrada" : m.tipo === "saida" ? "Saída" : "Transferência"}
-                              </span>
-                            </td>
-                            <td className={`px-4 py-3 font-bold ${m.tipo === "entrada" ? "text-green-700" : m.tipo === "saida" ? "text-red-700" : "text-blue-700"}`}>
-                              {m.tipo === "saida" ? "− " : m.tipo === "entrada" ? "+ " : "↔ "}{formatarMoeda(m.valor)}
-                            </td>
-                            <td className="px-4 py-3 text-sm">{m.conciliado ? "✅ Conferido" : "⏳ Pendente"}</td>
-                            <td className="px-4 py-3 text-sm">
-                              {m.comprovante_url ? (
-                                <button onClick={() => void abrirComprovante(m.comprovante_url)} className="font-bold text-[#005a3c] underline">Abrir</button>
-                              ) : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {estornosPorOrigem.has(m.id) ? (
-                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">↩ Estornado</span>
-                              ) : m.origem_tipo === "reserva" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarReserva(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
-                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar reserva"}
-                                </button>
-                              ) : m.origem_tipo === "manual" || m.origem_tipo === "transferencia" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => void estornarMovimento(m)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
-                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar"}
-                                </button>
-                              ) : String(m.origem_tipo || "").startsWith("estorno_") ? (
-                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">Estornado</span>
-                              ) : (
-                                <span className="text-xs text-gray-400">Módulo de origem</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                        {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
 
+                <div className="mt-5 rounded-xl border p-4">
+                  <h3 className="font-black">Adicionar novo tipo</h3>
 
-        </section>
-      </div>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void post({
+                        acao: "config_criar",
+                        ...novo,
+                        valor: Number(novo.valor || 0),
+                      }).then(() => {
+                        setNovo({
+                          tipo_socio: "",
+                          nome: "",
+                          valor: "0",
+                          vigencia_inicio: `${ano}-01-01`,
+                        });
+                      });
+                    }}
+                    className="mt-3 grid gap-3 md:grid-cols-2"
+                  >
+                    <input
+                      value={novo.nome}
+                      onChange={(e) =>
+                        setNovo({ ...novo, nome: e.target.value })
+                      }
+                      placeholder="Nome do tipo"
+                      className="rounded-xl border p-3"
+                    />
 
-      {mostrarContaModal && (
-        <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Campo label="Nome da conta" value={contaNome} onChange={setContaNome} />
-            <Campo label="Banco" value={contaBanco} onChange={setContaBanco} />
-            <Campo label="Agência" value={contaAgencia} onChange={setContaAgencia} />
-            <Campo label="Número da conta" value={contaNumero} onChange={setContaNumero} />
-            <Campo label="Saldo inicial" type="number" value={contaSaldoInicial} onChange={setContaSaldoInicial} />
-            <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoConta} onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoConta ? "Salvando..." : "Salvar conta"}</button></div>
+                    <input
+                      value={novo.tipo_socio}
+                      onChange={(e) =>
+                        setNovo({ ...novo, tipo_socio: e.target.value })
+                      }
+                      placeholder="Código interno"
+                      className="rounded-xl border p-3"
+                    />
+
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={novo.valor}
+                      onChange={(e) =>
+                        setNovo({ ...novo, valor: e.target.value })
+                      }
+                      placeholder="Valor"
+                      className="rounded-xl border p-3"
+                    />
+
+                    <input
+                      type="date"
+                      value={novo.vigencia_inicio}
+                      onChange={(e) =>
+                        setNovo({
+                          ...novo,
+                          vigencia_inicio: e.target.value,
+                        })
+                      }
+                      className="rounded-xl border p-3"
+                    />
+
+                    <button className="rounded-xl bg-[#005a3c] p-3 font-bold text-white md:col-span-2">
+                      Adicionar configuração
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {abaConfig === "tarifas" && (
+              <div className="mt-5">
+                <div className="mb-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+                  <b>Atenção:</b> a tarifa é cobrada do associado junto com a
+                  mensalidade, mas não deve ser contabilizada como receita da
+                  Sociedade.
+                </div>
+
+                <div className="space-y-3">
+                  {tiposPagamento.map((tipo) => {
+                    const atual =
+                      tarifas.find(
+                        (x) => x.tipo_pagamento === tipo.value
+                      ) || {
+                        tipo_pagamento: tipo.value,
+                        nome: tipo.label,
+                        valor_tarifa: 0,
+                        ativo: true,
+                      };
+
+                    return (
+                      <div
+                        key={tipo.value}
+                        className="grid gap-3 rounded-xl border p-4 md:grid-cols-[1fr_180px_110px]"
+                      >
+                        <div>
+                          <div className="font-bold">{tipo.label}</div>
+                          <div className="text-xs text-gray-500">
+                            Código: {tipo.value}
+                          </div>
+                        </div>
+
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={String(atual.valor_tarifa ?? 0)}
+                          onChange={(e) =>
+                            setTarifas((lista) => {
+                              const existe = lista.some(
+                                (x) => x.tipo_pagamento === tipo.value
+                              );
+
+                              if (existe) {
+                                return lista.map((x) =>
+                                  x.tipo_pagamento === tipo.value
+                                    ? {
+                                        ...x,
+                                        valor_tarifa: Number(
+                                          e.target.value || 0
+                                        ),
+                                      }
+                                    : x
+                                );
+                              }
+
+                              return [
+                                ...lista,
+                                {
+                                  ...atual,
+                                  valor_tarifa: Number(
+                                    e.target.value || 0
+                                  ),
+                                },
+                              ];
+                            })
+                          }
+                          className="rounded-xl border p-3"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => void salvarTarifa(atual)}
+                          className="rounded-xl bg-[#005a3c] px-3 py-2 font-bold text-white"
+                        >
+                          <Save className="mr-1 inline h-4 w-4" />
+                          Salvar
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {abaConfig === "atrasos" && (
+              <div className="mt-5 space-y-5">
+                <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
+                  Deixamos multa, juros e desconto zerados até você definir os
+                  valores oficiais. Depois eles poderão ser alterados pelo
+                  administrador.
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="rounded-xl border p-4">
+                    <span className="font-bold">Dias de tolerância</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={cobranca.dias_tolerancia}
+                      onChange={(e) =>
+                        setCobranca({
+                          ...cobranca,
+                          dias_tolerancia: Number(e.target.value || 0),
+                        })
+                      }
+                      className="mt-2 w-full rounded-xl border p-3"
+                    />
+                  </label>
+
+                  <label className="rounded-xl border p-4">
+                    <span className="font-bold">Multa</span>
+                    <div className="mt-2 flex gap-2">
+                      <select
+                        value={cobranca.multa_tipo}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            multa_tipo: e.target.value as Cobranca["multa_tipo"],
+                          })
+                        }
+                        className="rounded-xl border p-3"
+                      >
+                        <option value="percentual">%</option>
+                        <option value="valor">R$</option>
+                      </select>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={cobranca.multa_valor}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            multa_valor: Number(e.target.value || 0),
+                          })
+                        }
+                        className="w-full rounded-xl border p-3"
+                      />
+                    </div>
+                  </label>
+
+                  <label className="rounded-xl border p-4">
+                    <span className="font-bold">Juros</span>
+                    <div className="mt-2 flex gap-2">
+                      <select
+                        value={cobranca.juros_tipo}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            juros_tipo:
+                              e.target.value as Cobranca["juros_tipo"],
+                          })
+                        }
+                        className="rounded-xl border p-3"
+                      >
+                        <option value="percentual_dia">% ao dia</option>
+                        <option value="percentual_mes">% ao mês</option>
+                        <option value="valor_dia">R$ ao dia</option>
+                        <option value="valor_mes">R$ ao mês</option>
+                      </select>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={cobranca.juros_valor}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            juros_valor: Number(e.target.value || 0),
+                          })
+                        }
+                        className="w-full rounded-xl border p-3"
+                      />
+                    </div>
+                  </label>
+
+                  <label className="rounded-xl border p-4">
+                    <span className="font-bold">Desconto</span>
+                    <div className="mt-2 flex gap-2">
+                      <select
+                        value={cobranca.desconto_tipo}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            desconto_tipo:
+                              e.target.value as Cobranca["desconto_tipo"],
+                          })
+                        }
+                        className="rounded-xl border p-3"
+                      >
+                        <option value="percentual">%</option>
+                        <option value="valor">R$</option>
+                      </select>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={cobranca.desconto_valor}
+                        onChange={(e) =>
+                          setCobranca({
+                            ...cobranca,
+                            desconto_valor: Number(e.target.value || 0),
+                          })
+                        }
+                        className="w-full rounded-xl border p-3"
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={salvandoConfig}
+                    onClick={() => void salvarCobranca()}
+                    className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
+                  >
+                    <Save className="mr-2 inline h-4 w-4" />
+                    {salvandoConfig ? "Salvando..." : "Salvar regras"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {edit && abaConfig === "mensalidades" && (
+              <div className="mt-5 rounded-xl border bg-gray-50 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-black">Editando configuração</h3>
+                  <button
+                    type="button"
+                    onClick={() => setEdit(null)}
+                    className="text-sm font-bold"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+
+                    void post({
+                      acao: "config_editar",
+                      id: edit.id,
+                      ...novo,
+                      valor: Number(novo.valor || 0),
+                    }).then(() => setEdit(null));
+                  }}
+                  className="grid gap-3 md:grid-cols-2"
+                >
+                  <input
+                    value={novo.nome}
+                    onChange={(e) =>
+                      setNovo({ ...novo, nome: e.target.value })
+                    }
+                    placeholder="Nome do tipo"
+                    className="rounded-xl border p-3"
+                  />
+
+                  <input
+                    value={novo.tipo_socio}
+                    onChange={(e) =>
+                      setNovo({ ...novo, tipo_socio: e.target.value })
+                    }
+                    placeholder="Código interno"
+                    className="rounded-xl border p-3"
+                  />
+
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={novo.valor}
+                    onChange={(e) =>
+                      setNovo({ ...novo, valor: e.target.value })
+                    }
+                    placeholder="Valor"
+                    className="rounded-xl border p-3"
+                  />
+
+                  <input
+                    type="date"
+                    value={novo.vigencia_inicio}
+                    onChange={(e) =>
+                      setNovo({
+                        ...novo,
+                        vigencia_inicio: e.target.value,
+                      })
+                    }
+                    className="rounded-xl border p-3"
+                  />
+
+                  <button className="rounded-xl bg-[#005a3c] p-3 font-bold text-white md:col-span-2">
+                    Salvar alterações
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
-        </Modal>
+        </div>
       )}
-
-      {contaConferindo && (
-        <Modal titulo={`Conferir saldo — ${contaConferindo.nome}`} fechar={() => setContaConferindo(null)}>
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-4">
-              <p className="text-sm text-gray-500">Saldo calculado pelo sistema</p>
-              <p className="mt-1 text-3xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(contaConferindo))}</p>
-              <p className="mt-1 text-xs text-gray-500">Saldo de abertura + entradas − saídas + transferências.</p>
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
-              <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">A conferência fica registrada separadamente e não cria entrada nem saída no caixa.</p>
-            </div>
-            <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação</label>
-              <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
-            </div>
-            <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial e as movimentações não serão alterados. A diferença ficará registrada apenas no histórico de conferência bancária.
-            </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
-              <button disabled={salvandoConferencia} onClick={() => void salvarConferenciaSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConferencia ? "Salvando..." : "Conferir e salvar saldo"}</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarMovimentoModal && (
-        <Modal titulo="Nova movimentação financeira" fechar={() => setMostrarMovimentoModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label><select value={movTipo} onChange={(e)=>setMovTipo(e.target.value as "entrada"|"saida")} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta bancária</label><select value={movConta} onChange={(e)=>setMovConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome} — {c.banco || ""}</option>)}</select></div>
-            <Campo label="Categoria" value={movCategoria} onChange={setMovCategoria} />
-            <Campo label="Descrição" value={movDescricao} onChange={setMovDescricao} />
-            <Campo label="Valor" type="number" value={movValor} onChange={setMovValor} />
-            <Campo label="Data" type="date" value={movData} onChange={setMovData} />
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label><select value={movForma} onChange={(e)=>setMovForma(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3">{FORMAS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label><input type="file" accept="image/*,.pdf" onChange={(e)=>setMovArquivo(e.target.files?.[0]||null)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm" /></div>
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={movObservacoes} onChange={(e)=>setMovObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarMovimentoModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoMovimento} onClick={()=>void salvarMovimentoFinanceiro()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoMovimento ? "Registrando..." : "Registrar movimentação"}</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarTransferenciaModal && (
-        <Modal titulo="Transferência entre contas" fechar={() => setMostrarTransferenciaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de origem</label><select value={transOrigem} onChange={(e)=>setTransOrigem(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de destino</label><select value={transDestino} onChange={(e)=>setTransDestino(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <Campo label="Valor" type="number" value={transValor} onChange={setTransValor} />
-            <Campo label="Data" type="date" value={transData} onChange={setTransData} />
-            <Campo label="Descrição" value={transDescricao} onChange={setTransDescricao} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoTransferencia} onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoTransferencia ? "Transferindo..." : "Transferir"}</button></div>
-          </div>
-        </Modal>
-      )}
-
-
-    </main>
+    </div>
   );
 }
