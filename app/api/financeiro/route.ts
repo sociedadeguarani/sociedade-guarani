@@ -42,11 +42,181 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST() {
-  return NextResponse.json(
-    { error: "Os lançamentos financeiros são realizados pela tela autenticada do Financeiro." },
-    { status: 405 }
-  );
+export const dynamic = "force-dynamic";
+
+const TIPOS_MOVIMENTO = new Set(["entrada", "saida"]);
+const FORMAS_PAGAMENTO = new Set(["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]);
+const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const BUCKET_COMPROVANTES = "comprovantes-financeiro";
+
+async function garantirBucketComprovantes(db: ReturnType<typeof getServiceClient>) {
+  const atual = await db.storage.getBucket(BUCKET_COMPROVANTES);
+  if (!atual.error) return;
+  const criado = await db.storage.createBucket(BUCKET_COMPROVANTES, {
+    public: true,
+    fileSizeLimit: "8MB",
+    allowedMimeTypes: [...TIPOS_COMPROVANTE],
+  });
+  if (criado.error && !/already exists/i.test(criado.error.message)) {
+    throw new Error(criado.error.message);
+  }
+}
+
+export async function POST(request: Request) {
+  const auth = await requireRoles(request, ["administrador"]);
+  if ("response" in auth) return auth.response;
+
+  try {
+    const db = getServiceClient();
+    const contentType = request.headers.get("content-type") || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const acao = String(form.get("acao") || "").trim().toLowerCase();
+      if (acao !== "salvar_movimento") {
+        return NextResponse.json({ error: "Ação financeira inválida." }, { status: 400 });
+      }
+
+      const contaId = String(form.get("conta_bancaria_id") || "").trim();
+      const descricao = String(form.get("descricao") || "").trim();
+      const tipo = String(form.get("tipo") || "").trim().toLowerCase();
+      const categoria = String(form.get("categoria") || "").trim();
+      const forma = String(form.get("forma_pagamento") || "").trim().toLowerCase();
+      const dataMovimentacao = String(form.get("data_movimentacao") || "").trim();
+      const observacoes = String(form.get("observacoes") || "").trim();
+      const valor = Number(String(form.get("valor") || "0").replace(",", "."));
+      const arquivo = form.get("arquivo");
+
+      if (!contaId || !descricao || !TIPOS_MOVIMENTO.has(tipo) || !Number.isFinite(valor) || valor <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(dataMovimentacao)) {
+        return NextResponse.json({ error: "Informe conta, tipo, descrição, valor e data válidos." }, { status: 400 });
+      }
+      if (forma && !FORMAS_PAGAMENTO.has(forma)) {
+        return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
+      }
+
+      const { data: conta, error: contaError } = await db
+        .from("contas_bancarias")
+        .select("id,ativo")
+        .eq("id", contaId)
+        .maybeSingle();
+      if (contaError) throw contaError;
+      if (!conta || conta.ativo !== true) {
+        return NextResponse.json({ error: "Conta bancária não encontrada ou inativa." }, { status: 400 });
+      }
+
+      let comprovantePath: string | null = null;
+      if (arquivo instanceof File && arquivo.size > 0) {
+        if (!TIPOS_COMPROVANTE.has(arquivo.type) || arquivo.size > 8 * 1024 * 1024) {
+          return NextResponse.json({ error: "Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB." }, { status: 400 });
+        }
+        await garantirBucketComprovantes(db);
+        const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
+        const caminho = `movimentos/${crypto.randomUUID()}.${ext}`;
+        const upload = await db.storage.from(BUCKET_COMPROVANTES).upload(caminho, new Uint8Array(await arquivo.arrayBuffer()), {
+          contentType: arquivo.type,
+          upsert: false,
+        });
+        if (upload.error) throw upload.error;
+        comprovantePath = caminho;
+      }
+
+      const { data, error } = await db
+        .from("movimentacoes_financeiras")
+        .insert({
+          created_by: auth.usuario.id,
+          conta_bancaria_id: contaId,
+          conta_destino_id: null,
+          grupo_transferencia: null,
+          tipo,
+          categoria: categoria || null,
+          descricao,
+          valor: Number(valor.toFixed(2)),
+          data_movimentacao: dataMovimentacao,
+          forma_pagamento: forma || null,
+          origem_tipo: "manual",
+          origem_id: null,
+          socio_id: null,
+          dependente_id: null,
+          comprovante_url: comprovantePath,
+          conciliado: false,
+          data_conciliacao: null,
+          observacoes: observacoes || null,
+        })
+        .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,created_by,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
+        .single();
+      if (error) {
+        if (comprovantePath) await db.storage.from(BUCKET_COMPROVANTES).remove([comprovantePath]).catch(() => undefined);
+        throw error;
+      }
+      return NextResponse.json({ ok: true, movimento: data });
+    }
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const acao = String(body.acao || "").trim().toLowerCase();
+
+    if (acao === "salvar_conta") {
+      const id = String(body.id || "").trim();
+      const nome = String(body.nome || "").trim();
+      const banco = String(body.banco || "").trim() || null;
+      const agencia = String(body.agencia || "").trim() || null;
+      const conta = String(body.conta || "").trim() || null;
+      const observacoes = String(body.observacoes || "").trim() || null;
+      const saldoInicial = Number(String(body.saldo_inicial ?? "0").replace(",", "."));
+      const dataSaldoInicial = String(body.data_saldo_inicial || "").trim() || null;
+      if (!nome || !Number.isFinite(saldoInicial) || saldoInicial < 0) {
+        return NextResponse.json({ error: "Informe nome e saldo inicial válidos." }, { status: 400 });
+      }
+      const payload = { nome, banco, agencia, conta, saldo_inicial: Number(saldoInicial.toFixed(2)), data_saldo_inicial: dataSaldoInicial, ativo: true, observacoes };
+      const result = id
+        ? await db.from("contas_bancarias").update(payload).eq("id", id).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single()
+        : await db.from("contas_bancarias").insert(payload).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single();
+      if (result.error) throw result.error;
+      return NextResponse.json({ ok: true, conta: result.data });
+    }
+
+    if (acao === "conferir_saldo") {
+      const contaId = String(body.conta_bancaria_id || "").trim();
+      const saldoBanco = Number(String(body.saldo_banco ?? "").replace(",", "."));
+      const data = String(body.data_conferencia || "").trim();
+      const observacao = String(body.observacao || "Conferência do saldo bancário").trim().slice(0, 500);
+      if (!contaId || !Number.isFinite(saldoBanco) || saldoBanco < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+        return NextResponse.json({ error: "Dados de conferência inválidos." }, { status: 400 });
+      }
+      const { data: conta, error: contaError } = await db.from("contas_bancarias").select("id,ativo,saldo_inicial,data_saldo_inicial").eq("id", contaId).maybeSingle();
+      if (contaError) throw contaError;
+      if (!conta || conta.ativo !== true) return NextResponse.json({ error: "Conta bancária não encontrada ou inativa." }, { status: 404 });
+      const { data: movimentos, error: movimentosError } = await db.from("movimentacoes_financeiras").select("tipo,valor").eq("conta_bancaria_id", contaId);
+      if (movimentosError) throw movimentosError;
+      const saldoSistema = Number((Number(conta.saldo_inicial || 0) + (movimentos || []).reduce((sum, m) => sum + (String(m.tipo) === "entrada" ? Number(m.valor || 0) : String(m.tipo) === "saida" ? -Number(m.valor || 0) : 0), 0)).toFixed(2));
+      const diferenca = Number((saldoBanco - saldoSistema).toFixed(2));
+      const { data: conferencia, error } = await db.from("conferencias_bancarias").insert({ conta_bancaria_id: contaId, saldo_sistema: saldoSistema, saldo_banco: Number(saldoBanco.toFixed(2)), diferenca, data_conferencia: data, observacao: observacao || "Conferência do saldo bancário" }).select().single();
+      if (error) throw error;
+      return NextResponse.json({ ok: true, conferencia });
+    }
+
+    if (acao === "transferencia") {
+      const origemId = String(body.conta_origem_id || "").trim();
+      const destinoId = String(body.conta_destino_id || "").trim();
+      const descricao = String(body.descricao || "Transferência entre contas").trim();
+      const data = String(body.data_movimentacao || "").trim();
+      const observacoes = String(body.observacoes || "").trim() || null;
+      const valor = Number(String(body.valor || "0").replace(",", "."));
+      if (!origemId || !destinoId || origemId === destinoId || !Number.isFinite(valor) || valor <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+        return NextResponse.json({ error: "Informe contas diferentes, valor e data válidos." }, { status: 400 });
+      }
+      const { data: contas, error: contasError } = await db.from("contas_bancarias").select("id,ativo").in("id", [origemId, destinoId]);
+      if (contasError) throw contasError;
+      if (!contas || contas.length !== 2 || contas.some((c) => c.ativo !== true)) return NextResponse.json({ error: "As duas contas precisam existir e estar ativas." }, { status: 400 });
+      const grupo = crypto.randomUUID();
+      const { data: movimento, error } = await db.from("movimentacoes_financeiras").insert({ created_by: auth.usuario.id, conta_bancaria_id: origemId, conta_destino_id: destinoId, grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao, valor: Number(valor.toFixed(2)), data_movimentacao: data, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes }).select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,created_by,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes").single();
+      if (error) throw error;
+      return NextResponse.json({ ok: true, movimento });
+    }
+
+    return NextResponse.json({ error: "Ação financeira inválida." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível registrar a operação financeira." }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
