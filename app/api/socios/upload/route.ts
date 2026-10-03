@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const acesso = await usuarioAutenticado(request);
     if ("error" in acesso) return NextResponse.json({ error: acesso.error }, { status: acesso.status });
-    if (!["administrador", "administrador_master", "funcionario"].includes(acesso.perfil)) return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
+    if (!["administrador", "administrador_master"].includes(acesso.perfil)) return NextResponse.json({ error: "Somente a administração pode alterar fotos de associados." }, { status: 403 });
 
     const form = await request.formData();
     const socioId = String(form.get("socio_id") || "").trim();
