@@ -312,8 +312,12 @@ export async function PATCH(request: Request) {
     if (existenteError) throw existenteError;
     if (existente?.length) return NextResponse.json({ error: "Este lançamento já possui um estorno registrado." }, { status: 409 });
 
-    const agora = new Date().toISOString().slice(0, 10);
+    const agoraData = new Date().toISOString().slice(0, 10);
+    const agoraInstante = new Date().toISOString();
     const valor = Number(original.valor || 0);
+    const motivoEstorno = String(body.motivo || "Não informado").trim().slice(0, 500) || "Não informado";
+    const nomeEstorno = auth.usuario.nome_exibicao || "Administrador";
+    const auditoriaEstorno = `[ESTORNO_FINANCEIRO] ${agoraInstante} | por: ${nomeEstorno} | usuario_id: ${auth.usuario.id} | motivo: ${motivoEstorno}`;
     if (!(valor > 0)) return NextResponse.json({ error: "O lançamento não possui um valor válido para estorno." }, { status: 400 });
 
     const base = {
@@ -322,7 +326,7 @@ export async function PATCH(request: Request) {
       categoria: "Estorno",
       descricao: `Estorno: ${String(original.descricao || "Lançamento financeiro")}`,
       valor,
-      data_movimentacao: agora,
+      data_movimentacao: agoraData,
       forma_pagamento: original.forma_pagamento || null,
       origem_tipo: "estorno_movimento",
       origem_id: id,
@@ -332,7 +336,7 @@ export async function PATCH(request: Request) {
       conciliado: false,
       data_conciliacao: null,
       created_by: auth.usuario.id,
-      observacoes: `Estorno do lançamento ${id} registrado por ${auth.usuario.nome_exibicao || "Administrador"}. Motivo: ${String(body.motivo || "Não informado").trim().slice(0, 500)}.`,
+      observacoes: auditoriaEstorno,
     };
 
     if (String(original.tipo) === "transferencia") {
@@ -353,7 +357,7 @@ export async function PATCH(request: Request) {
         .select("*")
         .single();
       if (error) throw error;
-      return NextResponse.json({ ok: true, movimento: data, message: "Transferência estornada com sucesso." });
+      return NextResponse.json({ ok: true, movimento: data, estornado_por: { nome: nomeEstorno, usuario_id: auth.usuario.id, instante: agoraInstante, motivo: motivoEstorno }, message: "Transferência estornada com sucesso." });
     }
 
     const tipo = String(original.tipo) === "entrada" ? "saida" : "entrada";
@@ -364,7 +368,7 @@ export async function PATCH(request: Request) {
       .single();
     if (error) throw error;
 
-    return NextResponse.json({ ok: true, movimento: data, message: "Estorno registrado com sucesso. O histórico original foi preservado." });
+    return NextResponse.json({ ok: true, movimento: data, estornado_por: { nome: nomeEstorno, usuario_id: auth.usuario.id, instante: agoraInstante, motivo: motivoEstorno }, message: "Estorno registrado com sucesso. O histórico original foi preservado." });
   } catch (error) {
     return NextResponse.json({ error: `Não foi possível estornar o lançamento: ${error instanceof Error ? error.message : String(error)}` }, { status: 500 });
   }
