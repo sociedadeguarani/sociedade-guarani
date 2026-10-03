@@ -83,6 +83,7 @@ type MovimentoFinanceiro = {
   valor: number;
   data_movimentacao: string;
   created_at: string | null;
+  created_by: string | null;
   forma_pagamento: string | null;
   origem_tipo: string | null;
   origem_id: string | null;
@@ -165,6 +166,7 @@ export default function FinanceiroPage() {
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
   const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
+  const [usuariosMovimentos, setUsuariosMovimentos] = useState<Map<string, { nome: string; email: string | null }>>(new Map());
   const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
@@ -328,68 +330,64 @@ export default function FinanceiroPage() {
   const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
   const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
 
+  async function apiFinanceiro(input: string, init: RequestInit = {}) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("Sessão expirada.");
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+    const response = await fetch(input, { ...init, headers, cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result?.error || "Operação financeira não concluída.");
+    return result;
+  }
+
   async function carregarFinanceiro() {
     setCarregandoFinanceiro(true);
     try {
-      const [contasResult, movimentosResult] = await Promise.all([
-        supabase
-          .from("contas_bancarias")
-          .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
-          .eq("ativo", true)
-          .order("nome", { ascending: true }),
-        supabase
-          .from("movimentacoes_financeiras")
-          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
-          .order("data_movimentacao", { ascending: false })
-          .order("created_at", { ascending: false }),
-      ]);
-
-      if (contasResult.error) throw contasResult.error;
-      if (movimentosResult.error) throw movimentosResult.error;
-
-      const movimentos = (movimentosResult.data || []) as MovimentoFinanceiro[];
-      setContasBancarias((contasResult.data || []) as ContaBancaria[]);
+      const result = await apiFinanceiro("/api/financeiro", { method: "GET" });
+      const movimentos = (result.movimentos || []) as MovimentoFinanceiro[];
+      const contas = (result.contas || []) as ContaBancaria[];
+      setContasBancarias(contas);
       setMovimentosFinanceiros(movimentos);
 
-      // Busca somente as pessoas que aparecem nos movimentos carregados.
-      // Isso evita trazer os 300+ associados/centenas de dependentes só para exibir o nome.
       const socioIds = Array.from(new Set(movimentos.map((m) => m.socio_id).filter(Boolean))) as string[];
       const dependenteIds = Array.from(new Set(movimentos.map((m) => m.dependente_id).filter(Boolean))) as string[];
+      const usuarioIds = Array.from(new Set(movimentos.map((m) => m.created_by).filter(Boolean))) as string[];
 
-      if (!socioIds.length && !dependenteIds.length) {
+      if (!socioIds.length && !dependenteIds.length && !usuarioIds.length) {
         setPessoasMovimentos(new Map());
-      } else {
-        const [sociosRes, dependentesRes] = await Promise.all([
-          socioIds.length
-            ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds)
-            : Promise.resolve({ data: [], error: null }),
-          dependenteIds.length
-            ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
-        if (sociosRes.error) throw sociosRes.error;
-        if (dependentesRes.error) throw dependentesRes.error;
-
-        const socioRows = (sociosRes.data || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
-        const dependenteRows = (dependentesRes.data || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
-        const socioMap = new Map(socioRows.map((s) => [s.id, s]));
-        const mapa = new Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>();
-
-        for (const s of socioRows) {
-          mapa.set(`socio:${s.id}`, { nome: s.nome, matricula: s.matricula, tipo: "socio" });
-        }
-        for (const d of dependenteRows) {
-          const responsavel = d.socio_id ? socioMap.get(d.socio_id) : null;
-          mapa.set(`dependente:${d.id}`, { nome: d.nome, matricula: responsavel?.matricula ?? null, tipo: "dependente", responsavelNome: responsavel?.nome ?? null });
-        }
-        setPessoasMovimentos(mapa);
+        setUsuariosMovimentos(new Map());
+        return;
       }
+
+      const [{ data: socios, error: sociosError }, { data: dependentes, error: dependentesError }, { data: usuarios, error: usuariosError }] = await Promise.all([
+        socioIds.length ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds) : Promise.resolve({ data: [], error: null }),
+        dependenteIds.length ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds) : Promise.resolve({ data: [], error: null }),
+        usuarioIds.length ? supabase.from("usuarios_sistema").select("id,nome_exibicao,email").in("id", usuarioIds) : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (sociosError) throw sociosError;
+      if (dependentesError) throw dependentesError;
+      if (usuariosError) throw usuariosError;
+
+      const socioRows = (socios || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
+      const dependenteRows = (dependentes || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
+      const socioMap = new Map(socioRows.map((socio) => [socio.id, socio]));
+      const mapa = new Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>();
+      for (const socio of socioRows) mapa.set(`socio:${socio.id}`, { nome: socio.nome, matricula: socio.matricula, tipo: "socio" });
+      for (const dependente of dependenteRows) {
+        const responsavel = dependente.socio_id ? socioMap.get(dependente.socio_id) : null;
+        mapa.set(`dependente:${dependente.id}`, { nome: dependente.nome, matricula: responsavel?.matricula ?? null, tipo: "dependente", responsavelNome: responsavel?.nome ?? null });
+      }
+      setPessoasMovimentos(mapa);
+      const usuarioMap = new Map<string, { nome: string; email: string | null }>();
+      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null; email: string | null }>) {
+        usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: usuario.email || null });
+      }
+      setUsuariosMovimentos(usuarioMap);
     } catch (error) {
-      setMensagem(
-        `Não foi possível carregar o Financeiro. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
-      );
+      setMensagem(`Não foi possível carregar o Financeiro. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
       setCarregandoFinanceiro(false);
     }
@@ -483,6 +481,11 @@ export default function FinanceiroPage() {
     if (movimento.dependente_id) return pessoasMovimentos.get(`dependente:${movimento.dependente_id}`) || null;
     if (movimento.socio_id) return pessoasMovimentos.get(`socio:${movimento.socio_id}`) || null;
     return null;
+  };
+
+  const usuarioDoMovimento = (movimento: MovimentoFinanceiro) => {
+    if (!movimento.created_by) return null;
+    return usuariosMovimentos.get(movimento.created_by) || null;
   };
 
   const saldoTotalBancos = useMemo(
@@ -632,17 +635,30 @@ export default function FinanceiroPage() {
     if (salvandoConta) return;
     if (!contaNome.trim()) { setMensagem("Informe o nome da conta."); return; }
     const saldoInicial = Number(String(contaSaldoInicial || "0").replace(",", "."));
-    if (!Number.isFinite(saldoInicial)) { setMensagem("Informe um saldo inicial válido."); return; }
-    const payload = { nome: contaNome.trim(), banco: contaBanco || null, agencia: contaAgencia || null, conta: contaNumero || null, saldo_inicial: saldoInicial, data_saldo_inicial: contaDataSaldo || null, ativo: true, observacoes: contaObservacoes || null };
+    if (!Number.isFinite(saldoInicial) || saldoInicial < 0) { setMensagem("Informe um saldo inicial válido."); return; }
     setSalvandoConta(true);
     try {
-      const result = contaEditando
-        ? await supabase.from("contas_bancarias").update(payload).eq("id", contaEditando.id).select("*").single()
-        : await supabase.from("contas_bancarias").insert(payload).select("*").single();
-      if (result.error) throw result.error;
-      if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? result.data as ContaBancaria : c));
-      else setContasBancarias((lista) => [...lista, result.data as ContaBancaria].sort((a,b)=>a.nome.localeCompare(b.nome)));
-      setMostrarContaModal(false); setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes(""); setMensagem("Conta bancária salva com sucesso.");
+      const result = await apiFinanceiro("/api/financeiro", {
+        method: "POST",
+        body: JSON.stringify({
+          acao: "salvar_conta",
+          id: contaEditando?.id || null,
+          nome: contaNome.trim(),
+          banco: contaBanco,
+          agencia: contaAgencia,
+          conta: contaNumero,
+          saldo_inicial: saldoInicial,
+          data_saldo_inicial: contaDataSaldo || null,
+          observacoes: contaObservacoes,
+        }),
+      });
+      const conta = result.conta as ContaBancaria;
+      if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? conta : c));
+      else setContasBancarias((lista) => [...lista, conta].sort((a, b) => a.nome.localeCompare(b.nome)));
+      setMostrarContaModal(false);
+      setContaEditando(null);
+      setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes("");
+      setMensagem("Conta bancária salva com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível salvar a conta. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
@@ -662,46 +678,27 @@ export default function FinanceiroPage() {
 
   async function salvarConferenciaSaldo() {
     if (!contaConferindo) return;
-
     const saldoInformado = Number(String(saldoConferido).replace(",", "."));
-    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) {
-      setMensagem("Informe um saldo bancário válido.");
-      return;
-    }
-
-    const saldoAtual = saldoConta(contaConferindo);
-    const diferenca = Number((saldoInformado - saldoAtual).toFixed(2));
-
+    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) { setMensagem("Informe um saldo bancário válido."); return; }
     setSalvandoConferencia(true);
-
     try {
-      const { error } = await supabase
-        .from("conferencias_bancarias")
-        .insert({
+      const result = await apiFinanceiro("/api/financeiro", {
+        method: "POST",
+        body: JSON.stringify({
+          acao: "conferir_saldo",
           conta_bancaria_id: contaConferindo.id,
-          saldo_sistema: saldoAtual,
           saldo_banco: saldoInformado,
-          diferenca,
           data_conferencia: dataConferencia,
-          observacao:
-            observacaoConferencia ||
-            "Conferência do saldo bancário",
-        });
-
-      if (error) throw error;
-
-      setMensagem(
-        diferenca === 0
-          ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
-          : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`
-      );
+          observacao: observacaoConferencia || "Conferência do saldo bancário",
+        }),
+      });
+      const diferenca = Number(result.conferencia?.diferenca || 0);
+      setMensagem(diferenca === 0
+        ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
+        : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`);
       setContaConferindo(null);
     } catch (error) {
-      setMensagem(
-        `Não foi possível registrar a conferência. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
-      );
+      setMensagem(`Não foi possível registrar a conferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
       setSalvandoConferencia(false);
     }
@@ -709,17 +706,27 @@ export default function FinanceiroPage() {
 
   async function salvarMovimentoFinanceiro() {
     if (salvandoMovimento) return;
-    if (!movConta || !movDescricao.trim() || Number(String(movValor || "0").replace(",", ".")) <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
-    const valor = Number(String(movValor).replace(",", "."));
-    if (!Number.isFinite(valor) || valor <= 0) { setMensagem("Informe um valor válido."); return; }
+    const valor = Number(String(movValor || "0").replace(",", "."));
+    if (!movConta || !movDescricao.trim() || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
     setSalvandoMovimento(true);
     try {
-      let comprovante: string | null = null;
-      if (movArquivo) { const ext = movArquivo.name.split(".").pop()?.toLowerCase() || "bin"; const caminho = `movimentos/${Date.now()}-${movArquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; const up = await supabase.storage.from("comprovantes-financeiro").upload(caminho, movArquivo, { upsert: true, contentType: movArquivo.type || "application/octet-stream" }); if (up.error) throw up.error; comprovante = caminho; }
-      const payload = { conta_bancaria_id: movConta, conta_destino_id: null, grupo_transferencia: null, tipo: movTipo, categoria: movCategoria || null, descricao: movDescricao.trim(), valor, data_movimentacao: movData, forma_pagamento: movForma || null, origem_tipo: "manual", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: comprovante, conciliado: false, data_conciliacao: null, observacoes: movObservacoes || null };
-      const { data, error } = await supabase.from("movimentacoes_financeiras").insert(payload).select("*").single();
-      if (error) throw error;
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarMovimentoModal(false); setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null); setMensagem("Movimentação registrada com sucesso.");
+      const form = new FormData();
+      form.set("acao", "salvar_movimento");
+      form.set("conta_bancaria_id", movConta);
+      form.set("tipo", movTipo);
+      form.set("categoria", movCategoria || "");
+      form.set("descricao", movDescricao.trim());
+      form.set("valor", String(valor));
+      form.set("data_movimentacao", movData);
+      form.set("forma_pagamento", movForma || "");
+      form.set("observacoes", movObservacoes || "");
+      if (movArquivo) form.set("arquivo", movArquivo);
+      const result = await apiFinanceiro("/api/financeiro", { method: "POST", body: form });
+      const movimento = result.movimento as MovimentoFinanceiro;
+      setMovimentosFinanceiros((lista) => [movimento, ...lista]);
+      setMostrarMovimentoModal(false);
+      setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null);
+      setMensagem("Movimentação registrada com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível registrar a movimentação. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
@@ -733,11 +740,23 @@ export default function FinanceiroPage() {
     if (!transOrigem || !transDestino || transOrigem === transDestino || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
     setSalvandoTransferencia(true);
     try {
-      const grupo = crypto.randomUUID();
-      const base = { grupo_transferencia: grupo, tipo: "transferencia", categoria: "Transferência interna", descricao: transDescricao || "Transferência entre contas", valor, data_movimentacao: transData, forma_pagamento: "transferencia", origem_tipo: "transferencia", origem_id: null, socio_id: null, dependente_id: null, comprovante_url: null, conciliado: false, data_conciliacao: null, observacoes: transObservacoes || null };
-      const { data, error } = await supabase.from("movimentacoes_financeiras").insert({ ...base, conta_bancaria_id: transOrigem, conta_destino_id: transDestino }).select("*").single();
-      if (error) throw error;
-      setMovimentosFinanceiros((lista) => [data as MovimentoFinanceiro, ...lista]); setMostrarTransferenciaModal(false); setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes(""); setMensagem("Transferência registrada com sucesso.");
+      const result = await apiFinanceiro("/api/financeiro", {
+        method: "POST",
+        body: JSON.stringify({
+          acao: "transferencia",
+          conta_origem_id: transOrigem,
+          conta_destino_id: transDestino,
+          valor,
+          data_movimentacao: transData,
+          descricao: transDescricao || "Transferência entre contas",
+          observacoes: transObservacoes || null,
+        }),
+      });
+      const movimento = result.movimento as MovimentoFinanceiro;
+      setMovimentosFinanceiros((lista) => [movimento, ...lista]);
+      setMostrarTransferenciaModal(false);
+      setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes("");
+      setMensagem("Transferência registrada com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível registrar a transferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
@@ -1145,6 +1164,7 @@ export default function FinanceiroPage() {
                         <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                           <th className="px-4 py-3">Data / hora</th>
                           <th className="px-4 py-3">Associado</th>
+                          <th className="px-4 py-3">Registrado por</th>
                           <th className="px-4 py-3">Conta</th>
                           <th className="px-4 py-3">Descrição</th>
                           <th className="px-4 py-3">Tipo</th>
@@ -1170,6 +1190,18 @@ export default function FinanceiroPage() {
                                     <div className="font-semibold">{pessoa.nome}</div>
                                     <div className="text-xs text-gray-500">{pessoa.tipo === "dependente" ? "Dependente" : "Associado"}{pessoa.matricula ? ` • ${pessoa.matricula}` : ""}</div>
                                     {pessoa.tipo === "dependente" && pessoa.responsavelNome ? <div className="text-xs text-gray-400">Resp.: {pessoa.responsavelNome}</div> : null}
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const usuario = usuarioDoMovimento(m);
+                                if (!usuario) return <span className="text-xs text-gray-400">Não identificado</span>;
+                                return (
+                                  <div>
+                                    <div className="font-semibold">{usuario.nome}</div>
+                                    {usuario.email ? <div className="text-xs text-gray-400">{usuario.email}</div> : null}
                                   </div>
                                 );
                               })()}
@@ -1213,7 +1245,7 @@ export default function FinanceiroPage() {
                           </tr>
                         ))}
                         {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
+                          <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
                         )}
                       </tbody>
                     </table>
