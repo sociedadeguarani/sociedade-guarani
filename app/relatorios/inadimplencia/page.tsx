@@ -47,13 +47,6 @@ function moeda(valor: number | string | null | undefined) {
   });
 }
 
-function dataBR(valor: string | null | undefined) {
-  if (!valor) return "—";
-  const partes = valor.slice(0, 10).split("-");
-  if (partes.length !== 3) return valor;
-  return `${partes[2]}/${partes[1]}/${partes[0]}`;
-}
-
 function competenciaBR(valor: string | null | undefined) {
   if (!valor) return "—";
   const partes = valor.slice(0, 10).split("-");
