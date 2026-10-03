@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { X } from "lucide-react";
 
@@ -97,6 +97,7 @@ export default function RegistrarPagamentoMensalidade({
   const [observacoes, setObservacoes] = useState("");
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const salvandoRef = useRef(false);
 
   const total = useMemo(
     () =>
@@ -111,6 +112,11 @@ export default function RegistrarPagamentoMensalidade({
   const registroAtual = registro;
 
   async function confirmarPagamento() {
+    // Guard imperativo: impede dois cliques antes mesmo de o React
+    // concluir a atualização do estado. A API também possui uma
+    // trava condicional para cobrir requisições simultâneas.
+    if (salvandoRef.current) return;
+    salvandoRef.current = true;
     if (salvando) return;
 
     if (!contaId) {
@@ -178,6 +184,7 @@ export default function RegistrarPagamentoMensalidade({
           : "Não foi possível registrar o pagamento."
       );
     } finally {
+      salvandoRef.current = false;
       setSalvando(false);
     }
   }
