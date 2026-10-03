@@ -1039,7 +1039,11 @@ export async function POST(request: Request) {
           regraCobranca
         );
 
-        const { error: erroBaixa } = await db
+        // Reserva a baixa de forma atômica na aplicação: somente a primeira
+        // requisição que encontrar a mensalidade aberta consegue mudar seu
+        // estado para pago. Isso evita a corrida que estava permitindo dois
+        // cliques/requisições simultâneos criarem duas entradas financeiras.
+        const { data: baixaConfirmada, error: erroBaixa } = await db
           .from("mensalidades")
           .update({
             situacao: "pago",
@@ -1055,9 +1059,32 @@ export async function POST(request: Request) {
             comprovante_url: comprovanteUrl,
             observacoes: observacoesPagamento,
           })
-          .eq("id", registro.id);
+          .eq("id", registro.id)
+          .in("situacao", ["em_aberto", "em_atraso"])
+          .select("id")
+          .maybeSingle();
 
         if (erroBaixa) throw erroBaixa;
+
+        if (!baixaConfirmada) {
+          const { data: estadoAtual, error: erroEstadoAtual } = await db
+            .from("mensalidades")
+            .select("situacao")
+            .eq("id", registro.id)
+            .maybeSingle();
+
+          if (erroEstadoAtual) throw erroEstadoAtual;
+
+          if (estadoAtual?.situacao === "pago") {
+            throw new Error(
+              `A mensalidade ${String(registro.competencia || "").slice(0, 7)} já foi registrada por outra operação. A página foi atualizada para evitar duplicidade.`
+            );
+          }
+
+          throw new Error(
+            "Não foi possível reservar a baixa desta mensalidade. Tente novamente."
+          );
+        }
 
         // A baixa da mensalidade precisa gerar a entrada no Financeiro.
         // Cada mensalidade recebe sua própria origem_id para impedir
