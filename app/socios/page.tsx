@@ -459,10 +459,6 @@ export default function Home() {
     }
   }
 
-  async function abrirFinanceiro() {
-    setMenu("Financeiro");
-    await carregarMensalidades(competenciaFinanceiro);
-  }
 
   function alterarCompetenciaFinanceiro(valor: string) {
     setCompetenciaFinanceiro(valor);
@@ -672,10 +668,6 @@ export default function Home() {
     setCarregandoRelatorio(false);
   }
 
-  function abrirRelatorios() {
-    setMenu("Relatórios");
-    void carregarRelatorioFinanceiro(relatorioCompetencia);
-  }
 
   async function carregarContasBancarias() {
     const { data, error } = await supabase
@@ -1304,34 +1296,6 @@ function Inicio({
 /* =========================
    CORES DAS CATEGORIAS
 ========================= */
-
-function categoriaClasse(categoria?: string | null) {
-  const valor = (categoria || "").toLowerCase();
-
-  if (valor.includes("patrimonial") && valor.includes("depend")) {
-    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-  }
-  if (valor.includes("patrimonial")) {
-    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-  }
-  if (valor.includes("contribuinte") && valor.includes("depend")) {
-    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-  }
-  if (valor.includes("contribuinte")) {
-    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-  }
-  if (valor.includes("temporário") || valor.includes("temporario") ||
-      valor.includes("transitório") || valor.includes("transitorio")) {
-    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-  }
-  if (valor.includes("temporada")) {
-    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-  }
-  if (valor.includes("benemérito") || valor.includes("benemerito")) {
-    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-  }
-  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
-}
 
 /* =========================
    SÓCIOS
