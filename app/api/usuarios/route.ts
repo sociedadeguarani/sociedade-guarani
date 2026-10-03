@@ -24,7 +24,6 @@ const DEFAULTS: Record<string, string[]> = {
   // O Master herda todas as permissões do Administrador e ainda possui
   // a função exclusiva de gerenciar usuários/perfis.
   administrador_master: TODAS_PERMISSOES,
-  master: [],
   funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
   associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
   funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
@@ -81,7 +80,7 @@ async function somenteMaster(request: Request) {
   if (usuarioError) {
     return {
       response: NextResponse.json(
-        { error: usuarioError.message },
+        { error: "Não foi possível consultar o usuário." },
         { status: 500 }
       ),
     };
@@ -105,7 +104,7 @@ async function somenteMaster(request: Request) {
   if (perfilError) {
     return {
       response: NextResponse.json(
-        { error: perfilError.message },
+        { error: "Não foi possível consultar o perfil." },
         { status: 500 }
       ),
     };
@@ -202,7 +201,7 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await carregarDados(getServiceClient()));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar usuários." }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível carregar os usuários." }, { status: 500 });
   }
 }
 
@@ -262,7 +261,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, id: authData.user.id, message: "Usuário criado com sucesso." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro interno do servidor." }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível concluir a operação de usuário." }, { status: 500 });
   }
 }
 
@@ -289,7 +288,7 @@ export async function PATCH(request: Request) {
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar usuário." }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível atualizar o usuário." }, { status: 500 });
   }
 }
 
@@ -313,6 +312,6 @@ export async function DELETE(request: Request) {
     if (authError) return NextResponse.json({ error: `Cadastro do sistema excluído, mas o acesso Auth não foi excluído: ${authError.message}` }, { status: 500 });
     return NextResponse.json({ ok: true, message: "Usuário excluído definitivamente." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir usuário." }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível excluir o usuário." }, { status: 500 });
   }
 }
