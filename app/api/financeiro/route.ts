@@ -35,8 +35,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ contas: contas || [], movimentos: movimentosData || [] });
   } catch (error) {
+    console.error("[api/financeiro][GET]", error);
     return NextResponse.json(
-      { error: `Erro ao carregar financeiro: ${error instanceof Error ? error.message : String(error)}` },
+      { error: "Não foi possível carregar o financeiro." },
       { status: 500 }
     );
   }
@@ -215,7 +216,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "Ação financeira inválida." }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível registrar a operação financeira." }, { status: 500 });
+    console.error("[api/financeiro][POST]", error);
+    return NextResponse.json({ error: "Não foi possível registrar a operação financeira." }, { status: 500 });
   }
 }
 
@@ -370,6 +372,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ ok: true, movimento: data, estornado_por: { nome: nomeEstorno, usuario_id: auth.usuario.id, instante: agoraInstante, motivo: motivoEstorno }, message: "Estorno registrado com sucesso. O histórico original foi preservado." });
   } catch (error) {
-    return NextResponse.json({ error: `Não foi possível estornar o lançamento: ${error instanceof Error ? error.message : String(error)}` }, { status: 500 });
+    console.error("[api/financeiro][PATCH]", error);
+    return NextResponse.json({ error: "Não foi possível concluir a operação financeira." }, { status: 500 });
   }
 }
