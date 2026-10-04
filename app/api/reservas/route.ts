@@ -203,7 +203,22 @@ async function registrarFinanceiro(
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    // A proteção no banco pode rejeitar a segunda tentativa simultânea.
+    // Nesse caso retornamos a entrada já criada para manter a operação idempotente.
+    if (String((error as { code?: string }).code || "") === "23505") {
+      const { data: existenteDepois, error: erroBuscaDepois } = await db
+        .from("movimentacoes_financeiras")
+        .select("*")
+        .eq("origem_tipo", "reserva")
+        .eq("origem_id", String(reserva.id))
+        .eq("tipo", "entrada")
+        .maybeSingle();
+      if (erroBuscaDepois) throw erroBuscaDepois;
+      if (existenteDepois) return existenteDepois;
+    }
+    throw error;
+  }
   return movimento;
 }
 
@@ -441,28 +456,63 @@ export async function PATCH(request: Request) {
       const contaBancariaId = String(body.conta_bancaria_id || "").trim();
       if (!contaBancariaId) return NextResponse.json({ error: "Informe a conta bancária que recebeu o PIX." }, { status: 400 });
 
-      const movimento = await registrarFinanceiro(db, reserva, contaBancariaId, auth.usuario.id, "pix");
       const agora = new Date().toISOString();
+
+      // Primeiro "assumimos" a confirmação da reserva de forma condicional.
+      // Apenas uma requisição simultânea pode mudar solicitada → confirmada.
+      const { data: atualizada, error: atualizarErro } = await db
+        .from("reservas")
+        .update({
+          situacao: "confirmada",
+          tipo_pagamento: "pix",
+          data_pagamento: agora.slice(0, 10),
+          comprovante_status: "aprovado",
+          comprovante_aprovado_por: auth.usuario.id,
+          comprovante_aprovado_em: agora,
+          motivo_recusa: null,
+        })
+        .eq("id", id)
+        .in("situacao", ["solicitada", "aguardando_pagamento"])
+        .select("*")
+        .maybeSingle();
+
+      if (atualizarErro) throw atualizarErro;
+      if (!atualizada) {
+        const { data: estadoAtual, error: estadoErro } = await db
+          .from("reservas")
+          .select("id,situacao,comprovante_status")
+          .eq("id", id)
+          .maybeSingle();
+        if (estadoErro) throw estadoErro;
+        if (estadoAtual?.situacao === "confirmada") {
+          return NextResponse.json(
+            { error: "Este PIX já foi confirmado por outra operação. Atualize a lista de reservas." },
+            { status: 409 }
+          );
+        }
+        return NextResponse.json({ error: "Não foi possível confirmar esta reserva agora. Tente novamente." }, { status: 409 });
+      }
+
       try {
-        const { data: atualizada, error } = await db
+        await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "pix");
+        return NextResponse.json({ reserva: normalizarReserva(atualizada), message: "PIX confirmado e lançamento criado no Financeiro." });
+      } catch (financeError) {
+        // Se o lançamento financeiro falhar, devolvemos a reserva ao estado
+        // anterior para não deixar confirmação sem entrada correspondente.
+        await db
           .from("reservas")
           .update({
-            situacao: "confirmada",
-            tipo_pagamento: "pix",
-            data_pagamento: agora.slice(0, 10),
-            comprovante_status: "aprovado",
-            comprovante_aprovado_por: auth.usuario.id,
-            comprovante_aprovado_em: agora,
-            motivo_recusa: null,
+            situacao: reserva.situacao,
+            tipo_pagamento: reserva.tipo_pagamento || null,
+            data_pagamento: reserva.data_pagamento || null,
+            comprovante_status: reserva.comprovante_status || null,
+            comprovante_aprovado_por: reserva.comprovante_aprovado_por || null,
+            comprovante_aprovado_em: reserva.comprovante_aprovado_em || null,
+            motivo_recusa: reserva.motivo_recusa || null,
           })
           .eq("id", id)
-          .select("*")
-          .single();
-        if (error) throw error;
-        return NextResponse.json({ reserva: normalizarReserva(atualizada), message: "PIX confirmado e lançamento criado no Financeiro." });
-      } catch (updateError) {
-        if (movimento?.id) await db.from("movimentacoes_financeiras").delete().eq("id", movimento.id);
-        throw updateError;
+          .eq("situacao", "confirmada");
+        throw financeError;
       }
     }
 
