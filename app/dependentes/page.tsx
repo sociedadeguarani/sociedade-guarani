@@ -152,7 +152,7 @@ export default function DependentesPage() {
 
     socios.forEach((s) => {
       if (!s.responsavel_id) return;
-      if (s.ativo === false || normalizar(s.situacao) === "inativo") return;
+      if ((s as { ativo?: boolean | null }).ativo === false || normalizar(s.situacao) === "inativo") return;
       if (!tiposFamiliares.has(normalizar(s.tipo_socio))) return;
 
       const chaveMatricula = normalizar(s.matricula);
@@ -175,7 +175,7 @@ export default function DependentesPage() {
         data_nascimento: null,
         parentesco: null,
         telefone: null,
-        ativo: s.ativo !== false,
+        ativo: (s as { ativo?: boolean | null }).ativo !== false,
         created_at: null,
         possui_mensalidade: s.possui_mensalidade === true,
         valor_mensalidade: Number(s.valor_mensalidade || 0),
@@ -263,7 +263,7 @@ export default function DependentesPage() {
         matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome ?? "",
         situacao: s.situacao ?? null,
-        ativo: s.ativo !== false,
+        ativo: (s as { ativo?: boolean | null }).ativo !== false,
         responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
         categoria: s.categoria ?? null,
         tipo_socio: s.tipo_socio ?? null,
