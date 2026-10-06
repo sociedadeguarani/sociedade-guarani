@@ -16,6 +16,7 @@ type Socio = {
   tipo_socio?: string | null;
   responsavel_id?: string | null;
   possui_mensalidade?: boolean | null;
+  valor_mensalidade?: number | null;
   situacao?: string | null;
   ativo?: boolean | null;
   tipo_pagamento?: string | null;
@@ -517,7 +518,17 @@ export default function Page() {
     // Quando a competência ainda não foi gerada, mostramos os associados
     // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
     // vazio e o administrador consegue conferir os 329 associados antes de gerar.
-    const virtuais: M[] = sociosElegiveis
+    const valorPrevistoSocio = (s: Socio) => {
+    const valorIndividual = Number(s.valor_mensalidade || 0);
+    if (valorIndividual > 0) return valorIndividual;
+
+    const config = configs.find(
+      (c) => c.ativo !== false && String(c.tipo_socio) === String(s.tipo_socio)
+    );
+    return Number(config?.valor || 0);
+  };
+
+  const virtuais: M[] = sociosElegiveis
       .filter((s) => !existentes.has(String(s.id)))
       .map((s) => ({
         id: `virtual-${s.id}-${ano}-${mes}`,
@@ -525,8 +536,8 @@ export default function Page() {
         competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
         // Prévia virtual: mostrar o valor que será gerado, usando o
         // valor individual do cadastro quando existir.
-        valor: Number(s.valor_mensalidade || 0),
-        valor_base: Number(s.valor_mensalidade || 0),
+        valor: valorPrevistoSocio(s),
+        valor_base: valorPrevistoSocio(s),
         tarifa_pagamento: 0,
         multa: 0,
         juros: 0,
@@ -546,7 +557,7 @@ export default function Page() {
       ...item,
       situacao: situacaoVisual(item),
     }));
-  }, [lista, sociosElegiveis, ano, mes, contas]);
+  }, [lista, sociosElegiveis, configs, ano, mes, contas]);
 
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
