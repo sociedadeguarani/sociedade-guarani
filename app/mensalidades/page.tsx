@@ -377,10 +377,19 @@ export default function Page() {
   }, [ano, mes]);
 
   function socioElegivelParaGeracao(s: Socio) {
-    // Regra oficial: titular ou dependente somente entra na geração
-    // quando possui mensalidade própria.
-    // Dependente sem mensalidade e isento ficam fora da lista.
-    if (s.ativo === false || String(s.situacao || "").trim().toLowerCase() === "inativo") {
+    // Regra oficial:
+    // - Titular com mensalidade própria: entra.
+    // - Dependente com mensalidade própria: entra.
+    // - Dependente sem mensalidade própria: não entra.
+    // - Isento: não entra.
+    // - Inativo: não entra.
+    //
+    // Não usamos matrícula, categoria ou tipo_socio para decidir isso,
+    // pois existem dependentes com mensalidade própria em diferentes tipos.
+    if (
+      s.ativo === false ||
+      String(s.situacao || "").trim().toLowerCase() === "inativo"
+    ) {
       return false;
     }
 
