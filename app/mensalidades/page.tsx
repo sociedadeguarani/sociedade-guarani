@@ -379,29 +379,15 @@ export default function Page() {
   function socioElegivelParaGeracao(s: Socio) {
     if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
 
-    // Titular: gera a mensalidade familiar somente quando possui mensalidade.
-    if (!s.responsavel_id) return s.possui_mensalidade === true;
+    // Titular: só entra se possuir mensalidade própria/familiar.
+    if (!s.responsavel_id) {
+      return s.possui_mensalidade === true;
+    }
 
-    // Dependente: só gera se tiver mensalidade própria explicitamente marcada.
-    // A matrícula SD....A é usada para os dependentes individuais pagantes.
-    if (s.possui_mensalidade !== true) return false;
-
-    const matricula = String(s.matricula || "").trim().toUpperCase();
-    if (/^SD\d{1,6}A$/.test(matricula)) return true;
-
-    const categoria = String(s.categoria || "").trim().toLowerCase();
-    const tipo = String(s.tipo_socio || "").trim().toLowerCase();
-
-    return (
-      categoria.includes("c/ mensalidade") ||
-      categoria.includes("com mensalidade") ||
-      [
-        "dependente_patrimonial_familiar_mensalidade",
-        "dependente_patrimonial_individual_mensalidade",
-        "dependente_contribuinte_familiar_mensalidade",
-        "dependente_contribuinte_individual_mensalidade",
-      ].includes(tipo)
-    );
+    // Dependente: a regra é exclusivamente o campo de cadastro.
+    // Categoria/tipo/matrícula não devem transformar um dependente
+    // familiar/isento em uma cobrança.
+    return s.possui_mensalidade === true;
   }
 
   const sociosElegiveis = useMemo(
