@@ -10,7 +10,12 @@ type Socio = {
   matricula: string | null;
   nome: string;
   situacao: string | null;
+  ativo?: boolean | null;
   responsavel_id?: string | null;
+  categoria?: string | null;
+  tipo_socio?: string | null;
+  possui_mensalidade?: boolean | null;
+  valor_mensalidade?: number | null;
 };
 
 type Dependente = {
@@ -118,12 +123,81 @@ export default function DependentesPage() {
     return mapa;
   }, [socios]);
 
+  const dependentesUnificados = useMemo(() => {
+    const normalizar = (valor: unknown) =>
+      String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
+
+    // Registros da tabela socios que representam dependentes familiares
+    // ainda não migrados para a tabela dependentes. Eles devem aparecer
+    // nesta tela sem criar uma segunda linha no banco.
+    const tiposFamiliares = new Set([
+      "dependente_patrimonial_familiar",
+      "dependente_contribuinte_familiar",
+    ]);
+
+    const jaExibidos = new Set<string>();
+    const resultado: Dependente[] = [];
+
+    dependentes.forEach((d) => {
+      const chaveMatricula = normalizar(d.matricula);
+      const chaveNome = normalizar(d.nome);
+      if (chaveMatricula) jaExibidos.add(`matricula:${chaveMatricula}`);
+      if (chaveNome) jaExibidos.add(`nome:${chaveNome}`);
+      resultado.push(d);
+    });
+
+    socios.forEach((s) => {
+      if (!s.responsavel_id) return;
+      if (s.ativo === false || normalizar(s.situacao) === "inativo") return;
+      if (!tiposFamiliares.has(normalizar(s.tipo_socio))) return;
+
+      const chaveMatricula = normalizar(s.matricula);
+      const chaveNome = normalizar(s.nome);
+      if (
+        (chaveMatricula && jaExibidos.has(`matricula:${chaveMatricula}`)) ||
+        (chaveNome && jaExibidos.has(`nome:${chaveNome}`))
+      ) return;
+
+      // O socio_id aponta para o responsável familiar, exatamente como na
+      // tabela dependentes. Assim os filtros e o nome do responsável
+      // continuam funcionando sem alterar nenhum dado do banco.
+      resultado.push({
+        id: `socio:${s.id}`,
+        socio_id: String(s.responsavel_id),
+        matricula: s.matricula,
+        foto_url: null,
+        nome: s.nome,
+        cpf: null,
+        data_nascimento: null,
+        parentesco: null,
+        telefone: null,
+        ativo: s.ativo !== false,
+        created_at: null,
+        possui_mensalidade: s.possui_mensalidade === true,
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
+        dia_vencimento: null,
+        tipo_pagamento: null,
+        situacao_financeira: s.possui_mensalidade ? "em_dia" : "isento",
+        data_ultimo_pagamento: null,
+        source: "socios",
+      });
+      if (chaveMatricula) jaExibidos.add(`matricula:${chaveMatricula}`);
+      if (chaveNome) jaExibidos.add(`nome:${chaveNome}`);
+    });
+
+    return resultado;
+  }, [dependentes, socios]);
+
   const dependentesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-    return dependentes.filter((d) => {
+    return dependentesUnificados.filter((d) => {
       const socio = socioPorId[d.socio_id];
       const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
-        socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
+        d.matricula || "", socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
       const bateStatus =
@@ -132,10 +206,10 @@ export default function DependentesPage() {
         (filtroStatus === "inativos" && d.ativo !== true);
       return bateBusca && bateSocio && bateStatus;
     });
-  }, [dependentes, socioPorId, busca, filtroSocio, filtroStatus]);
+  }, [dependentesUnificados, socioPorId, busca, filtroSocio, filtroStatus]);
 
-  const totalAtivos = dependentes.filter((d) => d.ativo === true).length;
-  const totalInativos = dependentes.filter((d) => d.ativo !== true).length;
+  const totalAtivos = dependentesUnificados.filter((d) => d.ativo === true).length;
+  const totalInativos = dependentesUnificados.filter((d) => d.ativo !== true).length;
 
   async function carregarDados() {
     setCarregando(true);
@@ -189,6 +263,12 @@ export default function DependentesPage() {
         matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome ?? "",
         situacao: s.situacao ?? null,
+        ativo: s.ativo !== false,
+        responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
+        categoria: s.categoria ?? null,
+        tipo_socio: s.tipo_socio ?? null,
+        possui_mensalidade: s.possui_mensalidade === true,
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
       })));
       setDependentes(dependentesData);
       setStatusResponsaveis(dados?.statusResponsaveis || {});
@@ -447,7 +527,7 @@ export default function DependentesPage() {
             {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
 
             <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentesUnificados.length}</div></div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes ativos</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{totalAtivos}</div></div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes inativos</div><div className="mt-1 text-3xl font-black text-slate-600">{totalInativos}</div></div>
             </div>
@@ -511,11 +591,14 @@ export default function DependentesPage() {
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4">
-                              {!somenteConsulta && (
+                              {!somenteConsulta && d.source !== "socios" && (
                                 <div className="flex justify-end gap-2">
                                   <button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button>
                                   <button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button>
                                 </div>
+                              )}
+                              {d.source === "socios" && (
+                                <span className="text-xs font-bold text-slate-400">Cadastro em Sócios</span>
                               )}
                             </td>
                           </tr>
@@ -526,7 +609,7 @@ export default function DependentesPage() {
                 </div>
               )}
             </div>
-            <div className="mt-5 text-sm text-slate-400">Exibindo {dependentesFiltrados.length} de {dependentes.length} dependentes.</div>
+            <div className="mt-5 text-sm text-slate-400">Exibindo {dependentesFiltrados.length} de {dependentesUnificados.length} dependentes.</div>
           </div>
         </section>
       </div>
