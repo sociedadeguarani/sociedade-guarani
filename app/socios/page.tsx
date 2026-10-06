@@ -294,7 +294,7 @@ export default function Home() {
       setPerfilUsuario(
         perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador" :
+        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
         perfil
       );
     } catch {}
@@ -459,6 +459,10 @@ export default function Home() {
     }
   }
 
+  async function abrirFinanceiro() {
+    setMenu("Financeiro");
+    await carregarMensalidades(competenciaFinanceiro);
+  }
 
   function alterarCompetenciaFinanceiro(valor: string) {
     setCompetenciaFinanceiro(valor);
@@ -668,6 +672,10 @@ export default function Home() {
     setCarregandoRelatorio(false);
   }
 
+  function abrirRelatorios() {
+    setMenu("Relatórios");
+    void carregarRelatorioFinanceiro(relatorioCompetencia);
+  }
 
   async function carregarContasBancarias() {
     const { data, error } = await supabase
@@ -1212,6 +1220,23 @@ function Inicio({
   quantidadeSocios: number;
   abrirCadastro: () => void;
 }) {
+  const tiposDependenteFamiliar = new Set([
+    "dependente_patrimonial_familiar",
+    "dependente_patrimonial_familiar_mensalidade",
+    "dependente_contribuinte_familiar",
+    "dependente_contribuinte_familiar_mensalidade",
+  ]);
+
+  const totalDependentes = socios.filter((s) => {
+    if (!s.responsavel_id) return false;
+
+    const tipo = String(s.tipo_socio || "")
+      .trim()
+      .toLowerCase();
+
+    return tiposDependenteFamiliar.has(tipo);
+  }).length;
+
   return (
     <>
       <div className="mb-8">
@@ -1242,8 +1267,8 @@ function Inicio({
 
         <DashboardCard
           titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
-          descricao="Vinculados a responsáveis"
+          valor={String(totalDependentes)}
+          descricao="Dependentes familiares"
           icone="👨‍👩‍👧‍👦"
         />
 
@@ -1296,6 +1321,34 @@ function Inicio({
 /* =========================
    CORES DAS CATEGORIAS
 ========================= */
+
+function categoriaClasse(categoria?: string | null) {
+  const valor = (categoria || "").toLowerCase();
+
+  if (valor.includes("patrimonial") && valor.includes("depend")) {
+    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
+  }
+  if (valor.includes("patrimonial")) {
+    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
+  }
+  if (valor.includes("contribuinte") && valor.includes("depend")) {
+    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
+  }
+  if (valor.includes("contribuinte")) {
+    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
+  }
+  if (valor.includes("temporário") || valor.includes("temporario") ||
+      valor.includes("transitório") || valor.includes("transitorio")) {
+    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
+  }
+  if (valor.includes("temporada")) {
+    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
+  }
+  if (valor.includes("benemérito") || valor.includes("benemerito")) {
+    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
+  }
+  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
+}
 
 /* =========================
    SÓCIOS
