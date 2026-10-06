@@ -523,9 +523,11 @@ export default function Page() {
         id: `virtual-${s.id}-${ano}-${mes}`,
         socio_id: String(s.id),
         competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
-        valor: 0,
-        valor_base: null,
-        tarifa_pagamento: null,
+        // Prévia virtual: mostrar o valor que será gerado, usando o
+        // valor individual do cadastro quando existir.
+        valor: Number(s.valor_mensalidade || 0),
+        valor_base: Number(s.valor_mensalidade || 0),
+        tarifa_pagamento: 0,
         multa: 0,
         juros: 0,
         desconto: 0,
