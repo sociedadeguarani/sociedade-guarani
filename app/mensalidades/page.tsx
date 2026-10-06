@@ -16,7 +16,6 @@ type Socio = {
   tipo_socio?: string | null;
   responsavel_id?: string | null;
   possui_mensalidade?: boolean | null;
-  valor_mensalidade?: number | null;
   situacao?: string | null;
   ativo?: boolean | null;
   tipo_pagamento?: string | null;
@@ -378,16 +377,13 @@ export default function Page() {
   }, [ano, mes]);
 
   function socioElegivelParaGeracao(s: Socio) {
-    if (s.ativo === false || String(s.situacao || "").toLowerCase() === "inativo") return false;
-
-    // Titular: só entra se possuir mensalidade própria/familiar.
-    if (!s.responsavel_id) {
-      return s.possui_mensalidade === true;
+    // Regra oficial: titular ou dependente somente entra na geração
+    // quando possui mensalidade própria.
+    // Dependente sem mensalidade e isento ficam fora da lista.
+    if (s.ativo === false || String(s.situacao || "").trim().toLowerCase() === "inativo") {
+      return false;
     }
 
-    // Dependente: a regra é exclusivamente o campo de cadastro.
-    // Categoria/tipo/matrícula não devem transformar um dependente
-    // familiar/isento em uma cobrança.
     return s.possui_mensalidade === true;
   }
 
@@ -518,27 +514,15 @@ export default function Page() {
     // Quando a competência ainda não foi gerada, mostramos os associados
     // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
     // vazio e o administrador consegue conferir os 329 associados antes de gerar.
-    const valorPrevistoSocio = (s: Socio) => {
-    const valorIndividual = Number(s.valor_mensalidade || 0);
-    if (valorIndividual > 0) return valorIndividual;
-
-    const config = configs.find(
-      (c) => c.ativo !== false && String(c.tipo_socio) === String(s.tipo_socio)
-    );
-    return Number(config?.valor || 0);
-  };
-
-  const virtuais: M[] = sociosElegiveis
+    const virtuais: M[] = sociosElegiveis
       .filter((s) => !existentes.has(String(s.id)))
       .map((s) => ({
         id: `virtual-${s.id}-${ano}-${mes}`,
         socio_id: String(s.id),
         competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
-        // Prévia virtual: mostrar o valor que será gerado, usando o
-        // valor individual do cadastro quando existir.
-        valor: valorPrevistoSocio(s),
-        valor_base: valorPrevistoSocio(s),
-        tarifa_pagamento: 0,
+        valor: 0,
+        valor_base: null,
+        tarifa_pagamento: null,
         multa: 0,
         juros: 0,
         desconto: 0,
@@ -557,7 +541,7 @@ export default function Page() {
       ...item,
       situacao: situacaoVisual(item),
     }));
-  }, [lista, sociosElegiveis, configs, ano, mes, contas]);
+  }, [lista, sociosElegiveis, ano, mes, contas]);
 
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
