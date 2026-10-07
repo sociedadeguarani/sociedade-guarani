@@ -1,3413 +1,767 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { supabase } from "@/lib/supabaseClient";
 
 type Socio = {
   id: string;
-  matricula: number | null;
+  matricula: string | null;
+  nome: string;
+  situacao: string | null;
+  responsavel_id?: string | null;
+  tipo_socio?: string | null;
+  categoria?: string | null;
+  cpf?: string | null;
+  data_nascimento?: string | null;
+  telefone?: string | null;
+  foto_url?: string | null;
+  possui_mensalidade?: boolean | null;
+  valor_mensalidade?: number | null;
+  dia_vencimento?: number | null;
+  tipo_pagamento?: string | null;
+  situacao_financeira?: string | null;
+  data_ultimo_pagamento?: string | null;
+};
+
+type Dependente = {
+  id: string;
+  socio_id: string;
+  matricula?: string | null;
+  foto_url?: string | null;
   nome: string;
   cpf: string | null;
-  rg: string | null;
   data_nascimento: string | null;
-  telefone: string | null;
-  whatsapp: string | null;
-  email: string | null;
-  endereco: string | null;
-  numero: string | null;
-  bairro: string | null;
-  cidade: string | null;
-  estado: string | null;
-  cep: string | null;
-  data_associacao: string | null;
-  categoria: string | null;
-  situacao: string | null;
-  observacoes: string | null;
-  foto_url: string | null;
-
-  tipo_socio: string | null;
-  responsavel_id: string | null;
   parentesco: string | null;
+  telefone: string | null;
+  ativo: boolean | null;
+  created_at: string | null;
   possui_mensalidade: boolean | null;
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
-  conta_bancaria_id: string | null;
-  modalidade_temporada: string | null;
-  inicio_temporada: string | null;
-  fim_temporada: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  source?: "socios" | "dependentes";
+  source_socio_id?: string | null;
 };
 
-type Mensalidade = {
-  id: string;
-  socio_id: string;
-  competencia: string;
-  valor: number;
-  data_vencimento: string | null;
-  situacao: string | null;
-  data_pagamento: string | null;
-  tipo_pagamento: string | null;
-  comprovante_url: string | null;
-  observacoes: string | null;
-  numero_recibo?: string | null;
-  created_at?: string;
-  updated_at?: string;
-};
-
-
-
-const menus = [
-  { nome: "Início", icone: "🏠", rota: "/painel" },
-  { nome: "Avisos", icone: "📢", rota: "/avisos" },
-  { nome: "Reservas", icone: "📅", rota: "/reservas" },
-  { nome: "Eventos", icone: "🎉", rota: "/eventos" },
-  { nome: "Convites", icone: "🎟️", rota: "/convites" },
-  { nome: "Carteirinhas", icone: "🎫", rota: "/carteirinhas" },
-  { nome: "Sócios", icone: "👥", rota: "/socios" },
-  { nome: "Dependentes", icone: "👨‍👩‍👧‍👦", rota: "/dependentes" },
-  { nome: "Mensalidades", icone: "💳", rota: "/mensalidades" },
-  { nome: "Financeiro", icone: "💰", rota: "/financeiro" },
-  { nome: "Inventário", icone: "📦", rota: "/inventario" },
-  { nome: "Acessos", icone: "🚪", rota: "/acessos" },
-  { nome: "Relatórios", icone: "📊", rota: "/relatorios" },
+const parentescos = [
+  "Filho(a)", "Esposo(a)", "Companheiro(a)", "Pai", "Mãe",
+  "Irmão(ã)", "Neto(a)", "Avô(ó)", "Outro",
 ];
 
-
-const socioInicial: Partial<Socio> = {
-  nome: "",
-  cpf: "",
-  rg: "",
-  data_nascimento: "",
-  telefone: "",
-  whatsapp: "",
-  email: "",
-  endereco: "",
-  numero: "",
-  bairro: "",
-  cidade: "",
-  estado: "RS",
-  cep: "",
-  data_associacao: "",
-  categoria: "Titular",
-  situacao: "ativo",
-  observacoes: "",
-  foto_url: "",
-
-  tipo_socio: "patrimonial_individual",
-  responsavel_id: null,
-  parentesco: "",
-  possui_mensalidade: false,
-  valor_mensalidade: 0,
-  dia_vencimento: 10,
-  tipo_pagamento: "pix",
-  conta_bancaria_id: null,
-  modalidade_temporada: null,
-  inicio_temporada: "",
-  fim_temporada: "",
-  situacao_financeira: "isento",
-  data_ultimo_pagamento: "",
-};
-
-const TIPOS_SOCIO = [
-  { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
-  { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
-  {
-    value: "dependente_patrimonial_familiar_mensalidade",
-    label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
-  },
-  {
-    value: "dependente_patrimonial_individual_mensalidade",
-    label: "Dependente Sócio Patrimonial Individual com Mensalidade",
-  },
-  { value: "contribuinte_individual", label: "Sócio Contribuinte Individual" },
-  { value: "contribuinte_familiar", label: "Sócio Contribuinte Familiar" },
-  {
-    value: "dependente_contribuinte_familiar_mensalidade",
-    label: "Dependente Sócio Contribuinte Familiar com Mensalidade",
-  },
-  {
-    value: "dependente_contribuinte_individual_mensalidade",
-    label: "Dependente Sócio Contribuinte Individual com Mensalidade",
-  },
-  { value: "remido", label: "Sócio Remido" },
-  { value: "temporada_individual", label: "Temporada Individual" },
-  { value: "temporada_familiar", label: "Temporada Familiar" },
-  { value: "transitorio", label: "Transitório" },
-  { value: "dependente_transitorio", label: "Dependente Transitório" },
-  { value: "convite_semanal", label: "Convite Semanal" },
-  { value: "convite_diario", label: "Convite Diário" },
-  { value: "convite_mes", label: "Convite Mês" },
-];
-
-const PARENTESCOS = [
-  "Esposa",
-  "Esposo",
-  "Companheiro(a)",
-  "Filho(a)",
-  "Enteado(a)",
-  "Pai",
-  "Mãe",
-  "Irmão(ã)",
-  "Outro",
-];
-
-const FORMAS_PAGAMENTO = [
-  "pix",
-  "debito_em_conta",
-  "boleto",
-  "dinheiro",
-];
-
-type ContaBancaria = {
-  id: string;
-  nome: string;
-  banco: string | null;
-  agencia: string | null;
-  conta: string | null;
-  ativo: boolean;
-};
-
-function podeTerDependentes(tipo?: string | null) {
-  return [
-    "patrimonial_familiar",
-    "contribuinte_familiar",
-    "temporada_familiar",
-    "transitorio",
-    "dependente_patrimonial_familiar_mensalidade",
-    "dependente_contribuinte_familiar_mensalidade",
-  ].includes(tipo || "");
+function formatarData(data: string | null) {
+  if (!data) return "—";
+  const [ano, mes, dia] = data.split("-");
+  return ano && mes && dia ? `${dia}/${mes}/${ano}` : data;
 }
 
-function tipoDependenteParaResponsavel(tipo?: string | null) {
-  switch (tipo) {
-    case "patrimonial_familiar":
-    case "dependente_patrimonial_familiar_mensalidade":
-      return "dependente_patrimonial_familiar_mensalidade";
-    case "contribuinte_familiar":
-    case "dependente_contribuinte_familiar_mensalidade":
-      return "dependente_contribuinte_familiar_mensalidade";
-    case "temporada_familiar":
-      return "dependente_patrimonial_familiar_mensalidade";
-    case "transitorio":
-      return "dependente_transitorio";
-    default:
-      return "dependente_patrimonial_familiar_mensalidade";
-  }
+function formatarCpf(valor: string | null) {
+  if (!valor) return "—";
+  const n = valor.replace(/\D/g, "");
+  return n.length === 11
+    ? `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}`
+    : valor;
 }
 
-function tipoSocioLabel(tipo?: string | null) {
-  return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
+function formatarTelefone(valor: string | null) {
+  if (!valor) return "—";
+  const n = valor.replace(/\D/g, "");
+  if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+  if (n.length === 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+  return valor;
 }
 
-function tipoSocioClasse(tipo?: string | null) {
-  switch (tipo) {
-    case "patrimonial_individual":
-      return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "patrimonial_familiar":
-      return "bg-[#cfe7dc] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-    case "dependente_patrimonial_familiar_mensalidade":
-      return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-    case "dependente_patrimonial_individual_mensalidade":
-      return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-    case "contribuinte_individual":
-      return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "contribuinte_familiar":
-      return "bg-[#cddff4] text-[#064b9b] ring-1 ring-[#aac4e4]";
-    case "dependente_contribuinte_familiar_mensalidade":
-      return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-    case "dependente_contribuinte_individual_mensalidade":
-      return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-    case "remido":
-      return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-    case "temporada_individual":
-    case "temporada_familiar":
-      return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-    case "transitorio":
-    case "dependente_transitorio":
-      return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-    case "convite_semanal":
-    case "convite_diario":
-    case "convite_mes":
-      return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
-    default:
-      return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
-  }
+function normalizarTexto(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
-export default function Home() {
-  const [menu, setMenu] = useState("Sócios");
-  const [verificandoLogin, setVerificandoLogin] = useState(true);
-  const [usuarioEmail, setUsuarioEmail] = useState("");
+function ehDependenteFamiliarSocio(s: any) {
+  if (!s?.responsavel_id) return false;
+  const tipo = normalizarTexto(s.tipo_socio);
+  const categoria = normalizarTexto(s.categoria);
+  return (
+    tipo === "dependente_patrimonial_familiar" ||
+    tipo === "dependente_patrimonial_familiar_mensalidade" ||
+    tipo === "dependente_contribuinte_familiar" ||
+    tipo === "dependente_contribuinte_familiar_mensalidade" ||
+    categoria.includes("dependente patrimonial familiar") ||
+    categoria.includes("dependente contribuinte familiar")
+  );
+}
 
+export default function DependentesPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
-  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
+  const [dependentes, setDependentes] = useState<Dependente[]>([]);
+  const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, string>>({});
   const [busca, setBusca] = useState("");
-  const [buscaResponsavel, setBuscaResponsavel] = useState("");
-  const [abrirCadastro, setAbrirCadastro] = useState(false);
-  const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
-
-  const [form, setForm] = useState<Partial<Socio>>(socioInicial);
+  const [filtroSocio, setFiltroSocio] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [carregando, setCarregando] = useState(false);
-  const [mensagem, setMensagem] = useState("");
-  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
-  const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
+  const [migrando, setMigrando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [sucesso, setSucesso] = useState("");
+  const [modalAberto, setModalAberto] = useState(false);
+  const [editando, setEditando] = useState<Dependente | null>(null);
   const [perfilUsuario, setPerfilUsuario] = useState("");
+  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
+
   const somenteConsulta = perfilUsuario === "funcionario";
 
-  const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
-  const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
-    new Date().toISOString().slice(0, 7)
-  );
-  const [buscaFinanceiro, setBuscaFinanceiro] = useState("");
-  const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(false);
-  const [gerandoMensalidades, setGerandoMensalidades] = useState(false);
-  const [mensalidadeEditando, setMensalidadeEditando] = useState<Mensalidade | null>(null);
-  const [abrirPagamento, setAbrirPagamento] = useState(false);
-  const [mensalidadePagamento, setMensalidadePagamento] = useState<Mensalidade | null>(null);
-  const [reciboMensalidade, setReciboMensalidade] = useState<Mensalidade | null>(null);
-  const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
-  const [pagamentoForm, setPagamentoForm] = useState({
-    valor: "",
-    data_pagamento: new Date().toISOString().slice(0, 10),
+  type FormDependente = {
+    socio_id: string;
+    nome: string;
+    cpf: string;
+    data_nascimento: string;
+    parentesco: string;
+    telefone: string;
+    ativo: boolean;
+    possui_mensalidade: boolean;
+    valor_mensalidade: number;
+    dia_vencimento: number;
+    tipo_pagamento: string;
+    situacao_financeira: string;
+    data_ultimo_pagamento: string;
+  };
+
+  const [form, setForm] = useState<FormDependente>({
+    socio_id: "",
+    nome: "",
+    cpf: "",
+    data_nascimento: "",
+    parentesco: "",
+    telefone: "",
+    ativo: true,
+    possui_mensalidade: false,
+    valor_mensalidade: 0,
+    dia_vencimento: 10,
     tipo_pagamento: "pix",
-    observacoes: "",
+    situacao_financeira: "isento",
+    data_ultimo_pagamento: "",
   });
 
-  const [relatorioCompetencia, setRelatorioCompetencia] = useState(new Date().toISOString().slice(0, 7));
-  const [relatorioMensalidades, setRelatorioMensalidades] = useState<Mensalidade[]>([]);
-  const [relatorioFormaPagamento, setRelatorioFormaPagamento] = useState("todas");
-  const [relatorioSituacao, setRelatorioSituacao] = useState("todas");
-  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
+  const socioPorId = useMemo(() => {
+    const mapa: Record<string, Socio> = {};
+    socios.forEach((socio) => { mapa[socio.id] = socio; });
+    return mapa;
+  }, [socios]);
+
+  const dependentesFiltrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    return dependentes.filter((d) => {
+      const socio = socioPorId[d.socio_id];
+      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
+        socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
+      const bateBusca = !termo || texto.includes(termo);
+      const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
+      const bateStatus =
+        filtroStatus === "todos" ||
+        (filtroStatus === "ativos" && d.ativo === true) ||
+        (filtroStatus === "inativos" && d.ativo !== true);
+      return bateBusca && bateSocio && bateStatus;
+    });
+  }, [dependentes, socioPorId, busca, filtroSocio, filtroStatus]);
+
+  const totalAtivos = dependentes.filter((d) => d.ativo === true).length;
+  const totalInativos = dependentes.filter((d) => d.ativo !== true).length;
+
+  async function carregarDados() {
+    setCarregando(true);
+    setErro("");
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      window.location.href = "/login";
+      return;
+    }
+
+    try {
+      // A página não consulta mais a tabela dependentes diretamente pelo cliente.
+      // O endpoint usa o usuário autenticado + service role, evitando que uma
+      // política RLS antiga esconda os 412 dependentes do Administrador Master.
+      const resposta = await fetch("/api/carteirinhas?modo=dependentes", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+
+      const dados = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) {
+        throw new Error(dados?.error || "Não foi possível carregar os dependentes.");
+      }
+
+      const sociosData = Array.isArray(dados?.socios) ? dados.socios : [];
+      const sociosNormalizados: Socio[] = sociosData.map((s: any) => ({
+        id: String(s.id),
+        matricula: s.matricula == null ? null : String(s.matricula),
+        nome: s.nome ?? "",
+        situacao: s.situacao ?? null,
+        responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
+        tipo_socio: s.tipo_socio ?? null,
+        categoria: s.categoria ?? null,
+        cpf: s.cpf ?? null,
+        data_nascimento: s.data_nascimento ?? null,
+        telefone: s.telefone ?? s.whatsapp ?? null,
+        foto_url: s.foto_url ?? null,
+        possui_mensalidade: s.possui_mensalidade === true,
+        valor_mensalidade: Number(s.valor_mensalidade || 0),
+        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
+        tipo_pagamento: s.tipo_pagamento ?? null,
+        situacao_financeira: s.situacao_financeira ?? null,
+        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+      }));
+
+      const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
+        .map((d: any) => ({
+          id: String(d.id),
+          socio_id: String(d.socio_id),
+          matricula: d.matricula == null ? null : String(d.matricula),
+          foto_url: d.foto_url ?? null,
+          nome: d.nome ?? "",
+          cpf: d.cpf ?? null,
+          data_nascimento: d.data_nascimento ?? null,
+          parentesco: d.parentesco ?? null,
+          telefone: d.telefone ?? d.whatsapp ?? null,
+          ativo: d.ativo !== false,
+          created_at: d.created_at ?? null,
+          possui_mensalidade: Boolean(d.possui_mensalidade),
+          valor_mensalidade: Number(d.valor_mensalidade || 0),
+          dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
+          tipo_pagamento: d.tipo_pagamento ?? null,
+          situacao_financeira: d.situacao_financeira ?? null,
+          data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
+          source: "dependentes",
+          source_socio_id: null,
+        }));
+
+      // Alguns dependentes familiares são associados oficiais da tabela socios.
+      // Eles precisam aparecer aqui também, mas sem criar uma segunda pessoa.
+      const chavesExistentes = new Set(
+        dependentesData.flatMap((d) => [
+          normalizarTexto(d.nome),
+          normalizarTexto(d.matricula),
+        ]).filter(Boolean)
+      );
+
+      const dependentesSocios: Dependente[] = sociosNormalizados
+        .filter((s) => ehDependenteFamiliarSocio(s))
+        .filter((s) => !chavesExistentes.has(normalizarTexto(s.nome)) && !chavesExistentes.has(normalizarTexto(s.matricula)))
+        .map((s) => ({
+          id: `socio:${s.id}`,
+          socio_id: String(s.responsavel_id),
+          matricula: s.matricula,
+          foto_url: s.foto_url ?? null,
+          nome: s.nome,
+          cpf: s.cpf ?? null,
+          data_nascimento: s.data_nascimento ?? null,
+          parentesco: null,
+          telefone: s.telefone ?? null,
+          ativo: s.situacao !== "inativo",
+          created_at: null,
+          possui_mensalidade: s.possui_mensalidade === true,
+          valor_mensalidade: Number(s.valor_mensalidade || 0),
+          dia_vencimento: s.dia_vencimento ?? 10,
+          tipo_pagamento: s.tipo_pagamento ?? null,
+          situacao_financeira: s.situacao_financeira ?? null,
+          data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+          source: "socios",
+          source_socio_id: s.id,
+        }));
+
+      setSocios(sociosNormalizados);
+      setDependentes([...dependentesData, ...dependentesSocios]);
+      setStatusResponsaveis(dados?.statusResponsaveis || {});
+    } catch (error) {
+      console.error(error);
+      setErro(error instanceof Error ? error.message : "Erro ao carregar dependentes.");
+      setSocios([]);
+      setDependentes([]);
+      setStatusResponsaveis({});
+    } finally {
+      setCarregando(false);
+    }
+  }
 
   useEffect(() => {
     try {
       const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
       setPerfilUsuario(
-        perfil === "funcionario" ? "funcionario" :
         perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+        perfil === "admin" ? "administrador" :
         perfil
       );
     } catch {}
+    carregarDados();
   }, []);
 
-  useEffect(() => {
-    let montado = true;
-
-    async function verificarSessao() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        window.location.replace("/login");
-        return;
-      }
-
-      if (montado) {
-        setUsuarioEmail(session.user.email || "");
-        setVerificandoLogin(false);
-      }
-    }
-
-    void verificarSessao();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        window.location.replace("/login");
-      } else if (montado) {
-        setUsuarioEmail(session.user.email || "");
-      }
-    });
-
-    return () => {
-      montado = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function sair() {
-    await supabase.auth.signOut();
-    window.location.replace("/login");
-  }
-
-  async function carregarMensalidades(referencia = competenciaFinanceiro) {
-    setCarregandoFinanceiro(true);
-
-    const inicio = primeiroDiaDoMes(referencia);
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("*")
-      .eq("competencia", inicio)
-      .order("data_vencimento", { ascending: true });
-
-    if (error) {
-      console.error(error);
-      setMensagem("Erro ao carregar as mensalidades.");
-      setMensalidades([]);
-    } else {
-      const itens = (data || []) as Mensalidade[];
-      const hoje = new Date().toISOString().slice(0, 10);
-
-      const idsParaAtraso = itens
-        .filter(
-          (item) =>
-            item.situacao === "em_aberto" &&
-            item.data_vencimento &&
-            item.data_vencimento < hoje
-        )
-        .map((item) => item.id);
-
-      if (idsParaAtraso.length > 0) {
-        await supabase
-          .from("mensalidades")
-          .update({ situacao: "em_atraso" })
-          .in("id", idsParaAtraso);
-
-        itens.forEach((item) => {
-          if (idsParaAtraso.includes(item.id)) item.situacao = "em_atraso";
-        });
-      }
-
-      setMensalidades(itens);
-    }
-
-    setCarregandoFinanceiro(false);
-  }
-
-  async function gerarMensalidadesCompetencia(referencia = competenciaFinanceiro) {
-    setGerandoMensalidades(true);
-    setMensagem("");
-
-    try {
-      const pessoasComMensalidade = socios.filter(
-        (s) =>
-          s.possui_mensalidade === true &&
-          Number(s.valor_mensalidade || 0) >= 0 &&
-          s.situacao?.toLowerCase() !== "inativo"
-      );
-
-      if (pessoasComMensalidade.length === 0) {
-        setMensalidades([]);
-        setMensagem("Nenhum associado/dependente possui mensalidade ativa.");
-        return;
-      }
-
-      const competencia = primeiroDiaDoMes(referencia);
-
-      const { data: existentes, error: erroBusca } = await supabase
-        .from("mensalidades")
-        .select("socio_id")
-        .eq("competencia", competencia);
-
-      if (erroBusca) throw erroBusca;
-
-      const idsExistentes = new Set(
-        (existentes || []).map((item: { socio_id: string }) => item.socio_id)
-      );
-
-      const novos = pessoasComMensalidade
-        .filter((socio) => !idsExistentes.has(socio.id))
-        .map((socio) => ({
-          socio_id: socio.id,
-          competencia,
-          valor: Number(socio.valor_mensalidade || 0),
-          data_vencimento: calcularVencimento(
-            referencia,
-            socio.dia_vencimento
-          ),
-          situacao:
-            Number(socio.valor_mensalidade || 0) === 0
-              ? "isento"
-              : "em_aberto",
-          data_pagamento: null,
-          tipo_pagamento: socio.tipo_pagamento || null,
-          comprovante_url: null,
-          observacoes: null,
-        }));
-
-      if (novos.length > 0) {
-        const { error: erroInsercao } = await supabase
-          .from("mensalidades")
-          .insert(novos);
-
-        if (erroInsercao) throw erroInsercao;
-      }
-
-      await carregarMensalidades(referencia);
-      setMensagem(
-        novos.length > 0
-          ? `${novos.length} mensalidade(s) gerada(s) para ${formatarCompetencia(referencia)}.`
-          : `As mensalidades de ${formatarCompetencia(referencia)} já estavam geradas.`
-      );
-    } catch (error) {
-      console.error(error);
-      setMensagem("Não foi possível gerar as mensalidades.");
-    } finally {
-      setGerandoMensalidades(false);
-    }
-  }
-
-  async function abrirFinanceiro() {
-    setMenu("Financeiro");
-    await carregarMensalidades(competenciaFinanceiro);
-  }
-
-  function alterarCompetenciaFinanceiro(valor: string) {
-    setCompetenciaFinanceiro(valor);
-    void carregarMensalidades(valor);
-  }
-
-  function editarMensalidade(item: Mensalidade) {
-    setMensalidadeEditando(item);
-  }
-
-  async function salvarEdicaoMensalidade(
-    item: Mensalidade,
-    valor: number,
-    vencimento: string,
-    situacao: string,
-    tipoPagamento: string,
-    observacoes: string
-  ) {
-    const { error } = await supabase
-      .from("mensalidades")
-      .update({
-        valor,
-        data_vencimento: vencimento || null,
-        situacao,
-        tipo_pagamento: tipoPagamento || null,
-        observacoes: observacoes || null,
-      })
-      .eq("id", item.id);
-
-    if (error) {
-      console.error(error);
-      setMensagem("Não foi possível atualizar a mensalidade.");
-      return;
-    }
-
-    setMensagem("Mensalidade atualizada com sucesso.");
-    setMensalidadeEditando(null);
-    await carregarMensalidades();
-  }
-
-  async function excluirMensalidade(item: Mensalidade) {
-    if (!window.confirm("Deseja realmente excluir esta mensalidade?")) return;
-
-    const { error } = await supabase
-      .from("mensalidades")
-      .delete()
-      .eq("id", item.id);
-
-    if (error) {
-      console.error(error);
-      setMensagem("Não foi possível excluir a mensalidade.");
-      return;
-    }
-
-    setMensagem("Mensalidade excluída.");
-    await carregarMensalidades();
-  }
-
-  function abrirRegistroPagamento(item: Mensalidade) {
-    setMensalidadePagamento(item);
-    setArquivoComprovante(null);
-    setPagamentoForm({
-      valor: String(Number(item.valor || 0)),
-      data_pagamento: new Date().toISOString().slice(0, 10),
-      tipo_pagamento: item.tipo_pagamento || "pix",
-      observacoes: "",
-    });
-    setAbrirPagamento(true);
-  }
-
-  async function confirmarPagamento() {
-    if (!mensalidadePagamento) return;
-
-    setSalvando(true);
-    setMensagem("");
-
-    try {
-      let comprovantePath = mensalidadePagamento.comprovante_url || null;
-
-      if (arquivoComprovante) {
-        const extensao =
-          arquivoComprovante.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `mensalidades/${mensalidadePagamento.id}.${extensao}`;
-
-        const upload = await supabase.storage
-          .from("comprovantes-financeiro")
-          .upload(caminho, arquivoComprovante, {
-            upsert: true,
-            contentType: arquivoComprovante.type || "application/octet-stream",
-          });
-
-        if (upload.error) throw upload.error;
-        comprovantePath = caminho;
-      }
-
-      const competenciaRecibo = mensalidadePagamento.competencia.slice(0, 7);
-
-      const { data: recibosExistentes, error: erroRecibos } = await supabase
-        .from("mensalidades")
-        .select("numero_recibo")
-        .eq("competencia", mensalidadePagamento.competencia)
-        .not("numero_recibo", "is", null);
-
-      if (erroRecibos) throw erroRecibos;
-
-      const numerosExistentes = (recibosExistentes || [])
-        .map((item: { numero_recibo?: string | null }) => {
-          const numero = String(item.numero_recibo || "");
-          const parte = numero.split("-").pop() || "";
-          return Number(parte);
-        })
-        .filter((numero: number) => Number.isFinite(numero) && numero > 0);
-
-      const proximoNumero =
-        numerosExistentes.length > 0 ? Math.max(...numerosExistentes) + 1 : 1;
-      const numeroRecibo = `REC-${competenciaRecibo.replace("-", "")}-${String(
-        proximoNumero
-      ).padStart(3, "0")}`;
-
-      const { error } = await supabase
-        .from("mensalidades")
-        .update({
-          valor: Number(pagamentoForm.valor || 0),
-          situacao: "pago",
-          data_pagamento: pagamentoForm.data_pagamento || null,
-          tipo_pagamento: pagamentoForm.tipo_pagamento || null,
-          comprovante_url: comprovantePath,
-          observacoes: pagamentoForm.observacoes || null,
-          numero_recibo: numeroRecibo,
-        })
-        .eq("id", mensalidadePagamento.id);
-
-      if (error) throw error;
-
-      await supabase
-        .from("socios")
-        .update({
-          situacao_financeira: "em_dia",
-          data_ultimo_pagamento: pagamentoForm.data_pagamento || null,
-        })
-        .eq("id", mensalidadePagamento.socio_id);
-
-      setAbrirPagamento(false);
-      setMensalidadePagamento(null);
-      setArquivoComprovante(null);
-      setMensagem("Pagamento registrado com sucesso.");
-      await carregarMensalidades();
-      await carregarSocios();
-    } catch (error) {
-      console.error(error);
-      setMensagem("Não foi possível registrar o pagamento.");
-    } finally {
-      setSalvando(false);
-    }
-  }
-
-  async function abrirComprovante(path: string | null) {
-    if (!path) return;
-
-    const { data, error } = await supabase.storage
-      .from("comprovantes-financeiro")
-      .createSignedUrl(path, 60 * 10);
-
-    if (error || !data?.signedUrl) {
-      console.error(error);
-      setMensagem("Não foi possível abrir o comprovante.");
-      return;
-    }
-
-    window.open(data.signedUrl, "_blank");
-  }
-
-  function selecionarFoto(file: File | null) {
-    setFotoArquivo(file);
-    if (file) {
-      setForm((atual) => ({
-        ...atual,
-        foto_url: URL.createObjectURL(file),
-      }));
-    }
-  }
-
-  function removerFoto() {
+  function abrirNovo() {
+    if (somenteConsulta) return;
+    setEditando(null);
     setFotoArquivo(null);
-    setForm((atual) => ({
-      ...atual,
-      foto_url: "",
-    }));
+    setForm({
+      socio_id: filtroSocio,
+      nome: "",
+      cpf: "",
+      data_nascimento: "",
+      parentesco: "",
+      telefone: "",
+      ativo: true,
+      possui_mensalidade: false,
+      valor_mensalidade: 0,
+      dia_vencimento: 10,
+      tipo_pagamento: "pix",
+      situacao_financeira: "isento",
+      data_ultimo_pagamento: "",
+    });
+    setErro("");
+    setSucesso("");
+    setModalAberto(true);
   }
 
-  async function carregarRelatorioFinanceiro(referencia = relatorioCompetencia) {
-    setCarregandoRelatorio(true);
-    const competencia = primeiroDiaDoMes(referencia);
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("*")
-      .eq("competencia", competencia)
-      .order("data_vencimento", { ascending: true });
-
-    if (error) {
-      console.error(error);
-      setRelatorioMensalidades([]);
-      setMensagem("Erro ao carregar o relatório financeiro.");
-    } else {
-      setRelatorioMensalidades((data || []) as Mensalidade[]);
-    }
-    setCarregandoRelatorio(false);
+  function abrirEdicao(d: Dependente) {
+    if (somenteConsulta) return;
+    setEditando(d);
+    setFotoArquivo(null);
+    setForm({
+      socio_id: d.socio_id,
+      nome: d.nome || "",
+      cpf: d.cpf || "",
+      data_nascimento: d.data_nascimento || "",
+      parentesco: d.parentesco || "",
+      telefone: d.telefone || "",
+      ativo: d.ativo !== false,
+      possui_mensalidade: d.possui_mensalidade === true,
+      valor_mensalidade: Number(d.valor_mensalidade || 0),
+      dia_vencimento: Number(d.dia_vencimento || 10),
+      tipo_pagamento: d.tipo_pagamento || "pix",
+      situacao_financeira: d.situacao_financeira || (d.possui_mensalidade ? "em_dia" : "isento"),
+      data_ultimo_pagamento: d.data_ultimo_pagamento || "",
+    });
+    setErro("");
+    setSucesso("");
+    setModalAberto(true);
   }
 
-  function abrirRelatorios() {
-    setMenu("Relatórios");
-    void carregarRelatorioFinanceiro(relatorioCompetencia);
-  }
+  async function migrarDependentesAntigos() {
+    if (somenteConsulta || migrando) return;
+    if (!window.confirm("Migrar para Dependentes todos os cadastros antigos que estão em Sócios sem mensalidade?")) return;
 
-  async function carregarContasBancarias() {
-    const { data, error } = await supabase
-      .from("contas_bancarias")
-      .select("id,nome,banco,agencia,conta,ativo")
-      .eq("ativo", true)
-      .order("nome", { ascending: true });
-
-    if (error) {
-      console.error(error);
-      setContasBancarias([]);
-      return;
-    }
-
-    setContasBancarias((data || []) as ContaBancaria[]);
-  }
-
-  async function carregarSocios() {
-    setCarregando(true);
+    setMigrando(true);
+    setErro("");
+    setSucesso("");
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        window.location.replace("/login");
+      if (!session) {
+        window.location.href = "/login";
         return;
       }
 
-      const response = await fetch("/api/socios", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      const resposta = await fetch("/api/dependentes/migrar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
         cache: "no-store",
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || "Erro ao carregar os sócios.");
-      setSocios((payload?.socios || []) as Socio[]);
+
+      const dados = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes.");
+
+      const migrados = Array.isArray(dados?.migrados) ? dados.migrados : [];
+      const ignorados = Array.isArray(dados?.ignorados) ? dados.ignorados : [];
+      const detalhes = migrados.map((item: any) => `${item.nome} → ${item.matricula}`).join("\n");
+      const pendencias = ignorados.map((item: any) => `${item.nome}: ${item.motivo}`).join("\n");
+
+      setSucesso(`${dados?.mensagem || "Migração concluída."}${detalhes ? `\n\n${detalhes}` : ""}`);
+      if (pendencias) setErro(`Não foi possível concluir alguns cadastros:\n${pendencias}`);
+      await carregarDados();
     } catch (error) {
-      console.error(error);
-      setMensagem(error instanceof Error ? error.message : "Erro ao carregar os sócios.");
+      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
+    } finally {
+      setMigrando(false);
     }
-
-    setCarregando(false);
   }
 
-  useEffect(() => {
-    carregarSocios();
-    void carregarContasBancarias();
-    void carregarMensalidades(competenciaFinanceiro);
-  }, []);
+  function fecharModal() {
+    if (salvando) return;
+    setModalAberto(false);
+    setEditando(null);
+    setErro("");
+  }
 
-  function novoSocio() {
+  async function salvarDependente(e: React.FormEvent) {
+    e.preventDefault();
     if (somenteConsulta) return;
-    setSocioEditando(null);
-    setBuscaResponsavel("");
-    setForm({
-      ...socioInicial,
-      data_associacao: new Date().toISOString().split("T")[0],
-    });
-    setFotoArquivo(null);
-    setAbrirCadastro(true);
-    setMensagem("");
-  }
 
-  function novoDependente(responsavel: Socio) {
-    if (somenteConsulta) return;
-    if (!podeTerDependentes(responsavel.tipo_socio)) {
-      setMensagem("Este tipo de sócio não possui dependentes.");
-      return;
-    }
+    setErro("");
+    setSucesso("");
 
-    setSocioEditando(null);
-    setBuscaResponsavel(responsavel.nome);
-    setForm({
-      ...socioInicial,
-      tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
-      responsavel_id: responsavel.id,
-      parentesco: "Filho(a)",
-      // Novo dependente começa sem mensalidade. Se passar a pagar,
-      // o cadastro pode ser alterado para mensalidade = SIM e então
-      // ele aparecerá automaticamente na guia Sócios.
-      possui_mensalidade: false,
-      valor_mensalidade: 0,
-      data_associacao: new Date().toISOString().split("T")[0],
-    });
-    setFotoArquivo(null);
-    setAbrirCadastro(true);
-    setMensagem("");
-  }
-
-  function editarSocio(socio: Socio) {
-    if (somenteConsulta) return;
-    setSocioEditando(socio);
-    setBuscaResponsavel(socio.responsavel_id ? (socios.find((p) => p.id === socio.responsavel_id)?.nome || "") : "");
-    setForm({ ...socio, situacao: socio.situacao?.toLowerCase() || "ativo" });
-    setFotoArquivo(null);
-    setAbrirCadastro(true);
-    setMensagem("");
-  }
-
-  function fecharCadastro() {
-    if (!salvando) {
-      setAbrirCadastro(false);
-      setSocioEditando(null);
-      setBuscaResponsavel("");
-    }
-  }
-
-  function alterarCampo(campo: keyof Socio, valor: string) {
-    setForm((atual) => {
-      const proximo = {
-        ...atual,
-        [campo]:
-          campo === "possui_mensalidade"
-            ? valor === "true"
-            : valor,
-      };
-
-      if (campo === "tipo_socio") {
-        const tipo = valor;
-        const mensalidadeObrigatoria = [
-          "dependente_patrimonial_familiar_mensalidade",
-          "dependente_patrimonial_individual_mensalidade",
-          "dependente_contribuinte_familiar_mensalidade",
-          "dependente_contribuinte_individual_mensalidade",
-        ].includes(tipo);
-
-        if (tipo === "remido") {
-          proximo.possui_mensalidade = false;
-          proximo.valor_mensalidade = 0;
-        } else if (mensalidadeObrigatoria) {
-          proximo.possui_mensalidade = true;
-        }
-
-        if (!tipo.startsWith("dependente_")) {
-          proximo.responsavel_id = null;
-          proximo.parentesco = "";
-        }
-      }
-
-      return proximo;
-    });
-  }
-
-  async function salvarSocio() {
-    if (!form.nome?.trim()) {
-      setMensagem("Informe o nome completo do sócio.");
-      return;
-    }
+    if (!form.socio_id) return setErro("Selecione o sócio responsável.");
+    if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
 
     setSalvando(true);
-    setMensagem("");
 
-    const dadosBase = {
-      nome: form.nome?.trim(),
-      cpf: form.cpf || null,
-      rg: form.rg || null,
+    const dados = {
+      socio_id: form.socio_id,
+      nome: form.nome.trim(),
+      cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
-      telefone: form.telefone || null,
-      whatsapp: form.whatsapp || null,
-      email: form.email || null,
-      endereco: form.endereco || null,
-      numero: form.numero || null,
-      bairro: form.bairro || null,
-      cidade: form.cidade || null,
-      estado: form.estado || null,
-      cep: form.cep || null,
-      data_associacao: form.data_associacao || null,
-      categoria: form.categoria || "Titular",
-      situacao: form.situacao || "ativo",
-      observacoes: form.observacoes || null,
-
-      tipo_socio: form.tipo_socio || "patrimonial_individual",
-      responsavel_id: form.responsavel_id || null,
       parentesco: form.parentesco || null,
-      possui_mensalidade: Boolean(form.possui_mensalidade),
-      valor_mensalidade: Number(form.valor_mensalidade || 0),
+      telefone: form.telefone.trim() || null,
+      ativo: form.ativo,
+      possui_mensalidade: form.possui_mensalidade,
+      valor_mensalidade: form.possui_mensalidade ? Number(form.valor_mensalidade || 0) : 0,
       dia_vencimento: Number(form.dia_vencimento || 10),
-      tipo_pagamento: form.tipo_pagamento || "pix",
-      conta_bancaria_id:
-        form.tipo_pagamento === "debito_em_conta"
-          ? form.conta_bancaria_id || null
-          : null,
-      modalidade_temporada: form.modalidade_temporada || null,
-      inicio_temporada: form.inicio_temporada || null,
-      fim_temporada: form.fim_temporada || null,
-      situacao_financeira: form.situacao_financeira || "isento",
+      tipo_pagamento: form.possui_mensalidade ? form.tipo_pagamento : "pix",
+      situacao_financeira: form.possui_mensalidade ? form.situacao_financeira : "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    try {
-      let socioId = socioEditando?.id || "";
+    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+    if (!socioResponsavel) {
+      setErro("Selecione um sócio responsável válido.");
+      setSalvando(false);
+      return;
+    }
 
-      if (socioEditando) {
-        const resultado = await supabase
-          .from("socios")
-          .update({
-            ...dadosBase,
-            foto_url: form.foto_url || null,
-          })
-          .eq("id", socioEditando.id);
+    let resultado: any;
+    const editandoSocio = editando?.source === "socios" && editando.source_socio_id;
 
-        if (resultado.error) throw resultado.error;
-      } else {
-        const resultado = await supabase
-          .from("socios")
-          .insert(dadosBase)
-          .select("id")
-          .single();
+    if (editandoSocio) {
+      resultado = await supabase
+        .from("socios")
+        .update({
+          nome: dados.nome,
+          cpf: dados.cpf,
+          data_nascimento: dados.data_nascimento,
+          telefone: dados.telefone,
+          parentesco: dados.parentesco,
+          possui_mensalidade: dados.possui_mensalidade,
+          valor_mensalidade: dados.valor_mensalidade,
+          dia_vencimento: dados.dia_vencimento,
+          tipo_pagamento: dados.tipo_pagamento,
+          situacao_financeira: dados.situacao_financeira,
+          data_ultimo_pagamento: dados.data_ultimo_pagamento,
+          situacao: dados.ativo ? "ativo" : "inativo",
+        })
+        .eq("id", editando.source_socio_id);
+    } else if (editando) {
+      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
+    } else {
+      resultado = await supabase.from("dependentes").insert(dados).select("id").single();
+    }
 
-        if (resultado.error) throw resultado.error;
-        socioId = resultado.data.id;
-      }
+    if (resultado.error) {
+      setErro(`Não foi possível salvar: ${resultado.error.message}`);
+      setSalvando(false);
+      return;
+    }
 
-      if (fotoArquivo && socioId) {
-        const extensao =
-          fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
-        const caminho = `socios/${socioId}.${extensao}`;
-
+    const dependenteId = editandoSocio
+      ? editando.source_socio_id
+      : editando?.id || (Array.isArray(resultado.data) ? resultado.data[0]?.id : resultado.data?.id);
+    if (fotoArquivo && dependenteId) {
+      try {
+        const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+        const pasta = editandoSocio ? "socios" : "dependentes";
+        const caminho = `${pasta}/${dependenteId}.${extensao}`;
         const upload = await supabase.storage
           .from("fotos-associados")
           .upload(caminho, fotoArquivo, {
             upsert: true,
             contentType: fotoArquivo.type || "image/jpeg",
           });
-
         if (upload.error) throw upload.error;
 
-        const { data: urlData } = supabase.storage
-          .from("fotos-associados")
-          .getPublicUrl(caminho);
-
-        const atualizacaoFoto = await supabase
-          .from("socios")
+        const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+        const fotoUpdate = await supabase
+          .from(editandoSocio ? "socios" : "dependentes")
           .update({ foto_url: urlData.publicUrl })
-          .eq("id", socioId);
-
-        if (atualizacaoFoto.error) throw atualizacaoFoto.error;
+          .eq("id", dependenteId);
+        if (fotoUpdate.error) throw fotoUpdate.error;
+      } catch (fotoError) {
+        setErro(`Dependente salvo, mas a foto não pôde ser enviada: ${fotoError instanceof Error ? fotoError.message : "erro no upload"}`);
       }
-
-      setMensagem(
-        socioEditando
-          ? "Sócio atualizado com sucesso!"
-          : "Sócio cadastrado com sucesso!"
-      );
-
-      setFotoArquivo(null);
-      await carregarSocios();
-
-      setTimeout(() => {
-        setAbrirCadastro(false);
-        setSocioEditando(null);
-        setMensagem("");
-      }, 900);
-    } catch (error) {
-      console.error(error);
-      setMensagem(
-        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
-      );
-    } finally {
-      setSalvando(false);
     }
+
+    setSucesso(editandoSocio ? "Cadastro do sócio atualizado com sucesso." : editando ? "Dependente atualizado com sucesso." : "Dependente cadastrado com sucesso.");
+    setFotoArquivo(null);
+    await carregarDados();
+    setSalvando(false);
+
+    setTimeout(() => {
+      setModalAberto(false);
+      setSucesso("");
+    }, 700);
   }
 
-  async function excluirSocio(socio: Socio) {
-    if (somenteConsulta) return;
-    const confirmar = window.confirm(
-      `Deseja realmente excluir o sócio "${socio.nome}"?`
-    );
-
-    if (!confirmar) return;
-
-    const { error } = await supabase
-      .from("socios")
-      .delete()
-      .eq("id", socio.id);
-
+  async function excluirDependente(d: Dependente) {
+    if (somenteConsulta || d.source === "socios") return;
+    if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
+    setErro("");
+    const { error } = await supabase.from("dependentes").delete().eq("id", d.id);
     if (error) {
-      console.error(error);
-      setMensagem("Não foi possível excluir o sócio.");
+      setErro(`Não foi possível excluir: ${error.message}`);
       return;
     }
-
-    setMensagem("Sócio excluído.");
-    await carregarSocios();
-
-    setTimeout(() => setMensagem(""), 1500);
+    setSucesso("Dependente excluído com sucesso.");
+    await carregarDados();
+    setTimeout(() => setSucesso(""), 1800);
   }
 
-  const sociosFiltrados = useMemo(() => {
-    const termo = busca.toLowerCase().trim();
-
-    return socios.filter((socio) => {
-      // Regra oficial de exibição: quem possui mensalidade fica em Sócios,
-      // inclusive quando possui responsavel_id.
-      if (socio.possui_mensalidade !== true) return false;
-
-      const correspondeBusca =
-        !termo ||
-        socio.nome?.toLowerCase().includes(termo) ||
-        socio.cpf?.toLowerCase().includes(termo) ||
-        String(socio.matricula || "").includes(termo);
-
-      const correspondeTipo =
-        !mostrarSomenteDependentes ||
-        Boolean(socio.responsavel_id) ||
-        (socio.tipo_socio || "").startsWith("dependente_");
-
-      return correspondeBusca && correspondeTipo;
-    });
-  }, [socios, busca, mostrarSomenteDependentes]);
-
-  if (verificandoLogin) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-[#dfe9e3] border-t-[#005a3c]" />
-          <p className="font-semibold text-[#005a3c]">
-            Verificando acesso...
-          </p>
-        </div>
-      </main>
-    );
+  async function alternarStatus(d: Dependente) {
+    if (somenteConsulta) return;
+    setErro("");
+    const tabela = d.source === "socios" ? "socios" : "dependentes";
+    const id = d.source === "socios" ? d.source_socio_id : d.id;
+    if (!id) return;
+    const atualizacao = d.source === "socios"
+      ? { situacao: d.ativo !== true ? "ativo" : "inativo" }
+      : { ativo: d.ativo !== true };
+    const { error } = await supabase.from(tabela).update(atualizacao).eq("id", id);
+    if (error) {
+      setErro(`Não foi possível alterar a situação: ${error.message}`);
+      return;
+    }
+    await carregarDados();
   }
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+    <main className="min-h-screen bg-[#F8FAF9] text-slate-800">
+      <CabecalhoPadrao />
 
-      {/* CABEÇALHO */}
-      <header className="sticky top-0 z-30 border-b border-[#dfe9e3] bg-white/95 text-[#123c2b] shadow-sm backdrop-blur">
-        <div className="flex h-20 items-center justify-between px-5 sm:px-7">
-
-          <div className="flex items-center gap-4">
-
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
-                src="/logo-guarani.png"
-                alt="Sociedade Guarani"
-                className="h-full w-full object-contain"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
-                SOCIEDADE GUARANI
-              </h1>
-
-              <p className="text-xs font-medium text-[#6b7d74]">
-                Sociedade Recreativa Guarani — S.R.G.
-              </p>
-            </div>
-
-          </div>
-
-          <div className="hidden items-center gap-4 sm:flex">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">
-                {usuarioEmail || "Usuário autenticado"}
-              </p>
-
-              <p className="font-bold text-[#005a3c]">
-                Área Administrativa
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={sair}
-              className="rounded-lg border border-[#c9d9d1] bg-white px-3 py-2 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3]"
-            >
-              Sair
-            </button>
-          </div>
-
-        </div>
-      </header>
-
-      <div className="flex min-h-[calc(100vh-80px)]">
-
-        {/* MENU LATERAL PADRÃO DO SISTEMA */}
+      <div className="flex min-h-[calc(100vh-76px)] min-w-0">
         <MenuLateralPadrao />
 
-        {/* CONTEÚDO */}
-        <section className="ml-0 min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
+        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:ml-[220px] lg:p-8">
+          <div className="mx-auto max-w-[1400px]">
+            <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-7 md:flex-row md:items-end">
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-500">Administração</div>
+                <h1 className="text-2xl font-black tracking-tight text-[#005A3C] sm:text-3xl">Dependentes</h1>
+                <p className="mt-1 text-slate-500">Cadastro e gerenciamento dos dependentes dos associados.</p>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                {!somenteConsulta && (
+                  <button onClick={migrarDependentesAntigos} disabled={migrando} className="w-full rounded-xl border border-[#9fcdb9] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] shadow-sm hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto sm:px-5">{migrando ? "Migrando..." : "↻ Corrigir antigos"}</button>
+                )}
+                <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
+              </div>
+            </div>
 
-          {/* INÍCIO */}
-          {menu === "Início" && (
-            <Inicio
-              socios={socios}
-              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true).length}
-              abrirCadastro={novoSocio}
-            />
-          )}
+            {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
+            {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
 
-          {/* SÓCIOS */}
-          {menu === "Sócios" && (
-            <Socios
-              socios={sociosFiltrados}
-              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true).length}
-              busca={busca}
-              setBusca={setBusca}
-              novoSocio={novoSocio}
-              novoDependente={novoDependente}
-              editarSocio={editarSocio}
-              excluirSocio={excluirSocio}
-              carregando={carregando}
-              mostrarSomenteDependentes={mostrarSomenteDependentes}
-            somenteConsulta={somenteConsulta}
-              setMostrarSomenteDependentes={setMostrarSomenteDependentes}
-            />
-          )}
+            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes ativos</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{totalAtivos}</div></div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes inativos</div><div className="mt-1 text-3xl font-black text-slate-600">{totalInativos}</div></div>
+            </div>
 
-          {/* DEPENDENTES / FAMÍLIAS */}
-          {menu === "Dependentes" && (
-            <Dependentes
-              socios={socios}
-              novoDependente={novoDependente}
-              editarSocio={editarSocio}
-            />
-          )}
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
+                <div className="flex items-center rounded-xl border border-slate-200 px-4">
+                  <span className="mr-3 text-xl">🔎</span>
+                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
+                </div>
+                <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
+                  <option value="">Todos os responsáveis</option>
+                  {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — ${s.matricula}` : ""}</option>)}
+                </select>
+                <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
+                  <option value="todos">Todos</option><option value="ativos">Ativos</option><option value="inativos">Inativos</option>
+                </select>
+              </div>
+            </div>
 
-          {/* FINANCEIRO */}
-          {menu === "Financeiro" && (
-            <Financeiro
-              socios={socios}
-              mensalidades={mensalidades}
-              competencia={competenciaFinanceiro}
-              busca={buscaFinanceiro}
-              setBusca={setBuscaFinanceiro}
-              carregando={carregandoFinanceiro}
-              gerando={gerandoMensalidades}
-              gerarMensalidades={() => void gerarMensalidadesCompetencia()}
-              alterarCompetencia={alterarCompetenciaFinanceiro}
-              editarMensalidade={editarMensalidade}
-              excluirMensalidade={excluirMensalidade}
-              registrarPagamento={abrirRegistroPagamento}
-              abrirComprovante={abrirComprovante}
-              emitirRecibo={(item) => setReciboMensalidade(item)}
-            />
-          )}
-
-          {/* RELATÓRIOS FINANCEIROS */}
-          {menu === "Relatórios" && (
-            <RelatoriosFinanceiros
-              socios={socios}
-              mensalidades={relatorioMensalidades}
-              competencia={relatorioCompetencia}
-              setCompetencia={(valor) => {
-                setRelatorioCompetencia(valor);
-                void carregarRelatorioFinanceiro(valor);
-              }}
-              formaPagamento={relatorioFormaPagamento}
-              setFormaPagamento={setRelatorioFormaPagamento}
-              situacao={relatorioSituacao}
-              setSituacao={setRelatorioSituacao}
-              carregando={carregandoRelatorio}
-            />
-          )}
-
-          {/* OUTROS MÓDULOS */}
-          {menu !== "Início" &&
-            menu !== "Sócios" &&
-            menu !== "Dependentes" &&
-            menu !== "Financeiro" &&
-             menu !== "Relatórios" && (
-              <ModuloEmConstrucao
-                nome={menu}
-                icone={
-                  menus.find((x) => x.nome === menu)?.icone || "📋"
-                }
-              />
-            )}
-
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              {carregando ? (
+                <div className="p-8 text-center text-sm text-slate-500 sm:p-10">Carregando dependentes...</div>
+              ) : dependentesFiltrados.length === 0 ? (
+                <div className="p-8 text-center sm:p-12"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-left text-sm">
+                    <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
+                      <tr>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dependentesFiltrados.map((d) => {
+                        const socio = socioPorId[d.socio_id];
+                        const statusResponsavel = statusResponsaveis[d.socio_id] || "em_dia";
+                        const statusLabel = statusResponsavel === "muito_atrasado" ? "5+ meses" : statusResponsavel === "atrasado" ? "3–4 meses" : "Até 2 meses";
+                        const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
+                        return (
+                          <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4">
+                              <div className="flex items-center gap-3">
+                                {d.foto_url ? (
+                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
+                                    {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
+                                  </div>
+                                )}
+                                <div className="font-extrabold text-[#003D2B]">{d.nome}</div>
+                              </div>
+                            </td>
+                            <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
+                            <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
+                            <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
+                            <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
+                            <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4">
+                              {!somenteConsulta && (
+                                <div className="flex justify-end gap-2">
+                                  <button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button>
+                                  {d.source !== "socios" && (
+                                    <button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="mt-5 text-sm text-slate-400">Exibindo {dependentesFiltrados.length} de {dependentes.length} dependentes.</div>
+          </div>
         </section>
       </div>
 
-      {mensalidadeEditando && (
-        <ModalEdicaoMensalidade
-          item={mensalidadeEditando}
-          fechar={() => setMensalidadeEditando(null)}
-          salvar={salvarEdicaoMensalidade}
-        />
-      )}
-
-      {abrirPagamento && mensalidadePagamento && (
-        <ModalPagamentoGuarani
-          socio={socios.find((s) => s.id === mensalidadePagamento.socio_id) || null}
-          mensalidade={mensalidadePagamento}
-          form={pagamentoForm}
-          setForm={setPagamentoForm}
-          arquivo={arquivoComprovante}
-          setArquivo={setArquivoComprovante}
-          fechar={() => {
-            setAbrirPagamento(false);
-            setMensalidadePagamento(null);
-            setArquivoComprovante(null);
-          }}
-          salvar={() => void confirmarPagamento()}
-          salvando={salvando}
-        />
-      )}
-
-      {reciboMensalidade && (
-        <ReciboPagamentoGuarani
-          socio={socios.find((s) => s.id === reciboMensalidade.socio_id) || null}
-          mensalidade={reciboMensalidade}
-          fechar={() => setReciboMensalidade(null)}
-        />
-      )}
-
-      {/* MODAL CADASTRO */}
-      {abrirCadastro && (
-        <ModalSocio
-          socios={socios}
-          contasBancarias={contasBancarias}
-          form={form}
-          socioEditando={socioEditando}
-          buscaResponsavel={buscaResponsavel}
-          setBuscaResponsavel={setBuscaResponsavel}
-          salvando={salvando}
-          mensagem={mensagem}
-          fechar={fecharCadastro}
-          alterarCampo={alterarCampo}
-          salvar={salvarSocio}
-          selecionarFoto={selecionarFoto}
-          removerFoto={removerFoto}
-        />
-      )}
-
-    </main>
-  );
-}
-
-
-/* =========================
-   INÍCIO
-========================= */
-
-function Inicio({
-  socios,
-  quantidadeSocios,
-  abrirCadastro,
-}: {
-  socios: Socio[];
-  quantidadeSocios: number;
-  abrirCadastro: () => void;
-}) {
-  return (
-    <>
-      <div className="mb-8">
-
-        <p className="text-sm font-medium text-gray-500">
-          Bem-vindo ao sistema
-        </p>
-
-        <h2 className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-          Painel da Sociedade Guarani
-        </h2>
-
-        <p className="mt-2 text-gray-600">
-          Gerencie sócios, reservas, eventos, espaços e financeiro
-          em um único lugar.
-        </p>
-
-      </div>
-
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
-
-        <DashboardCard
-          titulo="Sócios"
-          valor={String(quantidadeSocios)}
-          descricao="Sócios cadastrados"
-          icone="👥"
-        />
-
-        <DashboardCard
-          titulo="Dependentes"
-          valor={String(socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade !== true).length)}
-          descricao="Vinculados a responsáveis"
-          icone="👨‍👩‍👧‍👦"
-        />
-
-        <DashboardCard
-          titulo="Reservas"
-          valor="0"
-          descricao="Reservas este mês"
-          icone="📅"
-        />
-
-        <DashboardCard
-          titulo="Eventos"
-          valor="0"
-          descricao="Eventos cadastrados"
-          icone="🎉"
-        />
-
-        <DashboardCard
-          titulo="Espaços"
-          valor="4"
-          descricao="Espaços disponíveis"
-          icone="🏛️"
-        />
-
-      </div>
-
-      <div className="mt-8 rounded-2xl bg-[#063b28] p-6 text-white shadow-lg">
-
-        <h3 className="text-xl font-bold">
-          Acesso rápido
-        </h3>
-
-        <p className="mt-1 text-sm text-gray-200">
-          Comece uma nova operação no sistema.
-        </p>
-
-        <button
-          onClick={abrirCadastro}
-          className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#005a3c] transition hover:bg-[#f5d76e]"
-        >
-          👤 Cadastrar novo sócio
-        </button>
-
-      </div>
-    </>
-  );
-}
-
-
-/* =========================
-   CORES DAS CATEGORIAS
-========================= */
-
-function categoriaClasse(categoria?: string | null) {
-  const valor = (categoria || "").toLowerCase();
-
-  if (valor.includes("patrimonial") && valor.includes("depend")) {
-    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-  }
-  if (valor.includes("patrimonial")) {
-    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-  }
-  if (valor.includes("contribuinte") && valor.includes("depend")) {
-    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-  }
-  if (valor.includes("contribuinte")) {
-    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-  }
-  if (valor.includes("temporário") || valor.includes("temporario") ||
-      valor.includes("transitório") || valor.includes("transitorio")) {
-    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-  }
-  if (valor.includes("temporada")) {
-    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-  }
-  if (valor.includes("benemérito") || valor.includes("benemerito")) {
-    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-  }
-  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
-}
-
-/* =========================
-   SÓCIOS
-========================= */
-
-function Socios({
-  socios,
-  quantidadeTotal,
-  busca,
-  setBusca,
-  novoSocio,
-  novoDependente,
-  editarSocio,
-  excluirSocio,
-  carregando,
-  mostrarSomenteDependentes,
-  setMostrarSomenteDependentes,
-  somenteConsulta,
-}: {
-  socios: Socio[];
-  quantidadeTotal: number;
-  busca: string;
-  setBusca: (valor: string) => void;
-  novoSocio: () => void;
-  novoDependente: (responsavel: Socio) => void;
-  editarSocio: (socio: Socio) => void;
-  excluirSocio: (socio: Socio) => void;
-  carregando: boolean;
-  mostrarSomenteDependentes: boolean;
-  setMostrarSomenteDependentes: (valor: boolean) => void;
-  somenteConsulta: boolean;
-}) {
-  return (
-    <div>
-
-      <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-6 sm:flex-row sm:items-center">
-
-        <div>
-          <p className="text-sm font-medium text-gray-500">
-            Administração
-          </p>
-
-          <h2 className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            Sócios
-          </h2>
-
-          <p className="mt-1 text-gray-500">
-            Cadastro e gerenciamento dos associados.
-          </p>
-        </div>
-
-        {!somenteConsulta && (
-          <button
-            onClick={novoSocio}
-            className="w-full rounded-xl bg-[#063b28] px-4 py-3 text-sm font-bold text-white shadow transition hover:bg-[#003d2b] sm:w-auto sm:px-5"
-          >
-            + Novo Sócio
-          </button>
-        )}
-
-      </div>
-
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
-
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">
-            Total de sócios
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            {quantidadeTotal}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">
-            Sócios ativos
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            {socios.filter((s) => s.situacao?.toLowerCase() === "ativo").length}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">
-            Exibindo
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            {socios.length}
-          </p>
-        </div>
-
-      </div>
-
-      <div className="mb-5 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:p-4">
-
-        <div className="flex items-center gap-3">
-
-          <span className="text-xl">
-            🔎
-          </span>
-
-          <input
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por nome, CPF ou matrícula..."
-            className="w-full min-w-0 bg-transparent py-2 text-sm outline-none sm:text-base"
-          />
-
-        </div>
-
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
-
-        <div className="overflow-x-auto">
-
-          <table className="w-full min-w-[760px] text-sm">
-
-            <thead className="bg-[#e8f3ee]">
-
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Foto
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Matrícula
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Nome
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  CPF
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  WhatsApp
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Tipo
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Responsável
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Mensalidade
-                </th>
-
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Situação
-                </th>
-
-                <th className="px-5 py-4 text-right">
-                  Ações
-                </th>
-
-              </tr>
-
-            </thead>
-
-            <tbody className="divide-y">
-
-              {carregando && (
-                <tr>
-                  <td
-                    colSpan={10}
-                    className="px-3 py-10 text-center text-gray-500 sm:px-5 sm:py-12"
-                  >
-                    Carregando sócios...
-                  </td>
-                </tr>
-              )}
-
-              {!carregando && socios.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={10}
-                    className="px-3 py-10 text-center sm:px-5 sm:py-12"
-                  >
-                    <div className="text-4xl">
-                      👥
-                    </div>
-
-                    <p className="mt-3 font-semibold text-gray-700">
-                      Nenhum sócio encontrado
-                    </p>
-
-                    <p className="mt-1 text-sm text-gray-500">
-                      Cadastre o primeiro sócio da Sociedade Guarani.
-                    </p>
-
-                    <button
-                      onClick={novoSocio}
-                      className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
-                    >
-                      + Cadastrar sócio
-                    </button>
-                  </td>
-                </tr>
-              )}
-
-              {!carregando &&
-                socios.map((socio) => (
-                  <tr
-                    key={socio.id}
-                    className="transition hover:bg-[#fafcfb]"
-                  >
-
-                    <td className="px-3 py-3 sm:px-5 sm:py-4">
-                      {socio.foto_url ? (
-                        <img
-                          src={socio.foto_url}
-                          alt={`Foto de ${socio.nome}`}
-                          className="h-11 w-11 rounded-full object-cover ring-2 ring-[#eef3ef]"
-                        />
-                      ) : (
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f3ee] text-lg">
-                          👤
-                        </div>
-                      )}
-                    </td>
-
-                    <td className="px-5 py-4 font-semibold text-[#005a3c]">
-                      {socio.matricula || "-"}
-                    </td>
-
-                    <td className="px-3 py-3 sm:px-5 sm:py-4">
-
-                      <div className="font-semibold">
-                        {socio.nome}
-                      </div>
-
-                      <div className="text-xs text-gray-400">
-                        {socio.email || "Sem e-mail"}
-                      </div>
-
-                    </td>
-
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {socio.cpf || "-"}
-                    </td>
-
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {socio.whatsapp || socio.telefone || "-"}
-                    </td>
-
-                    <td className="px-5 py-4 text-sm">
-                      <span className={`inline-flex max-w-[190px] rounded-full px-3 py-1 text-xs font-extrabold ${tipoSocioClasse(socio.tipo_socio)}`}>
-                        {tipoSocioLabel(socio.tipo_socio)}
-                      </span>
-                    </td>
-
-                    <td className="px-5 py-4 text-sm text-gray-600">
-                      {socio.responsavel_id
-                        ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
-                        : "—"}
-                    </td>
-
-                    <td className="px-5 py-4 text-sm">
-                      {socio.possui_mensalidade
-                        ? `R$ ${Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}`
-                        : "Sem mensalidade"}
-                    </td>
-
-                    <td className="px-3 py-3 sm:px-5 sm:py-4">
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          socio.situacao?.toLowerCase() === "ativo"
-                            ? "bg-green-100 text-green-700"
-                            : socio.situacao?.toLowerCase() === "suspenso"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {socio.situacao?.toLowerCase() === "ativo"
-                          ? "Ativo"
-                          : socio.situacao?.toLowerCase() === "inativo"
-                            ? "Inativo"
-                            : socio.situacao?.toLowerCase() === "suspenso"
-                              ? "Suspenso"
-                              : "Ativo"}
-                      </span>
-
-                    </td>
-
-                    <td className="px-3 py-3 sm:px-5 sm:py-4">
-                      {!somenteConsulta && (
-                        <div className="flex justify-end gap-2">
-                          {podeTerDependentes(socio.tipo_socio) && (
-                            <button
-                              onClick={() => novoDependente(socio)}
-                              className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
-                              title="Adicionar dependente"
-                            >
-                              👨‍👩‍👧 + Dependente
-                            </button>
-                          )}
-                          <button
-                            onClick={() => editarSocio(socio)}
-                            className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-semibold text-[#005a3c] hover:bg-[#dce8df]"
-                          >
-                            ✏️ Editar
-                          </button>
-                          <button
-                            onClick={() => excluirSocio(socio)}
-                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      )}
-                    </td>
-
-                  </tr>
-                ))}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-
-
-/* =========================
-   FINANCEIRO
-========================= */
-
-function primeiroDiaDoMes(referencia: string) {
-    return `${referencia}-01`;
-  }
-
-function calcularVencimento(referencia: string, dia: number | null | undefined) {
-    const [ano, mes] = referencia.split("-").map(Number);
-    const ultimoDia = new Date(ano, mes, 0).getDate();
-    const diaSeguro = Math.min(Math.max(Number(dia || 10), 1), ultimoDia);
-    return `${referencia}-${String(diaSeguro).padStart(2, "0")}`;
-  }
-
-function rotuloSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "Pago";
-      case "em_atraso":
-        return "Em atraso";
-      case "isento":
-        return "Isento";
-      default:
-        return "Em aberto";
-    }
-  }
-
-function classeSituacaoFinanceira(situacao: string | null | undefined) {
-    switch (situacao) {
-      case "pago":
-        return "bg-green-100 text-green-700";
-      case "em_atraso":
-        return "bg-red-100 text-red-700";
-      case "isento":
-        return "bg-gray-100 text-gray-600";
-      default:
-        return "bg-yellow-100 text-yellow-700";
-    }
-  }
-
-function formatarMoeda(valor: number | null | undefined) {
-  return `R$ ${Number(valor || 0).toFixed(2).replace(".", ",")}`;
-}
-
-function formatarCompetencia(referencia: string) {
-  const [ano, mes] = referencia.split("-");
-  if (!ano || !mes) return referencia;
-  return `${mes}/${ano}`;
-}
-
-function formatarDataFinanceiro(data: string | null | undefined) {
-  if (!data) return "—";
-  const partes = data.slice(0, 10).split("-");
-  if (partes.length !== 3) return data;
-  return `${partes[2]}/${partes[1]}/${partes[0]}`;
-}
-
-function Financeiro({
-  socios,
-  mensalidades,
-  competencia,
-  busca,
-  setBusca,
-  carregando,
-  gerando,
-  gerarMensalidades,
-  alterarCompetencia,
-  editarMensalidade,
-  excluirMensalidade,
-  registrarPagamento,
-  abrirComprovante,
-  emitirRecibo,
-}: {
-  socios: Socio[];
-  mensalidades: Mensalidade[];
-  competencia: string;
-  busca: string;
-  setBusca: (valor: string) => void;
-  carregando: boolean;
-  gerando: boolean;
-  gerarMensalidades: () => void;
-  alterarCompetencia: (valor: string) => void;
-  editarMensalidade: (item: Mensalidade) => void;
-  excluirMensalidade: (item: Mensalidade) => void;
-  registrarPagamento: (item: Mensalidade) => void;
-  abrirComprovante: (path: string | null) => void;
-  emitirRecibo: (item: Mensalidade) => void;
-}) {
-  const termo = busca.toLowerCase().trim();
-
-  const filtradas = mensalidades.filter((item) => {
-    const socio = socios.find((s) => s.id === item.socio_id);
-    return (
-      !termo ||
-      socio?.nome?.toLowerCase().includes(termo) ||
-      String(socio?.matricula || "").includes(termo)
-    );
-  });
-
-  const total = filtradas.reduce((s, m) => s + Number(m.valor || 0), 0);
-  const recebido = filtradas
-    .filter((m) => m.situacao === "pago")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-  const aberto = filtradas
-    .filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-  const atrasado = filtradas
-    .filter((m) => m.situacao === "em_atraso")
-    .reduce((s, m) => s + Number(m.valor || 0), 0);
-
-  const pessoasComMensalidade = socios.filter(
-    (s) => s.possui_mensalidade === true && s.situacao?.toLowerCase() !== "inativo"
-  ).length;
-
-  return (
-    <div>
-      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-sm font-medium text-gray-500">Administração</p>
-          <h2 className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">Financeiro</h2>
-          <p className="mt-1 text-gray-500">
-            Controle mensal de cobranças, vencimentos e pagamentos.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <div className="rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
-            <label className="mr-2 text-xs font-bold text-gray-500">Competência</label>
-            <input
-              type="month"
-              value={competencia}
-              onChange={(e) => alterarCompetencia(e.target.value)}
-              className="font-semibold text-[#005a3c] outline-none"
-            />
-          </div>
-
-          <button
-            onClick={gerarMensalidades}
-            disabled={gerando}
-            className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-60"
-          >
-            {gerando ? "Gerando..." : "⚡ Gerar mensalidades"}
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <ResumoFinanceiroGuarani titulo="Total lançado" valor={total} />
-        <ResumoFinanceiroGuarani titulo="Recebido" valor={recebido} />
-        <ResumoFinanceiroGuarani titulo="Em aberto" valor={aberto} />
-        <ResumoFinanceiroGuarani titulo="Em atraso" valor={atrasado} />
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Com mensalidade</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{pessoasComMensalidade}</p>
-          <p className="mt-1 text-xs text-gray-500">Associados e dependentes</p>
-        </div>
-      </div>
-
-      <div className="mb-5 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <span className="text-xl">🔎</span>
-          <input
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por nome ou matrícula..."
-            className="w-full min-w-0 bg-transparent py-2 text-sm outline-none sm:text-base"
-          />
-        </div>
-      </div>
-
-      <div className="mb-5 rounded-2xl border border-[#cfe3d8] bg-[#eef7f2] p-4">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <div>
-            <p className="font-bold text-[#003d2b]">
-              Competência {formatarCompetencia(competencia)}
-            </p>
-            <p className="mt-1 text-sm text-[#587066]">
-              O sistema cria automaticamente uma cobrança para cada pessoa com mensalidade,
-              sem duplicar registros existentes.
-            </p>
-          </div>
-          <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#005a3c] ring-1 ring-[#cfe3d8]">
-            {mensalidades.length} lançamento(s)
-          </span>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px]">
-            <thead className="bg-[#e8f3ee]">
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Associado</th>
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Competência</th>
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Vencimento</th>
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Valor</th>
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th>
-                <th className="px-3 py-3 sm:px-5 sm:py-4">Pagamento</th>
-                <th className="px-5 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {carregando && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center text-gray-500 sm:px-5 sm:py-12">
-                    Carregando financeiro...
-                  </td>
-                </tr>
-              )}
-
-              {!carregando && filtradas.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center sm:px-5 sm:py-12">
-                    <div className="text-4xl">💰</div>
-                    <p className="mt-3 font-semibold text-gray-700">
-                      Nenhuma mensalidade nesta competência
-                    </p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Clique em “Gerar mensalidades” para criar os lançamentos das pessoas com mensalidade.
-                    </p>
-                  </td>
-                </tr>
-              )}
-
-              {!carregando &&
-                filtradas.map((item) => {
-                  const socio = socios.find((s) => s.id === item.socio_id);
-
-                  return (
-                    <tr key={item.id} className="transition hover:bg-[#fafcfb]">
-                      <td className="px-3 py-3 sm:px-5 sm:py-4">
-                        <div className="flex items-center gap-3">
-                          {socio?.foto_url ? (
-                            <img
-                              src={socio.foto_url}
-                              alt={`Foto de ${socio.nome}`}
-                              className="h-11 w-11 rounded-full object-cover ring-2 ring-[#e8f3ee]"
-                            />
-                          ) : (
-                            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f3ee]">
-                              👤
-                            </div>
-                          )}
-                          <div>
-                            <div className="font-bold text-[#173d2e]">
-                              {socio?.nome || "Associado não encontrado"}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Matrícula {socio?.matricula || "—"}
-                              {socio?.responsavel_id ? " · Dependente" : ""}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4 font-medium">
-                        {formatarCompetencia(competencia)}
-                      </td>
-
-                      <td className="px-3 py-3 sm:px-5 sm:py-4">
-                        {formatarDataFinanceiro(item.data_vencimento)}
-                      </td>
-
-                      <td className="px-5 py-4 font-bold text-[#005a3c]">
-                        {formatarMoeda(item.valor)}
-                      </td>
-
-                      <td className="px-3 py-3 sm:px-5 sm:py-4">
-                        <span
-                          className={`rounded-full px-3 py-1.5 text-xs font-bold ${classeSituacaoFinanceira(
-                            item.situacao
-                          )}`}
-                        >
-                          {rotuloSituacaoFinanceira(item.situacao)}
-                        </span>
-                      </td>
-
-                      <td className="px-5 py-4 text-sm text-gray-600">
-                        {item.data_pagamento
-                          ? `${formatarDataFinanceiro(item.data_pagamento)} · ${
-                              item.tipo_pagamento || "—"
-                            }`
-                          : "—"}
-                        {item.comprovante_url && (
-                          <button
-                            onClick={() => abrirComprovante(item.comprovante_url)}
-                            className="ml-2 text-xs font-bold text-[#005a3c] underline"
-                          >
-                            Comprovante
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 sm:px-5 sm:py-4">
-                        <div className="flex justify-end gap-2">
-                          {item.situacao !== "pago" && item.situacao !== "isento" && (
-                            <button
-                              onClick={() => registrarPagamento(item)}
-                              className="rounded-lg bg-[#005a3c] px-3 py-2 text-sm font-bold text-white"
-                            >
-                              💳 Pagar
-                            </button>
-                          )}
-
-                          {item.situacao === "pago" && (
-                            <button
-                              onClick={() => emitirRecibo(item)}
-                              className="rounded-lg bg-[#fff4cc] px-3 py-2 text-sm font-bold text-[#705c00]"
-                              title="Emitir recibo"
-                            >
-                              🧾 Recibo
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => editarMensalidade(item)}
-                            className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c]"
-                          >
-                            ✏️
-                          </button>
-
-                          <button
-                            onClick={() => excluirMensalidade(item)}
-                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-600"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-        <h3 className="font-bold text-[#003d2b]">Como funciona</h3>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="font-bold text-[#005a3c]">1. Cadastre a mensalidade</p>
-            <p className="mt-1 text-sm text-gray-500">
-              Defina no cadastro de cada pessoa se possui mensalidade, valor e dia de vencimento.
-            </p>
-          </div>
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="font-bold text-[#005a3c]">2. Gere a competência</p>
-            <p className="mt-1 text-sm text-gray-500">
-              O sistema cria os lançamentos somente para quem ainda não possui cobrança naquele mês.
-            </p>
-          </div>
-          <div className="rounded-xl bg-[#f7faf8] p-4">
-            <p className="font-bold text-[#005a3c]">3. Registre o pagamento</p>
-            <p className="mt-1 text-sm text-gray-500">
-              Informe a forma, data e, se quiser, anexe o comprovante.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResumoFinanceiroGuarani({
-  titulo,
-  valor,
-}: {
-  titulo: string;
-  valor: string | number;
-}) {
-  return (
-    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-      <p className="text-sm text-gray-500">{titulo}</p>
-      <p className="mt-1 text-2xl font-bold text-[#005a3c]">
-        {typeof valor === "number" ? formatarMoeda(valor) : valor}
-      </p>
-    </div>
-  );
-}
-
-function ModalEdicaoMensalidade({
-  item,
-  fechar,
-  salvar,
-}: {
-  item: Mensalidade;
-  fechar: () => void;
-  salvar: (
-    item: Mensalidade,
-    valor: number,
-    vencimento: string,
-    situacao: string,
-    tipoPagamento: string,
-    observacoes: string
-  ) => void;
-}) {
-  const [valor, setValor] = useState(String(item.valor ?? 0));
-  const [vencimento, setVencimento] = useState(item.data_vencimento || "");
-  const [situacao, setSituacao] = useState(item.situacao || "em_aberto");
-  const [tipoPagamento, setTipoPagamento] = useState(item.tipo_pagamento || "");
-  const [observacoes, setObservacoes] = useState(item.observacoes || "");
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#001f16]/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b px-6 py-5">
-          <div>
-            <p className="text-sm text-gray-500">Financeiro</p>
-            <h2 className="text-2xl font-bold text-[#005a3c]">Editar mensalidade</h2>
-          </div>
-          <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
-            ✕
-          </button>
-        </div>
-
-        <div className="grid gap-4 p-6 md:grid-cols-2">
-          <Campo label="Valor" type="number" value={valor} onChange={setValor} />
-          <Campo label="Vencimento" type="date" value={vencimento} onChange={setVencimento} />
-
-          <SelectCampo
-            label="Situação"
-            value={situacao}
-            onChange={setSituacao}
-            opcoes={["em_aberto", "em_atraso", "pago", "isento"]}
-            labels={{
-              em_aberto: "Em aberto",
-              em_atraso: "Em atraso",
-              pago: "Pago",
-              isento: "Isento",
-            }}
-          />
-
-          <SelectCampo
-            label="Forma de pagamento"
-            value={tipoPagamento}
-            onChange={setTipoPagamento}
-            opcoes={["", "pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]}
-            labels={{
-              "": "Não informado",
-              pix: "PIX",
-              debito_em_conta: "Débito em conta",
-              boleto: "Boleto",
-              dinheiro: "Dinheiro",
-              transferencia: "Transferência",
-              outro: "Outro",
-            }}
-          />
-
-          <div className="md:col-span-2">
-            <label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label>
-            <textarea
-              value={observacoes}
-              onChange={(e) => setObservacoes(e.target.value)}
-              rows={3}
-              className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
-          <button
-            onClick={fechar}
-            className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={() =>
-              salvar(
-                item,
-                Number(valor || 0),
-                vencimento,
-                situacao,
-                tipoPagamento,
-                observacoes
-              )
-            }
-            className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white"
-          >
-            Salvar alterações
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReciboPagamentoGuarani({
-  socio,
-  mensalidade,
-  fechar,
-}: {
-  socio: Socio | null;
-  mensalidade: Mensalidade;
-  fechar: () => void;
-}) {
-  const numeroRecibo =
-    mensalidade.numero_recibo ||
-    `REC-${mensalidade.competencia.slice(0, 7).replace("-", "")}-${
-      socio?.matricula || mensalidade.id.slice(0, 8).toUpperCase()
-    }`;
-
-  const formaPagamento: Record<string, string> = {
-    pix: "PIX",
-    debito_em_conta: "Débito em conta",
-    boleto: "Boleto",
-    dinheiro: "Dinheiro",
-    transferencia: "Transferência",
-    outro: "Outro",
-  };
-
-  return (
-    <>
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-
-          html,
-          body {
-            width: 210mm !important;
-            min-height: 297mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-          }
-
-          body * {
-            visibility: hidden !important;
-          }
-
-          .recibo-overlay {
-            position: static !important;
-            display: block !important;
-            width: 210mm !important;
-            min-height: 297mm !important;
-            padding: 0 !important;
-            background: white !important;
-            overflow: visible !important;
-          }
-
-          .recibo-impressao,
-          .recibo-impressao * {
-            visibility: visible !important;
-          }
-
-          .recibo-impressao {
-            position: relative !important;
-            left: auto !important;
-            top: auto !important;
-            width: 210mm !important;
-            min-height: 297mm !important;
-            max-height: none !important;
-            margin: 0 !important;
-            padding: 18mm !important;
-            overflow: visible !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            border: 0 !important;
-          }
-
-          .print-hide {
-            display: none !important;
-          }
-        }
-      `}</style>
-
-      <div className="recibo-overlay fixed inset-0 z-[80] flex items-center justify-center bg-[#001f16]/70 p-4 backdrop-blur-sm">
-        <div className="recibo-impressao max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-          <div className="print-hide flex items-center justify-between border-b px-6 py-5">
-            <div>
-              <p className="text-sm text-gray-500">Financeiro</p>
-              <h2 className="text-2xl font-bold text-[#005a3c]">Recibo de pagamento</h2>
-            </div>
-            <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
-              ✕
-            </button>
-          </div>
-
-          <div className="p-8 sm:p-10">
-            <div className="flex items-start justify-between gap-6 border-b-2 border-[#005a3c] pb-6">
-              <div className="flex items-center gap-4">
-                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-20 w-20 object-contain" />
-                <div>
-                  <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">Sociedade Guarani</h1>
-                  <p className="text-sm text-gray-600">Sociedade Recreativa Guarani — S.R.G.</p>
-                  <p className="mt-1 text-xs text-gray-500">Recibo de pagamento de mensalidade</p>
-                </div>
-              </div>
-              <div className="text-right text-xs text-gray-500">
-                <p className="font-bold text-[#003d2b]">Nº do recibo</p>
-                <p className="mt-1 font-mono text-sm">{numeroRecibo}</p>
-              </div>
+      {modalAberto && !somenteConsulta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+              <div><div className="text-xs font-semibold text-slate-500">Sociedade Recreativa Guarani</div><h2 className="text-2xl font-black text-[#005A3C]">{editando ? "Editar Dependente" : "Novo Dependente"}</h2></div>
+              <button onClick={fecharModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200">×</button>
             </div>
 
-            <div className="mt-8 space-y-5">
-              <div className="rounded-2xl bg-[#e8f3ee] p-5">
-                <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Associado</p>
-                <p className="mt-1 text-xl font-bold uppercase text-[#003d2b]">
-                  {socio?.nome || "Associado não encontrado"}
-                </p>
-                <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-3">
-                  <p><strong>Matrícula:</strong> {socio?.matricula || "—"}</p>
-                  <p><strong>CPF:</strong> {socio?.cpf || "—"}</p>
-                  <p><strong>Tipo:</strong> {tipoSocioLabel(socio?.tipo_socio)}</p>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Competência</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">{formatarCompetencia(mensalidade.competencia.slice(0, 7))}</p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Data do pagamento</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">{formatarDataFinanceiro(mensalidade.data_pagamento)}</p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Forma de pagamento</p>
-                  <p className="mt-1 font-bold text-[#003d2b]">
-                    {formaPagamento[mensalidade.tipo_pagamento || ""] || mensalidade.tipo_pagamento || "—"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#dfe9e3] p-4">
-                  <p className="text-xs font-bold uppercase text-gray-500">Valor pago</p>
-                  <p className="mt-1 text-xl font-extrabold text-[#005a3c]">{formatarMoeda(mensalidade.valor)}</p>
-                </div>
-              </div>
-
-              {mensalidade.observacoes && (
-                <div className="rounded-xl border border-[#dfe9e3] p-4 text-sm">
-                  <p className="font-bold text-[#003d2b]">Observações</p>
-                  <p className="mt-1 text-gray-600">{mensalidade.observacoes}</p>
-                </div>
-              )}
-
-              <p className="pt-4 text-center text-sm leading-6 text-gray-600">
-                Recebemos do associado acima identificado o valor referente à mensalidade indicada neste recibo.
-              </p>
-
-              <div className="pt-14 text-center">
-                <div className="mx-auto w-64 border-t border-gray-400 pt-2 text-sm text-gray-600">
-                  Sociedade Recreativa Guarani
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="print-hide flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
-            <button onClick={fechar} className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700">
-              Fechar
-            </button>
-            <button onClick={() => window.print()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white">
-              🖨️ Imprimir / Salvar PDF
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function ModalPagamentoGuarani({
-  socio,
-  mensalidade,
-  form,
-  setForm,
-  arquivo,
-  setArquivo,
-  fechar,
-  salvar,
-  salvando,
-}: {
-  socio: Socio | null;
-  mensalidade: Mensalidade;
-  form: {
-    valor: string;
-    data_pagamento: string;
-    tipo_pagamento: string;
-    observacoes: string;
-  };
-  setForm: React.Dispatch<
-    React.SetStateAction<{
-      valor: string;
-      data_pagamento: string;
-      tipo_pagamento: string;
-      observacoes: string;
-    }>
-  >;
-  arquivo: File | null;
-  setArquivo: (file: File | null) => void;
-  fechar: () => void;
-  salvar: () => void;
-  salvando: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#001f16]/60 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b px-6 py-5">
-          <div>
-            <p className="text-sm text-gray-500">Financeiro</p>
-            <h2 className="text-2xl font-bold text-[#005a3c]">Registrar pagamento</h2>
-          </div>
-          <button onClick={fechar} className="rounded-full bg-gray-100 px-3 py-2 text-lg">
-            ✕
-          </button>
-        </div>
-
-        <div className="space-y-5 p-6">
-          <div className="rounded-2xl bg-[#e8f3ee] p-4">
-            <p className="text-xs text-gray-500">Associado</p>
-            <p className="font-bold text-[#003d2b]">{socio?.nome || "Associado"}</p>
-            <p className="mt-1 text-sm text-gray-600">
-              Competência: {formatarCompetencia(mensalidade.competencia.slice(0, 7))} ·{" "}
-              {formatarMoeda(mensalidade.valor)}
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Campo
-              label="Valor pago"
-              type="number"
-              value={form.valor}
-              onChange={(v) => setForm((x) => ({ ...x, valor: v }))}
-            />
-
-            <Campo
-              label="Data do pagamento"
-              type="date"
-              value={form.data_pagamento}
-              onChange={(v) => setForm((x) => ({ ...x, data_pagamento: v }))}
-            />
-
-            <SelectCampo
-              label="Forma de pagamento"
-              value={form.tipo_pagamento}
-              onChange={(v) => setForm((x) => ({ ...x, tipo_pagamento: v }))}
-              opcoes={["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]}
-              labels={{
-                pix: "PIX",
-                debito_em_conta: "Débito em conta",
-                boleto: "Boleto",
-                dinheiro: "Dinheiro",
-                transferencia: "Transferência",
-                outro: "Outro",
-              }}
-            />
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Comprovante
-              </label>
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => setArquivo(e.target.files?.[0] || null)}
-                className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm"
-              />
-              {arquivo && (
-                <p className="mt-2 text-xs text-gray-500">
-                  Arquivo: {arquivo.name}
-                </p>
-              )}
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Observações
-              </label>
-              <textarea
-                value={form.observacoes}
-                onChange={(e) => setForm((x) => ({ ...x, observacoes: e.target.value }))}
-                rows={3}
-                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 border-t bg-[#fafcfb] px-6 py-4">
-          <button
-            onClick={fechar}
-            className="rounded-xl border border-gray-200 bg-white px-5 py-3 font-semibold text-gray-700"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={salvar}
-            disabled={salvando}
-            className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60"
-          >
-            {salvando ? "Salvando..." : "Confirmar pagamento"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   DEPENDENTES / FAMÍLIAS
-========================= */
-
-const TIPOS_DEPENDENTES_FAMILIA = new Set([
-  "dependente_patrimonial_familiar",
-  "dependente_patrimonial_familiar_mensalidade",
-  "dependente_contribuinte_familiar",
-  "dependente_contribuinte_familiar_mensalidade",
-]);
-
-function ehDependenteFamiliar(socio: Socio) {
-  return Boolean(
-    socio.responsavel_id &&
-    TIPOS_DEPENDENTES_FAMILIA.has(String(socio.tipo_socio || "").trim().toLowerCase())
-  );
-}
-
-function Dependentes({
-  socios,
-  novoDependente,
-  editarSocio,
-}: {
-  socios: Socio[];
-  novoDependente: (responsavel: Socio) => void;
-  editarSocio: (socio: Socio) => void;
-}) {
-  const dependentes = socios.filter(ehDependenteFamiliar);
-  const responsaveis = socios.filter((s) =>
-    socios.some((filho) => ehDependenteFamiliar(filho) && filho.responsavel_id === s.id)
-  );
-
-  function filhosDe(id: string) {
-    return socios.filter((s) => ehDependenteFamiliar(s) && s.responsavel_id === id);
-  }
-
-  function arvore(pessoa: Socio, nivel = 0): ReactNode {
-    const filhos = filhosDe(pessoa.id);
-
-    return (
-      <div key={pessoa.id}>
-        <div
-          className="flex flex-col gap-4 rounded-2xl border border-[#dfe9e3] bg-white p-4 shadow-sm sm:flex-row sm:items-center"
-          style={{ marginLeft: nivel * 24 }}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-4">
-            {pessoa.foto_url ? (
-              <img
-                src={pessoa.foto_url}
-                alt={`Foto de ${pessoa.nome}`}
-                className="h-14 w-14 shrink-0 rounded-full object-cover ring-2 ring-[#e8f3ee]"
-              />
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#e8f3ee] text-2xl">
-                👤
-              </div>
-            )}
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-bold text-[#173d2e]">
-                  {pessoa.nome}
-                </p>
-
-                {nivel === 0 && (
-                  <span className="rounded-full bg-[#005a3c] px-2.5 py-1 text-[10px] font-bold text-white">
-                    TITULAR / RESPONSÁVEL
-                  </span>
-                )}
-              </div>
-
-              <p className="mt-1 text-xs text-gray-500">
-                Matrícula {pessoa.matricula || "—"} ·{" "}
-                {tipoSocioLabel(pessoa.tipo_socio)}
-              </p>
-
-              {pessoa.responsavel_id && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Parentesco: {pessoa.parentesco || "Não informado"}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {pessoa.possui_mensalidade ? (
-              <div className="text-right">
-                <span className="inline-flex rounded-full bg-[#fff4cc] px-3 py-1.5 text-xs font-bold text-[#8a6700]">
-                  Mensalidade · R$ {Number(pessoa.valor_mensalidade || 0).toFixed(2).replace(".", ",")}
-                </span>
-                {pessoa.dia_vencimento && (
-                  <p className="mt-1 text-[11px] text-gray-500">
-                    Vencimento dia {pessoa.dia_vencimento}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-500">
-                Sem mensalidade
-              </span>
-            )}
-
-            <button
-              onClick={() => editarSocio(pessoa)}
-              className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-sm font-bold text-[#005a3c] hover:bg-[#dce8df]"
-            >
-              ✏️ Editar
-            </button>
-
-            {podeTerDependentes(pessoa.tipo_socio) && (
-              <button
-                onClick={() => novoDependente(pessoa)}
-                className="rounded-xl bg-[#005a3c] px-3 py-2 text-sm font-bold text-white hover:bg-[#003d2b]"
-              >
-                👨‍👩‍👧 + Dependente
-              </button>
-            )}
-          </div>
-        </div>
-
-        {filhos.length > 0 && (
-          <div className="mt-3 space-y-3 border-l-2 border-[#cfe3d8] pl-3">
-            {filhos.map((filho) => arvore(filho, nivel + 1))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const raizes = socios.filter(
-    (s) =>
-      !s.responsavel_id &&
-      (podeTerDependentes(s.tipo_socio) || filhosDe(s.id).length > 0)
-  );
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-6 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-sm font-medium text-gray-500">
-            Administração
-          </p>
-          <h2 className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            Famílias e Dependentes
-          </h2>
-          <p className="mt-1 text-gray-500">
-            Visualize a estrutura familiar e quem está vinculado a cada responsável.
-          </p>
-        </div>
-      </div>
-
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-3 sm:gap-4">
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Pessoas cadastradas</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{socios.filter((s) => s.possui_mensalidade !== true).length}</p>
-        </div>
-
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Dependentes</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{dependentes.length}</p>
-        </div>
-
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-          <p className="text-sm text-gray-500">Responsáveis familiares</p>
-          <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{responsaveis.length}</p>
-        </div>
-      </div>
-
-      {socios.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-[#cfe3d8] bg-white p-12 text-center shadow-sm">
-          <div className="text-5xl">👨‍👩‍👧‍👦</div>
-          <h3 className="mt-4 text-lg font-bold text-[#173d2e]">
-            Nenhuma família cadastrada
-          </h3>
-          <p className="mt-2 text-sm text-gray-500">
-            Cadastre um Sócio Patrimonial Familiar ou Sócio Contribuinte Familiar para começar.
-          </p>
-        </div>
-      ) : raizes.length === 0 ? (
-        <div className="rounded-3xl border border-[#e2ebe6] bg-white p-8 text-center shadow-sm">
-          <p className="font-semibold text-gray-700">
-            Ainda não há uma família com dependentes.
-          </p>
-          <p className="mt-1 text-sm text-gray-500">
-            Os sócios individuais também aparecem no módulo Sócios.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {raizes.map((raiz) => (
-            <div
-              key={raiz.id}
-              className="rounded-3xl border border-[#dfe9e3] bg-[#f7faf8] p-4 shadow-sm sm:p-5"
-            >
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-extrabold uppercase tracking-wider text-[#91a099]">
-                    Grupo familiar
-                  </p>
-                  <p className="font-bold text-[#005a3c]">
-                    {raiz.nome}
-                  </p>
-                </div>
-
-                {podeTerDependentes(raiz.tipo_socio) && (
-                  <button
-                    onClick={() => novoDependente(raiz)}
-                    className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-bold text-white hover:bg-[#003d2b]"
-                  >
-                    + Adicionar dependente
-                  </button>
-                )}
-              </div>
-
-              <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-[#587066]">
-                <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#dfe9e3]">
-                  {filhosDe(raiz.id).length} dependente{filhosDe(raiz.id).length === 1 ? "" : "s"} direto{filhosDe(raiz.id).length === 1 ? "" : "s"}
-                </span>
-              </div>
-
-              {arvore(raiz)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-/* =========================
-   MODAL DO SÓCIO
-========================= */
-
-function ModalSocio({
-  socios,
-  contasBancarias,
-  form,
-  socioEditando,
-  buscaResponsavel,
-  setBuscaResponsavel,
-  salvando,
-  mensagem,
-  fechar,
-  alterarCampo,
-  salvar,
-  selecionarFoto,
-  removerFoto,
-}: {
-  socios: Socio[];
-  contasBancarias: ContaBancaria[];
-  form: Partial<Socio>;
-  socioEditando: Socio | null;
-  buscaResponsavel: string;
-  setBuscaResponsavel: (valor: string) => void;
-  salvando: boolean;
-  mensagem: string;
-  fechar: () => void;
-  alterarCampo: (campo: keyof Socio, valor: string) => void;
-  salvar: () => void;
-  selecionarFoto: (file: File | null) => void;
-  removerFoto: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#001f16]/55 backdrop-blur-sm p-4">
-
-      <div className="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-5">
-
-          <div>
-
-            <p className="text-sm text-gray-500">
-              Sociedade Recreativa Guarani
-            </p>
-
-            <h2 className="text-2xl font-bold text-[#005a3c]">
-              {socioEditando
-                ? "Editar Sócio"
-                : "Novo Sócio"}
-            </h2>
-
-          </div>
-
-          <button
-            onClick={fechar}
-            className="rounded-full bg-gray-100 px-3 py-2 text-lg hover:bg-gray-200"
-          >
-            ✕
-          </button>
-
-        </div>
-
-        <div className="space-y-8 p-6">
-
-          {/* DADOS PESSOAIS */}
-          <FormularioSecao titulo="👤 Dados pessoais">
-
-            <Campo
-              label="Nome completo"
-              obrigatorio
-              value={form.nome}
-              onChange={(v) => alterarCampo("nome", v)}
-              className="md:col-span-2"
-            />
-
-            <Campo
-              label="CPF"
-              value={form.cpf}
-              onChange={(v) => alterarCampo("cpf", v)}
-              placeholder="000.000.000-00"
-            />
-
-            <Campo
-              label="RG"
-              value={form.rg}
-              onChange={(v) => alterarCampo("rg", v)}
-            />
-
-            <Campo
-              label="Data de nascimento"
-              type="date"
-              value={form.data_nascimento}
-              onChange={(v) => alterarCampo("data_nascimento", v)}
-            />
-
-          </FormularioSecao>
-
-          {/* FOTO */}
-          <FormularioSecao titulo="📷 Foto do associado">
-            <div className="md:col-span-4">
-              <div className="flex flex-col items-center gap-5 rounded-2xl border border-dashed border-gray-300 bg-[#fafcfb] p-6 sm:flex-row">
-                <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-white shadow-sm">
-                  {form.foto_url ? (
-                    <img
-                      src={form.foto_url}
-                      alt={`Foto de ${form.nome || "associado"}`}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-5xl">👤</span>
-                  )}
-                </div>
-
-                <div className="flex-1 text-center sm:text-left">
-                  <p className="font-semibold text-gray-800">
-                    Foto do associado
-                  </p>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Escolha uma foto para aparecer no cadastro e na lista de sócios.
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
-                    <label className="cursor-pointer rounded-xl bg-[#063b28] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#003d2b]">
-                      📷 Escolher foto
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) =>
-                          selecionarFoto(e.target.files?.[0] || null)
-                        }
-                      />
-                    </label>
-
-                    {form.foto_url && (
-                      <button
-                        type="button"
-                        onClick={removerFoto}
-                        className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100"
-                      >
-                        🗑️ Remover foto
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </FormularioSecao>
-
-          {/* CONTATO */}
-          <FormularioSecao titulo="📞 Contato">
-
-            <Campo
-              label="Telefone"
-              value={form.telefone}
-              onChange={(v) => alterarCampo("telefone", v)}
-            />
-
-            <Campo
-              label="WhatsApp"
-              value={form.whatsapp}
-              onChange={(v) => alterarCampo("whatsapp", v)}
-            />
-
-            <Campo
-              label="E-mail"
-              type="email"
-              value={form.email}
-              onChange={(v) => alterarCampo("email", v)}
-              className="md:col-span-2"
-            />
-
-          </FormularioSecao>
-
-          {/* ENDEREÇO */}
-          <FormularioSecao titulo="🏠 Endereço">
-
-            <Campo
-              label="CEP"
-              value={form.cep}
-              onChange={(v) => alterarCampo("cep", v)}
-            />
-
-            <Campo
-              label="Número"
-              value={form.numero}
-              onChange={(v) => alterarCampo("numero", v)}
-            />
-
-            <Campo
-              label="Endereço"
-              value={form.endereco}
-              onChange={(v) => alterarCampo("endereco", v)}
-              className="md:col-span-2"
-            />
-
-            <Campo
-              label="Bairro"
-              value={form.bairro}
-              onChange={(v) => alterarCampo("bairro", v)}
-            />
-
-            <Campo
-              label="Cidade"
-              value={form.cidade}
-              onChange={(v) => alterarCampo("cidade", v)}
-            />
-
-            <Campo
-              label="Estado"
-              value={form.estado}
-              onChange={(v) => alterarCampo("estado", v)}
-            />
-
-          </FormularioSecao>
-
-          {/* ASSOCIAÇÃO */}
-          <FormularioSecao titulo="🏛️ Dados da associação">
-
-            <Campo
-              label="Data de associação"
-              type="date"
-              value={form.data_associacao}
-              onChange={(v) => alterarCampo("data_associacao", v)}
-            />
-
-            <SelectCampo
-              label="Tipo de associado"
-              value={form.tipo_socio || "patrimonial_individual"}
-              onChange={(v) => alterarCampo("tipo_socio", v)}
-              opcoes={TIPOS_SOCIO.map((item) => item.value)}
-              labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
-            />
-
-            <SelectCampo
-              label="Situação"
-
-              value={form.situacao || "ativo"}
-              onChange={(v) => alterarCampo("situacao", v)}
-              opcoes={[
-                "ativo",
-                "inativo",
-                "suspenso",
-              ]}
-            />
-
-            {Boolean(form.responsavel_id) ||
-              String(form.tipo_socio || "").startsWith("dependente_") ? (
-              <>
-                <SelectCampo
-                  label="Parentesco"
-                  value={form.parentesco || "Filho(a)"}
-                  onChange={(v) => alterarCampo("parentesco", v)}
-                  opcoes={PARENTESCOS}
-                />
-
-                <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-semibold text-gray-700">Responsável</label>
-                  <input
-                    type="text"
-                    value={buscaResponsavel}
-                    onChange={(e) => setBuscaResponsavel(e.target.value)}
-                    placeholder="Digite o nome do responsável para buscar..."
-                    className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c]"
-                  />
-                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-[#dfe9e3] bg-white">
-                    <button type="button" onClick={() => { alterarCampo("responsavel_id", ""); setBuscaResponsavel(""); }} className="block w-full px-4 py-2 text-left text-sm text-gray-500 hover:bg-[#e8f3ee]">Sem responsável</button>
-                    {socios
-                      .filter((p) => p.id !== socioEditando?.id)
-                      .filter((p) => p.nome.toLowerCase().includes(buscaResponsavel.toLowerCase()))
-                      .slice(0, 50)
-                      .map((p) => (
-                        <button key={p.id} type="button" onClick={() => { alterarCampo("responsavel_id", p.id); setBuscaResponsavel(p.nome); }} className={`block w-full px-4 py-2 text-left text-sm hover:bg-[#e8f3ee] ${form.responsavel_id === p.id ? "bg-[#e8f3ee] font-bold text-[#005a3c]" : "text-gray-700"}`}>
-                          {p.nome}
-                        </button>
-                      ))}
-                    {buscaResponsavel && socios.filter((p) => p.id !== socioEditando?.id && p.nome.toLowerCase().includes(buscaResponsavel.toLowerCase())).length === 0 && (
-                      <p className="px-4 py-3 text-sm text-gray-500">Nenhum responsável encontrado.</p>
-                    )}
-                  </div>
-                </div>
-              </>
-            ) : null}
-
-            <div className="md:col-span-4 rounded-2xl border border-[#dfe9e3] bg-[#f7faf8] p-4">
-              <div className="mb-4">
-                <p className="text-sm font-extrabold text-[#003d2b]">
-                  💰 Mensalidade
-                </p>
-                <p className="mt-1 text-xs text-[#718079]">
-                  Cada associado ou dependente pode ter sua própria mensalidade.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-4">
-                <SelectCampo
-                  label="Possui mensalidade?"
-                  value={form.possui_mensalidade ? "sim" : "nao"}
-                  onChange={(v) => alterarCampo("possui_mensalidade", v === "sim" ? "true" : "false")}
-                  opcoes={["sim", "nao"]}
-                  labels={{ sim: "Sim", nao: "Não" }}
-                />
-
-                {form.possui_mensalidade ? (
-                  <>
-                    <Campo
-                      label="Valor mensal"
-                      type="number"
-                      value={form.valor_mensalidade}
-                      onChange={(v) => alterarCampo("valor_mensalidade", v)}
-                      placeholder="0,00"
-                    />
-
-                    <Campo
-                      label="Dia do vencimento"
-                      type="number"
-                      value={form.dia_vencimento}
-                      onChange={(v) => alterarCampo("dia_vencimento", v)}
-                      placeholder="10"
-                    />
-
-                    <SelectCampo
-                      label="Tipo de pagamento"
-                      value={form.tipo_pagamento || "pix"}
-                      onChange={(v) => alterarCampo("tipo_pagamento", v)}
-                      opcoes={FORMAS_PAGAMENTO}
-                      labels={{
-                        pix: "PIX",
-                        debito_em_conta: "Débito em conta",
-                        boleto: "Boleto",
-                        dinheiro: "Dinheiro",
-                      }}
-                    />
-
-                    {form.tipo_pagamento === "debito_em_conta" && (
-                      <div className="md:col-span-4 rounded-xl border border-[#f1d879] bg-[#fffbea] p-4">
-                        <div className="mb-3">
-                          <p className="text-sm font-extrabold text-[#705c00]">
-                            🏦 Conta bancária do débito
-                          </p>
-                          <p className="mt-1 text-xs text-[#806f32]">
-                            Selecione em qual conta bancária a mensalidade deste associado será debitada.
-                          </p>
-                        </div>
-
-                        {contasBancarias.length > 0 ? (
-                          <SelectCampo
-                            label="Banco / conta"
-                            value={form.conta_bancaria_id || ""}
-                            onChange={(v) => alterarCampo("conta_bancaria_id", v)}
-                            opcoes={["", ...contasBancarias.map((conta) => conta.id)]}
-                            labels={{
-                              "": "Selecione o banco / conta",
-                              ...Object.fromEntries(
-                                contasBancarias.map((conta) => [
-                                  conta.id,
-                                  `${conta.nome}${conta.banco ? ` · ${conta.banco}` : ""}${conta.conta ? ` · Conta ${conta.conta}` : ""}`,
-                                ])
-                              ),
-                            }}
+            <form onSubmit={salvarDependente} className="overflow-y-auto p-6">
+              {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
+              {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
+
+              <div className="rounded-2xl border border-[#D9E9E2] bg-[#F8FAF9] p-5">
+                <div className="mb-4 text-base font-black text-[#005A3C]">👤 Dados do dependente</div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Sócio responsável *</span>
+                    <select required value={form.socio_id} onChange={(e) => setForm({ ...form, socio_id: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
+                      <option value="">Selecione o sócio responsável</option>
+                      {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — Matrícula ${s.matricula}` : ""}</option>)}
+                    </select>
+                  </label>
+                  <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Nome completo *</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo do dependente" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">CPF</span><input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} inputMode="numeric" placeholder="Somente números" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <div className="md:col-span-2 rounded-xl border border-dashed border-[#9fc8b5] bg-white p-4">
+                    <div className="mb-3 text-sm font-bold text-[#005A3C]">📷 Foto do dependente</div>
+                    <div className="flex flex-wrap items-center gap-4">
+                      {(fotoArquivo || editando?.foto_url) && (
+                        <div className="h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                          <img
+                            src={fotoArquivo ? URL.createObjectURL(fotoArquivo) : editando?.foto_url || ""}
+                            alt="Prévia"
+                            className="h-full w-full object-cover"
                           />
-                        ) : (
-                          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                            Nenhuma conta bancária ativa cadastrada. Cadastre uma conta em Financeiro → Contas bancárias.
-                          </div>
-                        )}
+                        </div>
+                      )}
+                      <div>
+                        <label className="inline-flex cursor-pointer items-center rounded-xl border border-[#cfe3d8] bg-[#E8F3EE] px-4 py-2.5 text-sm font-extrabold text-[#005A3C] hover:bg-[#d9eee4]">
+                          📷 {fotoArquivo ? "Trocar foto" : "Escolher foto"}
+                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setFotoArquivo(e.target.files?.[0] || null)} />
+                        </label>
+                        {fotoArquivo && <p className="mt-2 text-xs text-slate-500">{fotoArquivo.name}</p>}
                       </div>
-                    )}
-                  </>
-                ) : null}
-              </div>
-            </div>
-
-            {(form.tipo_socio === "temporada_individual" ||
-              form.tipo_socio === "temporada_familiar" ||
-              form.tipo_socio === "dependente_temporada_familiar") ? (
-              <div className="md:col-span-4 rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
-                <p className="mb-4 text-sm font-extrabold text-[#b65308]">
-                  🗓️ Período da temporada
-                </p>
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <SelectCampo
-                    label="Modalidade"
-                    value={form.modalidade_temporada || "individual"}
-                    onChange={(v) => alterarCampo("modalidade_temporada", v)}
-                    opcoes={["individual", "familiar"]}
-                    labels={{ individual: "Individual", familiar: "Familiar" }}
-                  />
-
-                  <Campo
-                    label="Início"
-                    type="date"
-                    value={form.inicio_temporada}
-                    onChange={(v) => alterarCampo("inicio_temporada", v)}
-                  />
-
-                  <Campo
-                    label="Fim"
-                    type="date"
-                    value={form.fim_temporada}
-                    onChange={(v) => alterarCampo("fim_temporada", v)}
-                  />
+                    </div>
+                  </div>
                 </div>
               </div>
-            ) : null}
 
-            <div className="md:col-span-3">
+              <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-[#F8FAF9] p-5">
+                <div className="mb-4 text-base font-black text-[#005A3C]">💰 Financeiro do dependente</div>
+                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <div className="font-bold text-slate-700">Possui mensalidade própria?</div>
+                    <div className="text-sm text-slate-500">A mensalidade do dependente será controlada separadamente do responsável.</div>
+                  </div>
+                  <button type="button" onClick={() => setForm({ ...form, possui_mensalidade: !form.possui_mensalidade, situacao_financeira: !form.possui_mensalidade ? "em_dia" : "isento" })} className={`relative h-7 w-12 rounded-full transition ${form.possui_mensalidade ? "bg-[#005A3C]" : "bg-slate-300"}`}>
+                    <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${form.possui_mensalidade ? "left-6" : "left-1"}`} />
+                  </button>
+                </label>
 
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Observações
-              </label>
+                {form.possui_mensalidade && (
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Valor da mensalidade</span>
+                      <input type="number" min="0" step="0.01" value={form.valor_mensalidade} onChange={(e) => setForm({ ...form, valor_mensalidade: Number(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" placeholder="0,00" />
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Dia do vencimento</span>
+                      <input type="number" min="1" max="31" value={form.dia_vencimento} onChange={(e) => setForm({ ...form, dia_vencimento: Math.min(31, Math.max(1, Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Forma de pagamento</span>
+                      <select value={form.tipo_pagamento} onChange={(e) => setForm({ ...form, tipo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
+                        <option value="pix">PIX</option>
+                        <option value="debito_em_conta">Débito em conta</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="transferencia">Transferência</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Situação financeira</span>
+                      <select value={form.situacao_financeira} onChange={(e) => setForm({ ...form, situacao_financeira: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
+                        <option value="em_dia">🟢 Em dia</option>
+                        <option value="em_atraso">🔴 Em atraso</option>
+                        <option value="isento">⚪ Isento</option>
+                      </select>
+                    </label>
+                    <label className="md:col-span-2">
+                      <span className="mb-1 block text-sm font-bold text-slate-700">Data do último pagamento</span>
+                      <input type="date" value={form.data_ultimo_pagamento} onChange={(e) => setForm({ ...form, data_ultimo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
+                    </label>
+                  </div>
+                )}
+              </div>
 
-              <textarea
-                value={form.observacoes || ""}
-                onChange={(e) =>
-                  alterarCampo("observacoes", e.target.value)
-                }
-                rows={4}
-                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
-                placeholder="Observações sobre o associado..."
-              />
+              <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-white p-5">
+                <div className="mb-4 text-base font-black text-[#005A3C]">🟢 Situação</div>
+                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4">
+                  <div><div className="font-bold text-slate-700">Dependente ativo</div><div className="text-sm text-slate-500">Dependentes inativos permanecem no histórico.</div></div>
+                  <button type="button" onClick={() => setForm({ ...form, ativo: !form.ativo })} className={`relative h-7 w-12 rounded-full transition ${form.ativo ? "bg-[#005A3C]" : "bg-slate-300"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${form.ativo ? "left-6" : "left-1"}`} /></button>
+                </label>
+              </div>
 
-            </div>
-
-          </FormularioSecao>
-
-          {mensagem && (
-            <div className="rounded-xl bg-[#e8f3ee] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              {mensagem}
-            </div>
-          )}
-
+              <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-5">
+                <button type="button" onClick={fecharModal} disabled={salvando} className="rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+                <button type="submit" disabled={salvando} className="rounded-xl bg-[#005A3C] px-6 py-3 font-extrabold text-white hover:bg-[#003D2B] disabled:opacity-60">{salvando ? "Salvando..." : editando ? "💾 Salvar alterações" : "📋 Cadastrar dependente"}</button>
+              </div>
+            </form>
+          </div>
         </div>
-
-        <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-white px-6 py-5">
-
-          <button
-            onClick={fechar}
-            disabled={salvando}
-            className="rounded-xl border border-[#d5e0da] px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            Cancelar
-          </button>
-
-          <button
-            onClick={salvar}
-            disabled={salvando}
-            className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
-          >
-            {salvando
-              ? "Salvando..."
-              : socioEditando
-                ? "💾 Salvar alterações"
-                : "💾 Cadastrar Sócio"}
-          </button>
-
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-
-/* =========================
-   COMPONENTES
-========================= */
-
-function FormularioSecao({
-  titulo,
-  children,
-}: {
-  titulo: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-
-      <h3 className="mb-4 border-b pb-3 text-lg font-bold text-[#005a3c]">
-        {titulo}
-      </h3>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        {children}
-      </div>
-
-    </div>
-  );
-}
-
-function Campo({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  obrigatorio = false,
-  className = "",
-}: {
-  label: string;
-  value?: string | number | null;
-  onChange: (valor: string) => void;
-  type?: string;
-  placeholder?: string;
-  obrigatorio?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-
-      <label className="mb-2 block text-sm font-semibold text-gray-700">
-        {label}
-
-        {obrigatorio && (
-          <span className="ml-1 text-red-500">
-            *
-          </span>
-        )}
-      </label>
-
-      <input
-        type={type}
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none transition focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
-      />
-
-    </div>
-  );
-}
-
-function SelectCampo({
-  label,
-  value,
-  onChange,
-  opcoes,
-  labels = {},
-}: {
-  label: string;
-  value: string;
-  onChange: (valor: string) => void;
-  opcoes: string[];
-  labels?: Record<string, string>;
-}) {
-  return (
-    <div>
-
-      <label className="mb-2 block text-sm font-semibold text-gray-700">
-        {label}
-      </label>
-
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
-      >
-
-        {opcoes.map((opcao) => (
-          <option key={opcao} value={opcao}>
-            {labels[opcao] || opcao}
-          </option>
-        ))}
-
-      </select>
-
-    </div>
-  );
-}
-
-function DashboardCard({
-  titulo,
-  valor,
-  descricao,
-  icone,
-}: {
-  titulo: string;
-  valor: string;
-  descricao: string;
-  icone: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5">
-
-      <div className="flex items-center justify-between">
-
-        <span className="text-3xl">
-          {icone}
-        </span>
-
-        <span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-semibold text-[#005a3c]">
-          Ativo
-        </span>
-
-      </div>
-
-      <p className="mt-5 text-sm font-medium text-gray-500">
-        {titulo}
-      </p>
-
-      <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-        {valor}
-      </p>
-
-      <p className="mt-1 text-xs text-gray-500">
-        {descricao}
-      </p>
-
-    </div>
-  );
-}
-
-function RelatoriosFinanceiros({
-  socios, mensalidades, competencia, setCompetencia, formaPagamento, setFormaPagamento, situacao, setSituacao, carregando,
-}: {
-  socios: Socio[]; mensalidades: Mensalidade[]; competencia: string; setCompetencia: (valor: string) => void;
-  formaPagamento: string; setFormaPagamento: (valor: string) => void; situacao: string; setSituacao: (valor: string) => void; carregando: boolean;
-}) {
-  const formas: Record<string, string> = { pix: "PIX", debito_em_conta: "Débito em conta", boleto: "Boleto", dinheiro: "Dinheiro", transferencia: "Transferência", outro: "Outro" };
-  const situacoes: Record<string, string> = { pago: "Pago", em_aberto: "Em aberto", em_atraso: "Em atraso", isento: "Isento" };
-  const filtradas = mensalidades.filter((m) =>
-    (formaPagamento === "todas" || (m.tipo_pagamento || "") === formaPagamento) &&
-    (situacao === "todas" || (m.situacao || "") === situacao)
-  );
-  const soma = (lista: Mensalidade[]) => lista.reduce((s, m) => s + Number(m.valor || 0), 0);
-  const total = soma(filtradas);
-  const recebido = soma(filtradas.filter((m) => m.situacao === "pago"));
-  const aberto = soma(filtradas.filter((m) => m.situacao === "em_aberto"));
-  const atrasado = soma(filtradas.filter((m) => m.situacao === "em_atraso"));
-  const isento = soma(filtradas.filter((m) => m.situacao === "isento"));
-  const pagos = filtradas.filter((m) => m.situacao === "pago").length;
-  const abertos = filtradas.filter((m) => m.situacao === "em_aberto").length;
-  const atrasados = filtradas.filter((m) => m.situacao === "em_atraso").length;
-  const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const dataBR = (v?: string | null) => v ? `${v.slice(8,10)}/${v.slice(5,7)}/${v.slice(0,4)}` : "—";
-  const compBR = `${competencia.slice(5,7)}/${competencia.slice(0,4)}`;
-  const porForma = Object.entries(formas).map(([codigo, label]) => {
-    const itens = filtradas.filter((m) => m.tipo_pagamento === codigo);
-    return { codigo, label, qtd: itens.length, valor: soma(itens) };
-  }).filter((x) => x.qtd > 0);
-  const inadimplentes = filtradas.filter((m) => m.situacao === "em_atraso").map((m) => ({ m, socio: socios.find((s) => s.id === m.socio_id) }));
-
-  return (
-    <div className="relatorio-area">
-      <style jsx global>{`@media print { @page { size: A4 portrait; margin: 12mm; } body * { visibility: hidden !important; } .relatorio-area, .relatorio-area * { visibility: visible !important; } .relatorio-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; background: white !important; } .relatorio-controles, .relatorio-acoes { display: none !important; } .relatorio-area .shadow-sm { box-shadow: none !important; } }`}</style>
-      <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div><p className="text-sm font-medium text-gray-500">Administração</p><h2 className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">Relatórios Financeiros</h2><p className="mt-1 text-gray-500">Visão consolidada de cobranças e recebimentos.</p></div>
-        <div className="relatorio-acoes"><button onClick={() => window.print()} className="rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm">🖨️ Imprimir / Salvar PDF</button></div>
-      </div>
-      <div className="relatorio-controles mb-6 grid gap-3 rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm md:grid-cols-3">
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Competência</label><input type="month" value={competencia} onChange={(e) => setCompetencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 font-semibold text-[#005a3c] outline-none" /></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Forma de pagamento</label><select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(formas).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-        <div><label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Situação</label><select value={situacao} onChange={(e) => setSituacao(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3"><option value="todas">Todas</option>{Object.entries(situacoes).map(([c,l]) => <option key={c} value={c}>{l}</option>)}</select></div>
-      </div>
-      {carregando ? <div className="rounded-2xl border border-[#e2ebe6] bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório...</div> : <>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <ResumoFinanceiroGuarani titulo="Total lançado" valor={moeda(total)} /><ResumoFinanceiroGuarani titulo="Recebido" valor={moeda(recebido)} /><ResumoFinanceiroGuarani titulo="Em aberto" valor={moeda(aberto)} /><ResumoFinanceiroGuarani titulo="Em atraso" valor={moeda(atrasado)} /><ResumoFinanceiroGuarani titulo="Isento" valor={moeda(isento)} />
-        </div>
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><p className="text-sm text-gray-500">Mensalidades pagas</p><p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">{pagos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><p className="text-sm text-gray-500">Em aberto</p><p className="mt-1 text-3xl font-bold text-[#8a6700]">{abertos}</p></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><p className="text-sm text-gray-500">Inadimplentes</p><p className="mt-1 text-3xl font-bold text-red-600">{atrasados}</p></div>
-        </div>
-        <div className="mb-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Recebimentos por forma de pagamento</h3><div className="mt-4 space-y-3">{porForma.length === 0 ? <p className="text-sm text-gray-500">Nenhum pagamento encontrado.</p> : porForma.map((x) => <div key={x.codigo} className="flex items-center justify-between rounded-xl bg-[#f7faf8] px-4 py-3"><div><p className="font-semibold">{x.label}</p><p className="text-xs text-gray-500">{x.qtd} lançamento(s)</p></div><p className="font-bold text-[#005a3c]">{moeda(x.valor)}</p></div>)}</div></div>
-          <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Resumo da competência {compBR}</h3><div className="mt-4 space-y-3 text-sm"><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Lançamentos</span><strong>{filtradas.length}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Valor médio</span><strong>{moeda(filtradas.length ? total / filtradas.length : 0)}</strong></div><div className="flex justify-between border-b pb-3"><span className="text-gray-500">Taxa de recebimento</span><strong>{total ? `${((recebido / total) * 100).toFixed(1).replace(".", ",")}%` : "0,0%"}</strong></div><div className="flex justify-between"><span className="text-gray-500">Pessoas com mensalidade</span><strong>{socios.filter((s) => s.possui_mensalidade && s.situacao?.toLowerCase() !== "inativo").length}</strong></div></div></div>
-        </div>
-        <div className="mb-6 rounded-2xl border border-[#e2ebe6] bg-white shadow-sm"><div className="border-b px-5 py-4"><h3 className="font-bold text-[#003d2b]">Inadimplentes da competência</h3><p className="mt-1 text-sm text-gray-500">Mensalidades vencidas e ainda não pagas.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Matrícula</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3 text-right">Valor</th></tr></thead><tbody className="divide-y">{inadimplentes.length === 0 ? <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-500">Nenhum inadimplente encontrado.</td></tr> : inadimplentes.map(({m,socio}) => <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{socio?.matricula || "—"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3"><span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">Em atraso</span></td><td className="px-5 py-3 text-right font-bold text-red-600">{moeda(Number(m.valor || 0))}</td></tr>)}</tbody></table></div></div>
-        <div className="rounded-2xl border border-[#e2ebe6] bg-white p-4 shadow-sm sm:p-5"><h3 className="font-bold text-[#003d2b]">Detalhamento financeiro</h3><p className="mt-1 text-sm text-gray-500">Competência {compBR} · {filtradas.length} lançamento(s)</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Associado</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th></tr></thead><tbody className="divide-y">{filtradas.map((m) => { const socio = socios.find((s) => s.id === m.socio_id); return <tr key={m.id}><td className="px-5 py-3 font-semibold">{socio?.nome || "Associado não encontrado"}</td><td className="px-5 py-3">{dataBR(m.data_vencimento)}</td><td className="px-5 py-3 font-bold text-[#005a3c]">{moeda(Number(m.valor || 0))}</td><td className="px-5 py-3">{situacoes[m.situacao || ""] || "Não informado"}</td><td className="px-5 py-3 text-sm text-gray-600">{m.data_pagamento ? `${dataBR(m.data_pagamento)} · ${formas[m.tipo_pagamento || ""] || m.tipo_pagamento || "—"}` : "—"}</td></tr>; })}</tbody></table></div></div>
-      </>}
-    </div>
-  );
-}
-
-function ModuloEmConstrucao({
-  nome,
-  icone,
-}: {
-  nome: string;
-  icone: string;
-}) {
-  return (
-    <div className="flex min-h-[500px] items-center justify-center">
-
-      <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
-
-        <div className="text-5xl">
-          {icone}
-        </div>
-
-        <h2 className="mt-4 text-2xl font-bold text-[#005a3c]">
-          {nome}
-        </h2>
-
-        <p className="mt-2 text-gray-500">
-          Este módulo será configurado na próxima etapa.
-        </p>
-
-      </div>
-
-    </div>
+      )}
+    </main>
   );
 }
