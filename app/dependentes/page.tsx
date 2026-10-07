@@ -541,8 +541,8 @@ export default function DependentesPage() {
       <div className="flex min-h-[calc(100vh-76px)] min-w-0">
         <MenuLateralPadrao />
 
-        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:ml-[220px] lg:p-8">
-          <div className="mx-auto max-w-[1400px]">
+        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:ml-[220px] lg:p-7">
+          <div className="mx-auto w-full max-w-[1500px] min-w-0">
             <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-7 md:flex-row md:items-end">
               <div>
                 <div className="mb-1 text-sm font-medium text-slate-500">Administração</div>
@@ -582,17 +582,30 @@ export default function DependentesPage() {
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               {carregando ? (
                 <div className="p-8 text-center text-sm text-slate-500 sm:p-10">Carregando dependentes...</div>
               ) : dependentesFiltrados.length === 0 ? (
                 <div className="p-8 text-center sm:p-12"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-left text-sm">
+                <div className="w-full overflow-x-auto">
+                  <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
+                    <colgroup>
+                      <col className="w-[90px]" />
+                      <col className="w-[190px]" />
+                      <col className="w-[105px]" />
+                      <col className="w-[105px]" />
+                      <col className="w-[125px]" />
+                      <col className="w-[185px]" />
+                      <col className="w-[115px]" />
+                      <col className="w-[100px]" />
+                      <col className="w-[120px]" />
+                      <col className="w-[85px]" />
+                      <col className="w-[150px]" />
+                    </colgroup>
                     <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
                       <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-5 py-4 text-right">Ações</th>
+                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-3 py-3 text-center sm:px-4 sm:py-4">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -624,12 +637,34 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusResponsavel === "em_dia" ? "🟢 Até 2 meses" : statusResponsavel === "atrasado" ? "🟡 3–4 meses" : "🔴 5+ meses"}</span></td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4">
+                            <td className="px-3 py-3 sm:px-4 sm:py-4">
                               {!somenteConsulta && (
-                                <div className="flex justify-end gap-2">
-                                  <button onClick={() => abrirEdicao(d)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-[#E8F3EE] hover:text-[#005A3C]">✏️ Editar</button>
-                                  {d.source !== "socios" && (
-                                    <button onClick={() => excluirDependente(d)} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100">🗑️</button>
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirEdicao(d)}
+                                    className="inline-flex h-9 w-[78px] items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 transition hover:bg-[#E8F3EE] hover:text-[#005A3C]"
+                                  >
+                                    ✏️ Editar
+                                  </button>
+                                  {d.source === "socios" ? (
+                                    <button
+                                      type="button"
+                                      disabled
+                                      title="Este cadastro pertence a Sócios. A exclusão deve ser feita pelo cadastro do sócio."
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-300 opacity-70 cursor-not-allowed"
+                                    >
+                                      🗑️
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => excluirDependente(d)}
+                                      title="Excluir dependente"
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-red-600 transition hover:bg-red-100"
+                                    >
+                                      🗑️
+                                    </button>
                                   )}
                                 </div>
                               )}
