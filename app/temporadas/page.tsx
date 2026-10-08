@@ -23,17 +23,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type Socio = {
-  id: string;
-  nome: string;
-  cpf: string | null;
-  matricula: string | null;
-  responsavel_id: string | null;
-  tipo_socio: string | null;
-  ativo?: boolean | null;
-  situacao?: string | null;
-};
-
 type Conta = {
   id: string;
   nome: string;
@@ -58,7 +47,7 @@ type Parcela = {
 
 type Temporada = {
   id: string;
-  socio_id: string;
+  socio_id: string | null;
   tipo: "temporada_individual" | "temporada_familiar";
   modalidade: "individual" | "familiar";
   codigo: string | null;
@@ -72,9 +61,12 @@ type Temporada = {
   data_contratacao: string;
   data_pagamento: string | null;
   observacoes: string | null;
-  socio: Socio | null;
+  responsavel_nome: string;
+  responsavel_cpf: string | null;
+  responsavel_telefone: string | null;
+  responsavel_email: string | null;
   parcelas: Parcela[];
-  participantes: { socio_id: string; papel: string; matricula: string | null }[];
+  participantes: { socio_id: string | null; nome: string | null; papel: string; matricula: string | null }[];
 };
 
 type ParcelaForm = {
@@ -162,7 +154,6 @@ function criarParcelas(
 
 export default function TemporadasPage() {
   const [temporadas, setTemporadas] = useState<Temporada[]>([]);
-  const [socios, setSocios] = useState<Socio[]>([]);
   const [contas, setContas] = useState<Conta[]>([]);
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("todas");
@@ -176,13 +167,16 @@ export default function TemporadasPage() {
   const [tipo, setTipo] = useState<"temporada_individual" | "temporada_familiar">(
     "temporada_familiar"
   );
-  const [socioId, setSocioId] = useState("");
   const [inicio, setInicio] = useState(hoje);
   const [fim, setFim] = useState(fimPadrao);
   const [valor, setValor] = useState("1100");
   const [plano, setPlano] = useState<"avista" | "entrada_1" | "entrada_2">("avista");
   const [formaPadrao, setFormaPadrao] = useState("pix");
   const [contaId, setContaId] = useState("");
+  const [responsavelNome, setResponsavelNome] = useState("");
+  const [responsavelCpf, setResponsavelCpf] = useState("");
+  const [responsavelTelefone, setResponsavelTelefone] = useState("");
+  const [responsavelEmail, setResponsavelEmail] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [parcelas, setParcelas] = useState<ParcelaForm[]>([]);
 
@@ -205,12 +199,8 @@ export default function TemporadasPage() {
         return;
       }
 
-      const [rTemp, rSocios, rContas] = await Promise.all([
+      const [rTemp, rContas] = await Promise.all([
         fetch("/api/temporadas", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          cache: "no-store",
-        }),
-        fetch("/api/socios", {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: "no-store",
         }),
@@ -220,28 +210,14 @@ export default function TemporadasPage() {
         }),
       ]);
 
-      const [jTemp, jSocios, jContas] = await Promise.all([
+      const [jTemp, jContas] = await Promise.all([
         rTemp.json().catch(() => ({})),
-        rSocios.json().catch(() => ({})),
         rContas.json().catch(() => ({})),
       ]);
 
       if (!rTemp.ok) throw new Error(jTemp?.error || "Erro ao carregar temporadas.");
-      if (!rSocios.ok) throw new Error(jSocios?.error || "Erro ao carregar sócios.");
 
       setTemporadas(Array.isArray(jTemp?.temporadas) ? jTemp.temporadas : []);
-      setSocios(
-        (Array.isArray(jSocios?.socios) ? jSocios.socios : []).map((s: any) => ({
-          id: String(s.id),
-          nome: s.nome || "",
-          cpf: s.cpf || null,
-          matricula: s.matricula == null ? null : String(s.matricula),
-          responsavel_id: s.responsavel_id || null,
-          tipo_socio: s.tipo_socio || null,
-          ativo: String(s.situacao || "").toLowerCase() !== "inativo",
-          situacao: s.situacao || null,
-        }))
-      );
       setContas(Array.isArray(jContas?.contas) ? jContas.contas : []);
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao carregar temporadas.");
@@ -267,20 +243,11 @@ export default function TemporadasPage() {
     }
   }, [tipo]);
 
-  const sociosElegiveis = useMemo(
-    () => socios.filter((s) => s.ativo !== false),
-    [socios]
-  );
-
-  const participantesFamilia = useMemo(
-    () => socios.filter((s) => s.responsavel_id === socioId && s.ativo !== false),
-    [socios, socioId]
-  );
 
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return temporadas.filter((t) => {
-      const nome = t.socio?.nome || "";
+      const nome = t.responsavel_nome || "";
       const texto = `${nome} ${t.matricula || ""} ${t.codigo || ""}`.toLowerCase();
       const bateBusca = !termo || texto.includes(termo);
       const bateFiltro = filtro === "todas" || t.situacao === filtro;
@@ -290,7 +257,10 @@ export default function TemporadasPage() {
 
   function limparFormulario() {
     setTipo("temporada_familiar");
-    setSocioId("");
+    setResponsavelNome("");
+    setResponsavelCpf("");
+    setResponsavelTelefone("");
+    setResponsavelEmail("");
     setInicio(hoje);
     setFim(fimPadrao);
     setValor("1100");
@@ -307,8 +277,8 @@ export default function TemporadasPage() {
   }
 
   async function salvarTemporada() {
-    if (!socioId) {
-      setMensagem("Selecione o titular da temporada.");
+    if (!responsavelNome.trim()) {
+      setMensagem("Informe o responsável pela temporada.");
       return;
     }
     if (!inicio || !fim || fim < inicio) {
@@ -340,7 +310,11 @@ export default function TemporadasPage() {
         },
         body: JSON.stringify({
           acao: "criar",
-          socio_id: socioId,
+          socio_id: null,
+          responsavel_nome: responsavelNome.trim(),
+          responsavel_cpf: responsavelCpf.replace(/\D/g, "").slice(0, 11) || null,
+          responsavel_telefone: responsavelTelefone.trim() || null,
+          responsavel_email: responsavelEmail.trim() || null,
           tipo,
           inicio,
           fim,
@@ -439,7 +413,7 @@ export default function TemporadasPage() {
             <Umbrella className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-[#005a3c]">Temporadas</h1>
+            <h1 className="text-xl font-black text-[#005a3c]">Temporada</h1>
             <p className="text-xs font-medium text-[#718078]">Venda, pagamentos e validade</p>
           </div>
         </div>
@@ -542,7 +516,7 @@ export default function TemporadasPage() {
                               </span>
                             )}
                           </div>
-                          <h2 className="mt-2 text-lg font-black">{t.socio?.nome || "Titular não encontrado"}</h2>
+                          <h2 className="mt-2 text-lg font-black">{t.responsavel_nome || "Responsável não informado"}</h2>
                           <div className="mt-2 grid gap-2 text-sm text-[#68776f] sm:grid-cols-3">
                             <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" /> {dataBr(t.inicio)} → {dataBr(t.fim)}</span>
                             <span className="inline-flex items-center gap-1.5"><DollarSign className="h-4 w-4" /> {moeda(t.valor_total)}</span>
@@ -604,15 +578,32 @@ export default function TemporadasPage() {
             </div>
 
             <div className="grid gap-5 p-5 md:grid-cols-2">
-              <label className="md:col-span-2">
-                <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Titular</span>
-                <select value={socioId} onChange={(e) => setSocioId(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-3 py-3">
-                  <option value="">Selecione...</option>
-                  {sociosElegiveis.map((s) => (
-                    <option key={s.id} value={s.id}>{s.nome} {s.matricula ? `— ${s.matricula}` : ""}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="md:col-span-2 rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
+                <div className="mb-3">
+                  <p className="text-sm font-extrabold text-[#b65308]">👤 Responsável pela temporada</p>
+                  <p className="mt-1 text-xs text-[#7b6b60]">
+                    O responsável da temporada é cadastrado aqui e não precisa ser sócio da Sociedade Guarani.
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Nome completo *</span>
+                    <input value={responsavelNome} onChange={(e) => setResponsavelNome(e.target.value)} placeholder="Nome do responsável" className="w-full rounded-xl border border-[#d5e0da] px-3 py-3" />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">CPF</span>
+                    <input value={responsavelCpf} onChange={(e) => setResponsavelCpf(e.target.value)} placeholder="000.000.000-00" className="w-full rounded-xl border border-[#d5e0da] px-3 py-3" />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Telefone / WhatsApp</span>
+                    <input value={responsavelTelefone} onChange={(e) => setResponsavelTelefone(e.target.value)} placeholder="(00) 00000-0000" className="w-full rounded-xl border border-[#d5e0da] px-3 py-3" />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">E-mail</span>
+                    <input type="email" value={responsavelEmail} onChange={(e) => setResponsavelEmail(e.target.value)} placeholder="email@exemplo.com" className="w-full rounded-xl border border-[#d5e0da] px-3 py-3" />
+                  </label>
+                </div>
+              </div>
 
               <div>
                 <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Tipo</span>
@@ -701,15 +692,10 @@ export default function TemporadasPage() {
 
               {tipo === "temporada_familiar" && (
                 <div className="md:col-span-2 rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
-                  <div className="flex items-center gap-2 font-bold text-[#b65308]"><Users className="h-4 w-4" /> Dependentes encontrados</div>
+                  <div className="flex items-center gap-2 font-bold text-[#b65308]"><Users className="h-4 w-4" /> Temporada familiar</div>
                   <p className="mt-1 text-xs text-[#7b6b60]">
-                    Os familiares que já possuem registro em Sócios serão vinculados à temporada. O módulo de carteirinhas será integrado na próxima etapa para gerar os cartões da família.
+                    Os familiares da temporada serão cadastrados como participantes da própria temporada. Eles não precisam ser sócios da Sociedade Guarani.
                   </p>
-                  {participantesFamilia.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {participantesFamilia.map((p) => <span key={p.id} className="rounded-full bg-white px-3 py-1 text-xs font-semibold">{p.nome}{p.matricula ? ` — ${p.matricula}` : ""}</span>)}
-                    </div>
-                  )}
                 </div>
               )}
 
