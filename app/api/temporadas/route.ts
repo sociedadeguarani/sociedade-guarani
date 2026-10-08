@@ -261,8 +261,13 @@ export async function POST(request: NextRequest) {
       if (erroTemporada || !temporada) throw erroTemporada || new Error("Não foi possível criar a temporada.");
 
       try {
-        const participantes = [
-          { temporada_id: temporada.id, socio_id: socioId, papel: "titular", matricula: codigo },
+        const participantes: Array<{
+          temporada_id: string;
+          socio_id: string;
+          papel: string;
+          matricula: string | null;
+        }> = [
+          { temporada_id: String(temporada.id), socio_id: socioId, papel: "titular", matricula: codigo },
         ];
 
         if (tipo === "temporada_familiar") {
