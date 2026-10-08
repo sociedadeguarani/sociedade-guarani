@@ -175,6 +175,60 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
+
+    const { data: temporadasDb, error: temporadasError } = await supabase
+      .from("temporadas")
+      .select("id,tipo,modalidade,codigo,matricula,inicio,fim,valor_total,situacao,forma_pagamento,data_pagamento,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email")
+      .in("situacao", ["pendente", "ativa"])
+      .order("responsavel_nome");
+
+    if (temporadasError) throw temporadasError;
+
+    const temporadaIds = (temporadasDb || []).map((t: any) => String(t.id));
+    let participantesDb: any[] = [];
+
+    for (const lote of emLotes(temporadaIds, 100)) {
+      if (!lote.length) continue;
+      const { data, error } = await supabase
+        .from("temporadas_participantes")
+        .select("id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco")
+        .in("temporada_id", lote)
+        .order("id");
+      if (error) throw error;
+      participantesDb.push(...(data || []));
+    }
+
+    const temporadas = (temporadasDb || []).map((t: any) => ({
+      id: String(t.id),
+      matricula: t.matricula || null,
+      codigo: t.codigo || null,
+      tipo: t.tipo || null,
+      modalidade: t.modalidade || null,
+      inicio: t.inicio || null,
+      fim: t.fim || null,
+      valor_total: Number(t.valor_total || 0),
+      situacao: t.situacao || null,
+      forma_pagamento: t.forma_pagamento || null,
+      data_pagamento: t.data_pagamento || null,
+      responsavel_nome: t.responsavel_nome || null,
+      responsavel_cpf: t.responsavel_cpf || null,
+      responsavel_telefone: t.responsavel_telefone || null,
+      responsavel_email: t.responsavel_email || null,
+      participantes: participantesDb
+        .filter((p: any) => String(p.temporada_id) === String(t.id))
+        .map((p: any) => ({
+          id: String(p.id),
+          temporada_id: String(p.temporada_id),
+          socio_id: p.socio_id || null,
+          papel: p.papel || "dependente",
+          matricula: p.matricula || null,
+          nome: p.nome || null,
+          cpf: p.cpf || null,
+          telefone: p.telefone || null,
+          parentesco: p.parentesco || null,
+        })),
+    }));
+
     const dependentes = (dependentesDb || []).map((d: any) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
@@ -218,6 +272,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       socios: resultado,
       dependentes,
+      temporadas,
     });
   } catch (error) {
     console.error("GET /api/carteirinhas:", error);
