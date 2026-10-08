@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     // primeiro e os dados de sócio/dependente/usuário depois, separadamente.
     let query = supabase
       .from("acessos_sociedade")
-      .select("id,socio_id,dependente_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por")
+      .select("id,socio_id,dependente_id,temporada_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por")
       .order("data_hora_entrada", { ascending: false })
       .limit(1000);
     if (de) query = query.gte("data_hora_entrada", `${de}T00:00:00`);
@@ -44,8 +44,9 @@ export async function GET(request: Request) {
     const socioIds = [...new Set(lista.map((a) => a.socio_id).filter(Boolean))];
     const dependenteIds = [...new Set(lista.map((a) => a.dependente_id).filter(Boolean))];
     const usuarioIds = [...new Set(lista.map((a) => a.registrado_por).filter(Boolean))];
+    const temporadaIds = [...new Set(lista.map((a: any) => a.temporada_id).filter(Boolean))];
 
-    const [sociosResult, dependentesResult, usuariosResult] = await Promise.all([
+    const [sociosResult, dependentesResult, usuariosResult, temporadasResult] = await Promise.all([
       socioIds.length
         ? supabase.from("socios").select("id,nome,matricula,foto_url").in("id", socioIds)
         : Promise.resolve({ data: [] as any[], error: null }),
@@ -55,19 +56,26 @@ export async function GET(request: Request) {
       usuarioIds.length
         ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds)
         : Promise.resolve({ data: [] as any[], error: null }),
+      temporadaIds.length
+        ? supabase.from("temporadas").select("id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome").in("id", temporadaIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
     ]);
     if (sociosResult.error) throw sociosResult.error;
     if (dependentesResult.error) throw dependentesResult.error;
     if (usuariosResult.error) throw usuariosResult.error;
+    if (temporadasResult.error) throw temporadasResult.error;
 
     const mapaSocios = new Map((sociosResult.data || []).map((s: any) => [s.id, s]));
     const mapaDependentes = new Map((dependentesResult.data || []).map((d: any) => [d.id, d]));
     const mapaUsuarios = new Map((usuariosResult.data || []).map((u: any) => [u.id, u]));
+    const mapaTemporadas = new Map((temporadasResult.data || []).map((t: any) => [t.id, t]));
 
     const resultado = lista.map((a) => ({
       ...a,
       socio: a.socio_id ? mapaSocios.get(a.socio_id) || null : null,
       dependente: a.dependente_id ? mapaDependentes.get(a.dependente_id) || null : null,
+      temporada_id: (a as any).temporada_id || null,
+      temporada: (a as any).temporada_id ? mapaTemporadas.get((a as any).temporada_id) || null : null,
       usuario: a.registrado_por ? mapaUsuarios.get(a.registrado_por) || null : null,
     }));
 
@@ -149,21 +157,65 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const qr = String(body?.qr || "").trim();
     const socioId = String(body?.socio_id || "").trim();
-    const matricula = String(body?.matricula || "").trim();
+    const matricula = String(body?.matricula || "").trim().toUpperCase();
     let dependenteId = String(body?.dependente_id || "").trim();
+    const temporadaIdInformada = String(body?.temporada_id || "").trim();
     const supabase = getServiceClient();
 
     let id = socioId;
+    let temporadaId = temporadaIdInformada || null;
+    let temporadaParticipante: any = null;
     if (!id && qr.startsWith("guarani:socio:")) id = qr.replace("guarani:socio:", "");
     if (!dependenteId && qr.startsWith("guarani:dependente:")) dependenteId = qr.replace("guarani:dependente:", "");
+    if (!temporadaId && qr.startsWith("guarani:temporada:")) temporadaId = qr.replace("guarani:temporada:", "");
+    if (!temporadaId && qr.startsWith("guarani:temporada-participante:")) {
+      const participanteId = qr.replace("guarani:temporada-participante:", "");
+      const { data: participanteQr, error: participanteQrError } = await supabase
+        .from("temporadas_participantes")
+        .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
+        .eq("id", participanteId)
+        .maybeSingle();
+      if (participanteQrError) throw participanteQrError;
+      if (!participanteQr) return NextResponse.json({ error: "Participante da temporada não encontrado." }, { status: 404 });
+      temporadaId = String(participanteQr.temporada_id);
+      temporadaParticipante = participanteQr;
+    }
 
-    if (!id && !dependenteId && matricula) {
-      etapa = "buscando sócio pela matrícula";
-      const { data: socioPorMatricula, error: matriculaError } = await supabase
-        .from("socios").select("id").eq("matricula", matricula).maybeSingle();
-      if (matriculaError) throw matriculaError;
-      if (!socioPorMatricula) return NextResponse.json({ error: `Nenhum associado encontrado com a matrícula ${matricula}.` }, { status: 404 });
-      id = socioPorMatricula.id;
+    if (!id && !dependenteId && !temporadaId && matricula) {
+      if (/^TE\d{4,8}[A-Z]$/.test(matricula)) {
+        etapa = "buscando temporada pela matrícula";
+        const { data: participantePorMatricula, error: participanteMatriculaError } = await supabase
+          .from("temporadas_participantes")
+          .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
+          .eq("matricula", matricula)
+          .maybeSingle();
+
+        if (participanteMatriculaError) throw participanteMatriculaError;
+
+        if (participantePorMatricula) {
+          temporadaId = String(participantePorMatricula.temporada_id);
+          temporadaParticipante = participantePorMatricula;
+        } else {
+          const { data: temporadaPorMatricula, error: temporadaMatriculaError } = await supabase
+            .from("temporadas")
+            .select("id")
+            .eq("matricula", matricula)
+            .maybeSingle();
+
+          if (temporadaMatriculaError) throw temporadaMatriculaError;
+          if (!temporadaPorMatricula) {
+            return NextResponse.json({ error: `Nenhuma temporada encontrada com a matrícula ${matricula}.` }, { status: 404 });
+          }
+          temporadaId = String(temporadaPorMatricula.id);
+        }
+      } else {
+        etapa = "buscando sócio pela matrícula";
+        const { data: socioPorMatricula, error: matriculaError } = await supabase
+          .from("socios").select("id").eq("matricula", matricula).maybeSingle();
+        if (matriculaError) throw matriculaError;
+        if (!socioPorMatricula) return NextResponse.json({ error: `Nenhum associado encontrado com a matrícula ${matricula}.` }, { status: 404 });
+        id = socioPorMatricula.id;
+      }
     }
 
     let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; ativo: boolean | null } | null = null;
@@ -176,6 +228,71 @@ export async function POST(request: Request) {
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
       id = String(dep.socio_id);
+    }
+
+    if (temporadaId) {
+      etapa = "validando temporada";
+
+      const { data: temporada, error: temporadaError } = await supabase
+        .from("temporadas")
+        .select("id,tipo,modalidade,codigo,matricula,inicio,fim,situacao,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email")
+        .eq("id", temporadaId)
+        .maybeSingle();
+
+      if (temporadaError) throw temporadaError;
+      if (!temporada) return NextResponse.json({ error: "Temporada não encontrada." }, { status: 404 });
+
+      if (!temporadaParticipante && matricula) {
+        const { data: participante, error: participanteError } = await supabase
+          .from("temporadas_participantes")
+          .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
+          .eq("temporada_id", temporada.id)
+          .eq("matricula", matricula)
+          .maybeSingle();
+        if (participanteError) throw participanteError;
+        temporadaParticipante = participante || null;
+      }
+
+      const hoje = new Date().toISOString().slice(0, 10);
+      const inicio = String(temporada.inicio || "").slice(0, 10);
+      const fim = String(temporada.fim || "").slice(0, 10);
+      const situacao = String(temporada.situacao || "").toLowerCase();
+      const dentroPeriodo = (!inicio || hoje >= inicio) && (!fim || hoje <= fim);
+      const autorizado = situacao === "ativa" && dentroPeriodo;
+
+      let motivoNegacao: string | null = null;
+      if (situacao !== "ativa") motivoNegacao = `Temporada não está ativa (situação: ${temporada.situacao || "não informada"}).`;
+      else if (!dentroPeriodo) motivoNegacao = `Temporada fora da validade (${inicio || "?"} a ${fim || "?"}).`;
+
+      const { data: acesso, error: acessoError } = await supabase
+        .from("acessos_sociedade")
+        .insert({
+          socio_id: null,
+          dependente_id: null,
+          temporada_id: temporada.id,
+          registrado_por: auth.usuario.id,
+          autorizado,
+          motivo_negacao: motivoNegacao,
+        })
+        .select("id,socio_id,dependente_id,temporada_id,data_hora_entrada,autorizado,motivo_negacao")
+        .single();
+
+      if (acessoError) throw acessoError;
+
+      return NextResponse.json({
+        acesso,
+        temporada,
+        participante: temporadaParticipante,
+        socio: null,
+        dependente: null,
+        liberado: autorizado,
+        exame: { status: { texto: "Controle de exame médico ainda não configurado", cor: "cinza" }, validade: null, verificado: false },
+        mensalidade: { texto: "Não se aplica — temporada não possui mensalidade.", cor: "cinza" },
+        inadimplencia: {
+          atrasado: false, criticoTresMesesOuMais: false, quantidade: 0, valorTotal: 0,
+          status: { texto: "Não se aplica", cor: "cinza" },
+        },
+      });
     }
 
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
