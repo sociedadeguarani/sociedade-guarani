@@ -9,10 +9,14 @@ import {
   CreditCard,
   DollarSign,
   FileText,
+  Pencil,
   Plus,
+  Printer,
   RefreshCw,
   Search,
+  Trash2,
   Umbrella,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -66,7 +70,7 @@ type Temporada = {
   responsavel_telefone: string | null;
   responsavel_email: string | null;
   parcelas: Parcela[];
-  participantes: { socio_id: string | null; nome: string | null; papel: string; matricula: string | null }[];
+  participantes: { id?: string; socio_id: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; parentesco?: string | null; papel: string; matricula: string | null }[];
 };
 
 type ParcelaForm = {
@@ -158,6 +162,14 @@ export default function TemporadasPage() {
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("todas");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
+  const [modoCadastro, setModoCadastro] = useState<"novo" | "editar">("novo");
+  const [temporadaEditando, setTemporadaEditando] = useState<Temporada | null>(null);
+  const [abrirParticipantes, setAbrirParticipantes] = useState<Temporada | null>(null);
+  const [abrirCarteirinhas, setAbrirCarteirinhas] = useState<Temporada | null>(null);
+  const [novoParticipanteNome, setNovoParticipanteNome] = useState("");
+  const [novoParticipanteCpf, setNovoParticipanteCpf] = useState("");
+  const [novoParticipanteTelefone, setNovoParticipanteTelefone] = useState("");
+  const [novoParticipanteParentesco, setNovoParticipanteParentesco] = useState("Filho(a)");
   const [abrirPagamento, setAbrirPagamento] = useState<Parcela | null>(null);
   const [temporadaPagamento, setTemporadaPagamento] = useState<Temporada | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -256,6 +268,8 @@ export default function TemporadasPage() {
   }, [temporadas, busca, filtro]);
 
   function limparFormulario() {
+    setModoCadastro("novo");
+    setTemporadaEditando(null);
     setTipo("temporada_familiar");
     setResponsavelNome("");
     setResponsavelCpf("");
@@ -276,24 +290,34 @@ export default function TemporadasPage() {
     );
   }
 
-  async function salvarTemporada() {
-    if (!responsavelNome.trim()) {
-      setMensagem("Informe o responsável pela temporada.");
-      return;
-    }
-    if (!inicio || !fim || fim < inicio) {
-      setMensagem("Informe um período válido.");
-      return;
-    }
+  function abrirEdicaoTemporada(t: Temporada) {
+    setModoCadastro("editar");
+    setTemporadaEditando(t);
+    setTipo(t.tipo);
+    setResponsavelNome(t.responsavel_nome || "");
+    setResponsavelCpf(t.responsavel_cpf || "");
+    setResponsavelTelefone(t.responsavel_telefone || "");
+    setResponsavelEmail(t.responsavel_email || "");
+    setInicio(t.inicio);
+    setFim(t.fim);
+    setValor(String(t.valor_total || 0));
+    setObservacoes(t.observacoes || "");
+    setAbrirCadastro(true);
+    setMensagem("");
+  }
 
-    const total = Number(valor || 0);
-    if (total <= 0) {
-      setMensagem("Informe um valor de temporada maior que zero.");
-      return;
-    }
+  function abrirParticipantesModal(t: Temporada) {
+    setAbrirParticipantes(t);
+    setNovoParticipanteNome("");
+    setNovoParticipanteCpf("");
+    setNovoParticipanteTelefone("");
+    setNovoParticipanteParentesco("Filho(a)");
+    setMensagem("");
+  }
 
-    if (!parcelas.length) {
-      setMensagem("Configure pelo menos uma parcela.");
+  async function adicionarParticipante() {
+    if (!abrirParticipantes || !novoParticipanteNome.trim()) {
+      setMensagem("Informe o nome do participante.");
       return;
     }
 
@@ -304,10 +328,171 @@ export default function TemporadasPage() {
       const accessToken = await token();
       const resposta = await fetch("/api/temporadas", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          acao: "adicionar_participante",
+          temporada_id: abrirParticipantes.id,
+          nome: novoParticipanteNome.trim(),
+          cpf: novoParticipanteCpf,
+          telefone: novoParticipanteTelefone,
+          parentesco: novoParticipanteParentesco,
+        }),
+      });
+
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível adicionar o participante.");
+
+      setMensagem(resultado?.participante?.matricula
+        ? `Participante adicionado com matrícula ${resultado.participante.matricula}.`
+        : "Participante adicionado.");
+      setNovoParticipanteNome("");
+      setNovoParticipanteCpf("");
+      setNovoParticipanteTelefone("");
+      await carregar();
+
+      const recarregar = await fetch("/api/temporadas", {
+        headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store",
+      });
+      const dados = await recarregar.json().catch(() => ({}));
+      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
+      if (t) setAbrirParticipantes(t);
+    } catch (e) {
+      setMensagem(e instanceof Error ? e.message : "Erro ao adicionar participante.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function removerParticipante(participanteId: string) {
+    if (!abrirParticipantes) return;
+    if (!window.confirm("Remover este participante da temporada?")) return;
+
+    setSalvando(true);
+    try {
+      const accessToken = await token();
+      const resposta = await fetch("/api/temporadas", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          acao: "remover_participante",
+          temporada_id: abrirParticipantes.id,
+          participante_id: participanteId,
+        }),
+      });
+
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível remover o participante.");
+
+      await carregar();
+      const recarregar = await fetch("/api/temporadas", {
+        headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store",
+      });
+      const dados = await recarregar.json().catch(() => ({}));
+      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
+      if (t) setAbrirParticipantes(t);
+    } catch (e) {
+      setMensagem(e instanceof Error ? e.message : "Erro ao remover participante.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function gerarCarteirinhas(t: Temporada) {
+    setSalvando(true);
+    setMensagem("");
+
+    try {
+      const accessToken = await token();
+      const resposta = await fetch("/api/temporadas", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "gerar_carteirinhas", temporada_id: t.id }),
+      });
+
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível gerar as carteirinhas.");
+
+      setAbrirCarteirinhas({
+        ...t,
+        codigo: resultado.codigo || t.codigo,
+        matricula: resultado.codigo || t.matricula,
+        participantes: resultado.participantes || t.participantes || [],
+      });
+      await carregar();
+    } catch (e) {
+      setMensagem(e instanceof Error ? e.message : "Erro ao gerar carteirinhas.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  function imprimirCarteirinhas() {
+    window.print();
+  }
+
+  async function salvarTemporada() {
+    if (!responsavelNome.trim()) {
+      setMensagem("Informe o responsável pela temporada.");
+      return;
+    }
+    if (!inicio || !fim || fim < inicio) {
+      setMensagem("Informe um período válido.");
+      return;
+    }
+
+    setSalvando(true);
+    setMensagem("");
+
+    try {
+      const accessToken = await token();
+
+      if (modoCadastro === "editar" && temporadaEditando) {
+        const resposta = await fetch("/api/temporadas", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            acao: "editar",
+            temporada_id: temporadaEditando.id,
+            responsavel_nome: responsavelNome.trim(),
+            responsavel_cpf: responsavelCpf.replace(/\D/g, "").slice(0, 11) || null,
+            responsavel_telefone: responsavelTelefone.trim() || null,
+            responsavel_email: responsavelEmail.trim() || null,
+            inicio,
+            fim,
+            observacoes: observacoes || null,
+          }),
+        });
+
+        const resultado = await resposta.json().catch(() => ({}));
+        if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar as alterações.");
+
+        setMensagem("Temporada atualizada com sucesso.");
+        setAbrirCadastro(false);
+        limparFormulario();
+        await carregar();
+        return;
+      }
+
+      const total = Number(valor || 0);
+      if (total <= 0) {
+        setMensagem("Informe um valor de temporada maior que zero.");
+        return;
+      }
+
+      if (!parcelas.length) {
+        setMensagem("Configure pelo menos uma parcela.");
+        return;
+      }
+
+      const somaParcelas = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+      if (Math.abs(somaParcelas - total) > 0.02) {
+        setMensagem(`As parcelas somam ${moeda(somaParcelas)}, mas a temporada vale ${moeda(total)}. Ajuste os valores antes de salvar.`);
+        return;
+      }
+
+      const resposta = await fetch("/api/temporadas", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           acao: "criar",
           socio_id: null,
@@ -520,8 +705,24 @@ export default function TemporadasPage() {
                           <div className="mt-2 grid gap-2 text-sm text-[#68776f] sm:grid-cols-3">
                             <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" /> {dataBr(t.inicio)} → {dataBr(t.fim)}</span>
                             <span className="inline-flex items-center gap-1.5"><DollarSign className="h-4 w-4" /> {moeda(t.valor_total)}</span>
-                            <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" /> {t.participantes?.length || 1} participante(s)</span>
+                            <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" /> {Math.max(t.participantes?.length || 0, 1)} participante(s)</span>
                           </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 xl:max-w-[360px]">
+                          <button onClick={() => abrirEdicaoTemporada(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#d5e0da] bg-white px-3 py-2 text-xs font-bold text-[#005a3c] hover:bg-[#f4f7f5]">
+                            <Pencil className="h-4 w-4" /> Editar
+                          </button>
+                          {t.tipo === "temporada_familiar" && (
+                            <button onClick={() => abrirParticipantesModal(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#f2bb91] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#b65308] hover:bg-[#fff0e3]">
+                              <UserPlus className="h-4 w-4" /> Dependentes
+                            </button>
+                          )}
+                          {t.situacao === "ativa" && (
+                            <button onClick={() => void gerarCarteirinhas(t)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#005a3c] px-3 py-2 text-xs font-bold text-white hover:bg-[#003d2b]">
+                              <CreditCard className="h-4 w-4" /> Carteirinhas
+                            </button>
+                          )}
                         </div>
 
                         <div className="min-w-[240px] rounded-2xl bg-[#f6f9f7] p-4">
@@ -571,7 +772,7 @@ export default function TemporadasPage() {
           <div className="mx-auto my-6 w-full max-w-4xl rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#e5ece8] p-5">
               <div>
-                <h2 className="text-xl font-black text-[#005a3c]">Nova temporada</h2>
+                <h2 className="text-xl font-black text-[#005a3c]">{modoCadastro === "editar" ? "Editar temporada" : "Nova temporada"}</h2>
                 <p className="text-sm text-[#718078]">A temporada não gera mensalidade.</p>
               </div>
               <button onClick={() => setAbrirCadastro(false)} className="rounded-xl p-2 hover:bg-[#f4f7f5]"><X /></button>
@@ -708,8 +909,127 @@ export default function TemporadasPage() {
             <div className="flex justify-end gap-3 border-t border-[#e5ece8] p-5">
               <button onClick={() => setAbrirCadastro(false)} className="rounded-xl border border-[#d5e0da] px-5 py-2.5 font-bold">Cancelar</button>
               <button disabled={salvando} onClick={() => void salvarTemporada()} className="rounded-xl bg-[#005a3c] px-5 py-2.5 font-bold text-white disabled:opacity-50">
-                {salvando ? "Salvando..." : "Cadastrar temporada"}
+                {salvando ? "Salvando..." : modoCadastro === "editar" ? "Salvar alterações" : "Cadastrar temporada"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abrirParticipantes && (
+        <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b p-5">
+              <div>
+                <h2 className="text-lg font-black text-[#005a3c]">Dependentes da temporada</h2>
+                <p className="text-sm text-[#718078]">{abrirParticipantes.responsavel_nome} · {abrirParticipantes.codigo || "Temporada pendente"}</p>
+              </div>
+              <button onClick={() => setAbrirParticipantes(null)}><X /></button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div className="rounded-2xl border border-[#f2bb91] bg-[#fff8f2] p-4">
+                <p className="font-black text-[#b65308]">Titular</p>
+                <p className="mt-1 font-bold">{abrirParticipantes.responsavel_nome}</p>
+                <p className="mt-1 text-xs text-[#718078]">{abrirParticipantes.matricula || "TE — aguardando pagamento"}</p>
+              </div>
+
+              <div>
+                <h3 className="mb-3 font-black text-[#17382c]">Participantes cadastrados</h3>
+                <div className="space-y-2">
+                  {(abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[#d5e0da] p-4 text-sm text-[#718078]">Nenhum dependente cadastrado ainda.</div>
+                  ) : (
+                    (abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").map((p) => (
+                      <div key={p.id || `${p.nome}-${p.matricula}`} className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe9e3] p-3">
+                        <div>
+                          <p className="font-bold">{p.nome}</p>
+                          <p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
+                        </div>
+                        {p.id && (
+                          <button onClick={() => void removerParticipante(p.id!)} className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-100">
+                            <Trash2 className="h-4 w-4" /> Remover
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-4">
+                <h3 className="font-black text-[#005a3c]">+ Adicionar dependente</h3>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Nome *</span>
+                    <input value={novoParticipanteNome} onChange={(e) => setNovoParticipanteNome(e.target.value)} className="w-full rounded-xl border px-3 py-3" placeholder="Nome completo" />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Parentesco</span>
+                    <select value={novoParticipanteParentesco} onChange={(e) => setNovoParticipanteParentesco(e.target.value)} className="w-full rounded-xl border px-3 py-3">
+                      <option>Esposa</option><option>Esposo</option><option>Companheiro(a)</option><option>Filho(a)</option><option>Enteado(a)</option><option>Pai</option><option>Mãe</option><option>Irmão(ã)</option><option>Outro</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">CPF</span>
+                    <input value={novoParticipanteCpf} onChange={(e) => setNovoParticipanteCpf(e.target.value)} className="w-full rounded-xl border px-3 py-3" placeholder="000.000.000-00" />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Telefone</span>
+                    <input value={novoParticipanteTelefone} onChange={(e) => setNovoParticipanteTelefone(e.target.value)} className="w-full rounded-xl border px-3 py-3" placeholder="(55) 99999-9999" />
+                  </label>
+                </div>
+                <button onClick={() => void adicionarParticipante()} disabled={salvando} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+                  <UserPlus className="h-4 w-4" /> Adicionar dependente
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end border-t p-5">
+              <button onClick={() => setAbrirParticipantes(null)} className="rounded-xl border px-5 py-2.5 font-bold">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abrirCarteirinhas && (
+        <div className="fixed inset-0 z-[115] overflow-y-auto bg-black/50 p-4">
+          <div className="mx-auto my-6 w-full max-w-4xl rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b p-5 print:hidden">
+              <div>
+                <h2 className="text-lg font-black text-[#005a3c]">Carteirinhas da temporada</h2>
+                <p className="text-sm text-[#718078]">Temporada {abrirCarteirinhas.codigo}</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={imprimirCarteirinhas} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white">
+                  <Printer className="h-4 w-4" /> Imprimir
+                </button>
+                <button onClick={() => setAbrirCarteirinhas(null)} className="rounded-xl border px-3 py-2"><X /></button>
+              </div>
+            </div>
+
+            <div className="grid gap-5 p-6 sm:grid-cols-2">
+              {(abrirCarteirinhas.participantes || []).map((p, index) => (
+                <div key={p.id || `${p.nome}-${index}`} className="overflow-hidden rounded-3xl border-2 border-[#f2bb91] bg-gradient-to-br from-[#fff8f2] to-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest text-[#b65308]">Sociedade Recreativa Guarani</p>
+                      <p className="mt-1 text-sm font-bold text-[#b65308]">TEMPORADA {abrirCarteirinhas.tipo === "temporada_familiar" ? "FAMILIAR" : "INDIVIDUAL"}</p>
+                    </div>
+                    <div className="rounded-xl bg-[#ffead9] px-3 py-2 text-xs font-black text-[#b65308]">TE</div>
+                  </div>
+                  <div className="mt-6">
+                    <p className="text-xl font-black text-[#17382c]">{p.nome}</p>
+                    <p className="mt-2 text-sm font-black text-[#005a3c]">{p.matricula || abrirCarteirinhas.codigo}</p>
+                    <p className="mt-1 text-xs text-[#718078]">Validade: {dataBr(abrirCarteirinhas.inicio)} até {dataBr(abrirCarteirinhas.fim)}</p>
+                    {p.parentesco && <p className="mt-1 text-xs text-[#718078]">{p.parentesco}</p>}
+                  </div>
+                  <div className="mt-5 flex items-center justify-between border-t border-[#f2bb91] pt-4">
+                    <span className="text-xs font-bold text-[#718078]">Carteirinha de temporada</span>
+                    <span className="text-2xl">🏖️</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -721,9 +1041,7 @@ export default function TemporadasPage() {
             <div className="flex items-center justify-between border-b p-5">
               <div>
                 <h2 className="text-lg font-black text-[#005a3c]">Confirmar pagamento</h2>
-               <p className="text-sm text-[#718078]">
-  {temporadaPagamento.responsavel_nome || "Responsável não informado"} · {abrirPagamento.descricao}
-</p>
+                <p className="text-sm text-[#718078]">{temporadaPagamento.responsavel_nome || "Responsável não informado"} · {abrirPagamento.descricao}</p>
               </div>
               <button onClick={() => setAbrirPagamento(null)}><X /></button>
             </div>
@@ -776,6 +1094,15 @@ export default function TemporadasPage() {
           </div>
         </div>
       )}
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          [class*="z-[115]"], [class*="z-[115]"] * { visibility: visible !important; }
+          [class*="z-[115]"] { position: static !important; background: white !important; padding: 0 !important; }
+          [class*="z-[115]"] > div { box-shadow: none !important; max-width: none !important; margin: 0 !important; }
+          @page { margin: 10mm; }
+        }
+      `}</style>
     </main>
   );
 }
