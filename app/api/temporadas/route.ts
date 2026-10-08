@@ -90,7 +90,7 @@ async function criarMovimentacao(
   db: any,
   temporadaId: string,
   parcelaId: string,
-  socioId: string,
+  socioId: string | null,
   valor: number,
   formaPagamento: string,
   contaId: string,
@@ -121,7 +121,7 @@ async function criarMovimentacao(
       forma_pagamento: formaPagamento,
       origem_tipo: "temporada_parcela",
       origem_id: parcelaId,
-      socio_id: socioId,
+      socio_id: socioId || null,
       dependente_id: null,
       comprovante_url: null,
       conciliado: false,
@@ -148,9 +148,7 @@ export async function GET(request: NextRequest) {
     if (error) throw error;
 
     const ids = (temporadas || []).map((t: any) => String(t.id));
-    const socioIds = (temporadas || []).map((t: any) => String(t.socio_id)).filter(Boolean);
-
-    const [{ data: parcelas, error: erroParcelas }, { data: participantes, error: erroParticipantes }, { data: socios, error: erroSocios }] =
+    const [{ data: parcelas, error: erroParcelas }, { data: participantes, error: erroParticipantes }] =
       await Promise.all([
         ids.length
           ? auth.db.from("temporadas_parcelas").select("*").in("temporada_id", ids).order("numero", { ascending: true })
@@ -158,16 +156,11 @@ export async function GET(request: NextRequest) {
         ids.length
           ? auth.db.from("temporadas_participantes").select("*").in("temporada_id", ids)
           : Promise.resolve({ data: [], error: null }),
-        socioIds.length
-          ? auth.db.from("socios").select("id,nome,cpf,matricula,responsavel_id,tipo_socio,situacao").in("id", socioIds)
-          : Promise.resolve({ data: [], error: null }),
       ]);
 
     if (erroParcelas) throw erroParcelas;
     if (erroParticipantes) throw erroParticipantes;
-    if (erroSocios) throw erroSocios;
 
-    const mapaSocios = new Map((socios || []).map((s: any) => [String(s.id), s]));
     const mapaParcelas = new Map<string, any[]>();
     const mapaParticipantes = new Map<string, any[]>();
 
@@ -186,7 +179,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       temporadas: (temporadas || []).map((t: any) => ({
         ...t,
-        socio: mapaSocios.get(String(t.socio_id)) || null,
         parcelas: mapaParcelas.get(String(t.id)) || [],
         participantes: mapaParticipantes.get(String(t.id)) || [],
       })),
@@ -205,14 +197,17 @@ export async function POST(request: NextRequest) {
     const acao = String(body?.acao || "criar");
 
     if (acao === "criar") {
-      const socioId = String(body.socio_id || "").trim();
+      const responsavelNome = String(body.responsavel_nome || "").trim();
+      const responsavelCpf = body.responsavel_cpf ? String(body.responsavel_cpf).replace(/\D/g, "").slice(0, 11) : null;
+      const responsavelTelefone = body.responsavel_telefone ? String(body.responsavel_telefone).trim() : null;
+      const responsavelEmail = body.responsavel_email ? String(body.responsavel_email).trim() : null;
       const tipo = String(body.tipo || "");
       const inicio = String(body.inicio || "");
       const fim = String(body.fim || "");
       const valorTotal = Number(body.valor_total || 0);
       const parcelas = Array.isArray(body.parcelas) ? body.parcelas as ParcelaEntrada[] : [];
 
-      if (!socioId || !inicio || !fim) return jsonError("Titular e período são obrigatórios.");
+      if (!responsavelNome || !inicio || !fim) return jsonError("Responsável e período são obrigatórios.");
       if (!["temporada_individual", "temporada_familiar"].includes(tipo)) return jsonError("Tipo de temporada inválido.");
       if (fim < inicio) return jsonError("A data final não pode ser anterior à inicial.");
       if (valorTotal <= 0) return jsonError("O valor total deve ser maior que zero.");
@@ -223,23 +218,17 @@ export async function POST(request: NextRequest) {
         return jsonError(`A soma das parcelas (${somaParcelas.toFixed(2)}) não confere com o total (${valorTotal.toFixed(2)}).`);
       }
 
-      const { data: socio, error: erroSocio } = await auth.db
-        .from("socios")
-        .select("id,nome,ativo,matricula")
-        .eq("id", socioId)
-        .maybeSingle();
-
-      if (erroSocio) throw erroSocio;
-      if (!socio) return jsonError("Titular não encontrado.", 404);
-      if (socio.ativo === false) return jsonError("O titular está inativo.");
-
       const codigo = await proximoCodigo(auth.db);
       const formas = [...new Set(parcelas.map((p) => String(p.forma_pagamento || "").trim()).filter(Boolean))];
 
       const { data: temporada, error: erroTemporada } = await auth.db
         .from("temporadas")
         .insert({
-          socio_id: socioId,
+          socio_id: null,
+          responsavel_nome: responsavelNome,
+          responsavel_cpf: responsavelCpf,
+          responsavel_telefone: responsavelTelefone,
+          responsavel_email: responsavelEmail,
           tipo,
           modalidade: tipo === "temporada_familiar" ? "familiar" : "individual",
           codigo: null,
@@ -261,39 +250,8 @@ export async function POST(request: NextRequest) {
       if (erroTemporada || !temporada) throw erroTemporada || new Error("Não foi possível criar a temporada.");
 
       try {
-        const participantes: Array<{
-          temporada_id: string;
-          socio_id: string;
-          papel: string;
-          matricula: string | null;
-        }> = [
-          { temporada_id: String(temporada.id), socio_id: socioId, papel: "titular", matricula: codigo },
-        ];
-
-        if (tipo === "temporada_familiar") {
-          const { data: familiares, error: erroFamiliares } = await auth.db
-            .from("socios")
-            .select("id,matricula")
-            .eq("responsavel_id", socioId)
-            .eq("situacao", "ativo");
-
-          if (erroFamiliares) throw erroFamiliares;
-
-          for (const familiar of familiares || []) {
-            participantes.push({
-              temporada_id: temporada.id,
-              socio_id: String(familiar.id),
-              papel: "dependente",
-              matricula: familiar.matricula ? String(familiar.matricula) : null,
-            });
-          }
-        }
-
-        const { error: erroParticipantes } = await auth.db
-          .from("temporadas_participantes")
-          .insert(participantes);
-
-        if (erroParticipantes) throw erroParticipantes;
+        // A temporada não depende da tabela de Sócios.
+        // Os participantes familiares serão cadastrados na própria temporada.
 
         const { data: parcelasCriadas, error: erroParcelas } = await auth.db
           .from("temporadas_parcelas")
@@ -334,7 +292,7 @@ export async function POST(request: NextRequest) {
             auth.db,
             temporada.id,
             String(primeiraConfirmada.id),
-            socioId,
+            null,
             Number(primeiraConfirmada.valor),
             String(primeiraConfirmada.forma_pagamento),
             String(primeiraConfirmada.conta_bancaria_id),
@@ -424,7 +382,7 @@ export async function POST(request: NextRequest) {
           auth.db,
           temporadaId,
           parcelaId,
-          String((await auth.db.from("temporadas").select("socio_id").eq("id", temporadaId).single()).data?.socio_id),
+          ((await auth.db.from("temporadas").select("socio_id").eq("id", temporadaId).single()).data?.socio_id || null),
           Number(atualizada.valor),
           formaPagamento,
           contaId!,
