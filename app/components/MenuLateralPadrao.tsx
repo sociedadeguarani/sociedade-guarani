@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Home,
   Users,
@@ -13,6 +13,7 @@ import {
   CreditCard,
   DoorOpen,
   Wallet,
+  Umbrella,
   BarChart3,
   Boxes,
   UserCog,
@@ -102,6 +103,12 @@ const ITENS_MENU: readonly ItemMenu[] = [
     perfis: ["administrador", "administrador_master"],
   },
   {
+    nome: "Temporada",
+    rota: "/temporadas",
+    icone: Umbrella,
+    perfis: ["administrador", "administrador_master"],
+  },
+  {
     nome: "Financeiro",
     rota: "/financeiro",
     icone: Wallet,
@@ -151,7 +158,8 @@ function normalizarPerfil(value: unknown): Perfil {
 
   if (
     perfil === "administrador" ||
-    perfil === "admin"
+    perfil === "admin" ||
+    perfil === "administrador_normal"
   ) {
     return "administrador";
   }
@@ -169,7 +177,6 @@ function normalizarPerfil(value: unknown): Perfil {
 
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
-  const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil>("associado");
   const [abertoMobile, setAbertoMobile] = useState(false);
 
@@ -195,7 +202,9 @@ export default function MenuLateralPadrao() {
   );
 
   function irPara(rota: string) {
-    if (pathname !== rota) router.push(rota);
+    if (pathname !== rota) {
+      window.location.href = rota;
+    }
   }
 
   const conteudoMenu = (
