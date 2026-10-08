@@ -721,7 +721,9 @@ export default function TemporadasPage() {
             <div className="flex items-center justify-between border-b p-5">
               <div>
                 <h2 className="text-lg font-black text-[#005a3c]">Confirmar pagamento</h2>
-                <p className="text-sm text-[#718078]">{temporadaPagamento.socio?.nome} · {abrirPagamento.descricao}</p>
+               <p className="text-sm text-[#718078]">
+  {temporadaPagamento.responsavel_nome || "Responsável não informado"} · {abrirPagamento.descricao}
+</p>
               </div>
               <button onClick={() => setAbrirPagamento(null)}><X /></button>
             </div>
