@@ -70,7 +70,7 @@ async function autenticar(request: NextRequest) {
   return { db, user };
 }
 
-async function proximoCodigo(db: ReturnType<typeof createClient>) {
+async function proximoCodigo(db: any) {
   const { data, error } = await db
     .from("temporadas")
     .select("codigo")
@@ -87,7 +87,7 @@ async function proximoCodigo(db: ReturnType<typeof createClient>) {
 }
 
 async function criarMovimentacao(
-  db: ReturnType<typeof createClient>,
+  db: any,
   temporadaId: string,
   parcelaId: string,
   socioId: string,
@@ -477,4 +477,3 @@ export async function POST(request: NextRequest) {
     return jsonError(error instanceof Error ? error.message : "Erro interno no módulo de temporadas.", 500);
   }
 }
-
