@@ -86,6 +86,72 @@ async function proximoCodigo(db: any) {
   return `TE${String(maior + 1).padStart(4, "0")}A`;
 }
 
+async function garantirTitularParticipante(db: any, temporada: any) {
+  const nome = String(temporada.responsavel_nome || "").trim();
+  if (!nome) return null;
+
+  const dados = {
+    temporada_id: temporada.id,
+    socio_id: null,
+    nome,
+    cpf: temporada.responsavel_cpf || null,
+    telefone: temporada.responsavel_telefone || null,
+    parentesco: null,
+    papel: "titular",
+    matricula: temporada.matricula || null,
+  };
+
+  const { data: existente, error: erroBusca } = await db
+    .from("temporadas_participantes")
+    .select("*")
+    .eq("temporada_id", temporada.id)
+    .eq("papel", "titular")
+    .limit(1)
+    .maybeSingle();
+
+  if (erroBusca) throw erroBusca;
+
+  if (existente?.id) {
+    const { data, error } = await db
+      .from("temporadas_participantes")
+      .update(dados)
+      .eq("id", existente.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await db
+    .from("temporadas_participantes")
+    .insert(dados)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo: string) {
+  const { data, error } = await db
+    .from("temporadas_participantes")
+    .select("matricula")
+    .eq("temporada_id", temporadaId);
+
+  if (error) throw error;
+
+  const usadas = new Set(
+    (data || []).map((row: any) => String(row.matricula || "").trim().toUpperCase())
+  );
+
+  for (let codigoLetra = 66; codigoLetra <= 90; codigoLetra++) {
+    const candidata = `${codigo}${String.fromCharCode(codigoLetra)}`;
+    if (!usadas.has(candidata)) return candidata;
+  }
+
+  throw new Error("Limite de participantes da temporada atingido.");
+}
+
 async function criarMovimentacao(
   db: any,
   temporadaId: string,
@@ -250,8 +316,8 @@ export async function POST(request: NextRequest) {
       if (erroTemporada || !temporada) throw erroTemporada || new Error("Não foi possível criar a temporada.");
 
       try {
-        // A temporada não depende da tabela de Sócios.
-        // Os participantes familiares serão cadastrados na própria temporada.
+        // A temporada é independente de Sócios. O responsável fica como titular.
+        await garantirTitularParticipante(auth.db, temporada);
 
         const { data: parcelasCriadas, error: erroParcelas } = await auth.db
           .from("temporadas_parcelas")
@@ -310,6 +376,12 @@ export async function POST(request: NextRequest) {
             .eq("id", temporada.id);
 
           if (atualiza) throw atualiza;
+
+          await auth.db
+            .from("temporadas_participantes")
+            .update({ matricula: codigo })
+            .eq("temporada_id", temporada.id)
+            .eq("papel", "titular");
         } else {
           const { error: atualiza } = await auth.db
             .from("temporadas")
@@ -413,11 +485,10 @@ export async function POST(request: NextRequest) {
           })
           .eq("id", temporadaId);
 
-        await auth.db
-          .from("temporadas_participantes")
-          .update({ matricula: codigo })
-          .eq("temporada_id", temporadaId)
-          .eq("papel", "titular");
+        await garantirTitularParticipante(auth.db, {
+          ...temporada,
+          matricula: codigo,
+        });
       } else if (temporada && situacao === "pago" && temporada.situacao === "pendente") {
         await auth.db
           .from("temporadas")
@@ -432,6 +503,160 @@ export async function POST(request: NextRequest) {
         message: movimentacaoId
           ? "Pagamento confirmado e lançado no Financeiro."
           : "Pagamento registrado em compensação.",
+      });
+    }
+
+    if (acao === "editar") {
+      const temporadaId = String(body.temporada_id || "").trim();
+      const responsavelNome = String(body.responsavel_nome || "").trim();
+      const inicio = String(body.inicio || "");
+      const fim = String(body.fim || "");
+
+      if (!temporadaId || !responsavelNome || !inicio || !fim) {
+        return jsonError("Temporada, responsável e período são obrigatórios.");
+      }
+      if (fim < inicio) return jsonError("A data final não pode ser anterior à inicial.");
+
+      const { data: atualizada, error } = await auth.db
+        .from("temporadas")
+        .update({
+          responsavel_nome: responsavelNome,
+          responsavel_cpf: body.responsavel_cpf ? String(body.responsavel_cpf).replace(/\D/g, "").slice(0, 11) : null,
+          responsavel_telefone: body.responsavel_telefone ? String(body.responsavel_telefone).trim() : null,
+          responsavel_email: body.responsavel_email ? String(body.responsavel_email).trim() : null,
+          inicio,
+          fim,
+          observacoes: body.observacoes || null,
+        })
+        .eq("id", temporadaId)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      await garantirTitularParticipante(auth.db, atualizada);
+
+      return NextResponse.json({ ok: true, temporada: atualizada });
+    }
+
+    if (acao === "adicionar_participante") {
+      const temporadaId = String(body.temporada_id || "").trim();
+      const nome = String(body.nome || "").trim();
+
+      if (!temporadaId || !nome) return jsonError("Temporada e nome do participante são obrigatórios.");
+
+      const { data: temporada, error: erroTemporada } = await auth.db
+        .from("temporadas")
+        .select("id,tipo,situacao,codigo,matricula")
+        .eq("id", temporadaId)
+        .maybeSingle();
+
+      if (erroTemporada) throw erroTemporada;
+      if (!temporada) return jsonError("Temporada não encontrada.", 404);
+      if (temporada.tipo !== "temporada_familiar") {
+        return jsonError("Somente temporadas familiares possuem dependentes adicionais.");
+      }
+
+      const codigo = String(temporada.codigo || temporada.matricula || "").trim().toUpperCase();
+      const matricula = codigo && temporada.situacao === "ativa"
+        ? await proximaMatriculaParticipante(auth.db, temporadaId, codigo)
+        : null;
+
+      const { data: participante, error } = await auth.db
+        .from("temporadas_participantes")
+        .insert({
+          temporada_id: temporadaId,
+          socio_id: null,
+          nome,
+          cpf: body.cpf ? String(body.cpf).replace(/\D/g, "").slice(0, 11) : null,
+          telefone: body.telefone ? String(body.telefone).trim() : null,
+          parentesco: body.parentesco ? String(body.parentesco).trim() : null,
+          papel: "dependente",
+          matricula,
+        })
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      return NextResponse.json({ ok: true, participante });
+    }
+
+    if (acao === "remover_participante") {
+      const temporadaId = String(body.temporada_id || "").trim();
+      const participanteId = String(body.participante_id || "").trim();
+
+      const { data: participante, error: erroBusca } = await auth.db
+        .from("temporadas_participantes")
+        .select("id,papel")
+        .eq("id", participanteId)
+        .eq("temporada_id", temporadaId)
+        .maybeSingle();
+
+      if (erroBusca) throw erroBusca;
+      if (!participante) return jsonError("Participante não encontrado.", 404);
+      if (participante.papel === "titular") return jsonError("O responsável não pode ser removido.");
+
+      const { error } = await auth.db
+        .from("temporadas_participantes")
+        .delete()
+        .eq("id", participanteId)
+        .eq("temporada_id", temporadaId);
+
+      if (error) throw error;
+      return NextResponse.json({ ok: true });
+    }
+
+    if (acao === "gerar_carteirinhas") {
+      const temporadaId = String(body.temporada_id || "").trim();
+
+      const { data: temporada, error: erroTemporada } = await auth.db
+        .from("temporadas")
+        .select("*")
+        .eq("id", temporadaId)
+        .maybeSingle();
+
+      if (erroTemporada) throw erroTemporada;
+      if (!temporada) return jsonError("Temporada não encontrada.", 404);
+      if (temporada.situacao !== "ativa" || !temporada.codigo) {
+        return jsonError("A temporada precisa estar ativa e paga para gerar carteirinhas.");
+      }
+
+      await garantirTitularParticipante(auth.db, temporada);
+
+      const { data: dependentes, error: erroDependentes } = await auth.db
+        .from("temporadas_participantes")
+        .select("*")
+        .eq("temporada_id", temporadaId)
+        .eq("papel", "dependente")
+        .order("created_at", { ascending: true });
+
+      if (erroDependentes) throw erroDependentes;
+
+      for (const participante of dependentes || []) {
+        if (!participante.matricula) {
+          const matricula = await proximaMatriculaParticipante(auth.db, temporadaId, temporada.codigo);
+          const { error } = await auth.db
+            .from("temporadas_participantes")
+            .update({ matricula })
+            .eq("id", participante.id);
+          if (error) throw error;
+        }
+      }
+
+      const { data: participantes, error: erroFinal } = await auth.db
+        .from("temporadas_participantes")
+        .select("*")
+        .eq("temporada_id", temporadaId)
+        .order("papel", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (erroFinal) throw erroFinal;
+
+      return NextResponse.json({
+        ok: true,
+        codigo: temporada.codigo,
+        validade_inicio: temporada.inicio,
+        validade_fim: temporada.fim,
+        participantes: participantes || [],
       });
     }
 
