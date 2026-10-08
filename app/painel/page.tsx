@@ -5,6 +5,7 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
 const atalhosAdmin = [
+  ["🏖️", "Temporada", "/temporadas", "Venda e controle de temporadas."],
   ["👥", "Sócios", "/socios", "Cadastre, edite e consulte associados."],
   ["💰", "Financeiro", "/financeiro", "Mensalidades, recebimentos e despesas."],
   ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
@@ -47,6 +48,7 @@ export default function PainelPage() {
   const [totalDependentes, setTotalDependentes] = useState<number | null>(null);
   const [reservasPendentes, setReservasPendentes] = useState<number | null>(null);
   const [pixPendentes, setPixPendentes] = useState<number | null>(null);
+  const [totalTemporadas, setTotalTemporadas] = useState<number | null>(null);
   const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
@@ -65,19 +67,21 @@ export default function PainelPage() {
 
         // Consultas independentes em paralelo: o painel não espera uma tela
         // terminar para começar a próxima.
-        const [sociosResponse, dependentesResponse, reservasResponse, notificacoesResponse] =
+        const [sociosResponse, dependentesResponse, reservasResponse, notificacoesResponse, temporadasResponse] =
           await Promise.all([
             fetch("/api/socios", { headers, cache: "no-store" }),
             fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
             fetch("/api/reservas?status=pendente", { headers, cache: "no-store" }),
             fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", { headers, cache: "no-store" }),
+            fetch("/api/temporadas", { headers, cache: "no-store" }),
           ]);
 
-        const [sociosJson, dependentesJson, reservasJson, notificacoesJson] = await Promise.all([
+        const [sociosJson, dependentesJson, reservasJson, notificacoesJson, temporadasJson] = await Promise.all([
           sociosResponse.json().catch(() => ({})),
           dependentesResponse.json().catch(() => ({})),
           reservasResponse.json().catch(() => ({})),
           notificacoesResponse.json().catch(() => ({})),
+          temporadasResponse.json().catch(() => ({})),
         ]);
 
         if (!ativo) return;
@@ -148,6 +152,15 @@ export default function PainelPage() {
             String(n.origem_tipo || "").toLowerCase() === "pagamento"
           );
           setPixPendentes(pendentes.length);
+        }
+
+        if (temporadasResponse.ok) {
+          const listaTemporadas = Array.isArray(temporadasJson.temporadas)
+            ? temporadasJson.temporadas
+            : Array.isArray(temporadasJson)
+              ? temporadasJson
+              : [];
+          setTotalTemporadas(listaTemporadas.length);
         }
       } catch {
         // Os cards individuais permanecem com “—” quando uma fonte falhar.
@@ -236,6 +249,14 @@ export default function PainelPage() {
               <p className="mt-1 text-3xl font-black text-[#b56a12]">{carregandoPainel ? "—" : pixPendentes ?? "—"}</p>
               <p className="mt-1 text-xs text-slate-400">Comprovantes aguardando conferência</p>
             </a>
+
+            {(master || admin) && (
+              <a href="/temporadas" className="rounded-2xl border border-[#f2dfcf] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <p className="text-sm text-slate-500">🏖️ Temporadas</p>
+                <p className="mt-1 text-3xl font-black text-[#b65308]">{carregandoPainel ? "—" : totalTemporadas ?? "—"}</p>
+                <p className="mt-1 text-xs text-slate-400">Temporadas cadastradas</p>
+              </a>
+            )}
           </div>
 
           {(master || admin) && ((sociosInativos ?? 0) > 0 || (reservasPendentes ?? 0) > 0 || (pixPendentes ?? 0) > 0) && (
