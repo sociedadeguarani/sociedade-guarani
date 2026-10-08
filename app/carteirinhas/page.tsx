@@ -22,6 +22,27 @@ type Dependente = {
   dias_atraso?: number;
 };
 
+type Temporada = {
+  id: string;
+  matricula?: string | null;
+  codigo?: string | null;
+  tipo?: string | null;
+  modalidade?: string | null;
+  inicio?: string | null;
+  fim?: string | null;
+  valor_total?: number | null;
+  situacao?: string | null;
+  responsavel_nome?: string | null;
+  responsavel_cpf?: string | null;
+  participantes?: Array<{
+    id: string;
+    matricula?: string | null;
+    nome?: string | null;
+    papel?: string | null;
+    parentesco?: string | null;
+  }>;
+};
+
 type Socio = {
   id: string;
   matricula: number | string | null;
@@ -85,6 +106,8 @@ function formatarCpf(valor: string | null | undefined) {
 export default function CarteirinhasPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
+  const [temporadas, setTemporadas] = useState<Temporada[]>([]);
+  const [temporadaSelecionada, setTemporadaSelecionada] = useState<Temporada | null>(null);
   const [busca, setBusca] = useState("");
   const [filtroStatus, setFiltroStatus] = useState<"todos" | "ativos" | "inativos" | "exame_vencido">("todos");
   const [selecionado, setSelecionado] = useState<Socio | null>(null);
@@ -101,6 +124,7 @@ export default function CarteirinhasPage() {
       const params = new URLSearchParams(window.location.search);
       const idQr = params.get("id") || "";
       const dependenteQr = params.get("dependente_id") || "";
+      const temporadaQr = params.get("temporada_id") || "";
 
       if (!session) {
         const destino = `/carteirinhas?id=${encodeURIComponent(idQr)}`;
@@ -119,12 +143,20 @@ export default function CarteirinhasPage() {
       }
 
       const listaSocios: Socio[] = d.socios || [];
+      const listaTemporadas: Temporada[] = d.temporadas || [];
       if (ativo) {
         setSocios(listaSocios);
         setDependentes(d.dependentes || []);
+        setTemporadas(listaTemporadas);
         const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
         const dependenteQrObj = dependenteQr ? (d.dependentes || []).find((dep: Dependente) => String(dep.id) === String(dependenteQr)) : null;
-        if (socioQr) {
+        const temporadaQrObj = temporadaQr ? listaTemporadas.find((t: Temporada) => String(t.id) === String(temporadaQr)) : null;
+        if (temporadaQrObj) {
+          setTemporadaSelecionada(temporadaQrObj);
+          setSelecionado(null);
+          setDependenteSelecionado(null);
+          setModoQr(true);
+        } else if (socioQr) {
           setSelecionado(socioQr);
           setDependenteSelecionado(null);
           setModoQr(true);
@@ -212,6 +244,16 @@ export default function CarteirinhasPage() {
       .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
   }, [dependentes, selecionado]);
 
+  const temporadasLista = useMemo(() => {
+    const q = buscaNormalizada;
+    return temporadas.filter((t) => {
+      if (!q) return true;
+      return normalizarBusca(t.responsavel_nome).includes(q)
+        || normalizarBusca(t.matricula).includes(q)
+        || normalizarBusca(t.codigo).includes(q);
+    });
+  }, [temporadas, buscaNormalizada]);
+
   const contadores = useMemo(() => {
     let ativos = 0;
     let inativos = 0;
@@ -240,10 +282,12 @@ export default function CarteirinhasPage() {
   const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
   const statusFinanceiroText = statusFinanceiro === "atrasado" ? "2 meses em atraso" : statusFinanceiro === "muito_atrasado" ? "3 meses ou mais em atraso" : "0–1 mês em dia";
   const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
+  const temporadaQrValue = temporadaSelecionada ? `guarani:temporada:${temporadaSelecionada.id}` : "";
+  const temporadaValidade = temporadaSelecionada?.fim || null;
   const exame = statusExame(selecionado?.exame_medico_validade);
 
   function imprimirCarteirinha() {
-    if (!selecionado) return;
+    if (!selecionado && !temporadaSelecionada) return;
     window.print();
   }
 
@@ -382,6 +426,31 @@ export default function CarteirinhasPage() {
                   </button>
                 ))}
 
+                {temporadasLista.length > 0 && (
+                  <div className="pt-4">
+                    <div className="mb-2 text-xs font-black uppercase tracking-wide text-orange-600">🏖️ Temporadas</div>
+                    <div className="space-y-2">
+                      {temporadasLista.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            setTemporadaSelecionada(t);
+                            setSelecionado(null);
+                            setDependenteSelecionado(null);
+                            setModoQr(false);
+                          }}
+                          className={`w-full rounded-xl border p-4 text-left ${temporadaSelecionada?.id === t.id ? "border-orange-500 bg-orange-50" : "hover:bg-orange-50"}`}
+                        >
+                          <b>{t.responsavel_nome || "Responsável da temporada"}</b>
+                          <div className="text-xs text-gray-500">
+                            Matrícula: {t.matricula || "—"} · {t.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {selecionado && (familiaSelecionada.length > 0 || dependentesFamiliaSelecionada.length > 0) && (
                   <div className="pt-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
@@ -425,6 +494,70 @@ export default function CarteirinhasPage() {
                 )}
               </div>
             </section>}
+
+            {temporadaSelecionada && (
+              <section className={modoQr ? "space-y-3" : "space-y-4"}>
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-orange-700 bg-white shadow-xl`}>
+                  <div className="card-top p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="card-logo h-10 w-10 rounded-lg object-contain" />
+                        <div>
+                          <div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                          <div className="card-title mt-1 text-lg font-black">CARTEIRA DE TEMPORADA</div>
+                        </div>
+                      </div>
+                      <IdCard />
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <div className="flex gap-4">
+                      <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">
+                        <div className="grid h-full place-items-center text-4xl">🏖️</div>
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="card-name text-xl font-black leading-tight">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                        <p className="card-info mt-1 text-sm text-gray-500">Matrícula <b>{temporadaSelecionada.matricula || "—"}</b></p>
+                        <p className="card-info text-sm text-gray-500">CPF <b>{formatarCpf(temporadaSelecionada.responsavel_cpf)}</b></p>
+                        <span className="card-badge mt-2 inline-block rounded-full bg-orange-600 px-3 py-1 text-xs font-black text-white">
+                          {temporadaSelecionada.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4">
+                      <div className="space-y-2 text-sm">
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-orange-700">{temporadaSelecionada.situacao || "—"}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
+                      </div>
+                      <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-2 gap-2"}`}>
+                  <button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 font-bold text-white hover:bg-orange-700"><Printer className="h-4 w-4" /> Imprimir</button>
+                  <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold"><Smartphone className="h-4 w-4" /> Carteira digital</button>
+                </div>
+
+                {modoQr && (
+                  <div className="overflow-hidden rounded-[26px] border-4 border-orange-700 bg-white shadow-2xl">
+                    <div className="p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                      <div className="flex items-center gap-3">
+                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+                        <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div></div>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <h2 className="text-xl font-black">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{temporadaSelecionada.matricula || "—"}</b></p>
+                      <p className="text-sm text-gray-500">Validade: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                      <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
+                      <div className="mt-4 rounded-xl bg-orange-50 p-3 text-center text-xs font-semibold text-orange-800">Apresente este QR Code para identificação na portaria.</div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
 
             {dependenteSelecionado && (
               <section className={modoQr ? "space-y-3" : "space-y-4"}>
@@ -522,6 +655,26 @@ export default function CarteirinhasPage() {
           </div>
         </div>
       </main>
+
+      {digitalAberta && temporadaSelecionada && !modoQr && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
+          <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
+            <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white p-2 shadow" aria-label="Fechar"><X className="h-5 w-5" /></button>
+            <div className="overflow-hidden rounded-[22px] border-4 border-orange-700 bg-white">
+              <div className="p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                <div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div>
+              </div>
+              <div className="p-6">
+                <h2 className="text-xl font-black">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{temporadaSelecionada.matricula || "—"}</b></p>
+                <p className="text-sm text-gray-500">Validade: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {digitalAberta && selecionado && !modoQr && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
