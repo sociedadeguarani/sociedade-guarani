@@ -791,4 +791,3 @@ export default function TemporadasPage() {
     </main>
   );
 }
-
