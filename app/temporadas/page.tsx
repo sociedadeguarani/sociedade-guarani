@@ -405,7 +405,7 @@ export default function TemporadasPage() {
         body: JSON.stringify({
           acao: "registrar_pagamento",
           temporada_id: temporadaPagamento.id,
-          parcela_id: abrirModalPagamento.id,
+          parcela_id: abrirPagamento.id,
           data_pagamento: pagamentoData,
           forma_pagamento: pagamentoForma,
           conta_bancaria_id: pagamentoForma === "cheque" ? null : pagamentoConta,
