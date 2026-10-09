@@ -178,6 +178,7 @@ export default function TemporadasPage() {
   const [modoCadastro, setModoCadastro] = useState<"novo" | "editar">("novo");
   const [temporadaEditando, setTemporadaEditando] = useState<Temporada | null>(null);
   const [abrirParticipantes, setAbrirParticipantes] = useState<Temporada | null>(null);
+  const [validadeExameRascunho, setValidadeExameRascunho] = useState<Record<string, string>>({});
   const [abrirCarteirinhas, setAbrirCarteirinhas] = useState<Temporada | null>(null);
   const [novoParticipanteNome, setNovoParticipanteNome] = useState("");
   const [novoParticipanteCpf, setNovoParticipanteCpf] = useState("");
@@ -321,6 +322,7 @@ export default function TemporadasPage() {
 
   function abrirParticipantesModal(t: Temporada) {
     setAbrirParticipantes(t);
+    setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p) => p.id).map((p) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
     setNovoParticipanteNome("");
     setNovoParticipanteCpf("");
     setNovoParticipanteTelefone("");
@@ -368,7 +370,10 @@ export default function TemporadasPage() {
       });
       const dados = await recarregar.json().catch(() => ({}));
       const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
-      if (t) setAbrirParticipantes(t);
+      if (t) {
+        setAbrirParticipantes(t);
+        setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p) => p.id).map((p) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
+      }
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao adicionar participante.");
     } finally {
@@ -442,11 +447,16 @@ export default function TemporadasPage() {
       });
       const resultado = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a validade do exame.");
-      const recarregar = await fetch("/api/temporadas", { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
-      const dados = await recarregar.json().catch(() => ({}));
-      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
-      if (t) setAbrirParticipantes(t);
-      setMensagem("Validade do exame médico salva.");
+
+      const validadeSalva = String(resultado?.participante?.exame_medico_validade || "").slice(0, 10);
+      setAbrirParticipantes((atual) => atual && atual.id === abrirParticipantes.id ? {
+        ...atual,
+        participantes: (atual.participantes || []).map((p) => String(p.id || "") === participanteId
+          ? { ...p, exame_medico_validade: validadeSalva || null }
+          : p),
+      } : atual);
+      setValidadeExameRascunho((atual) => ({ ...atual, [participanteId]: validadeSalva }));
+      setMensagem("Validade do exame médico salva com sucesso.");
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao salvar o exame médico.");
     } finally {
@@ -1028,9 +1038,10 @@ export default function TemporadasPage() {
                   return titular?.id ? <div className="mt-3 flex items-center gap-3">
                     <div className="h-16 w-12 overflow-hidden rounded-lg bg-orange-50">{titular.foto_url ? <img src={titular.foto_url} alt={titular.nome || "Titular"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
                     <label className="cursor-pointer rounded-lg border border-[#d5e0da] px-3 py-2 text-xs font-bold hover:bg-white">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(titular.id!, file); e.currentTarget.value = ""; }} /></label>
-                    <label className="block text-xs font-bold text-[#718078]">Validade do exame médico
-                      <input type="date" defaultValue={titular.exame_medico_validade || ""} disabled={salvando} onBlur={(e) => { if (e.target.value !== (titular.exame_medico_validade || "")) void salvarValidadeExame(titular.id!, e.target.value); }} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-2 text-sm text-[#17382c]" />
-                    </label>
+                    <div className="block text-xs font-bold text-[#718078]">Validade do exame médico
+                      <input type="date" value={validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? ""} disabled={salvando} onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [titular.id!]: e.target.value }))} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-2 text-sm text-[#17382c]" />
+                      <button type="button" disabled={salvando} onClick={() => void salvarValidadeExame(titular.id!, validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? "")} className="mt-2 rounded-lg bg-[#006044] px-3 py-2 text-xs font-black text-white disabled:opacity-50">{salvando ? "Salvando..." : "Salvar exame do titular"}</button>
+                    </div>
                   </div> : <p className="mt-2 text-xs text-[#718078]">A carteirinha do titular será criada após ativação/pagamento.</p>;
                 })()}
               </div>
@@ -1048,7 +1059,7 @@ export default function TemporadasPage() {
                           <div className="min-w-0"><p className="font-bold">{p.nome}</p><p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
                             {p.id && <div className="mt-2 flex flex-wrap items-end gap-2">
                               <label className="inline-block cursor-pointer rounded-lg border px-2 py-1 text-xs font-bold hover:bg-[#f9fbfa]">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(p.id!, file); e.currentTarget.value = ""; }} /></label>
-                              <label className="text-xs font-bold text-[#718078]">Validade do exame médico<input type="date" defaultValue={p.exame_medico_validade || ""} disabled={salvando} onBlur={(e) => { if (e.target.value !== (p.exame_medico_validade || "")) void salvarValidadeExame(p.id!, e.target.value); }} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-1.5 text-sm text-[#17382c]" /></label>
+                              <div className="text-xs font-bold text-[#718078]">Validade do exame médico<input type="date" value={validadeExameRascunho[p.id!] ?? p.exame_medico_validade ?? ""} disabled={salvando} onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [p.id!]: e.target.value }))} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-1.5 text-sm text-[#17382c]" /><button type="button" disabled={salvando} onClick={() => void salvarValidadeExame(p.id!, validadeExameRascunho[p.id!] ?? p.exame_medico_validade ?? "")} className="mt-2 rounded-lg bg-[#006044] px-3 py-2 text-xs font-black text-white disabled:opacity-50">{salvando ? "Salvando..." : "Salvar exame"}</button></div>
                             </div>}
                           </div>
                         </div>
