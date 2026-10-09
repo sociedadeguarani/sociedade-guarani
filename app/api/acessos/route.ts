@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     // primeiro e os dados de sócio/dependente/usuário depois, separadamente.
     let query = supabase
       .from("acessos_sociedade")
-      .select("id,socio_id,dependente_id,temporada_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por")
+      .select("id,socio_id,dependente_id,temporada_id,temporada_participante_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao,registrado_por")
       .order("data_hora_entrada", { ascending: false })
       .limit(1000);
     if (de) query = query.gte("data_hora_entrada", `${de}T00:00:00`);
@@ -44,9 +44,10 @@ export async function GET(request: Request) {
     const socioIds = [...new Set(lista.map((a) => a.socio_id).filter(Boolean))];
     const dependenteIds = [...new Set(lista.map((a) => a.dependente_id).filter(Boolean))];
     const usuarioIds = [...new Set(lista.map((a) => a.registrado_por).filter(Boolean))];
-    const temporadaIds = [...new Set(lista.map((a: any) => a.temporada_id).filter(Boolean))];
+    const temporadaIds = [...new Set(lista.map((a) => a.temporada_id).filter(Boolean))];
+    const temporadaParticipanteIds = [...new Set(lista.map((a) => a.temporada_participante_id).filter(Boolean))];
 
-    const [sociosResult, dependentesResult, usuariosResult, temporadasResult] = await Promise.all([
+    const [sociosResult, dependentesResult, usuariosResult, temporadasResult, temporadaParticipantesResult] = await Promise.all([
       socioIds.length
         ? supabase.from("socios").select("id,nome,matricula,foto_url").in("id", socioIds)
         : Promise.resolve({ data: [] as any[], error: null }),
@@ -57,26 +58,34 @@ export async function GET(request: Request) {
         ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds)
         : Promise.resolve({ data: [] as any[], error: null }),
       temporadaIds.length
-        ? supabase.from("temporadas").select("id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome").in("id", temporadaIds)
+        ? supabase
+            .from("temporadas")
+            .select("id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome")
+            .in("id", temporadaIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      temporadaParticipanteIds.length
+        ? supabase.from("temporadas_participantes").select("id,nome,matricula,foto_url,papel,parentesco").in("id", temporadaParticipanteIds)
         : Promise.resolve({ data: [] as any[], error: null }),
     ]);
     if (sociosResult.error) throw sociosResult.error;
     if (dependentesResult.error) throw dependentesResult.error;
     if (usuariosResult.error) throw usuariosResult.error;
     if (temporadasResult.error) throw temporadasResult.error;
+    if (temporadaParticipantesResult.error) throw temporadaParticipantesResult.error;
 
     const mapaSocios = new Map((sociosResult.data || []).map((s: any) => [s.id, s]));
     const mapaDependentes = new Map((dependentesResult.data || []).map((d: any) => [d.id, d]));
     const mapaUsuarios = new Map((usuariosResult.data || []).map((u: any) => [u.id, u]));
     const mapaTemporadas = new Map((temporadasResult.data || []).map((t: any) => [t.id, t]));
+    const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: any) => [p.id, p]));
 
     const resultado = lista.map((a) => ({
       ...a,
       socio: a.socio_id ? mapaSocios.get(a.socio_id) || null : null,
       dependente: a.dependente_id ? mapaDependentes.get(a.dependente_id) || null : null,
-      temporada_id: (a as any).temporada_id || null,
-      temporada: (a as any).temporada_id ? mapaTemporadas.get((a as any).temporada_id) || null : null,
       usuario: a.registrado_por ? mapaUsuarios.get(a.registrado_por) || null : null,
+      temporada: a.temporada_id ? mapaTemporadas.get(a.temporada_id) || null : null,
+      temporada_participante: a.temporada_participante_id ? mapaTemporadaParticipantes.get(a.temporada_participante_id) || null : null,
     }));
 
     return NextResponse.json({ acessos: resultado });
@@ -147,6 +156,65 @@ async function avisarAdministradoresInadimplencia(
   }
 }
 
+type TemporadaAcesso = {
+  id: string;
+  codigo: string | null;
+  matricula: string | null;
+  tipo: string;
+  modalidade: string;
+  inicio: string;
+  fim: string;
+  situacao: string;
+  responsavel_nome: string | null;
+  responsavel_cpf: string | null;
+  responsavel_telefone: string | null;
+};
+
+function dataHojeBrasil() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+}
+
+function temporadaEstaValida(temporada: TemporadaAcesso) {
+  const hoje = dataHojeBrasil();
+  const situacao = String(temporada.situacao || "").toLowerCase();
+  if (situacao !== "ativa") return false;
+  if (temporada.inicio && temporada.inicio > hoje) return false;
+  if (temporada.fim && temporada.fim < hoje) return false;
+  return true;
+}
+
+async function verificarParcelasTemporadaAtrasadas(
+  supabase: ReturnType<typeof getServiceClient>,
+  temporadaId: string
+) {
+  const hoje = dataHojeBrasil();
+  const { data, error } = await supabase
+    .from("temporadas_parcelas")
+    .select("id,numero,descricao,valor,data_vencimento,situacao")
+    .eq("temporada_id", temporadaId)
+    .lt("data_vencimento", hoje)
+    .order("data_vencimento", { ascending: true });
+
+  if (error) throw error;
+
+  const pendentes = (data || []).filter((p: any) =>
+    !["pago", "paid", "quitado", "recebido", "cancelado", "cancelada", "isento", "isenta"].includes(
+      String(p.situacao || "").toLowerCase()
+    )
+  );
+
+  return {
+    atrasado: pendentes.length > 0,
+    quantidade: pendentes.length,
+    valorTotal: pendentes.reduce((total: number, p: any) => total + Number(p.valor || 0), 0),
+    parcelas: pendentes,
+  };
+}
+
+function matriculaTemporadaNormalizada(valor: unknown) {
+  return String(valor || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 export async function POST(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
@@ -157,65 +225,253 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const qr = String(body?.qr || "").trim();
     const socioId = String(body?.socio_id || "").trim();
-    const matricula = String(body?.matricula || "").trim().toUpperCase();
+    const matricula = matriculaTemporadaNormalizada(body?.matricula);
     let dependenteId = String(body?.dependente_id || "").trim();
-    const temporadaIdInformada = String(body?.temporada_id || "").trim();
     const supabase = getServiceClient();
 
     let id = socioId;
-    let temporadaId = temporadaIdInformada || null;
-    let temporadaParticipante: any = null;
-    if (!id && qr.startsWith("guarani:socio:")) id = qr.replace("guarani:socio:", "");
-    if (!dependenteId && qr.startsWith("guarani:dependente:")) dependenteId = qr.replace("guarani:dependente:", "");
-    if (!temporadaId && qr.startsWith("guarani:temporada:")) temporadaId = qr.replace("guarani:temporada:", "");
-    if (!temporadaId && qr.startsWith("guarani:temporada-participante:")) {
-      const participanteId = qr.replace("guarani:temporada-participante:", "");
-      const { data: participanteQr, error: participanteQrError } = await supabase
-        .from("temporadas_participantes")
-        .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
-        .eq("id", participanteId)
-        .maybeSingle();
-      if (participanteQrError) throw participanteQrError;
-      if (!participanteQr) return NextResponse.json({ error: "Participante da temporada não encontrado." }, { status: 404 });
-      temporadaId = String(participanteQr.temporada_id);
-      temporadaParticipante = participanteQr;
+    let temporadaId = "";
+    let temporadaParticipanteId = "";
+
+    if (!id && qr.startsWith("guarani:socio:")) {
+      id = qr.replace("guarani:socio:", "");
     }
 
-    if (!id && !dependenteId && !temporadaId && matricula) {
-      if (/^TE\d{4,8}[A-Z]$/.test(matricula)) {
-        etapa = "buscando temporada pela matrícula";
-        const { data: participantePorMatricula, error: participanteMatriculaError } = await supabase
-          .from("temporadas_participantes")
-          .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
+    if (!dependenteId && qr.startsWith("guarani:dependente:")) {
+      dependenteId = qr.replace("guarani:dependente:", "");
+    }
+
+    if (!temporadaId && qr.startsWith("guarani:temporada:")) {
+      temporadaId = qr.replace("guarani:temporada:", "");
+    }
+
+    if (!temporadaParticipanteId && qr.startsWith("guarani:temporada-participante:")) {
+      temporadaParticipanteId = qr.replace("guarani:temporada-participante:", "");
+    }
+
+    // QR antigo/novo pode apontar diretamente para a matrícula da temporada.
+    // Isso permite que a carteirinha TE funcione sem transformar o responsável
+    // em sócio no cadastro principal.
+    if (!temporadaId && !temporadaParticipanteId && !id && !dependenteId && matricula.startsWith("TE")) {
+      etapa = "buscando temporada pela matrícula";
+
+      const { data: temporadaPorMatricula, error: temporadaMatriculaError } =
+        await supabase
+          .from("temporadas")
+          .select("id")
           .eq("matricula", matricula)
           .maybeSingle();
+
+      if (temporadaMatriculaError) throw temporadaMatriculaError;
+
+      if (temporadaPorMatricula) {
+        temporadaId = String(temporadaPorMatricula.id);
+      } else {
+        const { data: participantePorMatricula, error: participanteMatriculaError } =
+          await supabase
+            .from("temporadas_participantes")
+            .select("id,temporada_id")
+            .eq("matricula", matricula)
+            .maybeSingle();
 
         if (participanteMatriculaError) throw participanteMatriculaError;
 
         if (participantePorMatricula) {
+          temporadaParticipanteId = String(participantePorMatricula.id);
           temporadaId = String(participantePorMatricula.temporada_id);
-          temporadaParticipante = participantePorMatricula;
-        } else {
-          const { data: temporadaPorMatricula, error: temporadaMatriculaError } = await supabase
-            .from("temporadas")
-            .select("id")
-            .eq("matricula", matricula)
-            .maybeSingle();
-
-          if (temporadaMatriculaError) throw temporadaMatriculaError;
-          if (!temporadaPorMatricula) {
-            return NextResponse.json({ error: `Nenhuma temporada encontrada com a matrícula ${matricula}.` }, { status: 404 });
-          }
-          temporadaId = String(temporadaPorMatricula.id);
         }
-      } else {
-        etapa = "buscando sócio pela matrícula";
-        const { data: socioPorMatricula, error: matriculaError } = await supabase
-          .from("socios").select("id").eq("matricula", matricula).maybeSingle();
-        if (matriculaError) throw matriculaError;
-        if (!socioPorMatricula) return NextResponse.json({ error: `Nenhum associado encontrado com a matrícula ${matricula}.` }, { status: 404 });
-        id = socioPorMatricula.id;
       }
+    }
+
+    // QR de participante de temporada.
+    if (temporadaParticipanteId && !temporadaId) {
+      const { data: participante, error: participanteError } = await supabase
+        .from("temporadas_participantes")
+        .select("id,temporada_id")
+        .eq("id", temporadaParticipanteId)
+        .maybeSingle();
+
+      if (participanteError) throw participanteError;
+      if (!participante) {
+        return NextResponse.json(
+          { error: "Participante da temporada não encontrado." },
+          { status: 404 }
+        );
+      }
+
+      temporadaId = String(participante.temporada_id);
+    }
+
+    // Se for uma temporada, ela é validada antes do fluxo normal de sócios.
+    if (temporadaId) {
+      etapa = "buscando temporada";
+
+      const { data: temporada, error: temporadaError } = await supabase
+        .from("temporadas")
+        .select(
+          "id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome,responsavel_cpf,responsavel_telefone"
+        )
+        .eq("id", temporadaId)
+        .maybeSingle();
+
+      if (temporadaError) throw temporadaError;
+
+      if (!temporada) {
+        return NextResponse.json(
+          { error: "Temporada não encontrada." },
+          { status: 404 }
+        );
+      }
+
+      const temporadaNormalizada: TemporadaAcesso = {
+        id: String(temporada.id),
+        codigo: temporada.codigo || null,
+        matricula: temporada.matricula || null,
+        tipo: temporada.tipo,
+        modalidade: temporada.modalidade,
+        inicio: String(temporada.inicio || "").slice(0, 10),
+        fim: String(temporada.fim || "").slice(0, 10),
+        situacao: temporada.situacao || "pendente",
+        responsavel_nome: temporada.responsavel_nome || null,
+        responsavel_cpf: temporada.responsavel_cpf || null,
+        responsavel_telefone: temporada.responsavel_telefone || null,
+      };
+
+      // Descobre o participante. Se não existir participante cadastrado,
+      // usamos o responsável da própria temporada como titular TE0001A.
+      let participante: any = null;
+
+      if (temporadaParticipanteId) {
+        const { data, error } = await supabase
+          .from("temporadas_participantes")
+          .select(
+            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url"
+          )
+          .eq("id", temporadaParticipanteId)
+          .maybeSingle();
+
+        if (error) throw error;
+        participante = data || null;
+      }
+
+      if (!participante && matricula) {
+        const { data, error } = await supabase
+          .from("temporadas_participantes")
+          .select(
+            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url"
+          )
+          .eq("temporada_id", temporadaId)
+          .eq("matricula", matricula)
+          .maybeSingle();
+
+        if (error) throw error;
+        participante = data || null;
+      }
+
+      const matriculaResponsavel =
+        temporadaNormalizada.matricula ||
+        `${temporadaNormalizada.codigo || "TE0001"}A`;
+
+      if (!participante) {
+        participante = {
+          id: `temporada:${temporadaId}`,
+          temporada_id: temporadaId,
+          papel: "titular",
+          matricula: matriculaResponsavel,
+          nome: temporadaNormalizada.responsavel_nome || "Responsável da temporada",
+          cpf: temporadaNormalizada.responsavel_cpf || null,
+          telefone: temporadaNormalizada.responsavel_telefone || null,
+          parentesco: null,
+          foto_url: null,
+        };
+      }
+
+      const parcelasAtrasadas = await verificarParcelasTemporadaAtrasadas(supabase, temporadaId);
+      const temporadaValida = temporadaEstaValida(temporadaNormalizada);
+      const autorizado = temporadaValida && !parcelasAtrasadas.atrasado;
+      const motivoNegacao = !temporadaValida
+        ? `Temporada não está ativa ou está fora da validade (${temporadaNormalizada.inicio || "?"} a ${temporadaNormalizada.fim || "?"}).`
+        : parcelasAtrasadas.atrasado
+          ? `Acesso bloqueado: ${parcelasAtrasadas.quantidade} parcela(s) vencida(s) e não paga(s), total de ${parcelasAtrasadas.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
+          : null;
+
+      etapa = "registrando acesso de temporada";
+
+      // O acesso de temporada usa a nova coluna temporada_id. A coluna
+      // socio_id permanece nula, pois temporada não cria sócio.
+      const { data: acesso, error: acessoError } = await supabase
+        .from("acessos_sociedade")
+        .insert({
+          socio_id: null,
+          dependente_id: null,
+          temporada_id: temporadaId,
+          temporada_participante_id: participante?.id && !String(participante.id).startsWith("temporada:") ? participante.id : null,
+          registrado_por: auth.usuario.id,
+          autorizado,
+          motivo_negacao: motivoNegacao,
+        })
+        .select(
+          "id,socio_id,dependente_id,temporada_id,temporada_participante_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao"
+        )
+        .single();
+
+      if (acessoError) throw acessoError;
+
+      return NextResponse.json({
+        acesso,
+        temporada: temporadaNormalizada,
+        participante,
+        socio: {
+          id: temporadaNormalizada.id,
+          matricula: participante.matricula || matriculaResponsavel,
+          nome: participante.nome,
+          situacao: autorizado ? "ativa" : temporadaNormalizada.situacao,
+          categoria: "Temporada",
+          foto_url: participante.foto_url || null,
+        },
+        dependente: null,
+        liberado: autorizado,
+        status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado ? "bloqueada" : "inativa",
+        parcelas_atrasadas: parcelasAtrasadas,
+        exame: {
+          status: {
+            texto: "Não se aplica à temporada",
+            cor: "cinza",
+          },
+          validade: temporadaNormalizada.fim || null,
+          verificado: false,
+        },
+        mensalidade: {
+          texto: parcelasAtrasadas.atrasado
+            ? `BLOQUEADA — ${parcelasAtrasadas.quantidade} parcela(s) vencida(s)`
+            : "Temporada — parcelas sem atraso",
+          cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde",
+        },
+        inadimplencia: {
+          atrasado: parcelasAtrasadas.atrasado,
+          criticoTresMesesOuMais: parcelasAtrasadas.quantidade >= 3,
+          quantidade: parcelasAtrasadas.quantidade,
+          valorTotal: parcelasAtrasadas.valorTotal,
+          status: { texto: parcelasAtrasadas.atrasado ? "Bloqueada por atraso" : "Em dia", cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde" },
+        },
+      });
+    }
+
+    if (!id && !dependenteId && matricula) {
+      etapa = "buscando sócio pela matrícula";
+      const { data: socioPorMatricula, error: matriculaError } = await supabase
+        .from("socios")
+        .select("id")
+        .eq("matricula", matricula)
+        .maybeSingle();
+      if (matriculaError) throw matriculaError;
+      if (!socioPorMatricula) {
+        return NextResponse.json(
+          { error: `Nenhum associado encontrado com a matrícula ${matricula}.` },
+          { status: 404 }
+        );
+      }
+      id = socioPorMatricula.id;
     }
 
     let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; ativo: boolean | null } | null = null;
@@ -228,71 +484,6 @@ export async function POST(request: Request) {
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
       id = String(dep.socio_id);
-    }
-
-    if (temporadaId) {
-      etapa = "validando temporada";
-
-      const { data: temporada, error: temporadaError } = await supabase
-        .from("temporadas")
-        .select("id,tipo,modalidade,codigo,matricula,inicio,fim,situacao,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email")
-        .eq("id", temporadaId)
-        .maybeSingle();
-
-      if (temporadaError) throw temporadaError;
-      if (!temporada) return NextResponse.json({ error: "Temporada não encontrada." }, { status: 404 });
-
-      if (!temporadaParticipante && matricula) {
-        const { data: participante, error: participanteError } = await supabase
-          .from("temporadas_participantes")
-          .select("id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco")
-          .eq("temporada_id", temporada.id)
-          .eq("matricula", matricula)
-          .maybeSingle();
-        if (participanteError) throw participanteError;
-        temporadaParticipante = participante || null;
-      }
-
-      const hoje = new Date().toISOString().slice(0, 10);
-      const inicio = String(temporada.inicio || "").slice(0, 10);
-      const fim = String(temporada.fim || "").slice(0, 10);
-      const situacao = String(temporada.situacao || "").toLowerCase();
-      const dentroPeriodo = (!inicio || hoje >= inicio) && (!fim || hoje <= fim);
-      const autorizado = situacao === "ativa" && dentroPeriodo;
-
-      let motivoNegacao: string | null = null;
-      if (situacao !== "ativa") motivoNegacao = `Temporada não está ativa (situação: ${temporada.situacao || "não informada"}).`;
-      else if (!dentroPeriodo) motivoNegacao = `Temporada fora da validade (${inicio || "?"} a ${fim || "?"}).`;
-
-      const { data: acesso, error: acessoError } = await supabase
-        .from("acessos_sociedade")
-        .insert({
-          socio_id: null,
-          dependente_id: null,
-          temporada_id: temporada.id,
-          registrado_por: auth.usuario.id,
-          autorizado,
-          motivo_negacao: motivoNegacao,
-        })
-        .select("id,socio_id,dependente_id,temporada_id,data_hora_entrada,autorizado,motivo_negacao")
-        .single();
-
-      if (acessoError) throw acessoError;
-
-      return NextResponse.json({
-        acesso,
-        temporada,
-        participante: temporadaParticipante,
-        socio: null,
-        dependente: null,
-        liberado: autorizado,
-        exame: { status: { texto: "Controle de exame médico ainda não configurado", cor: "cinza" }, validade: null, verificado: false },
-        mensalidade: { texto: "Não se aplica — temporada não possui mensalidade.", cor: "cinza" },
-        inadimplencia: {
-          atrasado: false, criticoTresMesesOuMais: false, quantidade: 0, valorTotal: 0,
-          status: { texto: "Não se aplica", cor: "cinza" },
-        },
-      });
     }
 
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
