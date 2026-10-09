@@ -9,12 +9,13 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
   temporada?: { inicio?: string | null; fim?: string | null; situacao?: string | null } | null;
-  participante?: { nome?: string | null; exame_medico_validade?: string | null } | null;
   status_temporada?: string | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
   mensalidade?: { texto: string; cor: string } | null;
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
+  acesso_agua_liberado?: boolean;
+  motivo_restricao_agua?: string | null;
   inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
 };
 
@@ -174,7 +175,7 @@ export default function AcessosPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
-                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
+                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? (resultado.temporada ? "ENTRADA NO PARQUE LIBERADA" : "ENTRADA LIBERADA") : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
@@ -194,6 +195,18 @@ export default function AcessosPage() {
                 </div>
               )}
 
+              {resultado.temporada && resultado.acesso_agua_liberado === false && (
+                <div role="alert" className="mt-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm font-bold text-red-900">
+                  <span className="block uppercase tracking-wide">Restrição de acesso à água/piscina</span>
+                  <span className="mt-1 block">{resultado.motivo_restricao_agua || "Exame médico não está válido. Não permitir entrada na água/piscina; a entrada no parque permanece liberada se a temporada e os pagamentos estiverem regulares."}</span>
+                </div>
+              )}
+              {resultado.temporada && resultado.acesso_agua_liberado === true && (
+                <div className="mt-3 rounded-xl border border-green-300 bg-green-50 p-4 text-sm font-bold text-green-900">
+                  Exame médico em dia: acesso à água/piscina liberado.
+                </div>
+              )}
+
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-white p-4">
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">Mensalidade</p>
@@ -207,8 +220,8 @@ export default function AcessosPage() {
                 </div>
                 <div className="rounded-xl bg-white p-4">
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">Exame médico</p>
-                  <p className={`mt-1 font-black ${resultado.exame?.status?.cor === "vermelho" ? "text-red-700" : resultado.exame?.status?.cor === "verde" ? "text-green-700" : "text-gray-700"}`}>{resultado.exame?.status?.texto || "Não informado"}</p>
-                  <p className="mt-1 text-sm">Validade: {resultado.exame?.validade ? new Date(`${resultado.exame.validade.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "Não cadastrada"}</p>
+                  <p className="mt-1 font-black">{resultado.exame?.status?.texto || "Não informado"}</p>
+                  <p className="mt-1 text-sm text-gray-600">Validade: {resultado.exame?.validade ? String(resultado.exame.validade).slice(0, 10).split("-").reverse().join("/") : "Não cadastrada"}</p>
                 </div>
               </div>
             </section>
