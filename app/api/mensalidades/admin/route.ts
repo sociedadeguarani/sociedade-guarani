@@ -966,9 +966,20 @@ export async function POST(request: Request) {
       );
 
       // Não permite marcar como pago sem uma conta de destino definida.
+      const contaRecebimentoSelecionada = String(body.conta_recebimento_id || "").trim();
+      if (
+        contaRecebimentoSelecionada &&
+        !mapaContas.has(contaRecebimentoSelecionada)
+      ) {
+        return NextResponse.json(
+          { error: "A conta de recebimento selecionada não existe ou está inativa. Atualize a lista de contas e tente novamente." },
+          { status: 400 }
+        );
+      }
+
       const semConta = registrosParaBaixar.filter((r: any) => {
         const socio = mapaSociosBaixa.get(String(r.socio_id));
-        return !r.conta_pagadora_id && !socio?.conta_bancaria_id;
+        return !contaRecebimentoSelecionada && !r.conta_pagadora_id && !socio?.conta_bancaria_id;
       });
 
       if (semConta.length > 0) {
@@ -1013,6 +1024,22 @@ export async function POST(request: Request) {
             error: `Já existe entrada financeira para: ${nomes}. A baixa foi interrompida para evitar duplicidade.`,
           },
           { status: 409 }
+        );
+      }
+
+      // Validar todo o lote antes de alterar qualquer registro evita uma
+      // baixa parcial quando uma das mensalidades está com valor inválido.
+      const mensalidadeComValorInvalido = registrosParaBaixar.find((registro: any) => {
+        const valor = Number(registro.valor_base ?? registro.valor ?? 0);
+        return !Number.isFinite(valor) || valor <= 0;
+      });
+
+      if (mensalidadeComValorInvalido) {
+        return NextResponse.json(
+          {
+            error: `A mensalidade ${String(mensalidadeComValorInvalido.competencia || "").slice(0, 7)} está com valor zerado ou inválido. Corrija o valor antes de registrar o pagamento. Nenhuma mensalidade deste lote foi baixada.`,
+          },
+          { status: 400 }
         );
       }
 
@@ -1117,6 +1144,25 @@ export async function POST(request: Request) {
             observacoes: observacoesPagamento,
           });
 
+        if (erroEntrada) {
+          // Se a entrada falhar, desfaz a marcação como paga para não
+          // deixar a mensalidade quitada sem correspondente financeiro.
+          await db
+            .from("mensalidades")
+            .update({
+              situacao: registro.situacao,
+              data_pagamento: null,
+              tipo_pagamento: registro.tipo_pagamento || null,
+              comprovante_url: registro.comprovante_url || null,
+              observacoes: registro.observacoes || null,
+              tarifa_pagamento: null,
+              total_cobrado: null,
+            })
+            .eq("id", registro.id);
+
+          throw erroEntrada;
+        }
+
         // A tarifa paga pelo associado é registrada separadamente
         // como DESPESA bancária da Sociedade.
         if (calculado.tarifa_pagamento > 0) {
@@ -1167,22 +1213,6 @@ export async function POST(request: Request) {
           }
         }
 
-        if (erroEntrada) {
-          // Se a entrada falhar, desfaz a marcação como paga para não
-          // deixar a mensalidade quitada sem correspondente financeiro.
-          await db
-            .from("mensalidades")
-            .update({
-              situacao: registro.situacao,
-              data_pagamento: null,
-              tipo_pagamento: registro.tipo_pagamento || null,
-              comprovante_url: registro.comprovante_url || null,
-              observacoes: registro.observacoes || null,
-            })
-            .eq("id", registro.id);
-
-          throw erroEntrada;
-        }
       }
 
       return NextResponse.json({
