@@ -372,7 +372,7 @@ export default function TemporadasPage() {
       const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
       if (t) {
         setAbrirParticipantes(t);
-        setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p) => p.id).map((p) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
+        setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p: Temporada["participantes"][number]) => p.id).map((p: Temporada["participantes"][number]) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
       }
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao adicionar participante.");
