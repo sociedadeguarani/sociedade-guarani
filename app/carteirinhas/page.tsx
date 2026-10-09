@@ -34,12 +34,21 @@ type Temporada = {
   situacao?: string | null;
   responsavel_nome?: string | null;
   responsavel_cpf?: string | null;
+  status_carteirinha?: "ativa" | "bloqueada" | "inativa" | string;
+  status_carteirinha_texto?: string;
+  parcelas_atrasadas?: number;
+  valor_parcelas_atrasadas?: number;
   participantes?: Array<{
     id: string;
+    temporada_id?: string;
     matricula?: string | null;
     nome?: string | null;
+    cpf?: string | null;
+    foto_url?: string | null;
     papel?: string | null;
     parentesco?: string | null;
+    status_carteirinha?: "ativa" | "bloqueada" | "inativa" | string;
+    status_carteirinha_texto?: string;
   }>;
 };
 
@@ -75,7 +84,8 @@ function visual(tipo: string | null) {
 
 function formatarData(valor: string | null) {
   if (!valor) return "—";
-  const data = new Date(valor);
+  const texto = String(valor).slice(0, 10);
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(texto) ? new Date(`${texto}T12:00:00`) : new Date(valor);
   if (Number.isNaN(data.getTime())) return valor;
   return data.toLocaleDateString("pt-BR");
 }
@@ -108,6 +118,7 @@ export default function CarteirinhasPage() {
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [temporadas, setTemporadas] = useState<Temporada[]>([]);
   const [temporadaSelecionada, setTemporadaSelecionada] = useState<Temporada | null>(null);
+  const [participanteTemporadaSelecionado, setParticipanteTemporadaSelecionado] = useState<NonNullable<Temporada["participantes"]>[number] | null>(null);
   const [busca, setBusca] = useState("");
   const [filtroStatus, setFiltroStatus] = useState<"todos" | "ativos" | "inativos" | "exame_vencido">("todos");
   const [selecionado, setSelecionado] = useState<Socio | null>(null);
@@ -153,6 +164,7 @@ export default function CarteirinhasPage() {
         const temporadaQrObj = temporadaQr ? listaTemporadas.find((t: Temporada) => String(t.id) === String(temporadaQr)) : null;
         if (temporadaQrObj) {
           setTemporadaSelecionada(temporadaQrObj);
+          setParticipanteTemporadaSelecionado(temporadaQrObj.participantes?.find((p) => p.papel === "titular") || temporadaQrObj.participantes?.[0] || null);
           setSelecionado(null);
           setDependenteSelecionado(null);
           setModoQr(true);
@@ -250,7 +262,8 @@ export default function CarteirinhasPage() {
       if (!q) return true;
       return normalizarBusca(t.responsavel_nome).includes(q)
         || normalizarBusca(t.matricula).includes(q)
-        || normalizarBusca(t.codigo).includes(q);
+        || normalizarBusca(t.codigo).includes(q)
+        || (t.participantes || []).some((p) => normalizarBusca(p.nome).includes(q) || normalizarBusca(p.matricula).includes(q));
     });
   }, [temporadas, buscaNormalizada]);
 
@@ -282,12 +295,20 @@ export default function CarteirinhasPage() {
   const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
   const statusFinanceiroText = statusFinanceiro === "atrasado" ? "2 meses em atraso" : statusFinanceiro === "muito_atrasado" ? "3 meses ou mais em atraso" : "0–1 mês em dia";
   const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
-  const temporadaQrValue = temporadaSelecionada ? `guarani:temporada:${temporadaSelecionada.id}` : "";
+  const participanteTemporadaAtual = participanteTemporadaSelecionado || temporadaSelecionada?.participantes?.find((p) => p.papel === "titular") || temporadaSelecionada?.participantes?.[0] || null;
+  const temporadaQrValue = temporadaSelecionada
+    ? participanteTemporadaAtual?.id
+      ? `guarani:temporada-participante:${participanteTemporadaAtual.id}`
+      : `guarani:temporada:${temporadaSelecionada.id}`
+    : "";
   const temporadaValidade = temporadaSelecionada?.fim || null;
+  const statusTemporadaTexto = participanteTemporadaAtual?.status_carteirinha_texto || temporadaSelecionada?.status_carteirinha_texto || (temporadaSelecionada?.situacao || "Situação não informada");
+  const statusTemporadaAtiva = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "ativa";
+  const statusTemporadaBloqueada = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "bloqueada";
   const exame = statusExame(selecionado?.exame_medico_validade);
 
   function imprimirCarteirinha() {
-    if (!selecionado && !temporadaSelecionada) return;
+    if (!selecionado && !temporadaSelecionada && !dependenteSelecionado) return;
     window.print();
   }
 
@@ -431,21 +452,34 @@ export default function CarteirinhasPage() {
                     <div className="mb-2 text-xs font-black uppercase tracking-wide text-orange-600">🏖️ Temporadas</div>
                     <div className="space-y-2">
                       {temporadasLista.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => {
-                            setTemporadaSelecionada(t);
-                            setSelecionado(null);
-                            setDependenteSelecionado(null);
-                            setModoQr(false);
-                          }}
-                          className={`w-full rounded-xl border p-4 text-left ${temporadaSelecionada?.id === t.id ? "border-orange-500 bg-orange-50" : "hover:bg-orange-50"}`}
-                        >
-                          <b>{t.responsavel_nome || "Responsável da temporada"}</b>
-                          <div className="text-xs text-gray-500">
-                            Matrícula: {t.matricula || "—"} · {t.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}
-                          </div>
-                        </button>
+                        <div key={t.id} className={`rounded-xl border p-3 ${temporadaSelecionada?.id === t.id ? "border-orange-500 bg-orange-50" : ""}`}>
+                          <button
+                            onClick={() => {
+                              setTemporadaSelecionada(t);
+                              setParticipanteTemporadaSelecionado(t.participantes?.find((p) => p.papel === "titular") || t.participantes?.[0] || null);
+                              setSelecionado(null);
+                              setDependenteSelecionado(null);
+                              setModoQr(false);
+                            }}
+                            className="w-full text-left"
+                          >
+                            <b>{t.responsavel_nome || "Responsável da temporada"}</b>
+                            <div className="text-xs text-gray-500">Matrícula: {t.matricula || "—"} · {t.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}</div>
+                            <div className={`mt-1 text-xs font-black ${t.status_carteirinha === "bloqueada" ? "text-red-700" : t.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{t.status_carteirinha_texto || t.situacao || "Situação não informada"}</div>
+                          </button>
+                          {temporadaSelecionada?.id === t.id && (t.participantes || []).length > 0 && (
+                            <div className="mt-3 space-y-2 border-t border-orange-200 pt-3">
+                              <div className="text-[10px] font-black uppercase tracking-wide text-orange-800">Carteirinhas individuais</div>
+                              {t.participantes!.map((p) => (
+                                <button key={p.id} onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className={`flex w-full items-center gap-3 rounded-lg border bg-white p-2 text-left ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "hover:border-orange-300"}`}>
+                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
+                                  <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : p.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : p.status_carteirinha === "ativa" ? "ATIVA" : "INATIVA"}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -513,12 +547,12 @@ export default function CarteirinhasPage() {
                   <div className="p-6">
                     <div className="flex gap-4">
                       <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">
-                        <div className="grid h-full place-items-center text-4xl">🏖️</div>
+                        {participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div>
                       <div className="min-w-0">
-                        <h2 className="card-name text-xl font-black leading-tight">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
-                        <p className="card-info mt-1 text-sm text-gray-500">Matrícula <b>{temporadaSelecionada.matricula || "—"}</b></p>
-                        <p className="card-info text-sm text-gray-500">CPF <b>{formatarCpf(temporadaSelecionada.responsavel_cpf)}</b></p>
+                        <h2 className="card-name text-xl font-black leading-tight">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                        <p className="card-info mt-1 text-sm text-gray-500">Matrícula <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p>
+                        <p className="card-info text-sm text-gray-500">CPF <b>{formatarCpf(participanteTemporadaAtual?.cpf || temporadaSelecionada.responsavel_cpf)}</b></p>
                         <span className="card-badge mt-2 inline-block rounded-full bg-orange-600 px-3 py-1 text-xs font-black text-white">
                           {temporadaSelecionada.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}
                         </span>
@@ -526,7 +560,7 @@ export default function CarteirinhasPage() {
                     </div>
                     <div className="card-bottom mt-6 flex items-end justify-between gap-4">
                       <div className="space-y-2 text-sm">
-                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-orange-700">{temporadaSelecionada.situacao || "—"}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className={`font-black ${statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}`}>{statusTemporadaTexto}</div></div>
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
                       </div>
                       <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
@@ -666,8 +700,8 @@ export default function CarteirinhasPage() {
                 <div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div>
               </div>
               <div className="p-6">
-                <h2 className="text-xl font-black">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
-                <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{temporadaSelecionada.matricula || "—"}</b></p>
+                <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
+                <p className="mt-3 text-sm text-gray-500">Situação: <b className={statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}>{statusTemporadaTexto}</b></p>
                 <p className="text-sm text-gray-500">Validade: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
                 <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
               </div>
