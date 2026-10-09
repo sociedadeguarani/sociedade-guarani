@@ -8,14 +8,12 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
-  temporada?: { inicio?: string | null; fim?: string | null; situacao?: string | null } | null;
-  status_temporada?: string | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
   mensalidade?: { texto: string; cor: string } | null;
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
-  acesso_agua_liberado?: boolean;
-  motivo_restricao_agua?: string | null;
+  uso_agua?: { permitido: boolean; texto: string; validade?: string | null; observacao?: string } | null;
+  motivo_bloqueio?: string | null;
   inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
 };
 
@@ -175,35 +173,21 @@ export default function AcessosPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
-                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? (resultado.temporada ? "ENTRADA NO PARQUE LIBERADA" : "ENTRADA LIBERADA") : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
+                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
-
-              {!resultado.liberado && resultado.acesso?.motivo_negacao && (
-                <div role="alert" className="mt-3 rounded-xl border border-red-300 bg-red-100 p-4 text-sm font-bold text-red-900">
-                  <span className="block uppercase tracking-wide">Motivo do bloqueio</span>
-                  <span className="mt-1 block">{resultado.acesso.motivo_negacao}</span>
+              {!resultado.liberado && (resultado.motivo_bloqueio || resultado.acesso?.motivo_negacao) && (
+                <div className="mt-3 rounded-xl border border-red-300 bg-red-100 p-4 text-sm font-bold text-red-900">
+                  Motivo do bloqueio da entrada: {resultado.motivo_bloqueio || resultado.acesso?.motivo_negacao}
                 </div>
               )}
-
-              {resultado.temporada && (
-                <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm font-semibold text-orange-950">
-                  <p className="font-black">Carteirinha de temporada</p>
-                  <p className="mt-1">Situação: {resultado.status_temporada || resultado.temporada.situacao || "Não informada"}</p>
-                  <p>Validade: {resultado.temporada.inicio ? new Date(`${resultado.temporada.inicio.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "—"} até {resultado.temporada.fim ? new Date(`${resultado.temporada.fim.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "—"}</p>
-                </div>
-              )}
-
-              {resultado.temporada && resultado.acesso_agua_liberado === false && (
-                <div role="alert" className="mt-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm font-bold text-red-900">
-                  <span className="block uppercase tracking-wide">Restrição de acesso à água/piscina</span>
-                  <span className="mt-1 block">{resultado.motivo_restricao_agua || "Exame médico não está válido. Não permitir entrada na água/piscina; a entrada no parque permanece liberada se a temporada e os pagamentos estiverem regulares."}</span>
-                </div>
-              )}
-              {resultado.temporada && resultado.acesso_agua_liberado === true && (
-                <div className="mt-3 rounded-xl border border-green-300 bg-green-50 p-4 text-sm font-bold text-green-900">
-                  Exame médico em dia: acesso à água/piscina liberado.
+              {resultado.uso_agua && (
+                <div className={`mt-3 rounded-xl border p-4 ${resultado.uso_agua.permitido ? "border-green-300 bg-green-100 text-green-900" : "border-amber-300 bg-amber-100 text-amber-950"}`}>
+                  <p className="font-black">Acesso à água / piscinas</p>
+                  <p className="mt-1 text-sm font-bold">{resultado.uso_agua.texto}</p>
+                  {resultado.uso_agua.validade && <p className="mt-1 text-sm">Validade do exame: {new Date(`${resultado.uso_agua.validade}T12:00:00`).toLocaleDateString("pt-BR")}</p>}
+                  <p className="mt-1 text-xs font-semibold">Atenção: exame vencido ou sem validade restringe somente o uso da água. A entrada no parque continua permitida se a temporada estiver ativa, dentro da validade e sem parcelas vencidas.</p>
                 </div>
               )}
 
@@ -221,7 +205,7 @@ export default function AcessosPage() {
                 <div className="rounded-xl bg-white p-4">
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">Exame médico</p>
                   <p className="mt-1 font-black">{resultado.exame?.status?.texto || "Não informado"}</p>
-                  <p className="mt-1 text-sm text-gray-600">Validade: {resultado.exame?.validade ? String(resultado.exame.validade).slice(0, 10).split("-").reverse().join("/") : "Não cadastrada"}</p>
+                  {resultado.exame?.validade && <p className="mt-1 text-sm text-gray-600">Validade: {new Date(`${resultado.exame.validade}T12:00:00`).toLocaleDateString("pt-BR")}</p>}
                 </div>
               </div>
             </section>
