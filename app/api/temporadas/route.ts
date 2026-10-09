@@ -606,6 +606,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, participante: data });
     }
 
+    if (acao === "atualizar_exame_participante") {
+      const temporadaId = String(body.temporada_id || "").trim();
+      const participanteId = String(body.participante_id || "").trim();
+      const validade = body.exame_medico_validade ? String(body.exame_medico_validade).slice(0, 10) : null;
+      if (!temporadaId || !participanteId) return jsonError("Temporada e participante são obrigatórios.");
+      if (validade && !/^\d{4}-\d{2}-\d{2}$/.test(validade)) return jsonError("Data de validade do exame inválida.");
+      const { data, error } = await auth.db
+        .from("temporadas_participantes")
+        .update({ exame_medico_validade: validade })
+        .eq("id", participanteId)
+        .eq("temporada_id", temporadaId)
+        .select("id,temporada_id,nome,matricula,exame_medico_validade")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return jsonError("Participante não encontrado nesta temporada.", 404);
+      return NextResponse.json({ ok: true, participante: data });
+    }
+
     if (acao === "remover_participante") {
       const temporadaId = String(body.temporada_id || "").trim();
       const participanteId = String(body.participante_id || "").trim();
@@ -691,4 +709,3 @@ export async function POST(request: NextRequest) {
     return jsonError(error instanceof Error ? error.message : "Erro interno no módulo de temporadas.", 500);
   }
 }
-
