@@ -84,6 +84,8 @@ type MovimentoFinanceiro = {
   data_movimentacao: string;
   created_at: string | null;
   created_by: string | null;
+  created_by_nome?: string | null;
+  created_by_email?: string | null;
   forma_pagamento: string | null;
   origem_tipo: string | null;
   origem_id: string | null;
@@ -491,6 +493,14 @@ export default function FinanceiroPage() {
   };
 
   const usuarioDoMovimento = (movimento: MovimentoFinanceiro) => {
+    // Preferir o nome resolvido pela API no servidor, onde a consulta não
+    // depende das políticas RLS do navegador.
+    if (movimento.created_by_nome || movimento.created_by_email) {
+      return {
+        nome: movimento.created_by_nome || movimento.created_by_email || "Usuário sem nome",
+        email: movimento.created_by_email || null,
+      };
+    }
     if (!movimento.created_by) return null;
     return usuariosMovimentos.get(movimento.created_by) || null;
   };
