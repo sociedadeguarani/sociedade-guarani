@@ -8,8 +8,10 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  temporada?: { inicio?: string | null; fim?: string | null; situacao?: string | null } | null;
+  status_temporada?: string | null;
   liberado?: boolean;
-  acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean };
+  acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
   mensalidade?: { texto: string; cor: string } | null;
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
   inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
@@ -175,6 +177,21 @@ export default function AcessosPage() {
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
+
+              {!resultado.liberado && resultado.acesso?.motivo_negacao && (
+                <div role="alert" className="mt-3 rounded-xl border border-red-300 bg-red-100 p-4 text-sm font-bold text-red-900">
+                  <span className="block uppercase tracking-wide">Motivo do bloqueio</span>
+                  <span className="mt-1 block">{resultado.acesso.motivo_negacao}</span>
+                </div>
+              )}
+
+              {resultado.temporada && (
+                <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm font-semibold text-orange-950">
+                  <p className="font-black">Carteirinha de temporada</p>
+                  <p className="mt-1">Situação: {resultado.status_temporada || resultado.temporada.situacao || "Não informada"}</p>
+                  <p>Validade: {resultado.temporada.inicio ? new Date(`${resultado.temporada.inicio.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "—"} até {resultado.temporada.fim ? new Date(`${resultado.temporada.fim.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "—"}</p>
+                </div>
+              )}
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-white p-4">
