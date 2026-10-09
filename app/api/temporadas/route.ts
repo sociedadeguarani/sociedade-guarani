@@ -168,7 +168,8 @@ async function criarMovimentacao(
   valor: number,
   formaPagamento: string,
   contaId: string,
-  dataPagamento: string
+  dataPagamento: string,
+  createdBy: string
 ) {
   const { data: existente, error: erroBusca } = await db
     .from("movimentacoes_financeiras")
@@ -197,6 +198,7 @@ async function criarMovimentacao(
       origem_id: parcelaId,
       socio_id: socioId || null,
       dependente_id: null,
+      created_by: createdBy,
       comprovante_url: null,
       conciliado: false,
       data_conciliacao: null,
@@ -370,7 +372,8 @@ export async function POST(request: NextRequest) {
             Number(primeiraConfirmada.valor),
             String(primeiraConfirmada.forma_pagamento),
             String(primeiraConfirmada.conta_bancaria_id),
-            String(primeiraConfirmada.data_pagamento)
+            String(primeiraConfirmada.data_pagamento),
+            auth.user.id
           );
 
           const { error: atualiza } = await auth.db
@@ -466,7 +469,8 @@ export async function POST(request: NextRequest) {
           Number(atualizada.valor),
           formaPagamento,
           contaId!,
-          dataPagamento
+          dataPagamento,
+          auth.user.id
         );
 
         await auth.db
