@@ -144,8 +144,16 @@ async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo
     (data || []).map((row: any) => String(row.matricula || "").trim().toUpperCase())
   );
 
+  // O código da temporada já termina em A (ex.: TE0001A).
+  // Os familiares recebem B, C, D... sem repetir o A:
+  // titular = TE0001A
+  // companheira = TE0001B
+  // filho = TE0001C
+  // segundo filho = TE0001D
+  const base = String(codigo || "").trim().toUpperCase().replace(/A$/, "");
+
   for (let codigoLetra = 66; codigoLetra <= 90; codigoLetra++) {
-    const candidata = `${codigo}${String.fromCharCode(codigoLetra)}`;
+    const candidata = `${base}${String.fromCharCode(codigoLetra)}`;
     if (!usadas.has(candidata)) return candidata;
   }
 
