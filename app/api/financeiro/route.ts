@@ -41,12 +41,12 @@ export async function GET(request: Request) {
         .map((movimento) => movimento.created_by)
         .filter((id): id is string => Boolean(id))
     ));
-    const usuariosPorId = new Map<string, { nome: string | null; email: string | null }>();
+    const usuariosPorId = new Map<string, { nome: string | null }>();
 
     if (usuarioIds.length > 0) {
       const { data: usuarios, error: usuariosError } = await supabase
         .from("usuarios_sistema")
-        .select("id,nome_exibicao,email")
+        .select("id,nome_exibicao")
         .in("id", usuarioIds);
       // A falha ao consultar os perfis não pode impedir o carregamento
       // das contas e movimentações financeiras. A identificação é complementar.
@@ -56,7 +56,6 @@ export async function GET(request: Request) {
       for (const usuario of usuarios || []) {
         usuariosPorId.set(String(usuario.id), {
           nome: usuario.nome_exibicao || null,
-          email: usuario.email || null,
         });
       }
     }
@@ -68,7 +67,7 @@ export async function GET(request: Request) {
       return {
         ...movimento,
         created_by_nome: usuario?.nome || null,
-        created_by_email: usuario?.email || null,
+        created_by_email: null,
       };
     });
 
