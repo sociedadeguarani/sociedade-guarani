@@ -588,6 +588,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, participante });
     }
 
+    if (acao === "atualizar_foto_participante") {
+      const temporadaId = String(body.temporada_id || "").trim();
+      const participanteId = String(body.participante_id || "").trim();
+      const fotoUrl = String(body.foto_url || "").trim();
+      if (!temporadaId || !participanteId || !fotoUrl) return jsonError("Temporada, participante e foto são obrigatórios.");
+      if (!/^https:\/\//i.test(fotoUrl)) return jsonError("URL da foto inválida.");
+      const { data, error } = await auth.db
+        .from("temporadas_participantes")
+        .update({ foto_url: fotoUrl })
+        .eq("id", participanteId)
+        .eq("temporada_id", temporadaId)
+        .select("id,temporada_id,nome,matricula,foto_url")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return jsonError("Participante não encontrado nesta temporada.", 404);
+      return NextResponse.json({ ok: true, participante: data });
+    }
+
     if (acao === "remover_participante") {
       const temporadaId = String(body.temporada_id || "").trim();
       const participanteId = String(body.participante_id || "").trim();
@@ -673,3 +691,4 @@ export async function POST(request: NextRequest) {
     return jsonError(error instanceof Error ? error.message : "Erro interno no módulo de temporadas.", 500);
   }
 }
+
