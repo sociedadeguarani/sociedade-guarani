@@ -9,6 +9,7 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
   temporada?: { inicio?: string | null; fim?: string | null; situacao?: string | null } | null;
+  participante?: { nome?: string | null; exame_medico_validade?: string | null } | null;
   status_temporada?: string | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
@@ -206,7 +207,8 @@ export default function AcessosPage() {
                 </div>
                 <div className="rounded-xl bg-white p-4">
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">Exame médico</p>
-                  <p className="mt-1 font-black">{resultado.exame?.status?.texto || "Não informado"}</p>
+                  <p className={`mt-1 font-black ${resultado.exame?.status?.cor === "vermelho" ? "text-red-700" : resultado.exame?.status?.cor === "verde" ? "text-green-700" : "text-gray-700"}`}>{resultado.exame?.status?.texto || "Não informado"}</p>
+                  <p className="mt-1 text-sm">Validade: {resultado.exame?.validade ? new Date(`${resultado.exame.validade.slice(0, 10)}T00:00:00`).toLocaleDateString("pt-BR") : "Não cadastrada"}</p>
                 </div>
               </div>
             </section>
