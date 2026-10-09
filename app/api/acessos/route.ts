@@ -383,33 +383,29 @@ export async function POST(request: Request) {
           telefone: temporadaNormalizada.responsavel_telefone || null,
           parentesco: null,
           foto_url: null,
-          exame_medico_validade: null,
         };
       }
 
       const parcelasAtrasadas = await verificarParcelasTemporadaAtrasadas(supabase, temporadaId);
       const temporadaValida = temporadaEstaValida(temporadaNormalizada);
       const hoje = dataHojeBrasil();
-      const validadeExame = String(participante.exame_medico_validade || "").slice(0, 10) || null;
-      const exameValido = Boolean(validadeExame && validadeExame >= hoje);
-      const exame = {
-        status: {
-          texto: !validadeExame ? "Exame médico não cadastrado" : exameValido ? "Exame médico em dia" : "Exame médico vencido",
-          cor: exameValido ? "verde" : "vermelho",
-        },
-        validade: validadeExame,
-        verificado: true,
-      };
-      const autorizado = temporadaValida && !parcelasAtrasadas.atrasado && exameValido;
+      const validadeExame = String(participante.exame_medico_validade || "").slice(0, 10);
+      const exameCadastrado = Boolean(validadeExame);
+      const exameVencido = exameCadastrado && validadeExame < hoje;
+      const exameValido = exameCadastrado && !exameVencido;
+      // O exame médico restringe apenas o acesso à água/piscina, não a entrada no parque.
+      const autorizado = temporadaValida && !parcelasAtrasadas.atrasado;
       const motivoNegacao = !temporadaValida
         ? `Temporada não está ativa ou está fora da validade (${temporadaNormalizada.inicio || "?"} a ${temporadaNormalizada.fim || "?"}).`
         : parcelasAtrasadas.atrasado
-          ? `Acesso bloqueado: ${parcelasAtrasadas.quantidade} parcela(s) vencida(s) e não paga(s), total de ${parcelasAtrasadas.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
-          : !validadeExame
-            ? "Acesso bloqueado: exame médico não cadastrado para este participante."
-            : !exameValido
-              ? `Acesso bloqueado: exame médico vencido em ${validadeExame.split("-").reverse().join("/")}.`
-              : null;
+          ? `Entrada bloqueada: ${parcelasAtrasadas.quantidade} parcela(s) vencida(s) e não paga(s), total de ${parcelasAtrasadas.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
+          : null;
+      const acessoAguaLiberado = exameValido;
+      const motivoRestricaoAgua = !exameCadastrado
+        ? "Acesso à água/piscina proibido: validade do exame médico não cadastrada. A entrada no parque continua liberada se a temporada e os pagamentos estiverem regulares."
+        : exameVencido
+          ? `Acesso à água/piscina proibido: exame médico vencido em ${validadeExame.split("-").reverse().join("/")}. A entrada no parque continua liberada se a temporada e os pagamentos estiverem regulares.`
+          : null;
 
       etapa = "registrando acesso de temporada";
 
@@ -447,9 +443,18 @@ export async function POST(request: Request) {
         },
         dependente: null,
         liberado: autorizado,
-        status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado || !exameValido ? "bloqueada" : "inativa",
+        status_temporada: autorizado ? "ativa" : (!temporadaValida ? "inativa" : "bloqueada"),
         parcelas_atrasadas: parcelasAtrasadas,
-        exame,
+        exame: {
+          status: {
+            texto: !exameCadastrado ? "Não cadastrado — não pode entrar na água" : exameVencido ? "Vencido — não pode entrar na água" : "Em dia — acesso à água liberado",
+            cor: !exameCadastrado || exameVencido ? "vermelho" : "verde",
+          },
+          validade: validadeExame || null,
+          verificado: true,
+        },
+        acesso_agua_liberado: acessoAguaLiberado,
+        motivo_restricao_agua: motivoRestricaoAgua,
         mensalidade: {
           texto: parcelasAtrasadas.atrasado
             ? `BLOQUEADA — ${parcelasAtrasadas.quantidade} parcela(s) vencida(s)`
