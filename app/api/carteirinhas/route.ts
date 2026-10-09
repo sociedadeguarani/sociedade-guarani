@@ -186,19 +186,43 @@ export async function GET(request: Request) {
 
     const temporadaIds = (temporadasDb || []).map((t: any) => String(t.id));
     let participantesDb: any[] = [];
+    let parcelasTemporadasDb: any[] = [];
 
     for (const lote of emLotes(temporadaIds, 100)) {
       if (!lote.length) continue;
       const { data, error } = await supabase
         .from("temporadas_participantes")
-        .select("id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco")
+        .select("id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url")
         .in("temporada_id", lote)
         .order("id");
       if (error) throw error;
       participantesDb.push(...(data || []));
     }
 
-    const temporadas = (temporadasDb || []).map((t: any) => ({
+    for (const lote of emLotes(temporadaIds, 100)) {
+      if (!lote.length) continue;
+      const { data, error } = await supabase
+        .from("temporadas_parcelas")
+        .select("id,temporada_id,numero,descricao,valor,data_vencimento,situacao")
+        .in("temporada_id", lote);
+      if (error) throw error;
+      parcelasTemporadasDb.push(...(data || []));
+    }
+
+    const hojeBrasil = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+
+    const temporadas = (temporadasDb || []).map((t: any) => {
+      const parcelas = parcelasTemporadasDb.filter((p: any) => String(p.temporada_id) === String(t.id));
+      const atrasadas = parcelas.filter((p: any) =>
+        Boolean(String(p.data_vencimento || "").slice(0, 10)) &&
+        String(p.data_vencimento || "").slice(0, 10) < hojeBrasil &&
+        !["pago", "paid", "quitado", "recebido", "cancelado", "cancelada", "isento", "isenta"].includes(String(p.situacao || "").toLowerCase())
+      );
+      const situacaoContrato = String(t.situacao || "pendente").toLowerCase();
+      const validade = (!t.inicio || String(t.inicio).slice(0, 10) <= hojeBrasil) && (!t.fim || String(t.fim).slice(0, 10) >= hojeBrasil);
+      const statusCarteirinha = atrasadas.length ? "bloqueada" : situacaoContrato !== "ativa" || !validade ? "inativa" : "ativa";
+      const statusCarteirinhaTexto = statusCarteirinha === "bloqueada" ? "BLOQUEADA — PARCELA VENCIDA" : statusCarteirinha === "ativa" ? "ATIVA — EM DIA" : "INATIVA / FORA DA VALIDADE";
+      return ({
       id: String(t.id),
       matricula: t.matricula || null,
       codigo: t.codigo || null,
@@ -208,6 +232,10 @@ export async function GET(request: Request) {
       fim: t.fim || null,
       valor_total: Number(t.valor_total || 0),
       situacao: t.situacao || null,
+      status_carteirinha: statusCarteirinha,
+      status_carteirinha_texto: statusCarteirinhaTexto,
+      parcelas_atrasadas: atrasadas.length,
+      valor_parcelas_atrasadas: atrasadas.reduce((total: number, p: any) => total + Number(p.valor || 0), 0),
       forma_pagamento: t.forma_pagamento || null,
       data_pagamento: t.data_pagamento || null,
       responsavel_nome: t.responsavel_nome || null,
@@ -226,8 +254,12 @@ export async function GET(request: Request) {
           cpf: p.cpf || null,
           telefone: p.telefone || null,
           parentesco: p.parentesco || null,
+          foto_url: p.foto_url || null,
+          status_carteirinha: statusCarteirinha,
+          status_carteirinha_texto: statusCarteirinhaTexto,
         })),
-    }));
+    });
+    });
 
     const dependentes = (dependentesDb || []).map((d: any) => {
       const titular = sociosPorId.get(String(d.socio_id));
