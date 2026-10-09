@@ -112,18 +112,18 @@ export default function RegistrarPagamentoMensalidade({
   const registroAtual = registro;
 
   async function confirmarPagamento() {
-    // Guard imperativo: impede dois cliques antes mesmo de o React
-    // concluir a atualização do estado. A API também possui uma
-    // trava condicional para cobrir requisições simultâneas.
-    if (salvandoRef.current) return;
-    salvandoRef.current = true;
-    if (salvando) return;
-
+    // Validar antes de ativar a trava imperativa. Caso contrário, uma
+    // validação malsucedida pode deixar o formulário permanentemente travado.
     if (!contaId) {
       onError("Selecione a conta da Sociedade que recebeu o pagamento.");
       return;
     }
 
+    // Guard imperativo: impede dois cliques antes mesmo de o React
+    // concluir a atualização do estado. A API também valida a situação
+    // da mensalidade para impedir baixas concorrentes.
+    if (salvandoRef.current) return;
+    salvandoRef.current = true;
     setSalvando(true);
     onError("");
 
