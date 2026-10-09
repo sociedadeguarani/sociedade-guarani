@@ -33,7 +33,42 @@ export async function GET(request: Request) {
     if (contasError) throw contasError;
     if (movimentosError) throw movimentosError;
 
-    return NextResponse.json({ contas: contas || [], movimentos: movimentosData || [] });
+    // Resolve o responsável no servidor com service role. A consulta feita
+    // pelo navegador pode ser filtrada por RLS e deixar o nome em branco.
+    const listaMovimentos = movimentosData || [];
+    const usuarioIds = Array.from(new Set(
+      listaMovimentos
+        .map((movimento) => movimento.created_by)
+        .filter((id): id is string => Boolean(id))
+    ));
+    const usuariosPorId = new Map<string, { nome: string | null; email: string | null }>();
+
+    if (usuarioIds.length > 0) {
+      const { data: usuarios, error: usuariosError } = await supabase
+        .from("usuarios_sistema")
+        .select("id,nome_exibicao,email")
+        .in("id", usuarioIds);
+      if (usuariosError) throw usuariosError;
+      for (const usuario of usuarios || []) {
+        usuariosPorId.set(String(usuario.id), {
+          nome: usuario.nome_exibicao || null,
+          email: usuario.email || null,
+        });
+      }
+    }
+
+    const movimentosComResponsavel = listaMovimentos.map((movimento) => {
+      const usuario = movimento.created_by
+        ? usuariosPorId.get(String(movimento.created_by))
+        : null;
+      return {
+        ...movimento,
+        created_by_nome: usuario?.nome || null,
+        created_by_email: usuario?.email || null,
+      };
+    });
+
+    return NextResponse.json({ contas: contas || [], movimentos: movimentosComResponsavel });
   } catch (error) {
     console.error("[api/financeiro][GET]", error);
     return NextResponse.json(
