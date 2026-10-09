@@ -54,6 +54,22 @@ function emLotes<T>(lista: T[], tamanho = 100): T[][] {
   return lotes;
 }
 
+function dataHoje() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function temporadaValida(temporada: any) {
+  const hoje = dataHoje();
+  const situacao = String(temporada?.situacao || "").toLowerCase();
+  const inicio = String(temporada?.inicio || "").slice(0, 10);
+  const fim = String(temporada?.fim || "").slice(0, 10);
+
+  if (["cancelada", "encerrada"].includes(situacao)) return false;
+  if (inicio && inicio > hoje) return false;
+  if (fim && fim < hoje) return false;
+  return true;
+}
+
 export async function GET(request: Request) {
   const modoDependentes = new URL(request.url).searchParams.get("modo") === "dependentes";
   const auth = await requireRoles(request, [
@@ -175,92 +191,6 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
-
-    const { data: temporadasDb, error: temporadasError } = await supabase
-      .from("temporadas")
-      .select("id,tipo,modalidade,codigo,matricula,inicio,fim,valor_total,situacao,forma_pagamento,data_pagamento,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email")
-      .in("situacao", ["pendente", "ativa"])
-      .order("responsavel_nome");
-
-    if (temporadasError) throw temporadasError;
-
-    const temporadaIds = (temporadasDb || []).map((t: any) => String(t.id));
-    let participantesDb: any[] = [];
-    let parcelasTemporadasDb: any[] = [];
-
-    for (const lote of emLotes(temporadaIds, 100)) {
-      if (!lote.length) continue;
-      const { data, error } = await supabase
-        .from("temporadas_participantes")
-        .select("id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url")
-        .in("temporada_id", lote)
-        .order("id");
-      if (error) throw error;
-      participantesDb.push(...(data || []));
-    }
-
-    for (const lote of emLotes(temporadaIds, 100)) {
-      if (!lote.length) continue;
-      const { data, error } = await supabase
-        .from("temporadas_parcelas")
-        .select("id,temporada_id,numero,descricao,valor,data_vencimento,situacao")
-        .in("temporada_id", lote);
-      if (error) throw error;
-      parcelasTemporadasDb.push(...(data || []));
-    }
-
-    const hojeBrasil = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-
-    const temporadas = (temporadasDb || []).map((t: any) => {
-      const parcelas = parcelasTemporadasDb.filter((p: any) => String(p.temporada_id) === String(t.id));
-      const atrasadas = parcelas.filter((p: any) =>
-        Boolean(String(p.data_vencimento || "").slice(0, 10)) &&
-        String(p.data_vencimento || "").slice(0, 10) < hojeBrasil &&
-        !["pago", "paid", "quitado", "recebido", "cancelado", "cancelada", "isento", "isenta"].includes(String(p.situacao || "").toLowerCase())
-      );
-      const situacaoContrato = String(t.situacao || "pendente").toLowerCase();
-      const validade = (!t.inicio || String(t.inicio).slice(0, 10) <= hojeBrasil) && (!t.fim || String(t.fim).slice(0, 10) >= hojeBrasil);
-      const statusCarteirinha = atrasadas.length ? "bloqueada" : situacaoContrato !== "ativa" || !validade ? "inativa" : "ativa";
-      const statusCarteirinhaTexto = statusCarteirinha === "bloqueada" ? "BLOQUEADA — PARCELA VENCIDA" : statusCarteirinha === "ativa" ? "ATIVA — EM DIA" : "INATIVA / FORA DA VALIDADE";
-      return ({
-      id: String(t.id),
-      matricula: t.matricula || null,
-      codigo: t.codigo || null,
-      tipo: t.tipo || null,
-      modalidade: t.modalidade || null,
-      inicio: t.inicio || null,
-      fim: t.fim || null,
-      valor_total: Number(t.valor_total || 0),
-      situacao: t.situacao || null,
-      status_carteirinha: statusCarteirinha,
-      status_carteirinha_texto: statusCarteirinhaTexto,
-      parcelas_atrasadas: atrasadas.length,
-      valor_parcelas_atrasadas: atrasadas.reduce((total: number, p: any) => total + Number(p.valor || 0), 0),
-      forma_pagamento: t.forma_pagamento || null,
-      data_pagamento: t.data_pagamento || null,
-      responsavel_nome: t.responsavel_nome || null,
-      responsavel_cpf: t.responsavel_cpf || null,
-      responsavel_telefone: t.responsavel_telefone || null,
-      responsavel_email: t.responsavel_email || null,
-      participantes: participantesDb
-        .filter((p: any) => String(p.temporada_id) === String(t.id))
-        .map((p: any) => ({
-          id: String(p.id),
-          temporada_id: String(p.temporada_id),
-          socio_id: p.socio_id || null,
-          papel: p.papel || "dependente",
-          matricula: p.matricula || null,
-          nome: p.nome || null,
-          cpf: p.cpf || null,
-          telefone: p.telefone || null,
-          parentesco: p.parentesco || null,
-          foto_url: p.foto_url || null,
-          status_carteirinha: statusCarteirinha,
-          status_carteirinha_texto: statusCarteirinhaTexto,
-        })),
-    });
-    });
-
     const dependentes = (dependentesDb || []).map((d: any) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
@@ -300,6 +230,70 @@ export async function GET(request: Request) {
         possui_mensalidade: false,
       };
     });
+
+    // Temporadas são independentes de `socios`: o responsável pode comprar
+    // uma temporada sem possuir cadastro de sócio. A carteirinha da temporada
+    // usa a matrícula TE e não cria/duplica registro em `socios`.
+    let temporadas: any[] = [];
+
+    if (auth.usuario.perfil !== "associado") {
+      const { data: temporadasDb, error: temporadasError } = await supabase
+        .from("temporadas")
+        .select(
+          "id,tipo,modalidade,codigo,matricula,inicio,fim,valor_total,situacao,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email"
+        )
+        .order("inicio", { ascending: false })
+        .limit(1000);
+
+      if (temporadasError) throw temporadasError;
+
+      const idsTemporadas = (temporadasDb || []).map((t: any) => String(t.id));
+
+      let participantesDb: any[] = [];
+      for (const lote of emLotes(idsTemporadas, 100)) {
+        if (!lote.length) continue;
+
+        const { data, error } = await supabase
+          .from("temporadas_participantes")
+          .select(
+            "id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url,exame_medico_validade"
+          )
+          .in("temporada_id", lote)
+          .order("papel", { ascending: true })
+          .order("nome", { ascending: true });
+
+        if (error) throw error;
+        participantesDb.push(...(data || []));
+      }
+
+      const participantesPorTemporada = new Map<string, any[]>();
+
+      for (const participante of participantesDb) {
+        const key = String(participante.temporada_id);
+        const lista = participantesPorTemporada.get(key) || [];
+        lista.push(participante);
+        participantesPorTemporada.set(key, lista);
+      }
+
+      temporadas = (temporadasDb || [])
+        .filter(temporadaValida)
+        .map((t: any) => ({
+          id: String(t.id),
+          tipo: t.tipo,
+          modalidade: t.modalidade,
+          codigo: t.codigo || null,
+          matricula: t.matricula || null,
+          inicio: t.inicio || null,
+          fim: t.fim || null,
+          valor_total: Number(t.valor_total || 0),
+          situacao: t.situacao || "pendente",
+          responsavel_nome: t.responsavel_nome || null,
+          responsavel_cpf: t.responsavel_cpf || null,
+          responsavel_telefone: t.responsavel_telefone || null,
+          responsavel_email: t.responsavel_email || null,
+          participantes: participantesPorTemporada.get(String(t.id)) || [],
+        }));
+    }
 
     return NextResponse.json({
       socios: resultado,
