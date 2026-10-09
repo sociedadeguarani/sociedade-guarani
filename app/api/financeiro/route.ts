@@ -48,7 +48,11 @@ export async function GET(request: Request) {
         .from("usuarios_sistema")
         .select("id,nome_exibicao,email")
         .in("id", usuarioIds);
-      if (usuariosError) throw usuariosError;
+      // A falha ao consultar os perfis não pode impedir o carregamento
+      // das contas e movimentações financeiras. A identificação é complementar.
+      if (usuariosError) {
+        console.error("[api/financeiro][GET] Não foi possível resolver nomes dos responsáveis:", usuariosError);
+      }
       for (const usuario of usuarios || []) {
         usuariosPorId.set(String(usuario.id), {
           nome: usuario.nome_exibicao || null,
