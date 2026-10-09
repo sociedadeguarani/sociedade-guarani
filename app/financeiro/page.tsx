@@ -374,7 +374,7 @@ export default function FinanceiroPage() {
       const [{ data: socios, error: sociosError }, { data: dependentes, error: dependentesError }, { data: usuarios, error: usuariosError }] = await Promise.all([
         socioIds.length ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds) : Promise.resolve({ data: [], error: null }),
         dependenteIds.length ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds) : Promise.resolve({ data: [], error: null }),
-        usuarioIds.length ? supabase.from("usuarios_sistema").select("id,nome_exibicao,email").in("id", usuarioIds) : Promise.resolve({ data: [], error: null }),
+        usuarioIds.length ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds) : Promise.resolve({ data: [], error: null }),
       ]);
       if (sociosError) throw sociosError;
       if (dependentesError) throw dependentesError;
@@ -391,8 +391,8 @@ export default function FinanceiroPage() {
       }
       setPessoasMovimentos(mapa);
       const usuarioMap = new Map<string, { nome: string; email: string | null }>();
-      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null; email: string | null }>) {
-        usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: usuario.email || null });
+      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null }>) {
+        usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: null });
       }
       setUsuariosMovimentos(usuarioMap);
     } catch (error) {
