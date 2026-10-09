@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { QRCodeSVG } from "qrcode.react";
 import {
   CalendarDays,
   CheckCircle2,
@@ -70,7 +71,7 @@ type Temporada = {
   responsavel_telefone: string | null;
   responsavel_email: string | null;
   parcelas: Parcela[];
-  participantes: { id?: string; socio_id: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; parentesco?: string | null; papel: string; matricula: string | null }[];
+  participantes: { id?: string; socio_id: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; parentesco?: string | null; papel: string; matricula: string | null; foto_url?: string | null }[];
 };
 
 type ParcelaForm = {
@@ -154,6 +155,18 @@ function criarParcelas(
       confirmar: i === 0,
     };
   });
+}
+
+function statusCarteirinhaTemporada(temporada: Temporada) {
+  const hojeLocal = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  const parcelasAtrasadas = (temporada.parcelas || []).filter((p) =>
+    String(p.data_vencimento || "").slice(0, 10) < hojeLocal &&
+    !["pago", "paid", "quitado", "recebido", "cancelado", "cancelada", "isento", "isenta"].includes(String(p.situacao || "").toLowerCase())
+  );
+  const validade = (!temporada.inicio || temporada.inicio.slice(0, 10) <= hojeLocal) && (!temporada.fim || temporada.fim.slice(0, 10) >= hojeLocal);
+  if (parcelasAtrasadas.length) return { texto: `BLOQUEADA — ${parcelasAtrasadas.length} parcela(s) vencida(s)`, bloqueada: true, ativa: false };
+  if (temporada.situacao !== "ativa" || !validade) return { texto: "INATIVA / FORA DA VALIDADE", bloqueada: false, ativa: false };
+  return { texto: "ATIVA — EM DIA", bloqueada: false, ativa: true };
 }
 
 export default function TemporadasPage() {
@@ -358,6 +371,54 @@ export default function TemporadasPage() {
       if (t) setAbrirParticipantes(t);
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao adicionar participante.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function salvarFotoParticipante(participanteId: string, arquivo: File) {
+    if (!abrirParticipantes || !arquivo) return;
+    if (!arquivo.type.startsWith("image/")) {
+      setMensagem("Selecione um arquivo de imagem (JPG, PNG ou WEBP).");
+      return;
+    }
+    if (arquivo.size > 5 * 1024 * 1024) {
+      setMensagem("A foto deve ter no máximo 5 MB.");
+      return;
+    }
+
+    setSalvando(true);
+    setMensagem("");
+    try {
+      const extensao = arquivo.name.split(".").pop()?.toLowerCase() || "jpg";
+      const caminho = `socios/temporada-${participanteId}.${extensao}`;
+      const upload = await supabase.storage.from("fotos-associados").upload(caminho, arquivo, {
+        upsert: true,
+        contentType: arquivo.type || "image/jpeg",
+      });
+      if (upload.error) throw upload.error;
+
+      const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+      const accessToken = await token();
+      const resposta = await fetch("/api/temporadas", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "atualizar_foto_participante", temporada_id: abrirParticipantes.id, participante_id: participanteId, foto_url: urlData.publicUrl }),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a foto.");
+
+      await carregar();
+      const recarregar = await fetch("/api/temporadas", { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+      const dados = await recarregar.json().catch(() => ({}));
+      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
+      if (t) {
+        setAbrirParticipantes(t);
+        setAbrirCarteirinhas((atual) => atual?.id === t.id ? t : atual);
+      }
+      setMensagem("Foto do participante salva com sucesso.");
+    } catch (e) {
+      setMensagem(e instanceof Error ? e.message : "Erro ao salvar a foto.");
     } finally {
       setSalvando(false);
     }
@@ -932,6 +993,13 @@ export default function TemporadasPage() {
                 <p className="font-black text-[#b65308]">Titular</p>
                 <p className="mt-1 font-bold">{abrirParticipantes.responsavel_nome}</p>
                 <p className="mt-1 text-xs text-[#718078]">{abrirParticipantes.matricula || "TE — aguardando pagamento"}</p>
+                {(() => {
+                  const titular = (abrirParticipantes.participantes || []).find((p) => p.papel === "titular");
+                  return titular?.id ? <div className="mt-3 flex items-center gap-3">
+                    <div className="h-16 w-12 overflow-hidden rounded-lg bg-orange-50">{titular.foto_url ? <img src={titular.foto_url} alt={titular.nome || "Titular"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                    <label className="cursor-pointer rounded-lg border border-[#d5e0da] px-3 py-2 text-xs font-bold hover:bg-white">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(titular.id!, file); e.currentTarget.value = ""; }} /></label>
+                  </div> : <p className="mt-2 text-xs text-[#718078]">A carteirinha do titular será criada após ativação/pagamento.</p>;
+                })()}
               </div>
 
               <div>
@@ -942,9 +1010,11 @@ export default function TemporadasPage() {
                   ) : (
                     (abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").map((p) => (
                       <div key={p.id || `${p.nome}-${p.matricula}`} className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe9e3] p-3">
-                        <div>
-                          <p className="font-bold">{p.nome}</p>
-                          <p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                          <div className="h-14 w-11 shrink-0 overflow-hidden rounded-lg bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Dependente"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                          <div className="min-w-0"><p className="font-bold">{p.nome}</p><p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
+                            {p.id && <label className="mt-2 inline-block cursor-pointer rounded-lg border px-2 py-1 text-xs font-bold hover:bg-[#f9fbfa]">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(p.id!, file); e.currentTarget.value = ""; }} /></label>}
+                          </div>
                         </div>
                         {p.id && (
                           <button onClick={() => void removerParticipante(p.id!)} className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-100">
@@ -1009,27 +1079,23 @@ export default function TemporadasPage() {
             </div>
 
             <div className="grid gap-5 p-6 sm:grid-cols-2">
-              {(abrirCarteirinhas.participantes || []).map((p, index) => (
-                <div key={p.id || `${p.nome}-${index}`} className="overflow-hidden rounded-3xl border-2 border-[#f2bb91] bg-gradient-to-br from-[#fff8f2] to-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-widest text-[#b65308]">Sociedade Recreativa Guarani</p>
-                      <p className="mt-1 text-sm font-bold text-[#b65308]">TEMPORADA {abrirCarteirinhas.tipo === "temporada_familiar" ? "FAMILIAR" : "INDIVIDUAL"}</p>
+              {(abrirCarteirinhas.participantes || []).map((p, index) => {
+                const statusCartao = statusCarteirinhaTemporada(abrirCarteirinhas);
+                return <div key={p.id || `${p.nome}-${index}`} className="overflow-hidden rounded-3xl border-2 border-[#f2bb91] bg-gradient-to-br from-[#fff8f2] to-white shadow-sm">
+                  <div className="flex items-center justify-between bg-[#e87511] p-4 text-white">
+                    <div><p className="text-[10px] font-black uppercase tracking-widest">Sociedade Recreativa Guarani</p><p className="mt-1 text-sm font-black">CARTEIRA DE TEMPORADA</p></div>
+                    <div className="rounded-xl bg-white/20 px-3 py-2 text-xs font-black">TE</div>
+                  </div>
+                  <div className="p-5">
+                    <div className="flex gap-3">
+                      <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                      <div className="min-w-0"><p className="text-lg font-black text-[#17382c]">{p.nome || "Participante"}</p><p className="mt-1 text-sm font-black text-[#005a3c]">{p.matricula || "Matrícula pendente"}</p><p className="mt-1 text-xs text-[#718078]">{p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</p><p className="mt-1 text-xs text-[#718078]">Validade: {dataBr(abrirCarteirinhas.inicio)} até {dataBr(abrirCarteirinhas.fim)}</p></div>
                     </div>
-                    <div className="rounded-xl bg-[#ffead9] px-3 py-2 text-xs font-black text-[#b65308]">TE</div>
+                    <div className={`mt-4 rounded-lg p-2 text-center text-xs font-black ${statusCartao.bloqueada ? "bg-red-100 text-red-700" : statusCartao.ativa ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>{statusCartao.texto}</div>
+                    <div className="mt-4 flex items-center justify-center border-t border-[#f2bb91] pt-4"><QRCodeSVG value={p.id ? `guarani:temporada-participante:${p.id}` : `guarani:temporada:${abrirCarteirinhas.id}`} size={112} includeMargin /></div>
                   </div>
-                  <div className="mt-6">
-                    <p className="text-xl font-black text-[#17382c]">{p.nome}</p>
-                    <p className="mt-2 text-sm font-black text-[#005a3c]">{p.matricula || abrirCarteirinhas.codigo}</p>
-                    <p className="mt-1 text-xs text-[#718078]">Validade: {dataBr(abrirCarteirinhas.inicio)} até {dataBr(abrirCarteirinhas.fim)}</p>
-                    {p.parentesco && <p className="mt-1 text-xs text-[#718078]">{p.parentesco}</p>}
-                  </div>
-                  <div className="mt-5 flex items-center justify-between border-t border-[#f2bb91] pt-4">
-                    <span className="text-xs font-bold text-[#718078]">Carteirinha de temporada</span>
-                    <span className="text-2xl">🏖️</span>
-                  </div>
-                </div>
-              ))}
+                </div>;
+              })}
             </div>
           </div>
         </div>
