@@ -206,6 +206,7 @@ export default function Page() {
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
   const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
+  const [contaRecebimentoSelecionada, setContaRecebimentoSelecionada] = useState("");
   const [historicoSocio, setHistoricoSocio] = useState<M[]>([]);
   const [carregandoHistoricoSocio, setCarregandoHistoricoSocio] = useState(false);
   const [mesHistoricoSelecionado, setMesHistoricoSelecionado] = useState<number | null>(null);
@@ -591,7 +592,7 @@ const selecionadasBaixa = useMemo(
 
     for (const item of selecionadasBaixa) {
       const socio = socioPorId.get(String(item.socio_id));
-      const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id || "";
+      const contaId = contaRecebimentoSelecionada || item.conta_pagadora_id || socio?.conta_bancaria_id || "";
       const conta = contas.find((c) => String(c.id) === String(contaId));
       const nomeConta = conta?.nome || "Conta não identificada";
       const chave = String(contaId || nomeConta);
@@ -618,7 +619,7 @@ const selecionadasBaixa = useMemo(
       totalCobrado,
       contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
     };
-  }, [selecionadasBaixa, socioPorId, contas]);
+  }, [selecionadasBaixa, socioPorId, contas, contaRecebimentoSelecionada]);
 
 
   async function confirmarBaixaSelecionadas() {
@@ -626,6 +627,18 @@ const selecionadasBaixa = useMemo(
     if (selecionadasBaixa.length === 0) {
       setErro("Selecione ao menos uma mensalidade em aberto para baixar.");
       return;
+    }
+
+    if (tipoBaixaSelecionada === "pago") {
+      const semConta = !contaRecebimentoSelecionada && selecionadasBaixa.some((item) => {
+        const socio = socioPorId.get(String(item.socio_id));
+        const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id;
+        return !contaId || !contas.some((conta) => String(conta.id) === String(contaId));
+      });
+      if (semConta) {
+        setErro("Selecione a conta bancária de destino (por exemplo, Banrisul ou Sicredi) antes de confirmar a baixa.");
+        return;
+      }
     }
 
     setProcessandoBaixa(true);
@@ -647,6 +660,7 @@ const selecionadasBaixa = useMemo(
         acao: "baixar",
         ids: selecionadasBaixa.map((item) => item.id),
         data_pagamento: new Date().toISOString().slice(0, 10),
+        ...(contaRecebimentoSelecionada ? { conta_recebimento_id: contaRecebimentoSelecionada } : {}),
       });
       setTipoBaixaSelecionada("pago");
     } finally {
@@ -1777,19 +1791,25 @@ const selecionadasBaixa = useMemo(
 
 
               {tipoBaixaSelecionada === "pago" && (
-              <div className="rounded-xl border">
-                <div className="border-b bg-gray-50 px-4 py-3 text-sm font-black">Contas de destino</div>
-                <div className="divide-y">
+              <div className="rounded-xl border p-4">
+                <label htmlFor="conta-recebimento-baixa" className="mb-2 block text-sm font-black text-[#005a3c]">Conta bancária de destino</label>
+                <select
+                  id="conta-recebimento-baixa"
+                  value={contaRecebimentoSelecionada}
+                  onChange={(e) => setContaRecebimentoSelecionada(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm font-semibold"
+                >
+                  <option value="">Usar conta cadastrada do associado (quando identificada)</option>
+                  {contas.map((conta) => (
+                    <option key={conta.id} value={conta.id}>{conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}</option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-gray-500">Escolha Banrisul, Sicredi ou outra conta cadastrada. A seleção será aplicada a todas as mensalidades desta baixa.</p>
+                <div className="mt-3 divide-y rounded-lg bg-gray-50 px-3">
                   {resumoBaixa.contas.map((conta) => (
-                    <div key={`${conta.nome}-${conta.banco || ""}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                      <div>
-                        <p className="font-bold">{conta.nome}</p>
-                        {conta.banco && <p className="text-xs text-gray-500">{conta.banco}</p>}
-                      </div>
-                      <div className="text-right">
-                        <p className="font-black text-[#005a3c]">{moeda(conta.valor)}</p>
-                        <p className="text-xs text-gray-500">{conta.quantidade} mensalidade(s)</p>
-                      </div>
+                    <div key={`${conta.nome}-${conta.banco || ""}`} className="flex items-center justify-between gap-3 py-3 text-sm">
+                      <div><p className="font-bold">{conta.nome}</p>{conta.banco && <p className="text-xs text-gray-500">{conta.banco}</p>}</div>
+                      <div className="text-right"><p className="font-black text-[#005a3c]">{moeda(conta.valor)}</p><p className="text-xs text-gray-500">{conta.quantidade} mensalidade(s)</p></div>
                     </div>
                   ))}
                 </div>
