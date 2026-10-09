@@ -345,7 +345,7 @@ export async function POST(request: Request) {
         const { data, error } = await supabase
           .from("temporadas_participantes")
           .select(
-            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url"
+            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url,exame_medico_validade"
           )
           .eq("id", temporadaParticipanteId)
           .maybeSingle();
@@ -358,7 +358,7 @@ export async function POST(request: Request) {
         const { data, error } = await supabase
           .from("temporadas_participantes")
           .select(
-            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url"
+            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url,exame_medico_validade"
           )
           .eq("temporada_id", temporadaId)
           .eq("matricula", matricula)
@@ -383,17 +383,33 @@ export async function POST(request: Request) {
           telefone: temporadaNormalizada.responsavel_telefone || null,
           parentesco: null,
           foto_url: null,
+          exame_medico_validade: null,
         };
       }
 
       const parcelasAtrasadas = await verificarParcelasTemporadaAtrasadas(supabase, temporadaId);
       const temporadaValida = temporadaEstaValida(temporadaNormalizada);
-      const autorizado = temporadaValida && !parcelasAtrasadas.atrasado;
+      const hoje = dataHojeBrasil();
+      const validadeExame = String(participante.exame_medico_validade || "").slice(0, 10) || null;
+      const exameValido = Boolean(validadeExame && validadeExame >= hoje);
+      const exame = {
+        status: {
+          texto: !validadeExame ? "Exame médico não cadastrado" : exameValido ? "Exame médico em dia" : "Exame médico vencido",
+          cor: exameValido ? "verde" : "vermelho",
+        },
+        validade: validadeExame,
+        verificado: true,
+      };
+      const autorizado = temporadaValida && !parcelasAtrasadas.atrasado && exameValido;
       const motivoNegacao = !temporadaValida
         ? `Temporada não está ativa ou está fora da validade (${temporadaNormalizada.inicio || "?"} a ${temporadaNormalizada.fim || "?"}).`
         : parcelasAtrasadas.atrasado
           ? `Acesso bloqueado: ${parcelasAtrasadas.quantidade} parcela(s) vencida(s) e não paga(s), total de ${parcelasAtrasadas.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
-          : null;
+          : !validadeExame
+            ? "Acesso bloqueado: exame médico não cadastrado para este participante."
+            : !exameValido
+              ? `Acesso bloqueado: exame médico vencido em ${validadeExame.split("-").reverse().join("/")}.`
+              : null;
 
       etapa = "registrando acesso de temporada";
 
@@ -431,16 +447,9 @@ export async function POST(request: Request) {
         },
         dependente: null,
         liberado: autorizado,
-        status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado ? "bloqueada" : "inativa",
+        status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado || !exameValido ? "bloqueada" : "inativa",
         parcelas_atrasadas: parcelasAtrasadas,
-        exame: {
-          status: {
-            texto: "Não se aplica à temporada",
-            cor: "cinza",
-          },
-          validade: temporadaNormalizada.fim || null,
-          verificado: false,
-        },
+        exame,
         mensalidade: {
           texto: parcelasAtrasadas.atrasado
             ? `BLOQUEADA — ${parcelasAtrasadas.quantidade} parcela(s) vencida(s)`
