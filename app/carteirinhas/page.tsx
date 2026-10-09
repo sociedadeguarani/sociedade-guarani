@@ -49,6 +49,7 @@ type Temporada = {
     parentesco?: string | null;
     status_carteirinha?: "ativa" | "bloqueada" | "inativa" | string;
     status_carteirinha_texto?: string;
+    exame_medico_validade?: string | null;
   }>;
 };
 
@@ -306,6 +307,7 @@ export default function CarteirinhasPage() {
   const statusTemporadaAtiva = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "ativa";
   const statusTemporadaBloqueada = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "bloqueada";
   const exame = statusExame(selecionado?.exame_medico_validade);
+  const exameTemporada = statusExame(participanteTemporadaAtual?.exame_medico_validade);
 
   function imprimirCarteirinha() {
     if (!selecionado && !temporadaSelecionada && !dependenteSelecionado) return;
@@ -561,7 +563,8 @@ export default function CarteirinhasPage() {
                     <div className="card-bottom mt-6 flex items-end justify-between gap-4">
                       <div className="space-y-2 text-sm">
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className={`font-black ${statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}`}>{statusTemporadaTexto}</div></div>
-                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade da temporada</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
+                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>
                       </div>
                       <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
                     </div>
@@ -702,7 +705,8 @@ export default function CarteirinhasPage() {
               <div className="p-6">
                 <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
                 <p className="mt-3 text-sm text-gray-500">Situação: <b className={statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}>{statusTemporadaTexto}</b></p>
-                <p className="text-sm text-gray-500">Validade: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                <p className="text-sm text-gray-500">Validade da temporada: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 p-3"><span className={`h-3 w-3 shrink-0 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`text-sm font-black ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>
                 <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
               </div>
             </div>
