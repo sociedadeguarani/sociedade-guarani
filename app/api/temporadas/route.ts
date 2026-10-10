@@ -198,11 +198,11 @@ async function criarMovimentacao(
       origem_id: parcelaId,
       socio_id: socioId || null,
       dependente_id: null,
-      created_by: createdBy,
       comprovante_url: null,
       conciliado: false,
       data_conciliacao: null,
       observacoes: `Entrada financeira referente à parcela da temporada ${temporadaId}.`,
+      created_by: createdBy,
     })
     .select("id")
     .single();
