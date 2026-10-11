@@ -13,7 +13,7 @@ export async function GET(request: Request) {
       db.from("dependentes").select("id,socio_id,nome,cpf"),
       db.from("socios").select("id,responsavel_id,nome,cpf").not("responsavel_id", "is", null).eq("possui_mensalidade", false),
       db.from("reservas").select("id", { count: "exact", head: true }).in("situacao", ["solicitada", "aguardando_pagamento"]),
-      db.from("notificacoes_admin").select("id", { count: "exact", head: true }).eq("lida", false).in("origem_tipo", ["mensalidade", "mensalidade_lote", "convite", "reserva", "reserva_pagamento", "pagamento_reserva"]),
+      db.from("notificacoes_admin").select("id", { count: "exact", head: true }).eq("lida", false).in("origem_tipo", ["mensalidade", "mensalidade_lote", "convite", "reserva", "reserva_pagamento", "pagamento_reserva", "temporada_parcela"]),
     ]);
     const erro = [socios, ativos, inativos, dependentesDb, dependentesLegados, reservas, notificacoes].find((r) => r.error)?.error;
     if (erro) throw erro;
