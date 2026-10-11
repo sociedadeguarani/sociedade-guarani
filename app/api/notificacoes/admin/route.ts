@@ -50,13 +50,19 @@ export async function GET(request: Request) {
       } else if (["reserva", "reserva_pagamento", "pagamento_reserva"].includes(n.origem_tipo)) {
         tabela = "reservas";
         ids = [String(n.origem_id).trim()];
+      } else if (n.origem_tipo === "temporada_parcela") {
+        tabela = "temporadas_parcelas";
+        ids = [String(n.origem_id).trim()];
       }
 
       if (!tabela || !ids.length) continue;
 
+      const campos = tabela === "temporadas_parcelas"
+        ? "id,valor,comprovante_url,forma_pagamento,situacao,temporada_id"
+        : "id,valor,comprovante_url,comprovante_status,forma_pagamento,tipo_pagamento";
       const { data: registros, error: registroError } = await serviceDb
         .from(tabela)
-        .select("id,valor,comprovante_url,comprovante_status,forma_pagamento,tipo_pagamento")
+        .select(campos)
         .in("id", ids);
 
       if (registroError || !registros?.length) continue;
@@ -78,6 +84,11 @@ export async function GET(request: Request) {
 
       n.valor = total;
       n.comprovante_url = comprovante;
+      if (n.comprovante_url && !/^https?:\/\//i.test(String(n.comprovante_url))) {
+        const caminho = String(n.comprovante_url).replace(/^\/+/, "");
+        const { data: publico } = serviceDb.storage.from("comprovantes-financeiro").getPublicUrl(caminho);
+        n.comprovante_url = publico?.publicUrl || n.comprovante_url;
+      }
       n.comprovante_status = status;
       n.forma_pagamento = forma?.forma_pagamento || forma?.tipo_pagamento || null;
       n.origem_ids = registrosOrdenados.map((r) => r.id);
