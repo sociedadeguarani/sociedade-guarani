@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Megaphone, Plus, Edit3, Trash2, Pin, Upload, X, Bell, CheckCheck, ExternalLink } from "lucide-react";
+import { Megaphone, Plus, Edit3, Trash2, Pin, Upload, X, Bell, CheckCheck, ExternalLink, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -328,7 +328,10 @@ export default function AvisosPage(){
           <h1 className="mt-1 text-3xl font-black text-[#003d2b]">Avisos e comunicados</h1>
           <p className="mt-1 text-sm text-gray-500">Publique informações para os associados.</p>
         </div>
-        {podeGerenciarAvisos&&<button onClick={novo} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white"><Plus className="h-4 w-4"/> Novo Aviso</button>}
+        {podeGerenciarAvisos&&<div className="flex flex-wrap items-center gap-2">
+          <button onClick={()=>void carregar()} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${carregando?"animate-spin":""}`}/> Atualizar</button>
+          <button onClick={novo} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white"><Plus className="h-4 w-4"/> Novo Aviso</button>
+        </div>}
       </div>
 
       {erro&&<div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{erro}</div>}
@@ -470,7 +473,7 @@ export default function AvisosPage(){
                         </a>
                       }
 
-                      {ehPagamento && n.origem_tipo && n.origem_id&&
+                      {ehPagamento && n.origem_tipo && n.origem_id && n.comprovante_url &&
                         <button
                           onClick={()=>abrirPagamento(n)}
                           className="rounded-xl bg-[#005a3c] px-4 py-3 text-xs font-black text-white shadow-sm hover:bg-[#004b32]"
