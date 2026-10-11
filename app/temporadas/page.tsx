@@ -210,6 +210,7 @@ export default function TemporadasPage() {
   const [pagamentoForma, setPagamentoForma] = useState("pix");
   const [pagamentoConta, setPagamentoConta] = useState("");
   const [chequeNumero, setChequeNumero] = useState("");
+  const [pagamentoComprovante, setPagamentoComprovante] = useState<File | null>(null);
 
   async function token() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -641,6 +642,7 @@ export default function TemporadasPage() {
     setPagamentoForma(p.forma_pagamento || "pix");
     setPagamentoConta(p.conta_bancaria_id || contas[0]?.id || "");
     setChequeNumero(p.cheque_numero || "");
+    setPagamentoComprovante(null);
   }
 
   async function confirmarPagamento() {
@@ -656,21 +658,21 @@ export default function TemporadasPage() {
 
     try {
       const accessToken = await token();
+      const form = new FormData();
+      form.set("acao", "registrar_pagamento");
+      form.set("temporada_id", temporadaPagamento.id);
+      form.set("parcela_id", abrirPagamento.id);
+      form.set("data_pagamento", pagamentoData);
+      form.set("forma_pagamento", pagamentoForma);
+      form.set("conta_bancaria_id", pagamentoForma === "cheque" ? "" : pagamentoConta);
+      form.set("cheque_numero", pagamentoForma === "cheque" ? chequeNumero : "");
+      if (pagamentoComprovante && pagamentoForma !== "cheque") {
+        form.set("arquivo", pagamentoComprovante);
+      }
       const resposta = await fetch("/api/temporadas", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          acao: "registrar_pagamento",
-          temporada_id: temporadaPagamento.id,
-          parcela_id: abrirPagamento.id,
-          data_pagamento: pagamentoData,
-          forma_pagamento: pagamentoForma,
-          conta_bancaria_id: pagamentoForma === "cheque" ? null : pagamentoConta,
-          cheque_numero: pagamentoForma === "cheque" ? chequeNumero || null : null,
-        }),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
       });
 
       const resultado = await resposta.json().catch(() => ({}));
@@ -683,6 +685,7 @@ export default function TemporadasPage() {
       );
       setAbrirPagamento(null);
       setTemporadaPagamento(null);
+      setPagamentoComprovante(null);
       await carregar();
     } catch (e) {
       setMensagem(e instanceof Error ? e.message : "Erro ao registrar pagamento.");
@@ -1185,6 +1188,18 @@ export default function TemporadasPage() {
                     <option value="">Selecione...</option>
                     {contas.filter((c) => c.ativo !== false).map((c) => <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>)}
                   </select>
+                </label>
+              )}
+              {pagamentoForma !== "cheque" && (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase text-[#718078]">Comprovante (opcional)</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    onChange={(e) => setPagamentoComprovante(e.target.files?.[0] || null)}
+                    className="w-full rounded-xl border px-3 py-3 text-sm"
+                  />
+                  <span className="mt-1 block text-xs text-[#718078]">JPG, PNG, WEBP ou PDF, até 8 MB.</span>
                 </label>
               )}
               {pagamentoForma === "cheque" && (
