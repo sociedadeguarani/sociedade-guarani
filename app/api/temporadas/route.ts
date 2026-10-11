@@ -169,7 +169,7 @@ async function criarMovimentacao(
   formaPagamento: string,
   contaId: string,
   dataPagamento: string,
-  createdBy: string
+  usuarioId: string
 ) {
   const { data: existente, error: erroBusca } = await db
     .from("movimentacoes_financeiras")
@@ -198,11 +198,11 @@ async function criarMovimentacao(
       origem_id: parcelaId,
       socio_id: socioId || null,
       dependente_id: null,
+      created_by: usuarioId,
       comprovante_url: null,
       conciliado: false,
       data_conciliacao: null,
       observacoes: `Entrada financeira referente à parcela da temporada ${temporadaId}.`,
-      created_by: createdBy,
     })
     .select("id")
     .single();
@@ -444,6 +444,9 @@ export async function POST(request: NextRequest) {
         return jsonError("Selecione a conta que receberá o pagamento.");
       }
 
+      // Atualização condicional: apenas uma requisição pode transformar uma
+      // parcela ainda não paga em paga. Se duas confirmações chegarem juntas,
+      // a segunda não encontrará a parcela no estado esperado e receberá 409.
       const { data: atualizada, error: erroAtualizacao } = await auth.db
         .from("temporadas_parcelas")
         .update({
@@ -454,29 +457,65 @@ export async function POST(request: NextRequest) {
           cheque_numero: chequeNumero,
         })
         .eq("id", parcelaId)
+        .eq("temporada_id", temporadaId)
+        .neq("situacao", "pago")
+        .neq("situacao", "cancelado")
         .select("*")
-        .single();
+        .maybeSingle();
 
       if (erroAtualizacao) throw erroAtualizacao;
+      if (!atualizada) {
+        return jsonError("Esta parcela já foi processada por outra operação. Atualize a tela antes de tentar novamente.", 409);
+      }
 
       let movimentacaoId: string | null = null;
       if (situacao === "pago") {
-        movimentacaoId = await criarMovimentacao(
-          auth.db,
-          temporadaId,
-          parcelaId,
-          ((await auth.db.from("temporadas").select("socio_id").eq("id", temporadaId).single()).data?.socio_id || null),
-          Number(atualizada.valor),
-          formaPagamento,
-          contaId!,
-          dataPagamento,
-          auth.user.id
-        );
+        try {
+          const { data: temporadaPagamento, error: erroTemporadaPagamento } = await auth.db
+            .from("temporadas")
+            .select("socio_id")
+            .eq("id", temporadaId)
+            .single();
+          if (erroTemporadaPagamento) throw erroTemporadaPagamento;
 
-        await auth.db
-          .from("temporadas_parcelas")
-          .update({ movimentacao_id: movimentacaoId })
-          .eq("id", parcelaId);
+          movimentacaoId = await criarMovimentacao(
+            auth.db,
+            temporadaId,
+            parcelaId,
+            temporadaPagamento?.socio_id || null,
+            Number(atualizada.valor),
+            formaPagamento,
+            contaId!,
+            dataPagamento,
+            auth.user.id
+          );
+
+          const { error: erroVinculoMovimentacao } = await auth.db
+            .from("temporadas_parcelas")
+            .update({ movimentacao_id: movimentacaoId })
+            .eq("id", parcelaId)
+            .eq("temporada_id", temporadaId);
+          if (erroVinculoMovimentacao) throw erroVinculoMovimentacao;
+        } catch (erroFinanceiro) {
+          // Não deixar uma parcela paga sem a movimentação correspondente.
+          // A criação da movimentação é idempotente por origem_tipo/origem_id,
+          // então uma nova tentativa poderá recuperar uma inserção que tenha
+          // sido concluída no banco apesar de uma falha de comunicação.
+          await auth.db
+            .from("temporadas_parcelas")
+            .update({
+              situacao: parcela.situacao,
+              data_pagamento: parcela.data_pagamento || null,
+              forma_pagamento: parcela.forma_pagamento || null,
+              conta_bancaria_id: parcela.conta_bancaria_id || null,
+              cheque_numero: parcela.cheque_numero || null,
+              movimentacao_id: parcela.movimentacao_id || null,
+            })
+            .eq("id", parcelaId)
+            .eq("temporada_id", temporadaId)
+            .eq("situacao", "pago");
+          throw erroFinanceiro;
+        }
       }
 
       const { data: temporada } = await auth.db
