@@ -160,6 +160,43 @@ async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo
   throw new Error("Limite de participantes da temporada atingido.");
 }
 
+const BUCKET_COMPROVANTES = "comprovantes-financeiro";
+const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+
+async function garantirBucketComprovantes(db: any) {
+  const atual = await db.storage.getBucket(BUCKET_COMPROVANTES);
+  if (!atual.error) return;
+  const criado = await db.storage.createBucket(BUCKET_COMPROVANTES, {
+    public: true,
+    fileSizeLimit: "8MB",
+    allowedMimeTypes: [...TIPOS_COMPROVANTE],
+  });
+  if (criado.error && !/already exists/i.test(criado.error.message)) {
+    throw new Error(criado.error.message);
+  }
+}
+
+async function salvarComprovante(db: any, arquivo: File): Promise<string> {
+  if (!TIPOS_COMPROVANTE.has(arquivo.type) || arquivo.size > 8 * 1024 * 1024) {
+    throw new Error("Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB.");
+  }
+  await garantirBucketComprovantes(db);
+  const extensaoPorTipo: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "application/pdf": "pdf",
+  };
+  const caminho = `temporadas/${crypto.randomUUID()}.${extensaoPorTipo[arquivo.type]}`;
+  const upload = await db.storage.from(BUCKET_COMPROVANTES).upload(
+    caminho,
+    new Uint8Array(await arquivo.arrayBuffer()),
+    { contentType: arquivo.type, upsert: false }
+  );
+  if (upload.error) throw new Error(upload.error.message);
+  return caminho;
+}
+
 async function criarMovimentacao(
   db: any,
   temporadaId: string,
@@ -169,18 +206,29 @@ async function criarMovimentacao(
   formaPagamento: string,
   contaId: string,
   dataPagamento: string,
-  usuarioId: string
+  usuarioId: string,
+  comprovantePath: string | null = null
 ) {
   const { data: existente, error: erroBusca } = await db
     .from("movimentacoes_financeiras")
-    .select("id")
+    .select("id,comprovante_url")
     .eq("origem_tipo", "temporada_parcela")
     .eq("origem_id", parcelaId)
     .limit(1)
     .maybeSingle();
 
   if (erroBusca) throw erroBusca;
-  if (existente?.id) return String(existente.id);
+  if (existente?.id) {
+    if (comprovantePath && !existente.comprovante_url) {
+      const { error: erroComprovante } = await db
+        .from("movimentacoes_financeiras")
+        .update({ comprovante_url: comprovantePath })
+        .eq("id", existente.id)
+        .is("comprovante_url", null);
+      if (erroComprovante) throw erroComprovante;
+    }
+    return String(existente.id);
+  }
 
   const { data, error } = await db
     .from("movimentacoes_financeiras")
@@ -199,7 +247,7 @@ async function criarMovimentacao(
       socio_id: socioId || null,
       dependente_id: null,
       created_by: usuarioId,
-      comprovante_url: null,
+      comprovante_url: comprovantePath,
       conciliado: false,
       data_conciliacao: null,
       observacoes: `Entrada financeira referente à parcela da temporada ${temporadaId}.`,
@@ -269,7 +317,14 @@ export async function POST(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const body = await request.json();
+    const contentType = request.headers.get("content-type") || "";
+    let body: Record<string, any>;
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      body = Object.fromEntries(form.entries()) as Record<string, any>;
+    } else {
+      body = (await request.json()) as Record<string, any>;
+    }
     const acao = String(body?.acao || "criar");
 
     if (acao === "criar") {
@@ -444,6 +499,24 @@ export async function POST(request: NextRequest) {
         return jsonError("Selecione a conta que receberá o pagamento.");
       }
 
+      const arquivoComprovante = body.arquivo;
+      const temArquivoComprovante = arquivoComprovante instanceof File && arquivoComprovante.size > 0;
+      if (temArquivoComprovante && situacao !== "pago") {
+        return jsonError("O comprovante pode ser anexado após a confirmação do pagamento. Cheques ficam em compensação.");
+      }
+      if (temArquivoComprovante && (!TIPOS_COMPROVANTE.has(arquivoComprovante.type) || arquivoComprovante.size > 8 * 1024 * 1024)) {
+        return jsonError("Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB.");
+      }
+
+      let comprovantePath: string | null = null;
+      if (temArquivoComprovante) {
+        try {
+          comprovantePath = await salvarComprovante(auth.db, arquivoComprovante);
+        } catch (erroUpload) {
+          return jsonError(erroUpload instanceof Error ? erroUpload.message : "Não foi possível salvar o comprovante.", 500);
+        }
+      }
+
       // Atualização condicional: apenas uma requisição pode transformar uma
       // parcela ainda não paga em paga. Se duas confirmações chegarem juntas,
       // a segunda não encontrará a parcela no estado esperado e receberá 409.
@@ -463,8 +536,12 @@ export async function POST(request: NextRequest) {
         .select("*")
         .maybeSingle();
 
-      if (erroAtualizacao) throw erroAtualizacao;
+      if (erroAtualizacao) {
+        if (comprovantePath) await auth.db.storage.from(BUCKET_COMPROVANTES).remove([comprovantePath]);
+        throw erroAtualizacao;
+      }
       if (!atualizada) {
+        if (comprovantePath) await auth.db.storage.from(BUCKET_COMPROVANTES).remove([comprovantePath]);
         return jsonError("Esta parcela já foi processada por outra operação. Atualize a tela antes de tentar novamente.", 409);
       }
 
@@ -487,7 +564,8 @@ export async function POST(request: NextRequest) {
             formaPagamento,
             contaId!,
             dataPagamento,
-            auth.user.id
+            auth.user.id,
+            comprovantePath
           );
 
           const { error: erroVinculoMovimentacao } = await auth.db
@@ -497,6 +575,21 @@ export async function POST(request: NextRequest) {
             .eq("temporada_id", temporadaId);
           if (erroVinculoMovimentacao) throw erroVinculoMovimentacao;
         } catch (erroFinanceiro) {
+          // Se o lançamento financeiro não foi gravado com este comprovante,
+          // remove o arquivo enviado para não deixar anexos órfãos. Se a gravação
+          // tiver sido concluída apesar de uma falha de comunicação, preserva-o.
+          if (comprovantePath) {
+            const { data: movimentoComprovante, error: erroBuscaComprovante } = await auth.db
+              .from("movimentacoes_financeiras")
+              .select("id")
+              .eq("origem_tipo", "temporada_parcela")
+              .eq("origem_id", parcelaId)
+              .eq("comprovante_url", comprovantePath)
+              .maybeSingle();
+            if (!erroBuscaComprovante && !movimentoComprovante) {
+              await auth.db.storage.from(BUCKET_COMPROVANTES).remove([comprovantePath]);
+            }
+          }
           // Não deixar uma parcela paga sem a movimentação correspondente.
           // A criação da movimentação é idempotente por origem_tipo/origem_id,
           // então uma nova tentativa poderá recuperar uma inserção que tenha
