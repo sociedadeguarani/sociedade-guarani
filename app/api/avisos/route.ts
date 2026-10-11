@@ -18,6 +18,11 @@ export async function GET(request: Request) {
     if (resultado.perfil === "associado") query = query.in("publico", ["todos", "associados"]);
     if (resultado.perfil === "funcionario") query = query.in("publico", ["todos", "funcionarios"]);
 
+    // Não exibir avisos ainda não vigentes ou já expirados.
+    const hoje = new Date().toISOString().slice(0, 10);
+    query = query.or(`data_inicio.is.null,data_inicio.lte.${hoje}`);
+    query = query.or(`data_fim.is.null,data_fim.gte.${hoje}`);
+
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     return NextResponse.json({ avisos: data || [], perfil: resultado.perfil });
