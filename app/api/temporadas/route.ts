@@ -160,6 +160,43 @@ async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo
   throw new Error("Limite de participantes da temporada atingido.");
 }
 
+async function registrarAvisoPagamentoTemporada(db: any, temporada: any, parcela: any, usuarioId: string | null) {
+  try {
+    const codigo = String(temporada?.codigo || temporada?.matricula || temporada?.id || "Temporada").trim();
+    const numero = parcela?.numero ? `parcela ${parcela.numero}` : String(parcela?.descricao || "parcela");
+    const valor = Number(parcela?.valor || 0).toFixed(2).replace(".", ",");
+    const titulo = "Pagamento de temporada confirmado";
+    const mensagem = `${String(temporada?.responsavel_nome || "Responsável não identificado").trim()} — temporada ${codigo}, ${numero}: R$ ${valor}. Pagamento lançado no Financeiro.`;
+
+    // Idempotência: uma repetição da mesma resposta não deve criar avisos duplicados.
+    const { data: existente, error: erroBusca } = await db
+      .from("avisos")
+      .select("id")
+      .eq("titulo", titulo)
+      .eq("mensagem", mensagem)
+      .eq("publico", "administradores")
+      .limit(1)
+      .maybeSingle();
+    if (erroBusca) throw erroBusca;
+    if (existente?.id) return;
+
+    const { error } = await db.from("avisos").insert({
+      titulo,
+      mensagem,
+      tipo: "informativo",
+      prioridade: "normal",
+      fixado: false,
+      ativo: true,
+      publico: "administradores",
+      criado_por: usuarioId,
+    });
+    if (error) throw error;
+  } catch (error) {
+    // A falha de um aviso não pode desfazer um pagamento já lançado no Financeiro.
+    console.error("Não foi possível criar aviso do pagamento de temporada:", error);
+  }
+}
+
 const BUCKET_COMPROVANTES = "comprovantes-financeiro";
 const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
@@ -448,6 +485,11 @@ export async function POST(request: NextRequest) {
             .update({ matricula: codigo })
             .eq("temporada_id", temporada.id)
             .eq("papel", "titular");
+          await registrarAvisoPagamentoTemporada(auth.db, {
+            ...temporada,
+            codigo,
+            responsavel_nome: responsavelNome,
+          }, primeiraConfirmada, auth.user.id);
         } else {
           const { error: atualiza } = await auth.db
             .from("temporadas")
@@ -613,7 +655,7 @@ export async function POST(request: NextRequest) {
 
       const { data: temporada } = await auth.db
         .from("temporadas")
-        .select("id,socio_id,codigo,matricula,situacao,data_pagamento")
+        .select("id,socio_id,codigo,matricula,situacao,data_pagamento,responsavel_nome")
         .eq("id", temporadaId)
         .single();
 
@@ -638,6 +680,20 @@ export async function POST(request: NextRequest) {
           .from("temporadas")
           .update({ situacao: "ativa", data_pagamento: dataPagamento })
           .eq("id", temporadaId);
+      }
+
+      if (situacao === "pago" && temporada) {
+        if (temporada.codigo || temporada.matricula) {
+          await registrarAvisoPagamentoTemporada(auth.db, temporada, atualizada, auth.user.id);
+        } else {
+          // A primeira parcela paga pode gerar a matrícula TE neste mesmo fluxo.
+          const { data: temporadaAtualizada } = await auth.db
+            .from("temporadas")
+            .select("id,codigo,matricula,responsavel_nome")
+            .eq("id", temporadaId)
+            .maybeSingle();
+          await registrarAvisoPagamentoTemporada(auth.db, temporadaAtualizada || temporada, atualizada, auth.user.id);
+        }
       }
 
       return NextResponse.json({
