@@ -512,18 +512,19 @@ export default function AvisosPage(){
         </div>
       ) : (
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {avisos.map(a=>
-          <article key={a.id} className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
+        {avisos.map(a=>{
+          const avisoAutomatico = String(a.tipo || "").toLowerCase() === "sistema" || a.titulo === "Pagamento de temporada confirmado";
+          return <article key={a.id} className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
             {a.imagem_url&&<img src={a.imagem_url} alt="" className="h-48 w-full object-cover"/>}
             <div className="p-5">
-              <div className="flex items-center justify-between gap-2"><span className="rounded-full bg-[#e8f3ee] px-2.5 py-1 text-[10px] font-black uppercase text-[#005a3c]">{a.tipo}</span>{a.fixado&&<Pin className="h-4 w-4 text-amber-600"/>}</div>
+              <div className="flex items-center justify-between gap-2"><span className="rounded-full bg-[#e8f3ee] px-2.5 py-1 text-[10px] font-black uppercase text-[#005a3c]">{avisoAutomatico ? "Automático do sistema" : a.tipo}</span>{a.fixado&&<Pin className="h-4 w-4 text-amber-600"/>}</div>
               <h2 className="mt-3 text-xl font-black text-[#003d2b]">{a.titulo}</h2>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{a.mensagem}</p>
               <div className="mt-4 text-xs font-bold text-gray-400">Publicado em {new Date(a.data_publicacao).toLocaleDateString("pt-BR")}</div>
-              {podeGerenciarAvisos&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
+              {avisoAutomatico ? <p className="mt-4 rounded-lg bg-[#f3f7f5] px-3 py-2 text-xs font-semibold text-gray-500">Registro automático de uma operação do sistema. Não precisa de confirmação nesta tela.</p> : podeGerenciarAvisos&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
             </div>
-          </article>
-        )}
+          </article>;
+        })}
       </div>
       )}
 
