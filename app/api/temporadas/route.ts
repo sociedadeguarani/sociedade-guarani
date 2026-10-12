@@ -183,7 +183,7 @@ async function registrarAvisoPagamentoTemporada(db: any, temporada: any, parcela
     const { error } = await db.from("avisos").insert({
       titulo,
       mensagem,
-      tipo: "informativo",
+      tipo: "sistema",
       prioridade: "normal",
       fixado: false,
       ativo: true,
@@ -244,6 +244,8 @@ async function criarMovimentacao(
   contaId: string,
   dataPagamento: string,
   usuarioId: string,
+  responsavelNome: string,
+  numeroParcela: number | string,
   comprovantePath: string | null = null
 ) {
   const { data: existente, error: erroBusca } = await db
@@ -275,7 +277,7 @@ async function criarMovimentacao(
       grupo_transferencia: null,
       tipo: "entrada",
       categoria: "Temporada",
-      descricao: `Temporada - parcela ${parcelaId}`,
+      descricao: `Temporada — ${String(responsavelNome || "Responsável não identificado").trim()} — Parcela ${numeroParcela || "—"}`,
       valor,
       data_movimentacao: dataPagamento,
       forma_pagamento: formaPagamento,
@@ -465,7 +467,9 @@ export async function POST(request: NextRequest) {
             String(primeiraConfirmada.forma_pagamento),
             String(primeiraConfirmada.conta_bancaria_id),
             String(primeiraConfirmada.data_pagamento),
-            auth.user.id
+            auth.user.id,
+            responsavelNome,
+            primeiraConfirmada.numero
           );
 
           const { error: atualiza } = await auth.db
@@ -592,7 +596,7 @@ export async function POST(request: NextRequest) {
         try {
           const { data: temporadaPagamento, error: erroTemporadaPagamento } = await auth.db
             .from("temporadas")
-            .select("socio_id")
+            .select("socio_id,responsavel_nome,codigo,matricula")
             .eq("id", temporadaId)
             .single();
           if (erroTemporadaPagamento) throw erroTemporadaPagamento;
@@ -607,6 +611,8 @@ export async function POST(request: NextRequest) {
             contaId!,
             dataPagamento,
             auth.user.id,
+            String(temporadaPagamento?.responsavel_nome || "Responsável não identificado"),
+            atualizada.numero || "—",
             comprovantePath
           );
 
