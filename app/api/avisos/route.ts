@@ -110,14 +110,24 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o aviso." }, { status: 400 });
-    const campos = ["titulo", "mensagem", "imagem_url", "tipo", "prioridade", "fixado", "ativo", "publico", "data_inicio", "data_fim"];
-    const update: Record<string, unknown> = {};
-    for (const campo of campos) if (Object.prototype.hasOwnProperty.call(body, campo)) update[campo] = body[campo] === "" ? null : body[campo];
     const supabase = getServiceClient();
     const { data: avisoAtual, error: erroAvisoAtual } = await supabase.from("avisos").select("id,titulo,tipo").eq("id", id).maybeSingle();
     if (erroAvisoAtual) throw new Error(erroAvisoAtual.message);
     if (!avisoAtual) return NextResponse.json({ error: "Aviso não encontrado." }, { status: 404 });
-    if (String(avisoAtual.tipo || "").toLowerCase() === "sistema" || avisoAtual.titulo === "Pagamento de temporada confirmado") {
+    const avisoAutomatico = String(avisoAtual.tipo || "").toLowerCase() === "sistema" || avisoAtual.titulo === "Pagamento de temporada confirmado";
+
+    // Dispensar encerra apenas a exibição do aviso; não toca no lançamento financeiro.
+    if (body.acao === "dispensar") {
+      if (!avisoAutomatico) return NextResponse.json({ error: "Somente avisos automáticos podem ser fechados por esta ação." }, { status: 400 });
+      const { error } = await supabase.from("avisos").update({ ativo: false }).eq("id", id);
+      if (error) throw new Error(error.message);
+      return NextResponse.json({ ok: true, dispensado: true });
+    }
+
+    const campos = ["titulo", "mensagem", "imagem_url", "tipo", "prioridade", "fixado", "ativo", "publico", "data_inicio", "data_fim"];
+    const update: Record<string, unknown> = {};
+    for (const campo of campos) if (Object.prototype.hasOwnProperty.call(body, campo)) update[campo] = body[campo] === "" ? null : body[campo];
+    if (avisoAutomatico) {
       return NextResponse.json({ error: "Avisos automáticos do sistema não podem ser editados manualmente." }, { status: 400 });
     }
     const { data, error } = await supabase.from("avisos").update(update).eq("id", id).select("*").single();
