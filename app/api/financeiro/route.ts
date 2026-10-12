@@ -36,17 +36,49 @@ export async function GET(request: Request) {
     // Resolve o responsável no servidor com service role. A consulta feita
     // pelo navegador pode ser filtrada por RLS e deixar o nome em branco.
     const listaMovimentos = movimentosData || [];
+
+    // Enriquecer lançamentos de temporada com o titular e o número real da parcela.
+    // Isso também corrige a descrição exibida de lançamentos antigos sem alterar o histórico gravado.
+    const idsParcelasTemporada = Array.from(new Set(
+      listaMovimentos
+        .filter((movimento) => movimento.origem_tipo === "temporada_parcela" && movimento.origem_id)
+        .map((movimento) => String(movimento.origem_id))
+    ));
+    if (idsParcelasTemporada.length) {
+      const { data: parcelasTemporada, error: erroParcelasTemporada } = await supabase
+        .from("temporadas_parcelas")
+        .select("id,numero,temporada_id")
+        .in("id", idsParcelasTemporada);
+      if (erroParcelasTemporada) throw erroParcelasTemporada;
+      const parcelas = parcelasTemporada || [];
+      const idsTemporadas = Array.from(new Set(parcelas.map((parcela) => String(parcela.temporada_id)).filter(Boolean)));
+      const { data: temporadas, error: erroTemporadas } = idsTemporadas.length
+        ? await supabase.from("temporadas").select("id,responsavel_nome,codigo,matricula").in("id", idsTemporadas)
+        : { data: [], error: null };
+      if (erroTemporadas) throw erroTemporadas;
+      const parcelaPorId = new Map(parcelas.map((parcela) => [String(parcela.id), parcela]));
+      const temporadaPorId = new Map((temporadas || []).map((temporada) => [String(temporada.id), temporada]));
+      for (const movimento of listaMovimentos) {
+        if (movimento.origem_tipo !== "temporada_parcela" || !movimento.origem_id) continue;
+        const parcela = parcelaPorId.get(String(movimento.origem_id));
+        const temporada = parcela ? temporadaPorId.get(String(parcela.temporada_id)) : null;
+        if (!parcela || !temporada) continue;
+        const nome = String(temporada.responsavel_nome || "Responsável não identificado").trim();
+        movimento.descricao = `Temporada — ${nome} — Parcela ${parcela.numero || "—"}`;
+      }
+    }
+
     const usuarioIds = Array.from(new Set(
       listaMovimentos
         .map((movimento) => movimento.created_by)
         .filter((id): id is string => Boolean(id))
     ));
-    const usuariosPorId = new Map<string, { nome: string | null }>();
+    const usuariosPorId = new Map<string, { nome: string | null; email: string | null }>();
 
     if (usuarioIds.length > 0) {
       const { data: usuarios, error: usuariosError } = await supabase
         .from("usuarios_sistema")
-        .select("id,nome_exibicao")
+        .select("id,nome_exibicao,email")
         .in("id", usuarioIds);
       // A falha ao consultar os perfis não pode impedir o carregamento
       // das contas e movimentações financeiras. A identificação é complementar.
@@ -56,6 +88,7 @@ export async function GET(request: Request) {
       for (const usuario of usuarios || []) {
         usuariosPorId.set(String(usuario.id), {
           nome: usuario.nome_exibicao || null,
+          email: usuario.email || null,
         });
       }
     }
@@ -67,7 +100,7 @@ export async function GET(request: Request) {
       return {
         ...movimento,
         created_by_nome: usuario?.nome || null,
-        created_by_email: null,
+        created_by_email: usuario?.email || null,
       };
     });
 
