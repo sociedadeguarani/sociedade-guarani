@@ -309,6 +309,19 @@ export default function AvisosPage(){
     await carregar();
   }
 
+  async function dispensarAvisoAutomatico(a:Aviso){
+    if(!confirm("Fechar este aviso automático? O aviso deixará de aparecer na lista, mas o pagamento continuará registrado no Financeiro."))return;
+    setProcessando(a.id);setErro("");
+    try{
+      const r=await api("/api/avisos",{method:"PATCH",body:JSON.stringify({id:a.id,acao:"dispensar"})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){setErro(j.error||"Não foi possível fechar o aviso.");return;}
+      setAvisos(lista=>lista.filter(x=>x.id!==a.id));
+    }catch(e){
+      setErro(e instanceof Error?e.message:"Erro ao fechar o aviso.");
+    }finally{setProcessando(null);}
+  }
+
   // Reservas pendentes já têm um bloco próprio acima. Algumas instalações
   // também criam uma notificação para a mesma reserva; ocultamos somente
   // essa cópia para que a mesma pendência não apareça duas vezes.
@@ -521,7 +534,7 @@ export default function AvisosPage(){
               <h2 className="mt-3 text-xl font-black text-[#003d2b]">{a.titulo}</h2>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{a.mensagem}</p>
               <div className="mt-4 text-xs font-bold text-gray-400">Publicado em {new Date(a.data_publicacao).toLocaleDateString("pt-BR")}</div>
-              {avisoAutomatico ? <p className="mt-4 rounded-lg bg-[#f3f7f5] px-3 py-2 text-xs font-semibold text-gray-500">Registro automático de uma operação do sistema. Não precisa de confirmação nesta tela.</p> : podeGerenciarAvisos&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
+              {avisoAutomatico ? <div className="mt-4 space-y-3"><p className="rounded-lg bg-[#f3f7f5] px-3 py-2 text-xs font-semibold text-gray-500">Registro automático do sistema. Fechar este aviso não altera nem apaga o pagamento no Financeiro.</p>{podeGerenciarAvisos&&<button disabled={processando===a.id} onClick={()=>void dispensarAvisoAutomatico(a)} className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#cfe3d8] px-3 py-2 text-sm font-black text-[#005a3c] disabled:opacity-60"><X className="h-4 w-4"/>{processando===a.id?"Fechando...":"Fechar aviso"}</button>}</div> : podeGerenciarAvisos&&<div className="mt-4 flex gap-2"><button onClick={()=>editar(a)} className="flex-1 rounded-xl border px-3 py-2 font-black"><Edit3 className="mr-1 inline h-4 w-4"/>Editar</button><button onClick={()=>excluir(a)} className="rounded-xl border border-red-200 px-3 py-2 text-red-600"><Trash2 className="h-4 w-4"/></button></div>}
             </div>
           </article>;
         })}
