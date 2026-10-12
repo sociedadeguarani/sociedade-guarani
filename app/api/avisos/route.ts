@@ -114,6 +114,12 @@ export async function PATCH(request: Request) {
     const update: Record<string, unknown> = {};
     for (const campo of campos) if (Object.prototype.hasOwnProperty.call(body, campo)) update[campo] = body[campo] === "" ? null : body[campo];
     const supabase = getServiceClient();
+    const { data: avisoAtual, error: erroAvisoAtual } = await supabase.from("avisos").select("id,titulo,tipo").eq("id", id).maybeSingle();
+    if (erroAvisoAtual) throw new Error(erroAvisoAtual.message);
+    if (!avisoAtual) return NextResponse.json({ error: "Aviso não encontrado." }, { status: 404 });
+    if (String(avisoAtual.tipo || "").toLowerCase() === "sistema" || avisoAtual.titulo === "Pagamento de temporada confirmado") {
+      return NextResponse.json({ error: "Avisos automáticos do sistema não podem ser editados manualmente." }, { status: 400 });
+    }
     const { data, error } = await supabase.from("avisos").update(update).eq("id", id).select("*").single();
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true, aviso: data });
@@ -130,6 +136,12 @@ export async function DELETE(request: Request) {
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Informe o aviso." }, { status: 400 });
     const supabase = getServiceClient();
+    const { data: avisoAtual, error: erroAvisoAtual } = await supabase.from("avisos").select("id,titulo,tipo").eq("id", id).maybeSingle();
+    if (erroAvisoAtual) throw new Error(erroAvisoAtual.message);
+    if (!avisoAtual) return NextResponse.json({ error: "Aviso não encontrado." }, { status: 404 });
+    if (String(avisoAtual.tipo || "").toLowerCase() === "sistema" || avisoAtual.titulo === "Pagamento de temporada confirmado") {
+      return NextResponse.json({ error: "Avisos automáticos do sistema não podem ser excluídos manualmente." }, { status: 400 });
+    }
     const { error } = await supabase.from("avisos").delete().eq("id", id);
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true });
