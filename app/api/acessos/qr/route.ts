@@ -1,4 +1,49 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
-function calcularExame(data:string|null|undefined){if(!data)return{status:"nao_informado",label:"Não informado",cor:"cinza",validade:null};const validade=new Date(`${data}T23:59:59`),hoje=new Date(),diffDias=Math.floor((hoje.getTime()-validade.getTime())/86400000);if(diffDias<=0)return{status:"em_dia",label:"Em dia",cor:"verde",validade:data};if(diffDias<=60)return{status:"atrasado",label:"Atrasado até 2 meses",cor:"amarelo",validade:data};return{status:"bem_atrasado",label:"Bem atrasado",cor:"vermelho",validade:data};}
-export async function POST(request:Request){const auth=await requireRoles(request,["administrador","funcionario"]);if("response" in auth)return auth.response;const {id}=await request.json();if(!id)return NextResponse.json({error:"Associado não informado."},{status:400});const supabase=getServiceClient();const {data:socio,error:socioError}=await supabase.from("socios").select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url").eq("id",id).maybeSingle();if(socioError)return NextResponse.json({error:socioError.message},{status:500});if(!socio)return NextResponse.json({error:"Associado não encontrado."},{status:404});const {data:exameData}=await supabase.from("acessos_piscina").select("exame_validade,exame_verificado,data_hora_entrada").eq("socio_id",id).not("exame_validade","is",null).order("data_hora_entrada",{ascending:false}).limit(1).maybeSingle();const exame=calcularExame(exameData?.exame_validade);const situacao=String(socio.situacao||"").toLowerCase();const liberado=["ativo","ativa","em_dia"].includes(situacao)||!situacao;const resultado=liberado?"liberado":"bloqueado";const {data:acesso,error}=await supabase.from("acessos_sociedade").insert({socio_id:id,usuario_id:auth.usuario.id,resultado,local:"Portaria - QR Code"}).select("id,entrada_em,local,resultado").single();if(error)return NextResponse.json({error:error.message},{status:500});return NextResponse.json({socio,exame,liberado,acesso});}
+import { POST as registrarAcesso } from "../route";
+
+/**
+ * Mantém o endpoint usado pelas carteirinhas QR, mas delega a validação ao
+ * fluxo principal de acessos. Assim, o QR não pode liberar alguém ignorando
+ * mensalidades atrasadas, situação cadastral ou regras da temporada.
+ */
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const id = String(body?.id || body?.socio_id || "").trim();
+    if (!id) {
+      return NextResponse.json({ error: "Associado não informado." }, { status: 400 });
+    }
+
+    const url = new URL(request.url);
+    url.pathname = url.pathname.replace(/\/qr\/?$/, "");
+    const headers = new Headers(request.headers);
+    headers.set("content-type", "application/json");
+
+    const resposta = await registrarAcesso(new Request(url.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ socio_id: id }),
+    }));
+    const dados = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      return NextResponse.json(dados, { status: resposta.status });
+    }
+
+    // Mantém o formato esperado pela tela QR antiga sem duplicar as regras.
+    const exameBase = dados?.exame || {};
+    const exameStatus = exameBase?.status;
+    const exame = {
+      ...exameBase,
+      label: exameBase.label || exameStatus?.texto || "Controle de exame médico não configurado",
+      cor: exameBase.cor || exameStatus?.cor || "cinza",
+      validade: exameBase.validade || null,
+    };
+
+    return NextResponse.json({ ...dados, exame });
+  } catch {
+    return NextResponse.json(
+      { error: "Não foi possível validar o QR Code. Tente novamente." },
+      { status: 500 }
+    );
+  }
+}
