@@ -24,6 +24,15 @@ export async function POST(request: Request) {
       headers,
       body: JSON.stringify({ socio_id: id }),
     }));
+    // A tipagem inferida da rota principal permite, em alguns caminhos, um
+    // retorno ausente. Trate esse caso antes de acessar json()/ok/status.
+    if (!resposta) {
+      return NextResponse.json(
+        { error: "A validação principal de acesso não retornou uma resposta." },
+        { status: 500 }
+      );
+    }
+
     const dados = await resposta.json().catch(() => ({}));
     if (!resposta.ok) {
       return NextResponse.json(dados, { status: resposta.status });
