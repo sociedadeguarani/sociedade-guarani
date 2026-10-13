@@ -15,17 +15,29 @@ export async function GET(request: Request) {
       .order("fixado", { ascending: false })
       .order("data_publicacao", { ascending: false });
 
-    if (resultado.perfil === "associado") query = query.in("publico", ["todos", "associados"]);
-    if (resultado.perfil === "funcionario") query = query.in("publico", ["todos", "funcionarios"]);
-
-    // Não exibir avisos ainda não vigentes ou já expirados.
-    const hoje = new Date().toISOString().slice(0, 10);
-    query = query.or(`data_inicio.is.null,data_inicio.lte.${hoje}`);
-    query = query.or(`data_fim.is.null,data_fim.gte.${hoje}`);
+    const perfilAtual = String(resultado.perfil || "").trim().toLowerCase();
+    const perfisAdmin = ["administrador", "administrador_master", "admin", "master"];
+    if (!perfisAdmin.includes(perfilAtual)) {
+      if (perfilAtual === "associado") {
+        query = query.in("publico", ["todos", "associados"]);
+      } else if (perfilAtual.startsWith("funcionario") || perfilAtual.startsWith("funcionário")) {
+        // Inclui funcionario_inventario/portaria sem expor avisos exclusivos da administração.
+        query = query.in("publico", ["todos", "funcionarios"]);
+      } else {
+        query = query.eq("publico", "todos");
+      }
+    }
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
-    return NextResponse.json({ avisos: data || [], perfil: resultado.perfil });
+    // Avaliar ambas as extremidades no servidor, sem sobrescrever filtros OR repetidos.
+    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const avisosVigentes = (data || []).filter((aviso: any) => {
+      const inicioOk = !aviso.data_inicio || String(aviso.data_inicio).slice(0, 10) <= hoje;
+      const fimOk = !aviso.data_fim || String(aviso.data_fim).slice(0, 10) >= hoje;
+      return inicioOk && fimOk;
+    });
+    return NextResponse.json({ avisos: avisosVigentes, perfil: resultado.perfil });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar avisos." }, { status: 500 });
   }
@@ -57,7 +69,7 @@ export async function POST(request: Request) {
         .insert({
           titulo,
           mensagem,
-          tipo: "informacao",
+          tipo: "sistema",
           prioridade: "alta",
           fixado: false,
           ativo: true,
