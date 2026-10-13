@@ -37,34 +37,68 @@ export async function GET(request: Request) {
     // pelo navegador pode ser filtrada por RLS e deixar o nome em branco.
     const listaMovimentos = movimentosData || [];
 
-    // Enriquecer lançamentos de temporada com o titular e o número real da parcela.
-    // Isso também corrige a descrição exibida de lançamentos antigos sem alterar o histórico gravado.
+    // Enriquecer lançamentos de temporada usando primeiro a parcela referenciada,
+    // depois o vínculo parcela.movimentacao_id. O fallback legado procura também
+    // uma temporada diretamente pelo origem_id. Não alteramos dados persistidos.
+    const movimentosTemporada = listaMovimentos.filter(
+      (movimento) => String(movimento.origem_tipo || "").toLowerCase() === "temporada_parcela"
+    );
     const idsParcelasTemporada = Array.from(new Set(
-      listaMovimentos
-        .filter((movimento) => movimento.origem_tipo === "temporada_parcela" && movimento.origem_id)
-        .map((movimento) => String(movimento.origem_id))
+      movimentosTemporada.map((movimento) => String(movimento.origem_id || "").trim()).filter(Boolean)
     ));
+    const idsMovimentosTemporada = movimentosTemporada.map((movimento) => String(movimento.id));
+
+    let parcelasPorId: any[] = [];
+    let parcelasPorMovimento: any[] = [];
     if (idsParcelasTemporada.length) {
-      const { data: parcelasTemporada, error: erroParcelasTemporada } = await supabase
+      const resultadoParcelasId = await supabase
         .from("temporadas_parcelas")
-        .select("id,numero,temporada_id")
+        .select("id,numero,temporada_id,movimentacao_id")
         .in("id", idsParcelasTemporada);
-      if (erroParcelasTemporada) throw erroParcelasTemporada;
-      const parcelas = parcelasTemporada || [];
-      const idsTemporadas = Array.from(new Set(parcelas.map((parcela) => String(parcela.temporada_id)).filter(Boolean)));
-      const { data: temporadas, error: erroTemporadas } = idsTemporadas.length
-        ? await supabase.from("temporadas").select("id,responsavel_nome,codigo,matricula").in("id", idsTemporadas)
-        : { data: [], error: null };
-      if (erroTemporadas) throw erroTemporadas;
-      const parcelaPorId = new Map(parcelas.map((parcela) => [String(parcela.id), parcela]));
-      const temporadaPorId = new Map((temporadas || []).map((temporada) => [String(temporada.id), temporada]));
-      for (const movimento of listaMovimentos) {
-        if (movimento.origem_tipo !== "temporada_parcela" || !movimento.origem_id) continue;
-        const parcela = parcelaPorId.get(String(movimento.origem_id));
-        const temporada = parcela ? temporadaPorId.get(String(parcela.temporada_id)) : null;
-        if (!parcela || !temporada) continue;
-        const nome = String(temporada.responsavel_nome || "Responsável não identificado").trim();
-        movimento.descricao = `Temporada — ${nome} — Parcela ${parcela.numero || "—"}`;
+      if (resultadoParcelasId.error) throw resultadoParcelasId.error;
+      parcelasPorId = resultadoParcelasId.data || [];
+    }
+    if (idsMovimentosTemporada.length) {
+      const resultadoParcelasMovimento = await supabase
+        .from("temporadas_parcelas")
+        .select("id,numero,temporada_id,movimentacao_id")
+        .in("movimentacao_id", idsMovimentosTemporada);
+      if (resultadoParcelasMovimento.error) throw resultadoParcelasMovimento.error;
+      parcelasPorMovimento = resultadoParcelasMovimento.data || [];
+    }
+
+    const parcelas = [...(parcelasPorId || []), ...(parcelasPorMovimento || [])];
+    const parcelaPorId = new Map(parcelas.map((parcela) => [String(parcela.id), parcela]));
+    const parcelaPorMovimento = new Map(
+      parcelas.filter((parcela) => parcela.movimentacao_id).map((parcela) => [String(parcela.movimentacao_id), parcela])
+    );
+    const idsTemporadas = Array.from(new Set(
+      parcelas.map((parcela) => String(parcela.temporada_id || "")).filter(Boolean)
+    ));
+    const idsTemporadasLegadas = Array.from(new Set(
+      movimentosTemporada.map((movimento) => String(movimento.origem_id || "").trim()).filter(Boolean)
+    ));
+    const todosIdsTemporadas = Array.from(new Set([...idsTemporadas, ...idsTemporadasLegadas]));
+    const { data: temporadas, error: erroTemporadas } = todosIdsTemporadas.length
+      ? await supabase.from("temporadas").select("id,responsavel_nome,codigo,matricula").in("id", todosIdsTemporadas)
+      : { data: [], error: null };
+    if (erroTemporadas) throw erroTemporadas;
+    const temporadaPorId = new Map((temporadas || []).map((temporada) => [String(temporada.id), temporada]));
+
+    for (const movimento of movimentosTemporada) {
+      const parcela = parcelaPorId.get(String(movimento.origem_id || "")) || parcelaPorMovimento.get(String(movimento.id));
+      const temporada = parcela
+        ? temporadaPorId.get(String(parcela.temporada_id || ""))
+        : temporadaPorId.get(String(movimento.origem_id || ""));
+      const nome = String(temporada?.responsavel_nome || "").trim();
+      if (nome) {
+        const numeroParcela = parcela?.numero;
+        movimento.descricao = numeroParcela
+          ? `Temporada — ${nome} — Parcela ${numeroParcela}`
+          : `Temporada — ${nome}`;
+      } else if (/temporada/i.test(String(movimento.descricao || "")) && /[0-9a-f]{8}-[0-9a-f-]{27,}/i.test(String(movimento.descricao || ""))) {
+        // Não expor UUID cru como descrição contábil quando o vínculo legado não é resolvido.
+        movimento.descricao = "Temporada — Responsável não identificado — Parcela a identificar";
       }
     }
 
@@ -73,12 +107,12 @@ export async function GET(request: Request) {
         .map((movimento) => movimento.created_by)
         .filter((id): id is string => Boolean(id))
     ));
-    const usuariosPorId = new Map<string, { nome: string | null; email: string | null }>();
+    const usuariosPorId = new Map<string, { nome: string | null }>();
 
     if (usuarioIds.length > 0) {
       const { data: usuarios, error: usuariosError } = await supabase
         .from("usuarios_sistema")
-        .select("id,nome_exibicao,email")
+        .select("id,nome_exibicao")
         .in("id", usuarioIds);
       // A falha ao consultar os perfis não pode impedir o carregamento
       // das contas e movimentações financeiras. A identificação é complementar.
@@ -88,7 +122,6 @@ export async function GET(request: Request) {
       for (const usuario of usuarios || []) {
         usuariosPorId.set(String(usuario.id), {
           nome: usuario.nome_exibicao || null,
-          email: usuario.email || null,
         });
       }
     }
@@ -100,7 +133,7 @@ export async function GET(request: Request) {
       return {
         ...movimento,
         created_by_nome: usuario?.nome || null,
-        created_by_email: usuario?.email || null,
+        created_by_email: null,
       };
     });
 
