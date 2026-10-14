@@ -333,18 +333,36 @@ export async function POST(request: Request) {
       if (temporadaPorMatricula) {
         temporadaId = String(temporadaPorMatricula.id);
       } else {
-        const { data: participantePorMatricula, error: participanteMatriculaError } =
+        // Algumas temporadas guardam a matrícula TE diretamente em `codigo`,
+        // enquanto `matricula` pode estar nulo. Tentar os dois campos evita
+        // tratar uma carteirinha de temporada válida como sócio inexistente.
+        const { data: temporadaPorCodigo, error: temporadaCodigoError } =
           await supabase
-            .from("temporadas_participantes")
-            .select("id,temporada_id")
-            .eq("matricula", matricula)
+            .from("temporadas")
+            .select("id")
+            .eq("codigo", matricula)
+            .limit(1)
             .maybeSingle();
 
-        if (participanteMatriculaError) throw participanteMatriculaError;
+        if (temporadaCodigoError) throw temporadaCodigoError;
 
-        if (participantePorMatricula) {
-          temporadaParticipanteId = String(participantePorMatricula.id);
-          temporadaId = String(participantePorMatricula.temporada_id);
+        if (temporadaPorCodigo) {
+          temporadaId = String(temporadaPorCodigo.id);
+        } else {
+          const { data: participantePorMatricula, error: participanteMatriculaError } =
+            await supabase
+              .from("temporadas_participantes")
+              .select("id,temporada_id")
+              .eq("matricula", matricula)
+              .limit(1)
+              .maybeSingle();
+
+          if (participanteMatriculaError) throw participanteMatriculaError;
+
+          if (participantePorMatricula) {
+            temporadaParticipanteId = String(participantePorMatricula.id);
+            temporadaId = String(participantePorMatricula.temporada_id);
+          }
         }
       }
     }
@@ -428,15 +446,37 @@ export async function POST(request: Request) {
           )
           .eq("temporada_id", temporadaId)
           .eq("matricula", matricula)
+          .limit(1)
           .maybeSingle();
 
         if (error) throw error;
         participante = data || null;
       }
 
+      // Se o responsável ainda não recebeu matrícula na tabela de participantes,
+      // recuperamos o participante titular da temporada para preservar nome,
+      // foto e validade individual do exame médico.
+      if (!participante) {
+        const { data, error } = await supabase
+          .from("temporadas_participantes")
+          .select(
+            "id,temporada_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url,exame_medico_validade"
+          )
+          .eq("temporada_id", temporadaId)
+          .eq("papel", "titular")
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
+        participante = data || null;
+      }
+
+      const codigoTemporada = String(temporadaNormalizada.codigo || "").trim().toUpperCase();
       const matriculaResponsavel =
-        temporadaNormalizada.matricula ||
-        `${temporadaNormalizada.codigo || "TE0001"}A`;
+        String(temporadaNormalizada.matricula || "").trim().toUpperCase() ||
+        (codigoTemporada
+          ? (/[A-Z]$/.test(codigoTemporada) ? codigoTemporada : `${codigoTemporada}A`)
+          : "TE0001A");
 
       if (!participante) {
         participante = {
