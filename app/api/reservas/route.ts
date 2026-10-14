@@ -35,10 +35,19 @@ function normalizarEspacoBanco(row: Record<string, unknown>) {
     categoria = "eventos";
   }
 
+  const nomeNormalizado = normalizarTexto(nome);
   const cobrancaBruta = normalizarTexto(
     row.cobranca ?? row.tipo_cobranca ?? row.unidade_cobranca ?? row.forma_cobranca ?? row.tipo,
   );
-  const cobranca: "hora" | "diaria" = cobrancaBruta.includes("diar") || cobrancaBruta.includes("dia") ? "diaria" : "hora";
+  // Regra da Sociedade: quiosques e salões ocupam o dia inteiro,
+  // mesmo quando o cadastro antigo não possui o campo de cobrança preenchido.
+  const diariaPeloNome =
+    nomeNormalizado.includes("quiosque") ||
+    nomeNormalizado.includes("salao");
+  const cobranca: "hora" | "diaria" =
+    cobrancaBruta.includes("diar") || cobrancaBruta.includes("dia") || diariaPeloNome
+      ? "diaria"
+      : "hora";
 
   const precoBase = Number(
     cobranca === "diaria" ? row.preco_diaria ?? row.valor_diaria : row.preco_hora ?? row.valor_hora,
@@ -105,6 +114,78 @@ function dividirHorario(horario: string) {
   return { inicio: inicio || horario.trim(), fim: fim || inicio || horario.trim() };
 }
 
+function minutosDoDia(valor: unknown) {
+  const texto = String(valor ?? "").slice(0, 5);
+  const correspondencia = /^(\d{2}):(\d{2})$/.exec(texto);
+  if (!correspondencia) return null;
+  const horas = Number(correspondencia[1]);
+  const minutos = Number(correspondencia[2]);
+  if (horas > 23 || minutos > 59) return null;
+  return horas * 60 + minutos;
+}
+
+/**
+ * Validação no servidor para evitar duas reservas ativas no mesmo espaço.
+ * Espaços por diária (como quiosques e salões) ocupam o dia inteiro.
+ * Espaços por hora não podem ter períodos sobrepostos.
+ */
+async function verificarConflitoReserva(
+  db: any,
+  dados: {
+    espacoId: string;
+    data: string;
+    inicio: string;
+    fim: string;
+    ignorarId?: string;
+  },
+): Promise<string | null> {
+  const { data: espacoDb, error: erroEspaco } = await db
+    .from("espacos")
+    .select("*")
+    .eq("id", dados.espacoId)
+    .maybeSingle();
+  if (erroEspaco) throw erroEspaco;
+  if (!espacoDb) throw new Error("Espaço não encontrado.");
+
+  const espacoNormalizado = normalizarEspacoBanco(espacoDb as Record<string, unknown>);
+  const { data: existentes, error } = await db
+    .from("reservas")
+    .select("id,hora_inicio,hora_fim,situacao")
+    .eq("espaco_id", dados.espacoId)
+    .eq("data_reserva", dados.data);
+  if (error) throw error;
+
+  const ativas = (existentes || []).filter((r: Record<string, unknown>) =>
+    String(r.situacao || "").toLowerCase() !== "cancelada" &&
+    (!dados.ignorarId || String(r.id) !== dados.ignorarId),
+  );
+
+  if (!ativas.length) return null;
+
+  if (espacoNormalizado.cobranca === "diaria") {
+    return `O espaço ${espacoNormalizado.nome || "selecionado"} é reservado por diária e já possui uma reserva ativa nesta data. Escolha outro dia.`;
+  }
+
+  const novoInicio = minutosDoDia(dados.inicio);
+  const novoFim = minutosDoDia(dados.fim);
+  if (novoInicio == null || novoFim == null || novoFim <= novoInicio) {
+    return "O intervalo de horário informado é inválido.";
+  }
+
+  const conflito = ativas.some((r: Record<string, unknown>) => {
+    const inicioExistente = minutosDoDia(r.hora_inicio);
+    const fimExistente = minutosDoDia(r.hora_fim);
+    if (inicioExistente == null || fimExistente == null || fimExistente <= inicioExistente) {
+      return false;
+    }
+    return novoInicio < fimExistente && inicioExistente < novoFim;
+  });
+
+  return conflito
+    ? `Este espaço já possui uma reserva ativa que se sobrepõe ao horário ${dados.inicio}–${dados.fim}. Escolha outro horário.`
+    : null;
+}
+
 function statusFrontend(situacao: string | null | undefined) {
   const v = String(situacao || "").toLowerCase();
   if (v === "cancelada") return "cancelada" as const;
@@ -131,12 +212,22 @@ function normalizarReserva(dbRow: Record<string, unknown>) {
     valor: Number(dbRow.valor || 0),
     status: statusFrontend(String(dbRow.situacao || "")),
     pagamento: pagamentoFrontend(dbRow.tipo_pagamento),
+    reservado_por_nome: dbRow.reservado_por_nome == null ? null : String(dbRow.reservado_por_nome),
+    reservado_por_perfil: dbRow.reservado_por_perfil == null ? null : String(dbRow.reservado_por_perfil),
+    lista_presenca_nome: dbRow.lista_presenca_nome == null ? null : String(dbRow.lista_presenca_nome),
+    quantidade_convidados: dbRow.quantidade_convidados == null ? null : Number(dbRow.quantidade_convidados),
   };
 }
 
 async function assinaturaComprovante(db: any, path: string | null) {
   if (!path) return null;
   const { data } = await db.storage.from("comprovantes-financeiro").createSignedUrl(path, 60 * 60);
+  return data?.signedUrl || null;
+}
+
+async function assinaturaListaPresenca(db: any, path: string | null) {
+  if (!path) return null;
+  const { data } = await db.storage.from("listas-presenca").createSignedUrl(path, 60 * 60);
   return data?.signedUrl || null;
 }
 
@@ -298,6 +389,9 @@ export async function GET(request: Request) {
           comprovante_url: await assinaturaComprovante(db, r.comprovante_url ? String(r.comprovante_url) : null),
           comprovante_status: r.comprovante_status || null,
           comprovante_nome: r.comprovante_nome || null,
+          lista_presenca_url: await assinaturaListaPresenca(db, r.lista_presenca_path ? String(r.lista_presenca_path) : null),
+          lista_presenca_nome: r.lista_presenca_nome || null,
+          quantidade_convidados: r.quantidade_convidados == null ? null : Number(r.quantidade_convidados),
         }),
       })),
     );
@@ -353,6 +447,8 @@ export async function POST(request: Request) {
 
     const espacoId = await resolverEspacoId(db, espacoInformado, espacoNome);
     const { inicio, fim } = dividirHorario(horario);
+    const conflito = await verificarConflitoReserva(db, { espacoId, data, inicio, fim });
+    if (conflito) return NextResponse.json({ error: conflito }, { status: 409 });
     const tipoPagamento: PagamentoDb | null =
       pagamento === "pendente" ? null : (pagamento as PagamentoDb);
     const situacao = pagamento === "pix" ? "solicitada" : "confirmada";
@@ -370,6 +466,12 @@ export async function POST(request: Request) {
       tipo_pagamento: tipoPagamento,
       matricula: body.matricula == null ? null : String(body.matricula),
       tipo_pessoa: body.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
+      reservado_por_id: auth.usuario.id,
+      reservado_por_nome: String(auth.usuario.nome_exibicao || auth.usuario.nome || auth.usuario.email || "Usuário autenticado"),
+      reservado_por_perfil: String(auth.usuario.perfil || ""),
+      quantidade_convidados: null,
+      lista_presenca_path: null,
+      lista_presenca_nome: null,
       comprovante_url: null,
       comprovante_status: null,
       motivo_recusa: null,
@@ -642,6 +744,14 @@ export async function PATCH(request: Request) {
 
       const espacoId = await resolverEspacoId(db, espacoInformado, espacoNome);
       const { inicio, fim } = dividirHorario(horario);
+      const conflito = await verificarConflitoReserva(db, {
+        espacoId,
+        data,
+        inicio,
+        fim,
+        ignorarId: id,
+      });
+      if (conflito) return NextResponse.json({ error: conflito }, { status: 409 });
       const tipoPagamento: PagamentoDb | null = pagamento === "pendente" ? null : (pagamento as PagamentoDb);
       const situacao = pagamento === "pix" ? "solicitada" : "confirmada";
       const contaBancariaId = String(body.conta_bancaria_id || "").trim();
