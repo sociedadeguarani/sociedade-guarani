@@ -8,14 +8,58 @@ import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
 type Acesso = {
   id: string;
-  socio_id: string;
-  registrado_por: string;
+  socio_id?: string | null;
+  dependente_id?: string | null;
+  temporada_id?: string | null;
+  temporada_participante_id?: string | null;
+  registrado_por: string | null;
   data_hora_entrada: string;
   autorizado: boolean | null;
-  observacao: string | null;
+  motivo_negacao?: string | null;
+  observacao?: string | null;
   socio?: { nome: string; matricula: number | string | null; foto_url?: string | null } | null;
+  dependente?: { nome: string } | null;
+  temporada?: {
+    id: string;
+    codigo?: string | null;
+    matricula?: string | null;
+    tipo?: string | null;
+    modalidade?: string | null;
+    responsavel_nome?: string | null;
+  } | null;
+  temporada_participante?: {
+    id: string;
+    nome?: string | null;
+    matricula?: string | null;
+    foto_url?: string | null;
+    papel?: string | null;
+    parentesco?: string | null;
+  } | null;
   usuario?: { nome_exibicao: string | null } | null;
 };
+
+function nomePessoaDoAcesso(a: Acesso) {
+  return a.socio?.nome || a.temporada_participante?.nome || a.temporada?.responsavel_nome || a.dependente?.nome || "—";
+}
+
+function matriculaDoAcesso(a: Acesso) {
+  const matriculaParticipante = String(a.temporada_participante?.matricula || "").trim();
+  if (matriculaParticipante) return matriculaParticipante;
+
+  const matriculaTemporada = String(a.temporada?.matricula || "").trim();
+  if (matriculaTemporada) return matriculaTemporada;
+
+  const codigoTemporada = String(a.temporada?.codigo || "").trim().toUpperCase();
+  if (codigoTemporada) return /[A-Z]$/.test(codigoTemporada) ? codigoTemporada : `${codigoTemporada}A`;
+
+  return a.socio?.matricula || "—";
+}
+
+function origemDoAcesso(a: Acesso) {
+  if (a.temporada_id || a.temporada || a.temporada_participante) return "Temporada";
+  if (a.dependente_id || a.dependente) return "Dependente";
+  return null;
+}
 
 function hojeISO() {
   return new Date().toISOString().slice(0, 10);
@@ -61,8 +105,9 @@ export default function RelatorioAcessosPage() {
   const filtrados = acessos.filter((a) => {
     if (!termo) return true;
     return (
-      a.socio?.nome?.toLowerCase().includes(termo) ||
-      String(a.socio?.matricula || "").includes(termo)
+      nomePessoaDoAcesso(a).toLowerCase().includes(termo) ||
+      String(matriculaDoAcesso(a)).toLowerCase().includes(termo) ||
+      String(origemDoAcesso(a) || "").toLowerCase().includes(termo)
     );
   });
 
@@ -149,12 +194,15 @@ export default function RelatorioAcessosPage() {
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-100">
-                            {a.socio?.foto_url ? <img src={a.socio.foto_url} alt={a.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
+                            {(a.socio?.foto_url || a.temporada_participante?.foto_url) ? <img src={(a.socio?.foto_url || a.temporada_participante?.foto_url) as string} alt={nomePessoaDoAcesso(a)} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
                           </div>
-                          <span className="font-semibold">{a.socio?.nome || "—"}</span>
+                          <div>
+                            <span className="font-semibold">{nomePessoaDoAcesso(a)}</span>
+                            {origemDoAcesso(a) && <p className="text-xs text-gray-500">{origemDoAcesso(a)}</p>}
+                          </div>
                         </div>
                       </td>
-                      <td className="p-3">{a.socio?.matricula || "—"}</td>
+                      <td className="p-3">{matriculaDoAcesso(a)}</td>
                       <td className="p-3">
                         {a.autorizado === true ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700"><CheckCircle2 className="h-3.5 w-3.5" />Liberado</span>
