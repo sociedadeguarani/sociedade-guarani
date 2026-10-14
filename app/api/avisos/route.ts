@@ -15,29 +15,29 @@ export async function GET(request: Request) {
       .order("fixado", { ascending: false })
       .order("data_publicacao", { ascending: false });
 
-    const perfilAtual = String(resultado.perfil || "").trim().toLowerCase();
-    const perfisAdmin = ["administrador", "administrador_master", "admin", "master"];
-    if (!perfisAdmin.includes(perfilAtual)) {
-      if (perfilAtual === "associado") {
-        query = query.in("publico", ["todos", "associados"]);
-      } else if (perfilAtual.startsWith("funcionario") || perfilAtual.startsWith("funcionário")) {
-        // Inclui funcionario_inventario/portaria sem expor avisos exclusivos da administração.
-        query = query.in("publico", ["todos", "funcionarios"]);
-      } else {
-        query = query.eq("publico", "todos");
-      }
+    if (resultado.perfil === "associado") {
+      query = query.in("publico", ["todos", "associados"]);
+    } else if (resultado.perfil === "funcionario") {
+      query = query.in("publico", ["todos", "funcionarios"]);
+    } else if (resultado.perfil === "funcionario_inventario") {
+      query = query.in("publico", ["todos", "funcionarios", "funcionario_inventario"]);
     }
+
+    // A mesma data local usada pela contagem do sino.
+    const partesData = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const parte = (tipo: string) => partesData.find((p) => p.type === tipo)?.value || "";
+    const hoje = `${parte("year")}-${parte("month")}-${parte("day")}`;
+    query = query.or(`data_inicio.is.null,data_inicio.lte.${hoje}`);
+    query = query.or(`data_fim.is.null,data_fim.gte.${hoje}`);
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
-    // Avaliar ambas as extremidades no servidor, sem sobrescrever filtros OR repetidos.
-    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-    const avisosVigentes = (data || []).filter((aviso: any) => {
-      const inicioOk = !aviso.data_inicio || String(aviso.data_inicio).slice(0, 10) <= hoje;
-      const fimOk = !aviso.data_fim || String(aviso.data_fim).slice(0, 10) >= hoje;
-      return inicioOk && fimOk;
-    });
-    return NextResponse.json({ avisos: avisosVigentes, perfil: resultado.perfil });
+    return NextResponse.json({ avisos: data || [], perfil: resultado.perfil });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar avisos." }, { status: 500 });
   }
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         .insert({
           titulo,
           mensagem,
-          tipo: "sistema",
+          tipo: "informacao",
           prioridade: "alta",
           fixado: false,
           ativo: true,
