@@ -17,6 +17,7 @@ import {
   BarChart3,
   Boxes,
   UserCog,
+  Settings,
   Menu as MenuIcon,
   X,
 } from "lucide-react";
@@ -142,6 +143,12 @@ const ITENS_MENU: readonly ItemMenu[] = [
     rota: "/usuarios",
     icone: UserCog,
     perfis: ["administrador_master"],
+  },
+  {
+    nome: "Política de acesso",
+    rota: "/configuracoes/acessos",
+    icone: Settings,
+    perfis: ["administrador", "administrador_master"],
   },
 ] as const;
 
