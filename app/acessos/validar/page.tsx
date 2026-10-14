@@ -56,6 +56,8 @@ export default function ValidarCarteiraPage() {
   );
   const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
   const ehTemporada = Boolean(resultado?.temporada || resultado?.status_temporada || resultado?.socio?.categoria === "Temporada");
+  const podeVerDetalhesFinanceiros = ["administrador", "administrador_master"].includes(String(resultado?.perfil_operador || ""));
+  const precisaAvisarDiretoria = Boolean(resultado && (!liberado || atencaoPorInadimplencia));
 
   return (
     <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
@@ -105,17 +107,42 @@ export default function ValidarCarteiraPage() {
                 </div>
 
                 <div className={`rounded-2xl border p-4 ${corExame(resultado.mensalidade?.cor)}`}>
-                  <div className="text-xs font-black uppercase tracking-wide">{ehTemporada ? "Parcelas da temporada" : "Mensalidade"}</div>
-                  <div className="mt-1 text-lg font-black">{resultado.mensalidade?.texto || "Não informado"}</div>
-                  {resultado.inadimplencia?.atrasado && (
-                    <div className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
-                      {resultado.inadimplencia.quantidade} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
-                        ? "entrada bloqueada"
-                        : atencaoPorInadimplencia
-                          ? "faixa de atenção — entrada liberada"
-                          : "dentro da tolerância — entrada liberada"} ·{" "}
-                      {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                    </div>
+                  <div className="text-xs font-black uppercase tracking-wide">{ehTemporada ? "Parcelas da Temporada" : "Situação financeira para acesso"}</div>
+                  {podeVerDetalhesFinanceiros ? (
+                    <>
+                      <div className="mt-1 text-lg font-black">{resultado.mensalidade?.texto || "Não informado"}</div>
+                      {resultado.inadimplencia?.atrasado && (
+                        <div className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
+                          {resultado.inadimplencia.quantidade ?? 0} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
+                            ? "entrada bloqueada"
+                            : atencaoPorInadimplencia
+                              ? "faixa de atenção — entrada liberada"
+                              : "dentro da tolerância — entrada liberada"} ·{" "}
+                          {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className={`mt-1 text-lg font-black ${!liberado || bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-800" : "text-green-800"}`}>
+                        {ehTemporada
+                          ? liberado ? "VERDE — entrada liberada" : "VERMELHO — entrada bloqueada"
+                          : bloqueioPorInadimplencia || !liberado
+                            ? "VERMELHO — entrada bloqueada"
+                            : atencaoPorInadimplencia
+                              ? "AMARELO — entrada liberada; avisar diretoria"
+                              : "VERDE — entrada liberada"}
+                      </div>
+                      {precisaAvisarDiretoria && (
+                        <div className={`mt-3 rounded-lg p-3 text-xs font-bold ${!liberado || bloqueioPorInadimplencia ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"}`}>
+                          {resultado.alerta_diretoria_enviado === true
+                            ? "A diretoria foi notificada automaticamente pelo sistema."
+                            : resultado.alerta_diretoria_enviado === false
+                              ? "Não foi possível enviar o aviso automático. Comunique a diretoria."
+                              : "Esta situação exige avaliação da diretoria. Comunique-a antes de autorizar qualquer exceção."}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
