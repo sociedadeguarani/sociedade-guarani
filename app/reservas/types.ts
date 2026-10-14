@@ -80,4 +80,9 @@ export type Reserva = {
   comprovante_nome?: string | null;
   comprovante_status?: string | null;
   dataPagamento?: string | null;
+  reservadoPorNome?: string | null;
+  reservadoPorPerfil?: string | null;
+  listaPresencaUrl?: string | null;
+  listaPresencaNome?: string | null;
+  quantidadeConvidados?: number | null;
 };
