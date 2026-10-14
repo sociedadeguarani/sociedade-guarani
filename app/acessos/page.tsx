@@ -8,6 +8,8 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  perfil_operador?: string;
+  alerta_diretoria_enviado?: boolean;
   temporada?: { id?: string; codigo?: string | null; inicio?: string | null; fim?: string | null } | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
@@ -18,8 +20,8 @@ type Resultado = {
   status_temporada?: string;
   inadimplencia?: {
     atrasado: boolean;
-    quantidade: number;
-    valorTotal: number;
+    quantidade?: number;
+    valorTotal?: number;
     bloqueiaEntrada?: boolean;
     precisaAlerta?: boolean;
     mesesAtencao?: number;
@@ -74,6 +76,8 @@ export default function AcessosPage() {
     : false;
   const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
   const ehTemporada = Boolean(resultado?.temporada || resultado?.status_temporada || resultado?.socio?.categoria === "Temporada");
+  const podeVerDetalhesFinanceiros = ["administrador", "administrador_master"].includes(String(resultado?.perfil_operador || ""));
+  const precisaAvisarDiretoria = Boolean(resultado && (!resultado.liberado || atencaoPorInadimplencia));
 
   function pararCamera() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -210,17 +214,47 @@ export default function AcessosPage() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-white p-4">
-                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">{ehTemporada ? "Parcelas da temporada" : "Mensalidade"}</p>
-                  <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
-                  {resultado.inadimplencia?.atrasado && (
-                    <p className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
-                      {resultado.inadimplencia.quantidade} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
-                        ? "entrada bloqueada"
-                        : atencaoPorInadimplencia
-                          ? "faixa de atenção — entrada liberada"
-                          : "dentro da tolerância — entrada liberada"} ·{" "}
-                      {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                    </p>
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">{ehTemporada ? "Parcelas da temporada" : "Situação financeira para acesso"}</p>
+                  {podeVerDetalhesFinanceiros ? (
+                    <>
+                      <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
+                      {resultado.inadimplencia?.atrasado && (
+                        <p className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
+                          {resultado.inadimplencia.quantidade ?? 0} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
+                            ? "entrada bloqueada"
+                            : atencaoPorInadimplencia
+                              ? "faixa de atenção — entrada liberada"
+                              : "dentro da tolerância — entrada liberada"} ·{" "}
+                          {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className={`mt-1 font-black ${!resultado.liberado || bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
+                        {ehTemporada
+                          ? resultado.liberado
+                            ? "VERDE — entrada liberada"
+                            : "VERMELHO — entrada bloqueada"
+                          : bloqueioPorInadimplencia || !resultado.liberado
+                            ? "VERMELHO — entrada bloqueada"
+                            : atencaoPorInadimplencia
+                              ? "AMARELO — entrada liberada; avisar diretoria"
+                              : "VERDE — entrada liberada"}
+                      </p>
+                      {precisaAvisarDiretoria && (
+                        <div className={`mt-3 rounded-lg p-3 text-xs font-bold ${!resultado.liberado || bloqueioPorInadimplencia ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"}`}>
+                          {resultado.alerta_diretoria_enviado === true
+                            ? "A diretoria foi notificada automaticamente pelo sistema."
+                            : resultado.alerta_diretoria_enviado === false
+                              ? "Não foi possível enviar o aviso automático. Comunique a diretoria."
+                              : "Esta situação exige avaliação da diretoria. Comunique-a antes de autorizar qualquer exceção."}
+                        </div>
+                      )}
+                      {ehTemporada && resultado.liberado && !resultado.inadimplencia?.atrasado && (
+                        <p className="mt-1 text-xs font-semibold text-green-700">Parcelas da Temporada em dia.</p>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="rounded-xl bg-white p-4">
