@@ -49,6 +49,11 @@ function recorteReserva(row: Record<string, unknown>): Reserva {
     comprovante_nome: row.comprovante_nome ? String(row.comprovante_nome) : null,
     comprovante_status: row.comprovante_status ? String(row.comprovante_status) : null,
     dataPagamento: row.data_pagamento ? String(row.data_pagamento) : null,
+    reservadoPorNome: row.reservado_por_nome == null ? null : String(row.reservado_por_nome),
+    reservadoPorPerfil: row.reservado_por_perfil == null ? null : String(row.reservado_por_perfil),
+    listaPresencaUrl: row.lista_presenca_url == null ? null : String(row.lista_presenca_url),
+    listaPresencaNome: row.lista_presenca_nome == null ? null : String(row.lista_presenca_nome),
+    quantidadeConvidados: row.quantidade_convidados == null ? null : Number(row.quantidade_convidados),
   };
 }
 
@@ -104,6 +109,11 @@ export default function ReservasPage() {
   const [carregandoReservas, setCarregandoReservas] = useState(false);
   const [carregandoPessoas, setCarregandoPessoas] = useState(false);
   const [pessoasCarregadas, setPessoasCarregadas] = useState(false);
+  const [reservaListaPresenca, setReservaListaPresenca] = useState<Reserva | null>(null);
+  const [arquivoListaPresenca, setArquivoListaPresenca] = useState<File | null>(null);
+  const [quantidadeConvidados, setQuantidadeConvidados] = useState("");
+  const [salvandoListaPresenca, setSalvandoListaPresenca] = useState(false);
+  const [erroListaPresenca, setErroListaPresenca] = useState("");
 
   const podeConfigurar = perfil === "administrador" || perfil === "administrador_master";
 
@@ -341,7 +351,26 @@ export default function ReservasPage() {
     if (tipoPessoa === "nao_socio" && bloqueadoNaoSocio) return alert("Este espaço não pode ser alugado por não sócios.");
     if (!data) return alert("Selecione a data da reserva.");
     if (!nome.trim()) return alert("Informe o nome do responsável pela reserva.");
-    if (ocupados.includes(horario) && !editandoReservaId) return alert("Este horário já está reservado para este espaço.");
+    if (!editandoReservaId && ocupados.length > 0 && espaco.cobranca === "diaria") {
+      return alert("Este espaço é reservado por diária e já possui uma reserva ativa nesta data. Escolha outro dia.");
+    }
+    if (!editandoReservaId && espaco.cobranca === "hora") {
+      const [inicioNovo, fimNovo] = horario.split("-").map((v) => v.trim());
+      const minutos = (v: string) => {
+        const [h, m] = v.split(":").map(Number);
+        return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+      };
+      const iNovo = minutos(inicioNovo);
+      const fNovo = minutos(fimNovo);
+      const sobreposicao = reservas.some((r) => {
+        if (r.status === "cancelada" || r.espacoId !== espacoId || r.data !== data) return false;
+        const [i, f] = r.horario.split("-").map((v) => v.trim());
+        const iExistente = minutos(i);
+        const fExistente = minutos(f);
+        return iNovo !== null && fNovo !== null && iExistente !== null && fExistente !== null && iNovo < fExistente && iExistente < fNovo;
+      });
+      if (sobreposicao) return alert("Este espaço já possui uma reserva que se sobrepõe ao horário escolhido.");
+    }
     if (data < new Date().toISOString().slice(0, 10)) return alert("A data da reserva não pode ser anterior a hoje.");
     setEtapa("confirmacao");
   }
@@ -532,6 +561,69 @@ export default function ReservasPage() {
       await carregarReservas({ todas: true });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Não foi possível cancelar a reserva.");
+    }
+  }
+
+  function abrirListaPresenca(reserva: Reserva) {
+    setReservaListaPresenca(reserva);
+    setQuantidadeConvidados(reserva.quantidadeConvidados ? String(reserva.quantidadeConvidados) : "");
+    setArquivoListaPresenca(null);
+    setErroListaPresenca("");
+  }
+
+  async function salvarListaPresenca() {
+    if (!reservaListaPresenca) return;
+    const quantidade = Number(quantidadeConvidados);
+    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 16) {
+      setErroListaPresenca("Informe de 1 a 16 convidados.");
+      return;
+    }
+    if (!arquivoListaPresenca) {
+      setErroListaPresenca("Selecione a lista de presença.");
+      return;
+    }
+    const extensao = arquivoListaPresenca.name.split(".").pop()?.toLowerCase() || "";
+    if (!["pdf", "csv", "xlsx", "xls", "jpg", "jpeg", "png"].includes(extensao)) {
+      setErroListaPresenca("Use PDF, CSV, Excel (.xlsx/.xls), JPG ou PNG.");
+      return;
+    }
+    if (arquivoListaPresenca.size <= 0 || arquivoListaPresenca.size > 10 * 1024 * 1024) {
+      setErroListaPresenca("O arquivo deve ter conteúdo e até 10 MB.");
+      return;
+    }
+
+    setSalvandoListaPresenca(true);
+    setErroListaPresenca("");
+    try {
+      const token = await tokenAtual();
+      if (!token) throw new Error("Sua sessão expirou. Entre novamente no sistema.");
+      const form = new FormData();
+      form.append("reserva_id", reservaListaPresenca.id);
+      form.append("quantidade_convidados", String(quantidade));
+      form.append("arquivo", arquivoListaPresenca);
+      const resposta = await fetch("/api/reservas/lista-presenca", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a lista de presença.");
+
+      setReservas((atuais) => atuais.map((r) => r.id === reservaListaPresenca.id ? {
+        ...r,
+        listaPresencaUrl: resultado.lista_presenca_url || r.listaPresencaUrl || null,
+        listaPresencaNome: resultado.lista_presenca_nome || arquivoListaPresenca.name,
+        quantidadeConvidados: Number(resultado.quantidade_convidados ?? quantidade),
+      } : r));
+      setReservaListaPresenca(null);
+      setArquivoListaPresenca(null);
+      setQuantidadeConvidados("");
+      if (!resultado.lista_presenca_url) await carregarReservas({ todas: true });
+      alert("Lista de presença salva. A portaria poderá abrir o arquivo pela reserva.");
+    } catch (error) {
+      setErroListaPresenca(error instanceof Error ? error.message : "Não foi possível salvar a lista de presença.");
+    } finally {
+      setSalvandoListaPresenca(false);
     }
   }
 
@@ -785,6 +877,7 @@ export default function ReservasPage() {
                     onEditar={editarReserva}
                     onCancelar={cancelarReserva}
                     onRecibo={setRecibo}
+                    onListaPresenca={abrirListaPresenca}
                     onConfirmarPix={(reserva) => { setReservaPixConfirmacao(reserva); setContaPixConfirmacao(contasBancarias[0]?.id || ""); }}
                     podeConfirmarPix={podeConfigurar}
                     operadorAtual={operadorAtual}
@@ -799,6 +892,36 @@ export default function ReservasPage() {
               )}
 
               {reservaPixConfirmacao && <ConfirmarPixReserva reserva={reservaPixConfirmacao} espacoNome={espacos.find((e) => e.id === reservaPixConfirmacao.espacoId)?.nome || "—"} contasBancarias={contasBancarias} contaBancariaId={contaPixConfirmacao} salvando={confirmandoPix} arquivo={arquivoConfirmacaoPix} onArquivo={setArquivoConfirmacaoPix} onContaBancaria={setContaPixConfirmacao} onConfirmar={() => void confirmarPixAdmin()} onFechar={() => { if (!confirmandoPix) { setReservaPixConfirmacao(null); setContaPixConfirmacao(""); setArquivoConfirmacaoPix(null); } }} />}
+
+              {reservaListaPresenca && (
+                <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#001f16]/60 p-4">
+                  <div role="dialog" aria-modal="true" aria-labelledby="lista-presenca-titulo" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h2 id="lista-presenca-titulo" className="text-xl font-extrabold text-[#005a3c]">Lista de presença do quiosque</h2>
+                        <p className="mt-1 text-sm text-gray-500">{espacos.find((e) => e.id === reservaListaPresenca.espacoId)?.nome || "Quiosque"} · {dataBR(reservaListaPresenca.data)} · {reservaListaPresenca.nome}</p>
+                      </div>
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => setReservaListaPresenca(null)} className="rounded-lg border px-3 py-1.5 font-bold disabled:opacity-50">✕</button>
+                    </div>
+                    <p className="mt-4 rounded-xl bg-[#f0f7f3] p-3 text-sm text-[#315849]">Informe quantas pessoas estão na lista e anexe o documento que a portaria usará na conferência. Limite: 16 convidados por quiosque.</p>
+                    <label className="mt-4 block text-sm font-bold">Quantidade de convidados (máximo 16)
+                      <input type="number" inputMode="numeric" min={1} max={16} step={1} value={quantidadeConvidados} onChange={(e) => setQuantidadeConvidados(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" />
+                    </label>
+                    <label className="mt-4 block rounded-xl border-2 border-dashed border-[#9cc8b1] p-4 text-sm">
+                      <span className="block font-bold text-[#005a3c]">Anexar lista de presença</span>
+                      <span className="mt-1 block text-xs text-gray-500">PDF, CSV, Excel (.xlsx/.xls), JPG ou PNG — até 10 MB</span>
+                      <input type="file" accept=".pdf,.csv,.xlsx,.xls,.jpg,.jpeg,.png,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/png" onChange={(e) => { setArquivoListaPresenca(e.target.files?.[0] || null); setErroListaPresenca(""); }} className="mt-3 block w-full text-sm" />
+                      {arquivoListaPresenca && <span className="mt-2 block font-semibold text-[#005a3c]">{arquivoListaPresenca.name}</span>}
+                    </label>
+                    {reservaListaPresenca.listaPresencaNome && <p className="mt-2 text-xs text-gray-500">Lista atual: {reservaListaPresenca.listaPresencaNome} ({reservaListaPresenca.quantidadeConvidados ?? "?"}/16 convidados)</p>}
+                    {erroListaPresenca && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{erroListaPresenca}</p>}
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => setReservaListaPresenca(null)} className="rounded-xl border px-4 py-2.5 font-bold">Cancelar</button>
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => void salvarListaPresenca()} className="rounded-xl bg-[#005a3c] px-4 py-2.5 font-extrabold text-white disabled:opacity-60">{salvandoListaPresenca ? "Enviando..." : "Salvar lista"}</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {recibo && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/60 p-4"><div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-sm font-semibold text-gray-500">Sociedade Recreativa Guarani</p><h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Recibo {recibo.numero}</h2></div><button onClick={() => setRecibo(null)} className="rounded-full bg-gray-100 px-3 py-2">✕</button></div><div className="mt-5 rounded-2xl border border-[#cfe3d8] bg-[#f8faf9] p-5 text-sm"><p><b>Tipo:</b> {recibo.tipo}</p><p className="mt-2"><b>Responsável:</b> {recibo.nome}{recibo.matricula ? ` — Matrícula ${recibo.matricula}` : ""}</p><p className="mt-2"><b>{recibo.detalhe.split(":")[0]}:</b> {recibo.detalhe.split(":").slice(1).join(":").trim()}</p><p className="mt-2"><b>Data/Horário:</b> {recibo.periodo}</p><p className="mt-3 text-2xl font-extrabold text-[#005a3c]">{moeda(recibo.valor)}</p><p className="mt-2"><b>Pagamento:</b> {recibo.pagamento}</p><p className="mt-2"><b>Status:</b> {recibo.status}</p><p className="mt-2"><b>Atendido por:</b> {recibo.operador}</p><p className="mt-2 text-xs text-gray-500">{recibo.dataHora}</p></div><div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3"><button onClick={() => imprimirRecibo(recibo)} className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white">🖨 Imprimir / PDF</button><button onClick={() => void enviarRecibo(recibo)} className="rounded-xl border border-[#005a3c] px-4 py-3 font-bold text-[#005a3c]">📤 Enviar</button><button onClick={() => void navigator.clipboard?.writeText(textoRecibo(recibo))} className="rounded-xl border px-4 py-3 font-bold">📋 Copiar</button></div><p className="mt-3 text-center text-xs text-gray-500">Em Imprimir, escolha “Salvar como PDF” para guardar o recibo.</p></div></div>}
 
