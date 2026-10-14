@@ -19,6 +19,7 @@ function mensagemErro(error: unknown, fallback: string) {
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
+  const ehAdministracao = ["administrador", "administrador_master"].includes(auth.usuario.perfil);
   try {
     const supabase = getServiceClient();
     const { searchParams } = new URL(request.url);
@@ -82,6 +83,11 @@ export async function GET(request: Request) {
 
     const resultado = lista.map((a) => ({
       ...a,
+      // O funcionário precisa saber que o acesso foi bloqueado, mas não deve
+      // receber valores de dívida que possam estar presentes no motivo gravado.
+      motivo_negacao: !ehAdministracao && a.autorizado === false
+        ? "Acesso bloqueado por política da sociedade. Consulte a diretoria."
+        : a.motivo_negacao,
       socio: a.socio_id ? mapaSocios.get(a.socio_id) || null : null,
       dependente: a.dependente_id ? mapaDependentes.get(a.dependente_id) || null : null,
       usuario: a.registrado_por ? mapaUsuarios.get(a.registrado_por) || null : null,
@@ -190,7 +196,7 @@ async function avisarAdministradoresInadimplencia(
   criadoPor: string,
   mesesAtencao: number,
   mesesBloqueio: number
-) {
+): Promise<boolean> {
   try {
     const bloqueio = quantidade >= mesesBloqueio;
     const matricula = String(socio.matricula || "—");
@@ -205,13 +211,13 @@ async function avisarAdministradoresInadimplencia(
       .limit(1)
       .maybeSingle();
     if (erroBusca) throw erroBusca;
-    if (existente) return;
+    if (existente) return true;
 
     const faixa = bloqueio
       ? `atingiu o limite de bloqueio (${mesesBloqueio} ou mais competências vencidas)`
       : `está na faixa de atenção (${mesesAtencao} a ${mesesBloqueio - 1} competências vencidas; a entrada permanece liberada)`;
 
-    await supabase.from("avisos").insert({
+    const { error: erroInsert } = await supabase.from("avisos").insert({
       titulo,
       mensagem: `${socio.nome} (matrícula ${matricula}) ${faixa}. Foram identificadas ${quantidade} competência(s) vencida(s), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
       tipo: bloqueio ? "urgente" : "informativo",
@@ -221,8 +227,49 @@ async function avisarAdministradoresInadimplencia(
       publico: "administradores",
       criado_por: criadoPor,
     });
+    if (erroInsert) throw erroInsert;
+    return true;
   } catch (e) {
     console.error("Falha ao gerar aviso de inadimplência:", e);
+    return false;
+  }
+}
+
+async function avisarAdministradoresParcelasTemporada(
+  supabase: ReturnType<typeof getServiceClient>,
+  dados: { nome: string; matricula: string; codigo: string | null },
+  quantidade: number,
+  valorTotal: number,
+  criadoPor: string
+): Promise<boolean> {
+  try {
+    const matricula = dados.matricula || dados.codigo || "temporada sem matrícula";
+    const titulo = `🔴 Parcelas de temporada vencidas — matrícula ${matricula}`;
+    const { data: existente, error: erroBusca } = await supabase
+      .from("avisos")
+      .select("id")
+      .eq("titulo", titulo)
+      .eq("ativo", true)
+      .limit(1)
+      .maybeSingle();
+    if (erroBusca) throw erroBusca;
+    if (existente) return true;
+
+    const { error: erroInsert } = await supabase.from("avisos").insert({
+      titulo,
+      mensagem: `${dados.nome} (matrícula ${matricula}) tem ${quantidade} parcela(s) de Temporada vencida(s) e não paga(s), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}. A entrada foi bloqueada pela regra de Temporada.`,
+      tipo: "urgente",
+      prioridade: "alta",
+      fixado: false,
+      ativo: true,
+      publico: "administradores",
+      criado_por: criadoPor,
+    });
+    if (erroInsert) throw erroInsert;
+    return true;
+  } catch (e) {
+    console.error("Falha ao gerar aviso de parcelas de Temporada:", e);
+    return false;
   }
 }
 
@@ -284,6 +331,7 @@ function matriculaTemporadaNormalizada(valor: unknown) {
 export async function POST(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
+  const ehAdministracao = ["administrador", "administrador_master"].includes(auth.usuario.perfil);
 
   let etapa = "iniciando";
 
@@ -535,22 +583,80 @@ export async function POST(request: Request) {
 
       if (acessoError) throw acessoError;
 
+      // Temporada não usa mensalidade. Qualquer parcela vencida e não paga
+      // bloqueia a entrada e gera aviso administrativo, sem expor valores ao funcionário.
+      const alertaDiretoriaEnviado = parcelasAtrasadas.atrasado
+        ? await avisarAdministradoresParcelasTemporada(
+            supabase,
+            { nome: participante.nome || temporadaNormalizada.responsavel_nome || "Responsável da Temporada", matricula: matriculaResponsavel, codigo: temporadaNormalizada.codigo },
+            parcelasAtrasadas.quantidade,
+            parcelasAtrasadas.valorTotal,
+            auth.usuario.id
+          )
+        : undefined;
+      const socioResposta = {
+        id: temporadaNormalizada.id,
+        matricula: participante.matricula || matriculaResponsavel,
+        nome: participante.nome,
+        situacao: autorizado ? "ativa" : temporadaNormalizada.situacao,
+        categoria: "Temporada",
+        foto_url: participante.foto_url || null,
+      };
+      const mensalidadeTemporada = ehAdministracao
+        ? {
+            texto: parcelasAtrasadas.atrasado
+              ? `BLOQUEADA — ${parcelasAtrasadas.quantidade} parcela(s) vencida(s)`
+              : "Temporada — parcelas sem atraso",
+            cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde",
+          }
+        : {
+            texto: !temporadaValida
+              ? "Temporada inativa ou fora da validade — entrada bloqueada"
+              : parcelasAtrasadas.atrasado
+                ? "Parcelas da Temporada pendentes — entrada bloqueada"
+                : "Parcelas em dia — entrada liberada",
+            cor: autorizado ? "verde" : "vermelho",
+          };
+      const inadimplenciaTemporada = ehAdministracao
+        ? {
+            atrasado: parcelasAtrasadas.atrasado,
+            bloqueiaEntrada: parcelasAtrasadas.atrasado,
+            precisaAlerta: parcelasAtrasadas.atrasado,
+            criticoTresMesesOuMais: parcelasAtrasadas.atrasado,
+            quantidade: parcelasAtrasadas.quantidade,
+            valorTotal: parcelasAtrasadas.valorTotal,
+            status: { texto: parcelasAtrasadas.atrasado ? "Bloqueada por atraso" : "Em dia", cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde" },
+          }
+        : {
+            atrasado: parcelasAtrasadas.atrasado,
+            bloqueiaEntrada: parcelasAtrasadas.atrasado,
+            precisaAlerta: parcelasAtrasadas.atrasado,
+            status: { texto: autorizado ? "Entrada liberada" : "Acesso bloqueado", cor: autorizado ? "verde" : "vermelho" },
+          };
       return NextResponse.json({
-        acesso,
-        temporada: temporadaNormalizada,
-        participante,
-        socio: {
-          id: temporadaNormalizada.id,
-          matricula: participante.matricula || matriculaResponsavel,
-          nome: participante.nome,
-          situacao: autorizado ? "ativa" : temporadaNormalizada.situacao,
-          categoria: "Temporada",
-          foto_url: participante.foto_url || null,
+        perfil_operador: auth.usuario.perfil,
+        alerta_diretoria_enviado: alertaDiretoriaEnviado,
+        acesso: {
+          ...acesso,
+          motivo_negacao: ehAdministracao || autorizado ? acesso.motivo_negacao : "Entrada bloqueada. Comunique a diretoria.",
         },
+        temporada: ehAdministracao ? temporadaNormalizada : {
+          id: temporadaNormalizada.id,
+          codigo: temporadaNormalizada.codigo,
+          matricula: temporadaNormalizada.matricula,
+          tipo: temporadaNormalizada.tipo,
+          modalidade: temporadaNormalizada.modalidade,
+          inicio: temporadaNormalizada.inicio,
+          fim: temporadaNormalizada.fim,
+          situacao: temporadaNormalizada.situacao,
+          responsavel_nome: temporadaNormalizada.responsavel_nome,
+        },
+        participante: ehAdministracao ? participante : undefined,
+        socio: socioResposta,
         dependente: null,
         liberado: autorizado,
         status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado ? "bloqueada" : "inativa",
-        parcelas_atrasadas: parcelasAtrasadas,
+        parcelas_atrasadas: ehAdministracao ? parcelasAtrasadas : { atrasado: parcelasAtrasadas.atrasado },
         exame: {
           status: statusExame,
           validade: validadeExame,
@@ -562,20 +668,9 @@ export async function POST(request: Request) {
           validade: validadeExame,
           observacao: "A validade do exame controla somente o uso da água; não bloqueia a entrada no parque.",
         },
-        motivo_bloqueio: motivoNegacao,
-        mensalidade: {
-          texto: parcelasAtrasadas.atrasado
-            ? `BLOQUEADA — ${parcelasAtrasadas.quantidade} parcela(s) vencida(s)`
-            : "Temporada — parcelas sem atraso",
-          cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde",
-        },
-        inadimplencia: {
-          atrasado: parcelasAtrasadas.atrasado,
-          criticoTresMesesOuMais: parcelasAtrasadas.quantidade >= 3,
-          quantidade: parcelasAtrasadas.quantidade,
-          valorTotal: parcelasAtrasadas.valorTotal,
-          status: { texto: parcelasAtrasadas.atrasado ? "Bloqueada por atraso" : "Em dia", cor: parcelasAtrasadas.atrasado ? "vermelho" : "verde" },
-        },
+        motivo_bloqueio: ehAdministracao || autorizado ? motivoNegacao : "Entrada bloqueada. Comunique a diretoria.",
+        mensalidade: mensalidadeTemporada,
+        inadimplencia: inadimplenciaTemporada,
       });
     }
 
@@ -646,9 +741,10 @@ export async function POST(request: Request) {
     etapa = "verificando mensalidades";
     const statusMensalidadeSocio = inadimplenciaSocio.status;
     const statusMensalidadeDependente = dependente ? inadimplenciaSocio.status : null;
+    let alertaDiretoriaEnviado: boolean | undefined;
     if (inadimplenciaSocio.precisaAlerta) {
       etapa = "gerando aviso de inadimplência";
-      await avisarAdministradoresInadimplencia(
+      alertaDiretoriaEnviado = await avisarAdministradoresInadimplencia(
         supabase,
         socio,
         inadimplenciaSocio.quantidade,
@@ -665,14 +761,47 @@ export async function POST(request: Request) {
       verificado: false,
     };
 
+    const socioResposta = ehAdministracao
+      ? socio
+      : {
+          id: socio.id,
+          matricula: socio.matricula,
+          nome: socio.nome,
+          situacao: socio.situacao,
+          categoria: socio.categoria,
+          foto_url: socio.foto_url,
+        };
+    const dependenteResposta = dependente
+      ? ehAdministracao
+        ? dependente
+        : { id: dependente.id, nome: dependente.nome }
+      : null;
+    const inadimplenciaResposta = ehAdministracao
+      ? inadimplenciaSocio
+      : {
+          atrasado: inadimplenciaSocio.atrasado,
+          bloqueiaEntrada: inadimplenciaSocio.bloqueiaEntrada,
+          precisaAlerta: inadimplenciaSocio.precisaAlerta,
+          status: inadimplenciaSocio.status,
+        };
+    const motivoNegacaoResposta = ehAdministracao || !motivoNegacao
+      ? motivoNegacao
+      : "Entrada bloqueada por política da sociedade. Consulte a diretoria.";
+
     return NextResponse.json({
-      acesso,
-      socio,
-      dependente,
+      perfil_operador: auth.usuario.perfil,
+      alerta_diretoria_enviado: alertaDiretoriaEnviado,
+      acesso: {
+        ...acesso,
+        motivo_negacao: motivoNegacaoResposta,
+      },
+      socio: socioResposta,
+      dependente: dependenteResposta,
       liberado: autorizado,
+      motivo_bloqueio: motivoNegacaoResposta,
       exame,
       mensalidade: dependente ? statusMensalidadeDependente : statusMensalidadeSocio,
-      inadimplencia: inadimplenciaSocio,
+      inadimplencia: inadimplenciaResposta,
     });
   } catch (error) {
     console.error(`Erro ao registrar acesso (etapa: ${etapa}):`, error);
