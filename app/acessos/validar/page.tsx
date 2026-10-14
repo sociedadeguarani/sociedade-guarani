@@ -51,6 +51,10 @@ export default function ValidarCarteiraPage() {
 
   const exame = resultado?.exame;
   const liberado = Boolean(resultado?.liberado);
+  const bloqueioPorInadimplencia = Boolean(
+    resultado?.inadimplencia?.bloqueiaEntrada ?? resultado?.status_temporada === "bloqueada"
+  );
+  const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
 
   return (
     <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
@@ -103,8 +107,12 @@ export default function ValidarCarteiraPage() {
                   <div className="text-xs font-black uppercase tracking-wide">Mensalidade</div>
                   <div className="mt-1 text-lg font-black">{resultado.mensalidade?.texto || "Não informado"}</div>
                   {resultado.inadimplencia?.atrasado && (
-                    <div className="mt-1 text-xs font-semibold">
-                      {resultado.inadimplencia.quantidade} mensalidade(s) em atraso ·{" "}
+                    <div className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
+                      {resultado.inadimplencia.quantidade} competência(s)/parcela(s) pendente(s) · {bloqueioPorInadimplencia
+                        ? "entrada bloqueada"
+                        : atencaoPorInadimplencia
+                          ? "faixa de atenção — entrada liberada"
+                          : "dentro da tolerância — entrada liberada"} ·{" "}
                       {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                     </div>
                   )}
