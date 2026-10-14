@@ -14,7 +14,17 @@ type Resultado = {
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
   uso_agua?: { permitido: boolean; texto: string; validade?: string | null; observacao?: string } | null;
   motivo_bloqueio?: string | null;
-  inadimplencia?: { atrasado: boolean; quantidade: number; valorTotal: number } | null;
+  status_temporada?: string;
+  inadimplencia?: {
+    atrasado: boolean;
+    quantidade: number;
+    valorTotal: number;
+    bloqueiaEntrada?: boolean;
+    precisaAlerta?: boolean;
+    mesesAtencao?: number;
+    mesesBloqueio?: number;
+    status?: { texto: string; cor: string };
+  } | null;
 };
 
 export default function AcessosPage() {
@@ -57,6 +67,11 @@ export default function AcessosPage() {
       setCarregando(false);
     }
   }
+
+  const bloqueioPorInadimplencia = resultado
+    ? Boolean(resultado.inadimplencia?.bloqueiaEntrada ?? resultado.status_temporada === "bloqueada")
+    : false;
+  const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
 
   function pararCamera() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -196,8 +211,12 @@ export default function AcessosPage() {
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">Mensalidade</p>
                   <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
                   {resultado.inadimplencia?.atrasado && (
-                    <p className="mt-1 text-xs font-semibold text-red-700">
-                      {resultado.inadimplencia.quantidade} em atraso ·{" "}
+                    <p className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
+                      {resultado.inadimplencia.quantidade} competência(s)/parcela(s) pendente(s) · {bloqueioPorInadimplencia
+                        ? "entrada bloqueada"
+                        : atencaoPorInadimplencia
+                          ? "faixa de atenção — entrada liberada"
+                          : "dentro da tolerância — entrada liberada"} ·{" "}
                       {Number(resultado.inadimplencia.valorTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                     </p>
                   )}
