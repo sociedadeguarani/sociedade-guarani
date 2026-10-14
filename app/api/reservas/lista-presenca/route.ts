@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const partes = arquivo.name.split(".");
-    const extensao = (partes.length > 1 ? partes.pop() : "").toLowerCase();
+    const extensao = (partes.length > 1 ? (partes.pop() ?? "") : "").toLowerCase();
     if (!extensao || !EXTENSOES_PERMITIDAS.has(extensao)) {
       return NextResponse.json({ error: "Use PDF, CSV, Excel (.xlsx/.xls) ou uma imagem JPG/PNG." }, { status: 400 });
     }
@@ -143,4 +143,3 @@ export async function POST(request: Request) {
     );
   }
 }
-
