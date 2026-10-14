@@ -1,23 +1,47 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 function isPago(situacao: unknown) {
-  return ["pago", "paid", "quitado", "recebido", "isento", "isenta"].includes(
-    String(situacao || "").toLowerCase()
-  );
+  const status = String(situacao || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status);
 }
 
-function statusPorMensalidades(mensalidades: any[]) {
-  const hoje = new Date().toISOString().slice(0, 10);
-  const mapa = new Map<string, { quantidade: number; dias: number }>();
+async function carregarPolitica(supabase: ReturnType<typeof getServiceClient>): Promise<PoliticaInadimplencia> {
+  try {
+    const { data, error } = await supabase
+      .from("configuracoes_acessos")
+      .select("meses_atencao,meses_bloqueio")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) {
+      console.error("Usando política padrão nas carteirinhas:", error.message);
+      return POLITICA_INADIMPLENCIA_PADRAO;
+    }
+    return normalizarPoliticaInadimplencia(data || POLITICA_INADIMPLENCIA_PADRAO);
+  } catch (error) {
+    console.error("Falha ao carregar política nas carteirinhas:", error);
+    return POLITICA_INADIMPLENCIA_PADRAO;
+  }
+}
+
+function statusPorMensalidades(mensalidades: any[], hoje: string) {
+  const mapa = new Map<string, { competencias: Set<string>; dias: number; valor: number }>();
 
   for (const m of mensalidades) {
     const id = String(m.socio_id || "");
     const vencimento = String(m.data_vencimento || "").slice(0, 10);
     if (!id || !vencimento || vencimento >= hoje || isPago(m.situacao)) continue;
 
-    const atual = mapa.get(id) || { quantidade: 0, dias: 0 };
-    atual.quantidade += 1;
+    const referencia = String(m.competencia || vencimento).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(referencia)) continue;
+
+    const atual = mapa.get(id) || { competencias: new Set<string>(), dias: 0, valor: 0 };
+    atual.competencias.add(referencia);
+    atual.valor += Number(m.valor || 0);
 
     const venc = new Date(`${vencimento}T00:00:00`);
     const h = new Date(`${hoje}T00:00:00`);
@@ -31,17 +55,27 @@ function statusPorMensalidades(mensalidades: any[]) {
     mapa.set(id, atual);
   }
 
-  return mapa;
+  return new Map(Array.from(mapa.entries()).map(([id, item]) => [id, {
+    quantidade: item.competencias.size,
+    dias: item.dias,
+    valor: item.valor,
+  }]));
 }
 
-function statusFinanceiro(quantidade: number, dias: number) {
-  if (quantidade <= 1) {
-    return { financeiro_status: "em_dia", dias_atraso: dias, meses_atraso: quantidade };
-  }
-  if (quantidade === 2) {
-    return { financeiro_status: "atrasado", dias_atraso: dias, meses_atraso: quantidade };
-  }
-  return { financeiro_status: "muito_atrasado", dias_atraso: dias, meses_atraso: quantidade };
+function statusFinanceiro(quantidade: number, dias: number, politica: PoliticaInadimplencia) {
+  const financeiro_status = quantidade >= politica.meses_bloqueio
+    ? "muito_atrasado"
+    : quantidade >= politica.meses_atencao
+      ? "atrasado"
+      : "em_dia";
+
+  return {
+    financeiro_status,
+    dias_atraso: dias,
+    meses_atraso: quantidade,
+    meses_atencao: politica.meses_atencao,
+    meses_bloqueio: politica.meses_bloqueio,
+  };
 }
 
 function emLotes<T>(lista: T[], tamanho = 100): T[][] {
@@ -55,7 +89,7 @@ function emLotes<T>(lista: T[], tamanho = 100): T[][] {
 }
 
 function dataHoje() {
-  return new Date().toISOString().slice(0, 10);
+  return dataHojeBrasil();
 }
 
 function temporadaValida(temporada: any) {
@@ -84,6 +118,8 @@ export async function GET(request: Request) {
 
   try {
     const supabase = getServiceClient();
+    const politicaInadimplencia = await carregarPolitica(supabase);
+    const hoje = dataHojeBrasil();
 
     const base =
       "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade,responsavel_id,parentesco,possui_mensalidade,valor_mensalidade";
@@ -153,20 +189,20 @@ export async function GET(request: Request) {
     for (const lote of emLotes(ids, 100)) {
       const { data, error } = await supabase
         .from("mensalidades")
-        .select("socio_id,data_vencimento,situacao")
+        .select("socio_id,data_vencimento,competencia,situacao,valor")
         .in("socio_id", lote);
 
       if (error) throw error;
       mensalidades.push(...(data || []));
     }
 
-    const atrasosPorSocio = statusPorMensalidades(mensalidades);
+    const atrasosPorSocio = statusPorMensalidades(mensalidades, hoje);
     const resultado = socios.map((s) => {
       const alvoId = String(s.responsavel_id || s.id);
-      const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0 };
+      const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
         ...s,
-        ...statusFinanceiro(atraso.quantidade, atraso.dias),
+        ...statusFinanceiro(atraso.quantidade, atraso.dias, politicaInadimplencia),
       };
     });
 
@@ -198,6 +234,9 @@ export async function GET(request: Request) {
         ? {
             financeiro_status: titular.financeiro_status || "em_dia",
             dias_atraso: titular.dias_atraso || 0,
+            meses_atraso: titular.meses_atraso || 0,
+            meses_atencao: titular.meses_atencao || politicaInadimplencia.meses_atencao,
+            meses_bloqueio: titular.meses_bloqueio || politicaInadimplencia.meses_bloqueio,
           }
         : { financeiro_status: "em_dia", dias_atraso: 0 };
 
@@ -225,6 +264,9 @@ export async function GET(request: Request) {
         titular_matricula: titular?.matricula || null,
         financeiro_status: status.financeiro_status,
         dias_atraso: status.dias_atraso,
+        meses_atraso: status.meses_atraso,
+        meses_atencao: status.meses_atencao,
+        meses_bloqueio: status.meses_bloqueio,
         situacao: d.situacao_financeira || "isento",
         responsavel_id: titularId,
         possui_mensalidade: false,
@@ -299,6 +341,8 @@ export async function GET(request: Request) {
       socios: resultado,
       dependentes,
       temporadas,
+      politicaInadimplencia,
+      statusResponsaveis: Object.fromEntries(resultado.map((s: any) => [String(s.id), s.financeiro_status || "em_dia"])),
     });
   } catch (error) {
     console.error("GET /api/carteirinhas:", error);
