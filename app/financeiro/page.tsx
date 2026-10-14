@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 import { Campo, Modal, Resumo } from "./components/FinanceiroUI";
 
 type Socio = {
@@ -137,23 +138,24 @@ function ehUrlAbsoluta(valor: string) {
   return /^https?:\/\//i.test(valor);
 }
 
-function nivelAtraso(meses: number) {
-  if (meses >= 3) {
+function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
+  const nivel = classificarMesesAtraso(meses, politica);
+  if (nivel === "vermelho") {
     return {
-      texto: `${meses} ${meses === 1 ? "mês" : "meses"}`,
+      texto: `${meses} ${meses === 1 ? "mês" : "meses"} · bloqueio`,
       classe: "bg-red-100 text-red-700 ring-1 ring-red-200",
       ponto: "bg-red-500",
     };
   }
-  if (meses === 2) {
+  if (nivel === "amarelo") {
     return {
-      texto: "2 meses",
+      texto: `${meses} ${meses === 1 ? "mês" : "meses"} · atenção`,
       classe: "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200",
       ponto: "bg-yellow-500",
     };
   }
   return {
-    texto: "Em dia",
+    texto: meses > 0 ? `${meses} ${meses === 1 ? "mês" : "meses"} · tolerância` : "Em dia",
     classe: "bg-green-100 text-green-700 ring-1 ring-green-200",
     ponto: "bg-green-500",
   };
@@ -163,6 +165,7 @@ export default function FinanceiroPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
+  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
@@ -302,13 +305,18 @@ export default function FinanceiroPage() {
 
   const historicoPorPessoa = useMemo(() => {
     const map = new Map<string, number>();
-    const hojeIso = new Date().toISOString().slice(0, 10);
+    const hojeIso = dataHojeBrasil();
+    const statusQuitados = new Set(["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"]);
     for (const [chave, lancamentos] of lancamentosPorPessoa) {
-      const atrasadas = lancamentos.filter((m) => {
-        if (m.situacao === "pago" || m.situacao === "isento") return false;
-        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < hojeIso));
-      }).length;
-      if (atrasadas > 0) map.set(chave, atrasadas);
+      const competencias = new Set<string>();
+      for (const mensalidade of lancamentos) {
+        const status = String(mensalidade.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const vencimento = String(mensalidade.data_vencimento || "").slice(0, 10);
+        if (statusQuitados.has(status) || !vencimento || vencimento >= hojeIso) continue;
+        const competencia = String(mensalidade.competencia || vencimento).slice(0, 7);
+        if (/^\d{4}-\d{2}$/.test(competencia)) competencias.add(competencia);
+      }
+      if (competencias.size > 0) map.set(chave, competencias.size);
     }
     return map;
   }, [lancamentosPorPessoa]);
@@ -316,19 +324,20 @@ export default function FinanceiroPage() {
   const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
     pessoa: p,
     meses: historicoPorPessoa.get(p.chave) || 0,
-    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0),
-  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa]);
+    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0, politicaInadimplencia),
+  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa, politicaInadimplencia]);
 
   const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.meses === 2).length;
-  const vermelhos = atrasoPessoas.filter((x) => x.meses >= 3).length;
+  const amarelos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-yellow-500").length;
+  const vermelhos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-red-500").length;
 
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return atrasoPessoas.map((x) => {
       const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || []).filter((m) => {
-        if (m.situacao === "pago" || m.situacao === "isento") return false;
-        return Boolean(m.situacao === "em_atraso" || (m.data_vencimento && m.data_vencimento.slice(0, 10) < new Date().toISOString().slice(0, 10)));
+        const status = String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status)) return false;
+        return Boolean(m.data_vencimento && m.data_vencimento.slice(0, 10) < dataHojeBrasil());
       }).sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
       const valorDevido = lancamentos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
       const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
@@ -422,6 +431,12 @@ export default function FinanceiroPage() {
     if (inadimplenciaCarregada || carregandoInadimplencia) return;
     setCarregandoInadimplencia(true);
     try {
+      try {
+        const configuracao = await apiFinanceiro("/api/configuracoes/acessos", { method: "GET" });
+        setPoliticaInadimplencia(normalizarPoliticaInadimplencia(configuracao?.politica));
+      } catch {
+        setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
+      }
       const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
         supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
@@ -921,19 +936,19 @@ export default function FinanceiroPage() {
             <div className="mb-6 space-y-5">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <Resumo
-                  titulo="Total inadimplentes"
+                  titulo="Pessoas com competências vencidas"
                   valor={String(quantidadeAtrasados)}
-                  subtitulo="Sócios e dependentes"
+                  subtitulo="Inclui quem está na tolerância de acesso"
                 />
                 <Resumo
-                  titulo="2 meses"
+                  titulo={`${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses`}
                   valor={String(amarelos)}
-                  subtitulo="Atenção"
+                  subtitulo="Faixa de atenção"
                 />
                 <Resumo
-                  titulo="3+ meses"
+                  titulo={`${politicaInadimplencia.meses_bloqueio}+ meses`}
                   valor={String(vermelhos)}
-                  subtitulo="Inadimplência crítica"
+                  subtitulo="Bloqueio da entrada"
                 />
                 <Resumo
                   titulo="Valor total devido"
@@ -947,18 +962,20 @@ export default function FinanceiroPage() {
                 />
               </div>
 
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+              <div className={`rounded-2xl border p-5 ${vermelhos > 0 ? "border-red-200 bg-red-50" : amarelos > 0 ? "border-amber-200 bg-amber-50" : "border-green-200 bg-green-50"}`}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className="text-lg font-extrabold text-red-700">
-                      {quantidadeAtrasados > 0
-                        ? `⚠️ ${quantidadeAtrasados} ${
-                            quantidadeAtrasados === 1 ? "sócio" : "sócios"
-                          } em atraso`
-                        : "✓ Nenhum sócio em atraso"}
+                    <p className={`text-lg font-extrabold ${vermelhos > 0 ? "text-red-700" : amarelos > 0 ? "text-amber-700" : "text-green-700"}`}>
+                      {vermelhos > 0
+                        ? `🔴 ${vermelhos} pessoa(s) com entrada bloqueada`
+                        : amarelos > 0
+                          ? `🟡 ${amarelos} pessoa(s) em faixa de atenção`
+                          : quantidadeAtrasados > 0
+                            ? `🟢 ${quantidadeAtrasados} pessoa(s) com saldo vencido dentro da tolerância de acesso`
+                            : "✓ Nenhuma mensalidade vencida"}
                     </p>
                     <p className="mt-1 text-sm text-gray-600">
-                      🟢 0–1 mês · 🟡 2 meses · 🔴 3 meses ou mais.
+                      🟢 0–{politicaInadimplencia.meses_atencao - 1} competências · 🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} · 🔴 {politicaInadimplencia.meses_bloqueio}+ competências.
                     </p>
                   </div>
                   <button
@@ -976,10 +993,10 @@ export default function FinanceiroPage() {
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-lg font-extrabold text-[#003d2b]">
-                      Lista de inadimplentes
+                      Lista de mensalidades vencidas
                     </h3>
                     <p className="text-sm text-gray-500">
-                      Controle quem está em atraso e quantos meses estão pendentes.
+                      Consulte valores vencidos, meses de atraso e a faixa de acesso definida pela política vigente.
                     </p>
                   </div>
                   <input
@@ -992,13 +1009,13 @@ export default function FinanceiroPage() {
 
                 <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
                   <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">
-                    🟢 Em dia: não aparece nesta lista
+                    🟢 Até {politicaInadimplencia.meses_atencao - 1} competências: dentro da tolerância de acesso
                   </span>
                   <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 2 meses: {amarelos}
+                    🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} competências: {amarelos}
                   </span>
                   <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 3+ meses: {vermelhos}
+                    🔴 {politicaInadimplencia.meses_bloqueio}+ competências: {vermelhos}
                   </span>
                 </div>
 
@@ -1006,10 +1023,10 @@ export default function FinanceiroPage() {
                   <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
                     <div className="text-4xl">✅</div>
                     <p className="mt-3 font-bold text-gray-700">
-                      Nenhum inadimplente encontrado
+                      Nenhuma mensalidade vencida encontrada
                     </p>
                     <p className="mt-1 text-sm text-gray-500">
-                      Quando houver mensalidades vencidas, elas aparecerão aqui.
+                      Quando houver valores vencidos, eles aparecerão aqui, separados por tolerância, atenção e bloqueio de acesso.
                     </p>
                   </div>
                 ) : (
