@@ -60,6 +60,7 @@ export default function CabecalhoPadrao() {
   const [nome, setNome] = useState("");
   const [perfil, setPerfil] = useState<Perfil>("associado");
   const [saindo, setSaindo] = useState(false);
+  const [avisosAtivos, setAvisosAtivos] = useState(0);
 
   useEffect(() => {
     try {
@@ -80,6 +81,42 @@ export default function CabecalhoPadrao() {
       // Ignora bloqueio do localStorage.
     }
   }, []);
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarContagemAvisos() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) {
+          if (ativo) setAvisosAtivos(0);
+          return;
+        }
+        const resposta = await fetch("/api/avisos/contador", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const payload = await resposta.json().catch(() => ({}));
+        if (ativo && resposta.ok) {
+          setAvisosAtivos(Math.max(0, Number(payload?.total) || 0));
+        }
+      } catch {
+        // O cabeçalho continua disponível mesmo se a contagem falhar.
+      }
+    }
+
+    void carregarContagemAvisos();
+    const intervalo = window.setInterval(() => void carregarContagemAvisos(), 20_000);
+    const aoRetomar = () => void carregarContagemAvisos();
+    window.addEventListener("focus", aoRetomar);
+
+    return () => {
+      ativo = false;
+      window.clearInterval(intervalo);
+      window.removeEventListener("focus", aoRetomar);
+    };
+  }, [perfil]);
 
   async function sair() {
     if (saindo) return;
@@ -143,10 +180,17 @@ export default function CabecalhoPadrao() {
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
-            aria-label="Avisos"
-            className="hidden h-10 w-10 items-center justify-center rounded-xl text-[#426258] transition hover:bg-[#e8f3ee] hover:text-[#005a3c] sm:flex"
+            onClick={() => (window.location.href = "/avisos")}
+            aria-label={avisosAtivos > 0 ? `Avisos ativos: ${avisosAtivos}` : "Avisos"}
+            title={avisosAtivos > 0 ? `${avisosAtivos} aviso(s) ativo(s)` : "Abrir avisos"}
+            className="relative flex h-10 w-10 items-center justify-center rounded-xl text-[#426258] transition hover:bg-[#e8f3ee] hover:text-[#005a3c]"
           >
             <Bell className="h-[19px] w-[19px]" />
+            {avisosAtivos > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-[19px] min-w-[19px] items-center justify-center rounded-full border-2 border-white bg-red-600 px-1 text-[10px] font-extrabold leading-none text-white shadow-sm">
+                {avisosAtivos > 99 ? "99+" : avisosAtivos}
+              </span>
+            )}
           </button>
 
           <div className="hidden items-center gap-2 sm:flex">
