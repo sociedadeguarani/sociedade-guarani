@@ -467,7 +467,7 @@ export async function POST(request: Request) {
       matricula: body.matricula == null ? null : String(body.matricula),
       tipo_pessoa: body.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
       reservado_por_id: auth.usuario.id,
-      reservado_por_nome: String(auth.usuario.nome_exibicao || auth.usuario.nome || auth.usuario.email || "Usuário autenticado"),
+      reservado_por_nome: String(auth.usuario.nome_exibicao || "Usuário autenticado"),
       reservado_por_perfil: String(auth.usuario.perfil || ""),
       quantidade_convidados: null,
       lista_presenca_path: null,
