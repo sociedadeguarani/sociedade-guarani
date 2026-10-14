@@ -38,6 +38,12 @@ function inferirCategoriaEspaco(nome: string) {
   return "lazer";
 }
 
+async function assinarListaPresenca(db: any, caminho: string | null) {
+  if (!caminho) return null;
+  const { data } = await db.storage.from("listas-presenca").createSignedUrl(caminho, 60 * 60);
+  return data?.signedUrl || null;
+}
+
 export async function GET(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master"]);
   if ("response" in auth) return auth.response;
@@ -55,7 +61,7 @@ export async function GET(request: Request) {
     let query = db
       .from("reservas")
       .select(
-        "id,espaco_id,socio_id,dependente_id,responsavel_nome,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,espacos(id,nome)",
+        "id,espaco_id,socio_id,dependente_id,responsavel_nome,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,reservado_por_nome,reservado_por_perfil,lista_presenca_path,lista_presenca_nome,quantidade_convidados,espacos(id,nome)",
       )
       .order("data_reserva", { ascending: false })
       .order("hora_inicio", { ascending: false });
@@ -72,7 +78,7 @@ export async function GET(request: Request) {
     const { data, error } = await query.limit(10000);
     if (error) throw error;
 
-    const reservas = (data || []).map((row: Record<string, unknown>) => {
+    const reservas = await Promise.all((data || []).map(async (row: Record<string, unknown>) => {
       const rel = Array.isArray(row.espacos)
         ? (row.espacos[0] as Record<string, unknown> | undefined)
         : (row.espacos as Record<string, unknown> | undefined);
@@ -96,8 +102,13 @@ export async function GET(request: Request) {
         data_pagamento: row.data_pagamento == null ? null : String(row.data_pagamento).slice(0, 10),
         comprovante_status: row.comprovante_status == null ? null : String(row.comprovante_status),
         created_at: row.created_at == null ? null : String(row.created_at),
+        reservado_por_nome: row.reservado_por_nome == null ? null : String(row.reservado_por_nome),
+        reservado_por_perfil: row.reservado_por_perfil == null ? null : String(row.reservado_por_perfil),
+        lista_presenca_nome: row.lista_presenca_nome == null ? null : String(row.lista_presenca_nome),
+        quantidade_convidados: row.quantidade_convidados == null ? null : Number(row.quantidade_convidados),
+        lista_presenca_url: await assinarListaPresenca(db, row.lista_presenca_path == null ? null : String(row.lista_presenca_path)),
       };
-    });
+    }));
 
     const reservasFiltradas = statusFiltro === "todos"
       ? reservas
