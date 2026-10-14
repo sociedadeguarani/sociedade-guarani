@@ -55,6 +55,7 @@ export default function ValidarCarteiraPage() {
     resultado?.inadimplencia?.bloqueiaEntrada ?? resultado?.status_temporada === "bloqueada"
   );
   const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
+  const ehTemporada = Boolean(resultado?.temporada || resultado?.status_temporada || resultado?.socio?.categoria === "Temporada");
 
   return (
     <main className="min-h-screen bg-[#f4f7f5] px-4 py-8 text-[#17382c]">
@@ -104,11 +105,11 @@ export default function ValidarCarteiraPage() {
                 </div>
 
                 <div className={`rounded-2xl border p-4 ${corExame(resultado.mensalidade?.cor)}`}>
-                  <div className="text-xs font-black uppercase tracking-wide">Mensalidade</div>
+                  <div className="text-xs font-black uppercase tracking-wide">{ehTemporada ? "Parcelas da temporada" : "Mensalidade"}</div>
                   <div className="mt-1 text-lg font-black">{resultado.mensalidade?.texto || "Não informado"}</div>
                   {resultado.inadimplencia?.atrasado && (
                     <div className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
-                      {resultado.inadimplencia.quantidade} competência(s)/parcela(s) pendente(s) · {bloqueioPorInadimplencia
+                      {resultado.inadimplencia.quantidade} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
                         ? "entrada bloqueada"
                         : atencaoPorInadimplencia
                           ? "faixa de atenção — entrada liberada"
