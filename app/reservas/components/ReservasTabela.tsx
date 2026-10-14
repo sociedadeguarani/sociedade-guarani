@@ -4,6 +4,10 @@ import { Trash2, Users } from "lucide-react";
 import type { Espaco, Reserva, ReservaStatus, Recibo } from "../types";
 import { dataBR, moeda } from "../utils";
 
+function ehQuiosque(nome: string) {
+  return nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque");
+}
+
 interface Props {
   filtradas: Reserva[];
   espacos: Espaco[];
@@ -22,6 +26,7 @@ interface Props {
   onEditar: (reserva: Reserva) => void;
   onCancelar: (id: string) => void;
   onRecibo: (recibo: Recibo) => void;
+  onListaPresenca: (reserva: Reserva) => void;
   onConfirmarPix: (reserva: Reserva) => void;
   podeConfirmarPix: boolean;
   operadorAtual: () => Promise<string>;
@@ -46,6 +51,7 @@ export default function ReservasTabela(props: Props) {
     onEditar,
     onCancelar,
     onRecibo,
+    onListaPresenca,
     onConfirmarPix,
     podeConfirmarPix,
     operadorAtual,
@@ -138,6 +144,16 @@ export default function ReservasTabela(props: Props) {
                   <td className="p-3"><span className={`rounded-full px-2 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-700"}`}>{r.status === "confirmada" ? "Confirmada" : r.status === "pendente" ? "Pendente" : "Cancelada"}</span></td>
                   <td className="p-3">
                     {r.comprovante_url && <button onClick={() => onComprovante(r.comprovante_url || "")} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Comprovante</button>}{podeConfirmarPix && r.pagamento === "pix" && r.status === "pendente" && <button onClick={() => onConfirmarPix(r)} className="mr-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Confirmar PIX</button>}
+                    {ehQuiosque(espacoNome(r.espacoId)) && (
+                      r.listaPresencaUrl ? (
+                        <>
+                          <button onClick={() => window.open(r.listaPresencaUrl || "", "_blank", "noopener,noreferrer")} className="mr-2 rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800">Abrir lista ({r.quantidadeConvidados ?? "?"}/16)</button>
+                          <button onClick={() => onListaPresenca(r)} className="mr-2 rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800">Trocar lista</button>
+                        </>
+                      ) : (
+                        <button onClick={() => onListaPresenca(r)} className="mr-2 rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800">Lista de presença</button>
+                      )
+                    )}
                     <button onClick={() => onEditar(r)} className="mr-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">Editar</button>
                     <button onClick={() => void abrirRecibo(r)} className="mr-2 rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Recibo</button>
                     {r.status !== "cancelada" && <button onClick={() => onCancelar(r.id)} className="rounded-lg bg-red-50 p-2 text-red-600" title="Cancelar reserva"><Trash2 className="h-4 w-4" /></button>}
