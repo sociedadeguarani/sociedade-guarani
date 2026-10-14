@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
+import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 type Socio = {
   id: string;
@@ -56,12 +57,12 @@ function competenciaBR(valor: string | null | undefined) {
 
 function isPago(m: Mensalidade) {
   const status = String(m.situacao || "").toLowerCase();
-  return ["pago", "paid", "quitado", "recebido"].includes(status);
+  return ["pago", "paid", "quitado", "recebido", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 function isIsento(m: Mensalidade) {
   const status = String(m.situacao || "").toLowerCase();
-  return ["isento", "isenta"].includes(status);
+  return ["isento", "isenta", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 export default function InadimplenciaPage() {
@@ -72,6 +73,7 @@ export default function InadimplenciaPage() {
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
   const [busca, setBusca] = useState("");
+  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
 
   async function carregar() {
     setCarregando(true);
@@ -114,6 +116,25 @@ export default function InadimplenciaPage() {
     setSocios((sociosResult.data || []) as Socio[]);
     setDependentes((dependentesResult.data || []) as Dependente[]);
     setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
+
+    try {
+      const { data: authData } = await supabase.auth.getSession();
+      const token = authData.session?.access_token;
+      if (token) {
+        const policyResponse = await fetch("/api/configuracoes/acessos", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const policyJson = await policyResponse.json().catch(() => ({}));
+        if (policyResponse.ok) {
+          setPoliticaInadimplencia(normalizarPoliticaInadimplencia(policyJson?.politica));
+        } else {
+          setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
+        }
+      }
+    } catch {
+      setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
+    }
     setCarregando(false);
   }
 
@@ -142,7 +163,7 @@ export default function InadimplenciaPage() {
     [dependentes, socioMap]
   );
 
-  const hoje = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const hoje = useMemo(() => dataHojeBrasil(), []);
 
   const inadimplentes = useMemo<Inadimplente[]>(() => {
     const grupos = new Map<
@@ -228,16 +249,11 @@ export default function InadimplenciaPage() {
           ...g,
           competencias: Array.from(g.competencias),
           meses,
-          nivel:
-            meses >= 3
-              ? ("vermelho" as const)
-              : meses === 2
-                ? ("amarelo" as const)
-                : ("verde" as const),
+          nivel: classificarMesesAtraso(meses, politicaInadimplencia),
         };
       })
       .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
-  }, [mensalidades, socios, dependentes, socioMap, dependenteMap, responsaveis, hoje]);
+  }, [mensalidades, socios, dependentes, socioMap, dependenteMap, responsaveis, hoje, politicaInadimplencia]);
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -363,15 +379,15 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">0 a 1 mês</p>
+                <p className="text-sm text-gray-500">0 a {politicaInadimplencia.meses_atencao - 1} meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-green-600">
                   {verdes}
                 </p>
-                <p className="mt-1 text-xs text-gray-500">Em dia</p>
+                <p className="mt-1 text-xs text-gray-500">Dentro da tolerância de acesso</p>
               </div>
 
               <div className="rounded-2xl border border-yellow-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">2 meses</p>
+                <p className="text-sm text-gray-500">{politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-yellow-600">
                   {amarelos}
                 </p>
@@ -379,11 +395,11 @@ export default function InadimplenciaPage() {
               </div>
 
               <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">3+ meses</p>
+                <p className="text-sm text-gray-500">{politicaInadimplencia.meses_bloqueio}+ meses</p>
                 <p className="mt-2 text-3xl font-extrabold text-red-600">
                   {vermelhos}
                 </p>
-                <p className="mt-1 text-xs text-gray-500">Inadimplência crítica</p>
+                <p className="mt-1 text-xs text-gray-500">Bloqueio da entrada</p>
               </div>
 
               <div className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
@@ -412,9 +428,9 @@ export default function InadimplenciaPage() {
                 <div className="flex gap-2">
                   {[
                     ["todos", "Todos"],
-                    ["verde", "🟢 0–2 meses"],
-                    ["amarelo", "🟡 2 meses"],
-                    ["vermelho", "🔴 3+ meses"],
+                    ["verde", `🟢 0–${politicaInadimplencia.meses_atencao - 1} meses`],
+                    ["amarelo", `🟡 ${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses`],
+                    ["vermelho", `🔴 ${politicaInadimplencia.meses_bloqueio}+ meses`],
                   ].map(([valor, label]) => (
                     <button
                       key={valor}
@@ -433,13 +449,13 @@ export default function InadimplenciaPage() {
 
               <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold">
                 <span className="rounded-full bg-green-50 px-3 py-2 text-green-700">
-                  🟢 0–2 meses: Em dia
+                  🟢 0–{politicaInadimplencia.meses_atencao - 1} meses: Em dia
                 </span>
                 <span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-700">
-                  🟡 2 meses em atraso
+                  🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} meses: Atenção
                 </span>
                 <span className="rounded-full bg-red-50 px-3 py-2 text-red-700">
-                  🔴 3 meses ou mais
+                  🔴 {politicaInadimplencia.meses_bloqueio} meses ou mais: Bloqueio
                 </span>
               </div>
             </div>
