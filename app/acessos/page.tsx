@@ -8,6 +8,7 @@ import CabecalhoPadrao from "../components/CabecalhoPadrao";
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  temporada?: { id?: string; codigo?: string | null; inicio?: string | null; fim?: string | null } | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
   mensalidade?: { texto: string; cor: string } | null;
@@ -72,6 +73,7 @@ export default function AcessosPage() {
     ? Boolean(resultado.inadimplencia?.bloqueiaEntrada ?? resultado.status_temporada === "bloqueada")
     : false;
   const atencaoPorInadimplencia = Boolean(resultado?.inadimplencia?.precisaAlerta);
+  const ehTemporada = Boolean(resultado?.temporada || resultado?.status_temporada || resultado?.socio?.categoria === "Temporada");
 
   function pararCamera() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -208,11 +210,11 @@ export default function AcessosPage() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-white p-4">
-                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Mensalidade</p>
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">{ehTemporada ? "Parcelas da temporada" : "Mensalidade"}</p>
                   <p className="mt-1 font-black">{resultado.mensalidade?.texto || "Não informado"}</p>
                   {resultado.inadimplencia?.atrasado && (
                     <p className={`mt-1 text-xs font-semibold ${bloqueioPorInadimplencia ? "text-red-700" : atencaoPorInadimplencia ? "text-amber-700" : "text-green-700"}`}>
-                      {resultado.inadimplencia.quantidade} competência(s)/parcela(s) pendente(s) · {bloqueioPorInadimplencia
+                      {resultado.inadimplencia.quantidade} {ehTemporada ? "parcela(s) vencida(s)" : "competência(s) vencida(s)"} · {bloqueioPorInadimplencia
                         ? "entrada bloqueada"
                         : atencaoPorInadimplencia
                           ? "faixa de atenção — entrada liberada"
