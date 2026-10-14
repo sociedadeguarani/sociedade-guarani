@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 function mensagemErro(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
@@ -97,40 +98,88 @@ export async function GET(request: Request) {
   }
 }
 
-function situacaoMensalidadePorQuantidade(quantidade: number) {
-  if (quantidade <= 1) return { texto: "Em dia", cor: "verde" };
-  if (quantidade === 2) return { texto: "Atenção", cor: "amarelo" };
-  return { texto: "Crítico", cor: "vermelho" };
+async function carregarPoliticaInadimplencia(
+  supabase: ReturnType<typeof getServiceClient>
+): Promise<PoliticaInadimplencia> {
+  try {
+    const { data, error } = await supabase
+      .from("configuracoes_acessos")
+      .select("meses_atencao,meses_bloqueio")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error) {
+      // Até a migration ser aplicada, a portaria continua operando com o
+      // padrão conservador e explícito (3 meses atenção, 4 bloqueio).
+      console.error("Usando política padrão de inadimplência:", error.message);
+      return POLITICA_INADIMPLENCIA_PADRAO;
+    }
+
+    return normalizarPoliticaInadimplencia(data || POLITICA_INADIMPLENCIA_PADRAO);
+  } catch (error) {
+    console.error("Não foi possível ler a política de inadimplência:", error);
+    return POLITICA_INADIMPLENCIA_PADRAO;
+  }
+}
+
+function situacaoMensalidadePorQuantidade(
+  quantidade: number,
+  politica: PoliticaInadimplencia
+) {
+  if (quantidade >= politica.meses_bloqueio) {
+    return { texto: "Crítico — entrada bloqueada", cor: "vermelho" };
+  }
+  if (quantidade >= politica.meses_atencao) {
+    return { texto: "Atenção", cor: "amarelo" };
+  }
+  return { texto: "Em dia", cor: "verde" };
 }
 
 async function verificarMensalidadesAtrasadas(
   supabase: ReturnType<typeof getServiceClient>,
   socioId: string
 ) {
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = dataHojeBrasil();
   const { data, error } = await supabase
     .from("mensalidades")
-    .select("id,valor,data_vencimento,situacao")
+    .select("id,valor,data_vencimento,competencia,situacao")
     .eq("socio_id", socioId)
     .lt("data_vencimento", hoje);
 
   if (error) throw error;
 
   const itens = (data || []).filter((m: any) =>
-    !["pago", "isento", "isenta", "quitado", "recebido"].includes(
-      String(m.situacao || "").toLowerCase()
+    !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
+      String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     )
   );
 
+  // Conta competências distintas em vez de contar linhas: se houver uma
+  // segunda linha acidental para o mesmo mês, ela não antecipa o bloqueio.
+  const competencias = new Set<string>();
+  for (const mensalidade of itens) {
+    const referencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(referencia)) competencias.add(referencia);
+  }
+
   const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
-  const quantidade = itens.length;
+  const quantidade = competencias.size;
+  const politica = await carregarPoliticaInadimplencia(supabase);
+  const bloqueiaEntrada = quantidade >= politica.meses_bloqueio;
+  const precisaAlerta = quantidade >= politica.meses_atencao;
 
   return {
+    // "atrasado" sinaliza que há saldo pendente para exibição; não significa
+    // por si só que a entrada está bloqueada.
     atrasado: quantidade > 0,
-    criticoTresMesesOuMais: quantidade >= 3,
+    bloqueiaEntrada,
+    precisaAlerta,
+    criticoTresMesesOuMais: precisaAlerta, // compatibilidade com consumidores existentes
     quantidade,
     valorTotal,
-    status: situacaoMensalidadePorQuantidade(quantidade),
+    mesesAtencao: politica.meses_atencao,
+    mesesBloqueio: politica.meses_bloqueio,
+    status: situacaoMensalidadePorQuantidade(quantidade, politica),
   };
 }
 async function avisarAdministradoresInadimplencia(
@@ -138,14 +187,35 @@ async function avisarAdministradoresInadimplencia(
   socio: { nome: string; matricula: number | string | null },
   quantidade: number,
   valorTotal: number,
-  criadoPor: string
+  criadoPor: string,
+  mesesAtencao: number,
+  mesesBloqueio: number
 ) {
   try {
+    const bloqueio = quantidade >= mesesBloqueio;
+    const matricula = String(socio.matricula || "—");
+    const titulo = `${bloqueio ? "🔴" : "🟡"} Inadimplência na portaria — matrícula ${matricula}`;
+
+    // Não gerar um novo aviso idêntico a cada leitura do mesmo QR Code.
+    const { data: existente, error: erroBusca } = await supabase
+      .from("avisos")
+      .select("id")
+      .eq("titulo", titulo)
+      .eq("ativo", true)
+      .limit(1)
+      .maybeSingle();
+    if (erroBusca) throw erroBusca;
+    if (existente) return;
+
+    const faixa = bloqueio
+      ? `atingiu o limite de bloqueio (${mesesBloqueio} ou mais competências vencidas)`
+      : `está na faixa de atenção (${mesesAtencao} a ${mesesBloqueio - 1} competências vencidas; a entrada permanece liberada)`;
+
     await supabase.from("avisos").insert({
-      titulo: "🔴 Sócio com 3+ meses de atraso acessou a sociedade",
-      mensagem: `${socio.nome} (matrícula ${socio.matricula || "—"}) entrou na sociedade com ${quantidade} mensalidade(s) em atraso (3 meses ou mais), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
-      tipo: "urgente",
-      prioridade: "alta",
+      titulo,
+      mensagem: `${socio.nome} (matrícula ${matricula}) ${faixa}. Foram identificadas ${quantidade} competência(s) vencida(s), totalizando ${valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      tipo: bloqueio ? "urgente" : "informativo",
+      prioridade: bloqueio ? "alta" : "normal",
       fixado: false,
       ativo: true,
       publico: "administradores",
@@ -169,10 +239,6 @@ type TemporadaAcesso = {
   responsavel_cpf: string | null;
   responsavel_telefone: string | null;
 };
-
-function dataHojeBrasil() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-}
 
 function temporadaEstaValida(temporada: TemporadaAcesso) {
   const hoje = dataHojeBrasil();
@@ -516,11 +582,11 @@ export async function POST(request: Request) {
     const socioAtivo = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
     // A inadimplência pode bloquear a entrada no parque; exame médico não.
     const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
-    const autorizado = socioAtivo && !inadimplenciaSocio.atrasado;
+    const autorizado = socioAtivo && !inadimplenciaSocio.bloqueiaEntrada;
     const motivoNegacao = !socioAtivo
       ? `Entrada bloqueada. Situação do sócio: ${socio.situacao || "não informada"}.`
-      : inadimplenciaSocio.atrasado
-        ? `Entrada bloqueada: ${inadimplenciaSocio.quantidade} mensalidade(s) vencida(s) e não paga(s), total de ${inadimplenciaSocio.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
+      : inadimplenciaSocio.bloqueiaEntrada
+        ? `Entrada bloqueada: ${inadimplenciaSocio.quantidade} competência(s) vencida(s) e não paga(s); a política bloqueia a partir de ${inadimplenciaSocio.mesesBloqueio}, total de ${inadimplenciaSocio.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
         : null;
 
     etapa = "registrando acesso";
@@ -540,9 +606,17 @@ export async function POST(request: Request) {
     etapa = "verificando mensalidades";
     const statusMensalidadeSocio = inadimplenciaSocio.status;
     const statusMensalidadeDependente = dependente ? inadimplenciaSocio.status : null;
-    if (inadimplenciaSocio.criticoTresMesesOuMais) {
+    if (inadimplenciaSocio.precisaAlerta) {
       etapa = "gerando aviso de inadimplência";
-      await avisarAdministradoresInadimplencia(supabase, socio, inadimplenciaSocio.quantidade, inadimplenciaSocio.valorTotal, auth.usuario.id);
+      await avisarAdministradoresInadimplencia(
+        supabase,
+        socio,
+        inadimplenciaSocio.quantidade,
+        inadimplenciaSocio.valorTotal,
+        auth.usuario.id,
+        inadimplenciaSocio.mesesAtencao,
+        inadimplenciaSocio.mesesBloqueio
+      );
     }
 
     const exame = {
