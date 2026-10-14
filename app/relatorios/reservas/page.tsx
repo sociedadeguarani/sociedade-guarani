@@ -24,6 +24,11 @@ type Reserva = {
   tipo_pessoa: "socio" | "nao_socio";
   data_pagamento: string | null;
   comprovante_status: string | null;
+  reservado_por_nome: string | null;
+  reservado_por_perfil: string | null;
+  lista_presenca_nome: string | null;
+  quantidade_convidados: number | null;
+  lista_presenca_url: string | null;
 };
 type EspacoFiltro = { id: string | null; nome: string; categoria: string | null };
 
@@ -62,6 +67,12 @@ function statusBR(valor: Status) {
 
 function escapeCsv(valor: string) {
   return `"${valor.replaceAll('"', '""')}"`;
+}
+
+function horarioExibicao(r: Pick<Reserva, "espaco_nome" | "hora_inicio" | "hora_fim">) {
+  const nome = r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (nome.includes("quiosque") || nome.includes("salao")) return "Diária (dia todo)";
+  return `${r.hora_inicio} - ${r.hora_fim}`;
 }
 
 export default function RelatorioReservasPage() {
@@ -164,18 +175,22 @@ export default function RelatorioReservasPage() {
   }
 
   function exportarCsv() {
-    const cabecalho = ["Data", "Horário", "Espaço", "Responsável", "Matrícula", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Comprovante"];
+    const cabecalho = ["Data", "Horário", "Espaço", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
     const linhas = reservas.map((r) => [
       dataBR(r.data_reserva),
-      `${r.hora_inicio} - ${r.hora_fim}`,
+      horarioExibicao(r),
       r.espaco_nome,
       r.responsavel_nome,
       r.matricula || "",
+      r.reservado_por_nome || "Não registrado (histórico anterior)",
+      r.reservado_por_perfil || "",
       r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio",
       pagamentoBR(r.tipo_pagamento),
       statusBR(r.status),
       r.valor.toFixed(2).replace(".", ","),
       r.data_pagamento ? dataBR(r.data_pagamento) : "",
+      r.lista_presenca_nome || "",
+      r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
       r.comprovante_status || "",
     ]);
     const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
@@ -262,7 +277,7 @@ export default function RelatorioReservasPage() {
 
             <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{r.hora_inicio} - {r.hora_fim}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
             </section>
           </>
         )}
