@@ -61,7 +61,7 @@ export async function GET(request: Request) {
     let query = db
       .from("reservas")
       .select(
-        "id,espaco_id,socio_id,dependente_id,responsavel_nome,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,reservado_por_nome,reservado_por_perfil,lista_presenca_path,lista_presenca_nome,quantidade_convidados,espacos(id,nome)",
+        "id,espaco_id,socio_id,dependente_id,responsavel_nome,motivo_locacao,matricula,data_reserva,hora_inicio,hora_fim,valor,situacao,tipo_pagamento,tipo_pessoa,data_pagamento,comprovante_url,comprovante_status,created_at,reservado_por_nome,reservado_por_perfil,lista_presenca_path,lista_presenca_nome,quantidade_convidados,espacos(id,nome)",
       )
       .order("data_reserva", { ascending: false })
       .order("hora_inicio", { ascending: false });
@@ -90,6 +90,7 @@ export async function GET(request: Request) {
         socio_id: row.socio_id == null ? null : String(row.socio_id),
         dependente_id: row.dependente_id == null ? null : String(row.dependente_id),
         responsavel_nome: String(row.responsavel_nome ?? ""),
+        motivo_locacao: row.motivo_locacao == null ? "" : String(row.motivo_locacao),
         matricula: row.matricula == null ? null : String(row.matricula),
         data_reserva: String(row.data_reserva ?? "").slice(0, 10),
         hora_inicio: String(row.hora_inicio ?? "").slice(0, 5),
@@ -114,29 +115,14 @@ export async function GET(request: Request) {
       ? reservas
       : reservas.filter((item) => item.status === statusFiltro);
 
-    // A lista de espaços deve vir do cadastro, não apenas das reservas do período.
-    // Assim, o filtro também permite escolher espaços sem reservas no intervalo escolhido.
-    const { data: espacosBanco, error: erroEspacos } = await db
-      .from("espacos")
-      .select("id,nome")
-      .order("nome", { ascending: true });
-
-    const espacosDerivados = Array.from(
+    const espacos = Array.from(
       new Map(
         reservas.map((item) => [
           item.espaco_id || item.espaco_nome,
           { id: item.espaco_id, nome: item.espaco_nome, categoria: item.categoria },
         ]),
       ).values(),
-    );
-
-    const espacos = !erroEspacos && Array.isArray(espacosBanco) && espacosBanco.length
-      ? espacosBanco.map((item: { id: string; nome: string }) => ({
-          id: item.id,
-          nome: item.nome,
-          categoria: inferirCategoriaEspaco(item.nome),
-        })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
-      : espacosDerivados.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    ).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
 
     return NextResponse.json({ reservas: reservasFiltradas, espacos });
   } catch (error) {
