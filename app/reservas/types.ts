@@ -69,6 +69,7 @@ export type Reserva = {
   data: string;
   horario: string;
   nome: string;
+  motivoLocacao?: string | null;
   socioId?: string;
   dependenteId?: string;
   matricula?: number | string | null;
