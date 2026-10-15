@@ -228,6 +228,7 @@ export async function requireRoles(
   return {
     usuario: {
       ...resultado.usuario,
+      email: resultado.authUser.email || null,
       perfil: resultado.perfil,
     },
   };
