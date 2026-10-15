@@ -75,8 +75,14 @@ export async function GET(request: Request) {
     }
     if (tipoPessoaFiltro !== "todos") query = query.eq("tipo_pessoa", tipoPessoaFiltro);
 
-    const { data, error } = await query.limit(10000);
+    const [{ data, error }, { data: espacosDb, error: erroEspacos }] = await Promise.all([
+      query.limit(10000),
+      // O relatório precisa listar TODOS os espaços ativos, mesmo os que
+      // não tenham nenhuma reserva no mês selecionado.
+      db.from("espacos").select("*").order("nome", { ascending: true }),
+    ]);
     if (error) throw error;
+    if (erroEspacos) throw erroEspacos;
 
     const reservas = await Promise.all((data || []).map(async (row: Record<string, unknown>) => {
       const rel = Array.isArray(row.espacos)
@@ -115,14 +121,20 @@ export async function GET(request: Request) {
       ? reservas
       : reservas.filter((item) => item.status === statusFiltro);
 
-    const espacos = Array.from(
-      new Map(
-        reservas.map((item) => [
-          item.espaco_id || item.espaco_nome,
-          { id: item.espaco_id, nome: item.espaco_nome, categoria: item.categoria },
-        ]),
-      ).values(),
-    ).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    const espacos = (espacosDb || [])
+      .filter((row: Record<string, unknown>) =>
+        Boolean(row.ativo) && row.id != null && String(row.nome ?? "").trim() !== "" &&
+        (espacoId === "todos" || String(row.id) === espacoId),
+      )
+      .map((row: Record<string, unknown>) => {
+        const nome = String(row.nome ?? "").trim();
+        return {
+          id: String(row.id),
+          nome,
+          categoria: String(row.categoria ?? row.categoria_espaco ?? inferirCategoriaEspaco(nome)),
+        };
+      })
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
 
     return NextResponse.json({ reservas: reservasFiltradas, espacos });
   } catch (error) {
