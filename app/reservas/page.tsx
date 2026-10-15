@@ -58,6 +58,24 @@ function recorteReserva(row: Record<string, unknown>): Reserva {
   };
 }
 
+function periodoReserva(cobranca: Espaco["cobranca"] | undefined, horario: string) {
+  return cobranca === "diaria" ? "Diária (dia inteiro)" : horario;
+}
+
+function nomeOperadorParaExibir(nome: unknown, email: unknown): string {
+  const nomeSistema = String(nome ?? "").trim();
+  const nomeNormalizado = nomeSistema.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const nomesGenericos = new Set(["administrador", "administrador master", "administrator", "administrator master", "admin", "master", "funcionario", "funcionario da portaria", "usuario autenticado"]);
+  if (nomeSistema && !nomesGenericos.has(nomeNormalizado)) return nomeSistema;
+
+  const parteLocal = String(email ?? "").split("@")[0] || "";
+  const primeiroNome = parteLocal.split(/[._-]+/).filter(Boolean)[0] || "";
+  if (/^[a-zA-ZÀ-ÿ]{3,}$/u.test(primeiroNome)) {
+    return primeiroNome.charAt(0).toLocaleUpperCase("pt-BR") + primeiroNome.slice(1);
+  }
+  return nomeSistema || "Usuário autenticado";
+}
+
 function normalizarSocio(row: Record<string, unknown>): SocioReserva {
   return {
     id: String(row.id ?? ""),
@@ -380,10 +398,23 @@ export default function ReservasPage() {
 
   async function operadorAtual() {
     try {
+      const token = await tokenAtual();
+      if (token) {
+        const resposta = await fetch("/api/login/perfil", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const resultado = await resposta.json().catch(() => ({}));
+        const nomeExibicao = nomeOperadorParaExibir(resultado?.usuario?.nome_exibicao, resultado?.usuario?.email);
+        if (resposta.ok && nomeExibicao) return nomeExibicao;
+      }
       const { data: sessao } = await supabase.auth.getSession();
-      return sessao.session?.user?.user_metadata?.nome_exibicao || sessao.session?.user?.email || "Funcionário da portaria";
+      return nomeOperadorParaExibir(
+        sessao.session?.user?.user_metadata?.nome_exibicao || sessao.session?.user?.user_metadata?.name,
+        sessao.session?.user?.email,
+      );
     } catch {
-      return "Funcionário da portaria";
+      return "Usuário autenticado";
     }
   }
 
@@ -513,6 +544,7 @@ export default function ReservasPage() {
       }
 
       await carregarReservas({ todas: true });
+      const nomeOperador = await operadorAtual();
       setRecibo({
         id: reservaSalva.id,
         numero: `RS-${reservaSalva.id.slice(0, 6).toUpperCase() || Date.now().toString().slice(-6)}`,
@@ -520,17 +552,23 @@ export default function ReservasPage() {
         nome: reservaSalva.nome || nome,
         matricula: matriculaResponsavel,
         detalhe: `Espaço: ${espaco.nome} — Motivo: ${motivoLocacao.trim()}`,
-        periodo: `${dataBR(data)} — ${horario}`,
+        periodo: `${dataBR(data)} — ${periodoReserva(espaco.cobranca, horario)}`,
         valor,
         pagamento: pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança",
-        operador: await operadorAtual(),
+        operador: nomeOperador,
         status: pagamento === "pix" ? "Aguardando conferência" : "Pago",
         dataHora: new Date().toLocaleString("pt-BR"),
       });
 
+      const perfilOperador = String(perfil || reservaSalva.reservadoPorPerfil || "").trim().toLowerCase();
+      const foiFeitaNaPortaria = perfilOperador === "funcionario" || perfilOperador.includes("funcionario");
+      const tituloAviso = foiFeitaNaPortaria
+        ? (editandoReservaId ? "✏️ Reserva alterada na portaria" : "📅 Reserva realizada na portaria")
+        : `${editandoReservaId ? "✏️ Reserva alterada por" : "📅 Reserva feita por"} ${nomeOperador}`;
+      const periodoAviso = periodoReserva(espaco.cobranca, horario);
       await registrarAvisoAdministrativo(
-        editandoReservaId ? "✏️ Reserva alterada na portaria" : "📅 Reserva realizada na portaria",
-        `${reservaSalva.nome || nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} — ${espaco.nome} — Motivo: ${motivoLocacao.trim()} — ${dataBR(data)} ${horario} — ${moeda(valor)} — ${pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança"}.`,
+        tituloAviso,
+        `${reservaSalva.nome || nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} — ${espaco.nome} — Motivo: ${motivoLocacao.trim()} — ${dataBR(data)} — ${espaco.cobranca === "diaria" ? "Período: " : "Horário: "}${periodoAviso} — ${moeda(valor)} — ${pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança"}. ${foiFeitaNaPortaria ? "Registrada na portaria." : `Registrada por ${nomeOperador}.`}`,
       );
 
       setEtapa("selecao");
@@ -687,7 +725,9 @@ export default function ReservasPage() {
   }
 
   function copiarResumo() {
-    const texto = `Sociedade Guarani\nEspaço: ${espaco?.nome || "—"}\nData: ${dataBR(data)}\nHorário: ${horario}\nResponsável: ${nome}\nTipo: ${tipoPessoa === "socio" ? "Sócio" : "Não sócio"}\nValor: ${moeda(valor)}`;
+    const periodo = periodoReserva(espaco?.cobranca, horario);
+    const rotuloPeriodo = espaco?.cobranca === "diaria" ? "Período" : "Horário";
+    const texto = `Sociedade Guarani\nEspaço: ${espaco?.nome || "—"}\nData: ${dataBR(data)}\n${rotuloPeriodo}: ${periodo}\nMotivo: ${motivoLocacao.trim() || "—"}\nResponsável: ${nome}\nTipo: ${tipoPessoa === "socio" ? "Sócio" : "Não sócio"}\nValor: ${moeda(valor)}`;
     void navigator.clipboard.writeText(texto);
     setCopiado(true);
     window.setTimeout(() => setCopiado(false), 1500);
@@ -857,7 +897,7 @@ export default function ReservasPage() {
                     <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Data</span><input type="date" value={data} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
                     {espaco?.cobranca === "hora" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Horário</span><select value={horario} onChange={(e) => setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map((h) => <option key={h} value={h} disabled={ocupados.includes(h) && !editandoReservaId}>{h}{ocupados.includes(h) && !editandoReservaId ? " — ocupado" : ""}</option>)}</select></label>}
                     <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Motivo da locação / evento *</span><input value={motivoLocacao} onChange={(e) => setMotivoLocacao(e.target.value)} maxLength={200} required placeholder="Ex.: festa de aniversário, jantar, baile, reunião" className="mt-1 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" /><span className="mt-1 block text-xs text-gray-500">Informe a finalidade do aluguel para aparecer nos relatórios.</span></label>
-                    <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}><div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}<div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div><div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between text-sm"><span>Horário</span><b>{horario}</b></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div><div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
+                    <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}><div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}<div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div><div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between text-sm"><span>{espaco?.cobranca === "diaria" ? "Período" : "Horário"}</span><b>{periodoReserva(espaco?.cobranca, horario)}</b></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div><div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
                     <button disabled={!espaco || (tipoPessoa === "nao_socio" && bloqueadoNaoSocio)} onClick={continuar} className="mt-4 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">Continuar</button>
                   </aside>
                 </section>
@@ -895,7 +935,7 @@ export default function ReservasPage() {
               {!publico && aba === "admin" && podeConfigurar && <ConfiguracaoEspacos espacos={espacos} salvandoId={salvandoEspacoId} onSalvar={salvarEspaco} />}
 
               {etapa === "confirmacao" && (publico || aba === "reservar") && (
-                <ConfirmacaoReserva tipoPessoa={tipoPessoa} espacoNome={espaco?.nome || ""} data={data} horario={horario} nome={nome} motivoLocacao={motivoLocacao.trim()} matricula={matriculaResponsavel} valor={valor} publico={publico} formaPagamento={formaPagamentoReserva} pix={pix} copiado={copiado} arquivo={arquivoComprovante} contasBancarias={contasBancarias} contaBancariaId={contaBancariaId} enviando={enviandoComprovante} onVoltar={() => setEtapa("selecao")} onFormaPagamento={setFormaPagamentoReserva} onContaBancaria={setContaBancariaId} onArquivo={setArquivoComprovante} onCopiarPix={copiarPix} onCopiarResumo={copiarResumo} onConfirmar={() => void confirmar()} />
+                <ConfirmacaoReserva tipoPessoa={tipoPessoa} espacoNome={espaco?.nome || ""} cobranca={espaco?.cobranca || "hora"} data={data} horario={horario} nome={nome} motivoLocacao={motivoLocacao.trim()} matricula={matriculaResponsavel} valor={valor} publico={publico} formaPagamento={formaPagamentoReserva} pix={pix} copiado={copiado} arquivo={arquivoComprovante} contasBancarias={contasBancarias} contaBancariaId={contaBancariaId} enviando={enviandoComprovante} onVoltar={() => setEtapa("selecao")} onFormaPagamento={setFormaPagamentoReserva} onContaBancaria={setContaBancariaId} onArquivo={setArquivoComprovante} onCopiarPix={copiarPix} onCopiarResumo={copiarResumo} onConfirmar={() => void confirmar()} />
               )}
 
               {reservaPixConfirmacao && <ConfirmarPixReserva reserva={reservaPixConfirmacao} espacoNome={espacos.find((e) => e.id === reservaPixConfirmacao.espacoId)?.nome || "—"} contasBancarias={contasBancarias} contaBancariaId={contaPixConfirmacao} salvando={confirmandoPix} arquivo={arquivoConfirmacaoPix} onArquivo={setArquivoConfirmacaoPix} onContaBancaria={setContaPixConfirmacao} onConfirmar={() => void confirmarPixAdmin()} onFechar={() => { if (!confirmandoPix) { setReservaPixConfirmacao(null); setContaPixConfirmacao(""); setArquivoConfirmacaoPix(null); } }} />}
