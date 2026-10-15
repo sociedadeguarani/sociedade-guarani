@@ -193,6 +193,20 @@ function statusFrontend(situacao: string | null | undefined) {
   return "pendente" as const;
 }
 
+function nomeOperadorParaExibir(nome: unknown, email: unknown): string {
+  const nomeSistema = String(nome ?? "").trim();
+  const nomeNormalizado = normalizarTexto(nomeSistema);
+  const nomesGenericos = new Set(["administrador", "administrador master", "administrator", "administrator master", "admin", "master", "funcionario", "funcionario da portaria", "usuario autenticado"]);
+  if (nomeSistema && !nomesGenericos.has(nomeNormalizado)) return nomeSistema;
+
+  const parteLocal = String(email ?? "").split("@")[0] || "";
+  const primeiroNome = parteLocal.split(/[._-]+/).filter(Boolean)[0] || "";
+  if (/^[a-zA-ZÀ-ÿ]{3,}$/u.test(primeiroNome)) {
+    return primeiroNome.charAt(0).toLocaleUpperCase("pt-BR") + primeiroNome.slice(1);
+  }
+  return nomeSistema || "Usuário autenticado";
+}
+
 function pagamentoFrontend(value: unknown) {
   if (value === "pix" || value === "dinheiro" || value === "transferencia") return value;
   return "pendente" as const;
@@ -469,7 +483,7 @@ export async function POST(request: Request) {
       matricula: body.matricula == null ? null : String(body.matricula),
       tipo_pessoa: body.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
       reservado_por_id: auth.usuario.id,
-      reservado_por_nome: String(auth.usuario.nome_exibicao || "Usuário autenticado"),
+      reservado_por_nome: nomeOperadorParaExibir(auth.usuario.nome_exibicao, auth.usuario.email),
       reservado_por_perfil: String(auth.usuario.perfil || ""),
       quantidade_convidados: null,
       lista_presenca_path: null,
