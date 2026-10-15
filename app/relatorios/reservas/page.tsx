@@ -287,6 +287,56 @@ export default function RelatorioReservasPage() {
   }
 
   function exportarCsv() {
+    // Na visão de um único mês, exporta a mesma estrutura da grade exibida na tela:
+    // dias nas linhas e espaços nas colunas. CSV não guarda cores/bordas, mas mantém
+    // a organização, inclusive os detalhes de cada reserva dentro da célula do espaço.
+    if (visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7)) {
+      const [anoGrade, mesGrade] = dataInicial.slice(0, 7).split("-").map(Number);
+      const dias = new Date(anoGrade, mesGrade, 0).getDate();
+      const espacosGrade = espacos.length
+        ? espacos
+        : Array.from(new Map(reservas.map((r) => [r.espaco_id || r.espaco_nome, {
+            id: r.espaco_id,
+            nome: r.espaco_nome,
+            categoria: r.categoria,
+          }])).values());
+      const ativos = reservas.filter((r) => r.status !== "cancelada");
+      const cabecalho = ["DIA", ...espacosGrade.map((e) => e.nome)];
+      const linhas = Array.from({ length: dias }, (_, i) => {
+        const dia = i + 1;
+        const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+        const rotuloDia = `${String(dia).padStart(2, "0")} - ${diaSemanaBR(data)}`;
+        const reservasDia = ativos.filter((r) => r.data_reserva === data);
+        const celulas = espacosGrade.map((espaco) => {
+          const itens = reservasDia.filter((r) =>
+            r.espaco_id && espaco.id
+              ? r.espaco_id === espaco.id
+              : r.espaco_nome === espaco.nome,
+          );
+          if (!itens.length) return "Livre";
+          return itens.map((r) => [
+            r.responsavel_nome || "Responsável não informado",
+            `${horarioExibicao(r)} · ${statusBR(r.status)}`,
+            moeda(r.valor),
+            r.data_pagamento ? "PAGO" : "VERIFICAR PAGAMENTO",
+            r.reservado_por_nome ? `Reservado por: ${r.reservado_por_nome}` : "",
+          ].filter(Boolean).join("\n")).join("\n\n");
+        });
+        return [rotuloDia, ...celulas];
+      });
+      const csv = [cabecalho, ...linhas]
+        .map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";"))
+        .join("\r\n");
+      const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `grade-mensal-reservas-${dataInicial.slice(0, 7)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     if (visualizacao === "limpeza") {
       const cabecalho = ["Data", "Dia da semana", "Espaço", "Horário", "Responsável / associado", "Situação", "Lista de presença", "Quantidade de convidados"];
       const linhas = reservasLimpeza.map((r) => [
@@ -299,7 +349,7 @@ export default function RelatorioReservasPage() {
         r.lista_presenca_nome ? "Lista anexada" : (r.espaco_nome.toLowerCase().includes("quiosque") ? "Lista não anexada" : "Não se aplica"),
         r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
       ]);
-      const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
+      const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\r\n");
       const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -328,12 +378,12 @@ export default function RelatorioReservasPage() {
       r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
       r.comprovante_status || "",
     ]);
-    const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
+    const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\r\n");
     const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `grade-mensal-reservas-${dataInicial}-${dataFinal}.csv`;
+    a.download = `relatorio-reservas-${dataInicial}-${dataFinal}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
