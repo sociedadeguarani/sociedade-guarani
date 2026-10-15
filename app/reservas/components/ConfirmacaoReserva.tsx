@@ -10,6 +10,7 @@ interface Props {
   data: string;
   horario: string;
   nome: string;
+  motivoLocacao: string;
   matricula: number | string | null;
   valor: number;
   publico: boolean;
@@ -35,6 +36,7 @@ export default function ConfirmacaoReserva({
   data,
   horario,
   nome,
+  motivoLocacao,
   matricula,
   valor,
   publico,
@@ -71,6 +73,7 @@ export default function ConfirmacaoReserva({
           <div className="mt-5 space-y-3 rounded-xl bg-[#f8faf9] p-4 text-sm">
             <div className="flex justify-between gap-3"><span>Tipo</span><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b></div>
             <div className="flex justify-between gap-3"><span>Espaço</span><b className="text-right">{espacoNome || "—"}</b></div>
+            <div className="flex justify-between gap-3"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div>
             <div className="flex justify-between gap-3"><span>Data</span><b>{dataBR(data)}</b></div>
             <div className="flex justify-between gap-3"><span>Horário</span><b>{horario}</b></div>
             <div className="flex justify-between gap-3"><span>Responsável</span><b className="text-right">{nome}</b></div>
