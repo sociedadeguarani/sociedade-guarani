@@ -114,14 +114,29 @@ export async function GET(request: Request) {
       ? reservas
       : reservas.filter((item) => item.status === statusFiltro);
 
-    const espacos = Array.from(
+    // A lista de espaços deve vir do cadastro, não apenas das reservas do período.
+    // Assim, o filtro também permite escolher espaços sem reservas no intervalo escolhido.
+    const { data: espacosBanco, error: erroEspacos } = await db
+      .from("espacos")
+      .select("id,nome")
+      .order("nome", { ascending: true });
+
+    const espacosDerivados = Array.from(
       new Map(
         reservas.map((item) => [
           item.espaco_id || item.espaco_nome,
           { id: item.espaco_id, nome: item.espaco_nome, categoria: item.categoria },
         ]),
       ).values(),
-    ).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    );
+
+    const espacos = !erroEspacos && Array.isArray(espacosBanco) && espacosBanco.length
+      ? espacosBanco.map((item: { id: string; nome: string }) => ({
+          id: item.id,
+          nome: item.nome,
+          categoria: inferirCategoriaEspaco(item.nome),
+        })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+      : espacosDerivados.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
 
     return NextResponse.json({ reservas: reservasFiltradas, espacos });
   } catch (error) {
