@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { BarChart3, CalendarDays, ClipboardList, Download, Printer, RefreshCw } from "lucide-react";
@@ -14,6 +14,7 @@ type Reserva = {
   espaco_nome: string;
   categoria: string | null;
   responsavel_nome: string;
+  motivo_locacao: string | null;
   matricula: string | null;
   data_reserva: string;
   hora_inicio: string;
@@ -31,36 +32,6 @@ type Reserva = {
   lista_presenca_url: string | null;
 };
 type EspacoFiltro = { id: string | null; nome: string; categoria: string | null };
-
-// Mantém a ordem operacional da grade usada pela Sociedade Guarani:
-// salões, CTG, campo/quadras, demais espaços, quiosques e Cancha 48 por último.
-function normalizarNomeEspaco(nome: string) {
-  return nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function prioridadeEspaco(nome: string) {
-  const n = normalizarNomeEspaco(nome);
-  if (n.includes("salao social grande")) return 0;
-  if (n.includes("salao social pequeno")) return 1;
-  if (n === "ctg" || n.includes(" ctg") || n.startsWith("ctg ")) return 2;
-  if (n.includes("campo")) return 3;
-  if (n.includes("quadra") && n.includes("futebol")) return 4;
-  if (n.includes("quadra") && n.includes("volei")) return 5;
-  if (n.includes("quadra")) return 6;
-  if (n.includes("quiosque")) return 8;
-  if (n.includes("cancha 48")) return 99;
-  if (n.includes("cancha")) return 9;
-  return 7;
-}
-
-function ordenarEspacosGrade(lista: EspacoFiltro[]) {
-  return [...lista].sort((a, b) => {
-    const prioridade = prioridadeEspaco(a.nome) - prioridadeEspaco(b.nome);
-    if (prioridade !== 0) return prioridade;
-    // Ordenação natural para manter Quiosque A, Quiosque B, Quiosque C.
-    return a.nome.localeCompare(b.nome, "pt-BR", { numeric: true, sensitivity: "base" });
-  });
-}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -97,6 +68,43 @@ function statusBR(valor: Status) {
 
 function escapeCsv(valor: string) {
   return `"${valor.replaceAll('"', '""')}"`;
+}
+
+function textoNormalizado(valor: string) {
+  return valor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function prioridadeEspaco(nome: string) {
+  const n = textoNormalizado(nome);
+  if (n.includes("salao social grande")) return 0;
+  if (n.includes("salao social pequeno")) return 1;
+  if (n.includes("ctg")) return 2;
+  if (n.includes("cancha 48")) return 5;
+  if (n.includes("quiosque")) return 4;
+  return 3; // Campo e quadras ficam antes dos quiosques.
+}
+
+function ordenarEspacos<T extends { nome: string }>(itens: T[]): T[] {
+  return [...itens].sort((a, b) => prioridadeEspaco(a.nome) - prioridadeEspaco(b.nome) || a.nome.localeCompare(b.nome, "pt-BR"));
+}
+
+function corCabecalhoEspaco(nome: string) {
+  const n = textoNormalizado(nome);
+  if (n.includes("salao social grande")) return "#c6e0b4";
+  if (n.includes("salao social pequeno")) return "#fce4d6";
+  if (n.includes("ctg")) return "#ffe699";
+  if (n.includes("futebol") || n.includes("campo")) return "#f4b183";
+  if (n.includes("volei")) return "#a9d18e";
+  if (n.includes("quiosque a")) return "#d9eaf7";
+  if (n.includes("quiosque b")) return "#d9ead3";
+  if (n.includes("quiosque c")) return "#d9d2e9";
+  if (n.includes("cancha 48")) return "#c9daf8";
+  if (n.includes("quiosque")) return "#d9eaf7";
+  return "#ddebf7";
+}
+
+function escapeHtml(valor: unknown) {
+  return String(valor ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 type PeriodoRapido = "ano" | "restante" | "mes" | "personalizado";
@@ -144,10 +152,6 @@ function horarioExibicao(r: Pick<Reserva, "espaco_nome" | "hora_inicio" | "hora_
   const nome = r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (nome.includes("quiosque") || nome.includes("salao") || nome.includes("pavilhao")) return "Diária (dia todo)";
   return `${r.hora_inicio} - ${r.hora_fim}`;
-}
-
-function pagamentoConfirmado(r: Pick<Reserva, "data_pagamento" | "tipo_pagamento">) {
-  return Boolean(r.data_pagamento) || ["pago", "paga", "quitado", "quitada"].includes((r.tipo_pagamento || "").toLowerCase());
 }
 
 export default function RelatorioReservasPage() {
@@ -320,49 +324,83 @@ export default function RelatorioReservasPage() {
     void carregar();
   }
 
+  function obterEspacosGrade(): EspacoFiltro[] {
+    const base = espacos.length
+      ? espacos
+      : Array.from(new Map(reservas.map((r) => [r.espaco_id || r.espaco_nome, {
+          id: r.espaco_id,
+          nome: r.espaco_nome,
+          categoria: r.categoria,
+        }])).values());
+    return ordenarEspacos(base);
+  }
+
+  function exportarExcelGrade() {
+    if (!(visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7))) return;
+    const [anoGrade, mesGrade] = dataInicial.slice(0, 7).split("-").map(Number);
+    const dias = new Date(anoGrade, mesGrade, 0).getDate();
+    const espacosGrade = obterEspacosGrade();
+    const ativos = reservas.filter((r) => r.status !== "cancelada");
+    const cabecalhoEspacos = espacosGrade.map((e) => `<th colspan="3" style="background:${corCabecalhoEspaco(e.nome)};border:1px solid #64748b;text-align:center;padding:8px;font-weight:bold">${escapeHtml(e.nome)}</th>`).join("");
+    const subCabecalho = espacosGrade.map((e) => {
+      const cor = corCabecalhoEspaco(e.nome);
+      return ["Nome", "Motivo", "Pagamento"].map((sub) => `<th style="background:${cor};border:1px solid #94a3b8;text-align:left;padding:5px;font-size:10pt">${sub}</th>`).join("");
+    }).join("");
+    const linhas = Array.from({ length: dias }, (_, i) => {
+      const dia = i + 1;
+      const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+      const reservasDia = ativos.filter((r) => r.data_reserva === data);
+      const celulas = espacosGrade.map((espaco) => {
+        const itens = reservasDia.filter((r) => r.espaco_id && espaco.id ? r.espaco_id === espaco.id : r.espaco_nome === espaco.nome);
+        if (!itens.length) return `<td colspan="3" style="border:1px solid #cbd5e1;padding:6px;color:#94a3b8">Livre</td>`;
+        const nomes = itens.map((r) => `<div style="padding:2px 0"><b>${escapeHtml(r.responsavel_nome || "Responsável não informado")}</b><br/><span style="color:#64748b;font-size:9pt">${escapeHtml(horarioExibicao(r))} · ${escapeHtml(statusBR(r.status))}</span></div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
+        const motivos = itens.map((r) => `<div style="padding:2px 0">${escapeHtml(r.motivo_locacao || "Não informado")}</div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
+        const pagamentos = itens.map((r) => {
+          const quitado = Boolean(r.data_pagamento);
+          const situacao = quitado ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE";
+          return `<div style="padding:2px 0;color:${quitado ? "#166534" : "#92400e"}"><b>${situacao}</b><br/>${escapeHtml(moeda(r.valor))}</div>`;
+        }).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
+        const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "#f0fdf4" : "#fffbeb";
+        return `<td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:145px">${nomes}</td><td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:130px">${motivos}</td><td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:120px">${pagamentos}</td>`;
+      }).join("");
+      return `<tr><td style="vertical-align:top;background:#f8fafc;border:1px solid #cbd5e1;padding:6px;white-space:nowrap"><b>${String(dia).padStart(2, "0")}</b><br/><span style="font-size:9pt">${escapeHtml(diaSemanaBR(data))}</span></td>${celulas}</tr>`;
+    }).join("\r\n");
+
+    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><meta name="ProgId" content="Excel.Sheet"><meta name="ExcelWorkbook"><style>body{font-family:Arial,sans-serif;color:#1f2937}table{border-collapse:collapse;font-size:10pt}th,td{mso-number-format:"\@"} .titulo{font-size:16pt;font-weight:bold;color:#005a3c;padding:10px}.subtitulo{padding:5px;color:#64748b}</style></head><body><div class="titulo">SOCIEDADE RECREATIVA GUARANI — GRADE MENSAL</div><div class="subtitulo">${escapeHtml(tituloMes(`${dataInicial.slice(0, 7)}-15`))} · Reservas e pagamentos</div><table><thead><tr><th rowspan="2" style="background:#e7f3ec;border:1px solid #64748b;padding:8px">DIA</th>${cabecalhoEspacos}</tr><tr>${subCabecalho}</tr></thead><tbody>${linhas}</tbody></table></body></html>`;
+    const blob = new Blob([`\ufeff${html}`], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `grade-mensal-reservas-${dataInicial.slice(0, 7)}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportarCsv() {
-    // Na visão de um único mês, exporta a mesma estrutura da grade exibida na tela:
-    // dias nas linhas e espaços nas colunas. CSV não guarda cores/bordas, mas mantém
-    // a organização, inclusive os detalhes de cada reserva dentro da célula do espaço.
+    // A grade CSV usa duas linhas de cabeçalho para agrupar Nome, Motivo e Pagamento por espaço.
     if (visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7)) {
       const [anoGrade, mesGrade] = dataInicial.slice(0, 7).split("-").map(Number);
       const dias = new Date(anoGrade, mesGrade, 0).getDate();
-      const espacosGradeBase = espacos.length
-        ? espacos
-        : Array.from(new Map(reservas.map((r) => [r.espaco_id || r.espaco_nome, {
-            id: r.espaco_id,
-            nome: r.espaco_nome,
-            categoria: r.categoria,
-          }])).values());
-      const espacosGrade = ordenarEspacosGrade(espacosGradeBase);
+      const espacosGrade = obterEspacosGrade();
       const ativos = reservas.filter((r) => r.status !== "cancelada");
-      const cabecalho = ["DIA", ...espacosGrade.map((e) => e.nome)];
+      const cabecalhoPrincipal = ["DIA", ...espacosGrade.flatMap((e) => [e.nome, "", ""])];
+      const subCabecalho = ["", ...espacosGrade.flatMap(() => ["Nome", "Motivo", "Pagamento"])];
       const linhas = Array.from({ length: dias }, (_, i) => {
         const dia = i + 1;
         const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
         const rotuloDia = `${String(dia).padStart(2, "0")} - ${diaSemanaBR(data)}`;
         const reservasDia = ativos.filter((r) => r.data_reserva === data);
-        const celulas = espacosGrade.map((espaco) => {
-          const itens = reservasDia.filter((r) =>
-            r.espaco_id && espaco.id
-              ? r.espaco_id === espaco.id
-              : r.espaco_nome === espaco.nome,
-          );
-          if (!itens.length) return "Livre";
-          return itens.map((r) => {
-            const estaPago = pagamentoConfirmado(r);
-            return [
-              r.responsavel_nome || "Responsável não informado",
-              `${horarioExibicao(r)} · ${statusBR(r.status)}`,
-              moeda(r.valor),
-              estaPago ? "PAGO" : "PENDENTE DE PAGAMENTO",
-              r.reservado_por_nome ? `Reservado por: ${r.reservado_por_nome}` : "",
-            ].filter(Boolean).join("\n");
-          }).join("\n\n");
+        const celulas = espacosGrade.flatMap((espaco) => {
+          const itens = reservasDia.filter((r) => r.espaco_id && espaco.id ? r.espaco_id === espaco.id : r.espaco_nome === espaco.nome);
+          if (!itens.length) return ["Livre", "", ""];
+          const nomes = itens.map((r) => `${r.responsavel_nome || "Responsável não informado"}\n${horarioExibicao(r)} · ${statusBR(r.status)}`).join("\n\n");
+          const motivos = itens.map((r) => r.motivo_locacao || "Não informado").join("\n\n");
+          const pagamentos = itens.map((r) => `${r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"} · ${moeda(r.valor)}`).join("\n\n");
+          return [nomes, motivos, pagamentos];
         });
         return [rotuloDia, ...celulas];
       });
-      const csv = [cabecalho, ...linhas]
+      const csv = [cabecalhoPrincipal, subCabecalho, ...linhas]
         .map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";"))
         .join("\r\n");
       const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
@@ -398,11 +436,12 @@ export default function RelatorioReservasPage() {
       return;
     }
 
-    const cabecalho = ["Data", "Horário", "Espaço", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
+    const cabecalho = ["Data", "Horário", "Espaço", "Motivo da locação", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
     const linhas = reservas.map((r) => [
       dataBR(r.data_reserva),
       horarioExibicao(r),
       r.espaco_nome,
+      r.motivo_locacao || "",
       r.responsavel_nome,
       r.matricula || "",
       r.reservado_por_nome || "Não registrado (histórico anterior)",
@@ -455,7 +494,7 @@ export default function RelatorioReservasPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
-            <button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
+            {visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7) && <button onClick={exportarExcelGrade} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-[#e8f3ee] px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Excel colorido</button>}<button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
             <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
           </div>
         </div>
@@ -487,12 +526,11 @@ export default function RelatorioReservasPage() {
             {periodoRapido === "mes" && dataInicial.slice(0,7) === dataFinal.slice(0,7) && (() => {
               const [anoGrade, mesGrade] = dataInicial.slice(0,7).split("-").map(Number);
               const dias = new Date(anoGrade, mesGrade, 0).getDate();
-              const espacosGradeBase = espacos.length ? espacos : Array.from(new Map(reservas.map(r => [r.espaco_id || r.espaco_nome, { id: r.espaco_id, nome: r.espaco_nome, categoria: r.categoria }])).values());
-              const espacosGrade = ordenarEspacosGrade(espacosGradeBase);
+              const espacosGrade = obterEspacosGrade();
               const ativos = reservas.filter(r => r.status !== "cancelada");
               return <section className="mb-6 overflow-hidden rounded-2xl border border-[#cbd9d2] bg-white shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-[#e7f3ec] p-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani</p><h2 className="text-xl font-extrabold capitalize text-[#005a3c]">{tituloMes(`${dataInicial.slice(0,7)}-15`)}</h2><p className="text-sm text-gray-600">Grade mensal · reservas e pagamentos</p></div><div className="flex flex-wrap gap-3 text-xs font-bold"><span className="rounded-full bg-green-100 px-3 py-2 text-green-800">● Pago</span><span className="rounded-full bg-amber-100 px-3 py-2 text-amber-800">● Pendente</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">— Livre</span></div></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[1000px] border-collapse text-sm"><thead><tr className="bg-[#f7faf8] text-left text-xs uppercase text-gray-600"><th className="sticky left-0 z-10 border-b border-r bg-[#f7faf8] p-3">Dia</th>{espacosGrade.map(e=><th key={e.id || e.nome} className="min-w-[220px] border-b border-r p-3">{e.nome}</th>)}</tr></thead><tbody>{Array.from({length:dias},(_,i)=>{const dia=i+1;const data=`${anoGrade}-${String(mesGrade).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;const reservasDia=ativos.filter(r=>r.data_reserva===data);return <tr key={data} className="align-top odd:bg-white even:bg-[#fbfcfb]"><td className="sticky left-0 border-b border-r bg-inherit p-3"><b>{String(dia).padStart(2,"0")}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(data)}</div></td>{espacosGrade.map(e=>{const itens=reservasDia.filter(r=>(r.espaco_id && e.id ? r.espaco_id===e.id : r.espaco_nome===e.nome));return <td key={e.id || e.nome} className="border-b border-r p-2">{itens.length ? <div className="space-y-2">{itens.map(r=><div key={r.id} className={`rounded-lg border p-2 ${pagamentoConfirmado(r) ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}><div className="font-bold text-[#17382c]">{r.responsavel_nome || "Responsável não informado"}</div><div className="text-xs text-gray-600">{horarioExibicao(r)} · {statusBR(r.status)}</div><div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-xs"><b>{moeda(r.valor)}</b><span className={`font-extrabold ${r.data_pagamento ? "text-green-700" : "text-amber-800"}`}>{pagamentoConfirmado(r) ? "PAGO" : "VERIFICAR PAGAMENTO"}</span></div>{r.reservado_por_nome && <div className="mt-1 text-xs text-gray-500">Reservado por: {r.reservado_por_nome}</div>}</div>)}</div>:<span className="text-xs text-gray-300">Livre</span>}</td>})}</tr>})}</tbody></table></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[1200px] border-collapse text-sm"><thead><tr className="text-left text-xs uppercase text-gray-700"><th rowSpan={2} className="sticky left-0 z-20 border-b border-r bg-[#e7f3ec] p-3">Dia</th>{espacosGrade.map((e) => <th key={e.id || e.nome} colSpan={3} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="min-w-[390px] border-b border-r p-3 text-center">{e.nome}</th>)}</tr><tr className="text-left text-[10px] font-bold uppercase text-gray-700">{espacosGrade.map((e) => ["Nome", "Motivo", "Pagamento"].map((sub) => <th key={`${e.id || e.nome}-${sub}`} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="border-b border-r px-2 py-2">{sub}</th>))}</tr></thead><tbody>{Array.from({ length: dias }, (_, i) => { const dia = i + 1; const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`; const reservasDia = ativos.filter((r) => r.data_reserva === data); return <tr key={data} className="align-top odd:bg-white even:bg-[#fbfcfb]"><td className="sticky left-0 z-10 border-b border-r bg-[#f7faf8] p-3"><b>{String(dia).padStart(2, "0")}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(data)}</div></td>{espacosGrade.map((e) => { const itens = reservasDia.filter((r) => r.espaco_id && e.id ? r.espaco_id === e.id : r.espaco_nome === e.nome); if (!itens.length) return <td key={e.id || e.nome} colSpan={3} className="border-b border-r p-2 text-xs text-gray-300">Livre</td>; const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "bg-green-50" : "bg-amber-50"; return <Fragment key={e.id || e.nome}><td className={`min-w-[145px] border-b border-r p-2 ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><div className="font-bold text-[#17382c]">{r.responsavel_nome || "Responsável não informado"}</div><div className="text-xs text-gray-600">{horarioExibicao(r)} · {statusBR(r.status)}</div>{r.reservado_por_nome && <div className="mt-1 text-[10px] text-gray-500">Por: {r.reservado_por_nome}</div>}</div>)}</td><td className={`min-w-[125px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0">{r.motivo_locacao || <span className="text-gray-400">Não informado</span>}</div>)}</td><td className={`min-w-[120px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><b className={r.data_pagamento ? "text-green-700" : "text-amber-800"}>{r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"}</b><div className="font-bold">{moeda(r.valor)}</div></div>)}</td></Fragment>; })}</tr>; })}</tbody></table></div>
                 <div className="border-t bg-[#f7faf8] p-3 text-xs text-gray-500">{ativos.length} reserva(s) ativa(s) no período · Valores e pagamento conforme os dados registrados na reserva. Confirme no Financeiro em caso de dúvida.</div>
               </section>;
             })()}
@@ -554,7 +592,7 @@ export default function RelatorioReservasPage() {
 
             <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Motivo da locação</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td>{r.motivo_locacao || "—"}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
             </section>
               </>
             )}
