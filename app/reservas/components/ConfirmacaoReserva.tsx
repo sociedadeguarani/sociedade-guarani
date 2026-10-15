@@ -7,6 +7,7 @@ import { dataBR, moeda } from "../utils";
 interface Props {
   tipoPessoa: TipoPessoa;
   espacoNome: string;
+  cobranca: "hora" | "diaria";
   data: string;
   horario: string;
   nome: string;
@@ -33,6 +34,7 @@ interface Props {
 export default function ConfirmacaoReserva({
   tipoPessoa,
   espacoNome,
+  cobranca,
   data,
   horario,
   nome,
@@ -75,7 +77,7 @@ export default function ConfirmacaoReserva({
             <div className="flex justify-between gap-3"><span>Espaço</span><b className="text-right">{espacoNome || "—"}</b></div>
             <div className="flex justify-between gap-3"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div>
             <div className="flex justify-between gap-3"><span>Data</span><b>{dataBR(data)}</b></div>
-            <div className="flex justify-between gap-3"><span>Horário</span><b>{horario}</b></div>
+            <div className="flex justify-between gap-3"><span>{cobranca === "diaria" ? "Período" : "Horário"}</span><b>{cobranca === "diaria" ? "Diária (dia inteiro)" : horario}</b></div>
             <div className="flex justify-between gap-3"><span>Responsável</span><b className="text-right">{nome}</b></div>
             {matricula && <div className="flex justify-between gap-3"><span>Matrícula</span><b>{matricula}</b></div>}
             <div className="flex justify-between gap-3"><span>Valor</span><b className="text-[#005a3c]">{moeda(valor)}</b></div>
