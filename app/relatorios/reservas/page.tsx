@@ -120,9 +120,9 @@ export default function RelatorioReservasPage() {
   const hoje = dataLocalISO();
   const anoAtual = Number(hoje.slice(0, 4));
   const [anoSelecionado, setAnoSelecionado] = useState(String(anoAtual));
-  const [periodoRapido, setPeriodoRapido] = useState<PeriodoRapido>("ano");
+  const [periodoRapido, setPeriodoRapido] = useState<PeriodoRapido>("mes");
   const [mesSelecionado, setMesSelecionado] = useState(String(new Date().getMonth() + 1));
-  const periodoInicial = datasDoPeriodo("ano", String(anoAtual), String(new Date().getMonth() + 1), hoje)!;
+  const periodoInicial = datasDoPeriodo("mes", String(anoAtual), String(new Date().getMonth() + 1), hoje)!;
   const [dataInicial, setDataInicial] = useState(periodoInicial.inicio);
   const [dataFinal, setDataFinal] = useState(periodoInicial.fim);
   const [visualizacao, setVisualizacao] = useState<Visualizacao>("administrativo");
@@ -225,13 +225,18 @@ export default function RelatorioReservasPage() {
     window.print();
   }
 
-  const reservasLimpeza = useMemo(
-    () => reservas.filter((r) => r.status !== "cancelada").slice().sort((a, b) =>
+  const reservasOrdenadas = useMemo(
+    () => [...reservas].sort((a, b) =>
       a.data_reserva.localeCompare(b.data_reserva) ||
       a.hora_inicio.localeCompare(b.hora_inicio) ||
       a.espaco_nome.localeCompare(b.espaco_nome, "pt-BR")
     ),
     [reservas],
+  );
+
+  const reservasLimpeza = useMemo(
+    () => reservasOrdenadas.filter((r) => r.status !== "cancelada"),
+    [reservasOrdenadas],
   );
 
   const gruposLimpeza = useMemo(() => {
@@ -266,12 +271,11 @@ export default function RelatorioReservasPage() {
 
   function mudarMes(mes: string) {
     setMesSelecionado(mes);
-    if (periodoRapido === "mes") {
-      const datas = datasDoPeriodo("mes", anoSelecionado, mes, hoje);
-      if (datas) {
-        setDataInicial(datas.inicio);
-        setDataFinal(datas.fim);
-      }
+    setPeriodoRapido("mes");
+    const datas = datasDoPeriodo("mes", anoSelecionado, mes, hoje);
+    if (datas) {
+      setDataInicial(datas.inicio);
+      setDataFinal(datas.fim);
     }
   }
 
@@ -287,53 +291,76 @@ export default function RelatorioReservasPage() {
   }
 
   function exportarCsv() {
+    // CSV simples, em ordem cronológica e com cabeçalhos objetivos,
+    // para abrir melhor no Excel em português (UTF-8 + delimitador ;).
+    const itens = [...(visualizacao === "limpeza" ? reservasLimpeza : reservas)].sort((a, b) =>
+      a.data_reserva.localeCompare(b.data_reserva) ||
+      a.hora_inicio.localeCompare(b.hora_inicio) ||
+      a.espaco_nome.localeCompare(b.espaco_nome, "pt-BR")
+    );
+
+    let cabecalho: string[];
+    let linhas: string[][];
+
     if (visualizacao === "limpeza") {
-      const cabecalho = ["Data", "Dia da semana", "Espaço", "Horário", "Responsável / associado", "Situação", "Lista de presença", "Quantidade de convidados"];
-      const linhas = reservasLimpeza.map((r) => [
+      cabecalho = [
+        "Data da reserva", "Dia da semana", "Espaço reservado", "Horário / período",
+        "Reservado para", "Reserva cadastrada por", "Situação da reserva",
+        "Lista de presença", "Quantidade de convidados"
+      ];
+      linhas = itens.map((r) => [
         dataBR(r.data_reserva),
         diaSemanaBR(r.data_reserva),
         r.espaco_nome,
         horarioExibicao(r),
-        r.responsavel_nome || "Não informado",
+        r.responsavel_nome || "Responsável não informado",
+        r.reservado_por_nome || "Não identificado (cadastro antigo)",
         statusBR(r.status),
-        r.lista_presenca_nome ? "Lista anexada" : (r.espaco_nome.toLowerCase().includes("quiosque") ? "Lista não anexada" : "Não se aplica"),
+        r.lista_presenca_nome
+          ? "Lista anexada"
+          : (r.espaco_nome.toLowerCase().includes("quiosque") ? "ATENÇÃO: lista não anexada" : "Não se aplica"),
         r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
       ]);
-      const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
-      const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `agenda-limpeza-${dataInicial}-${dataFinal}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      return;
+    } else {
+      cabecalho = [
+        "Data da reserva", "Horário / período", "Espaço reservado", "Associado / responsável",
+        "Matrícula", "Reserva cadastrada por", "Perfil de quem cadastrou", "Tipo de pessoa",
+        "Forma de pagamento", "Situação da reserva", "Valor previsto (R$)", "Data do pagamento",
+        "Arquivo da lista de presença", "Quantidade de convidados", "Situação do comprovante"
+      ];
+      linhas = itens.map((r) => [
+        dataBR(r.data_reserva),
+        horarioExibicao(r),
+        r.espaco_nome,
+        r.responsavel_nome || "Responsável não informado",
+        r.matricula || "",
+        r.reservado_por_nome || "Não identificado (cadastro antigo)",
+        r.reservado_por_perfil || "",
+        r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio",
+        pagamentoBR(r.tipo_pagamento),
+        statusBR(r.status),
+        Number(r.valor || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        r.data_pagamento ? dataBR(r.data_pagamento) : "",
+        r.lista_presenca_nome || "",
+        r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
+        r.comprovante_status || "",
+      ]);
     }
 
-    const cabecalho = ["Data", "Horário", "Espaço", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
-    const linhas = reservas.map((r) => [
-      dataBR(r.data_reserva),
-      horarioExibicao(r),
-      r.espaco_nome,
-      r.responsavel_nome,
-      r.matricula || "",
-      r.reservado_por_nome || "Não registrado (histórico anterior)",
-      r.reservado_por_perfil || "",
-      r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio",
-      pagamentoBR(r.tipo_pagamento),
-      statusBR(r.status),
-      r.valor.toFixed(2).replace(".", ","),
-      r.data_pagamento ? dataBR(r.data_pagamento) : "",
-      r.lista_presenca_nome || "",
-      r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
-      r.comprovante_status || "",
-    ]);
-    const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
+    const csv = [cabecalho, ...linhas]
+      .map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";"))
+      .join("\r\n");
     const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `relatorio-reservas-${dataInicial}-${dataFinal}.csv`;
+
+    const periodoArquivo = periodoRapido === "mes"
+      ? `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-${MESES[Number(mesSelecionado) - 1].toLowerCase()}`
+      : periodoRapido === "ano"
+        ? anoSelecionado
+        : `${dataInicial}_a_${dataFinal}`;
+    a.download = `${visualizacao === "limpeza" ? "Agenda_para_limpeza" : "Relatorio_da_diretoria"}_reservas_${periodoArquivo}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -352,6 +379,10 @@ export default function RelatorioReservasPage() {
           .sombra-impressao { box-shadow: none !important; border: 1px solid #dfe7e2 !important; }
           .agenda-limpeza-print { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
           .limpeza-mes { break-inside: auto; page-break-inside: auto; }
+          .agenda-limpeza-print table { font-size: 10pt !important; }
+          .agenda-limpeza-print th, .agenda-limpeza-print td { padding-top: 6px !important; padding-bottom: 6px !important; }
+          .relatorio-reservas-print tr { break-inside: avoid; page-break-inside: avoid; }
+          .relatorio-reservas-print h2 { break-after: avoid-page; }
           .limpeza-mes tr { break-inside: avoid; page-break-inside: avoid; }
           .limpeza-mes h3 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
         }
@@ -363,32 +394,104 @@ export default function RelatorioReservasPage() {
             <Link href="/relatorios" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar aos relatórios</Link>
             <p className="text-sm font-medium text-gray-500">Administração</p>
             <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]">{visualizacao === "limpeza" ? <><CalendarDays className="h-8 w-8" /> Agenda de limpeza</> : <><BarChart3 className="h-8 w-8" /> Relatório de Reservas</>}</h1>
-            <p className="mt-1 text-gray-500">{visualizacao === "limpeza" ? "Visão operacional dos espaços reservados, sem valores financeiros, para orientar a equipe de limpeza." : "Reservas realizadas, situação, ocupação dos espaços e valores do período."}</p>
+            <p className="mt-1 text-gray-500">{visualizacao === "limpeza" ? "Lista simples para encaminhar à limpeza: locais, datas e horários, sem valores financeiros." : "Relatório completo para presidente e diretoria, com situação, responsáveis e valores."}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
-            <button onClick={abrirRelatorioAdministrativo} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "administrativo" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><BarChart3 className="h-4 w-4" /> Relatório administrativo</button>
-            <button onClick={abrirAgendaLimpeza} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "limpeza" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><ClipboardList className="h-4 w-4" /> Agenda da limpeza</button>
-            <button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
-            <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
+            <button onClick={abrirRelatorioAdministrativo} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "administrativo" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><BarChart3 className="h-4 w-4" /> Para presidente / diretoria</button>
+            <button onClick={abrirAgendaLimpeza} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "limpeza" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><ClipboardList className="h-4 w-4" /> Para equipe de limpeza</button>
+            <button onClick={exportarCsv} disabled={carregando} title="CSV com colunas organizadas para abrir e filtrar no Excel" className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><Download className="h-4 w-4" /> Baixar para Excel (CSV)</button>
+            <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Salvar / imprimir PDF</button>
           </div>
         </div>
 
         <section className="nao-imprimir mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-          <div className="mb-4"><h2 className="font-extrabold text-[#003d2b]">Período e filtros</h2><p className="mt-1 text-sm text-gray-500">Escolha um ano inteiro, os meses restantes até dezembro, um mês específico ou um período personalizado.</p></div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="text-sm font-semibold text-gray-600">Ano<select value={anoSelecionado} onChange={(e) => mudarAno(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{Array.from({ length: anoAtual - 2000 + 11 }, (_, i) => 2000 + i).map((ano) => <option key={ano} value={String(ano)}>{ano}</option>)}</select></label>
-            <label className="text-sm font-semibold text-gray-600">Período<select value={periodoRapido} onChange={(e) => aplicarPeriodo(e.target.value as PeriodoRapido)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="ano">Ano inteiro</option><option value="restante">Hoje até dezembro (outros anos: ano inteiro)</option><option value="mes">Mês escolhido</option><option value="personalizado">Personalizado</option></select></label>
-            {periodoRapido === "mes" && <label className="text-sm font-semibold text-gray-600">Mês<select value={mesSelecionado} onChange={(e) => mudarMes(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{MESES.map((mes, i) => <option key={mes} value={String(i + 1)}>{mes}</option>)}</select></label>}
-            <label className="text-sm font-semibold text-gray-600">Data inicial<input type="date" value={dataInicial} onChange={(e) => { setDataInicial(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            <label className="text-sm font-semibold text-gray-600">Data final<input type="date" value={dataFinal} onChange={(e) => { setDataFinal(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Status<select value={status} onChange={(e) => setStatus(e.target.value as "todos" | Status)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option></select></label>}
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Pagamento<select value={pagamento} onChange={(e) => setPagamento(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="debito_em_conta">Débito em conta</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option><option value="outro">Outro</option><option value="sem_pagamento">Sem pagamento</option></select></label>}
+          <div className="mb-4">
+            <h2 className="text-lg font-extrabold text-[#003d2b]">Escolha o mês ou período para enviar</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Para enviar setembro inteiro, escolha o ano e o mês abaixo, clique em <b>Mês inteiro</b>, depois em Gerar e em <b>Salvar / imprimir PDF</b>.
+            </p>
           </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="text-sm font-semibold text-gray-700">
+              Ano
+              <select value={anoSelecionado} onChange={(e) => mudarAno(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">
+                {Array.from({ length: anoAtual - 2000 + 11 }, (_, i) => 2000 + i).map((ano) => <option key={ano} value={String(ano)}>{ano}</option>)}
+              </select>
+            </label>
+
+            <label className="text-sm font-semibold text-gray-700">
+              Mês
+              <select value={mesSelecionado} onChange={(e) => mudarMes(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">
+                {MESES.map((mes, i) => <option key={mes} value={String(i + 1)}>{mes}</option>)}
+              </select>
+            </label>
+
+            {periodoRapido === "personalizado" && <>
+              <label className="text-sm font-semibold text-gray-700">Data inicial
+                <input type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" />
+              </label>
+              <label className="text-sm font-semibold text-gray-700">Data final
+                <input type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" />
+              </label>
+            </>}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {([
+              ["mes", "Mês inteiro"],
+              ["ano", "Ano inteiro"],
+              ["restante", anoSelecionado === hoje.slice(0, 4) ? "Hoje até dezembro" : "Ano inteiro do ano escolhido"],
+            ] as Array<[PeriodoRapido, string]>).map(([periodo, rotulo]) => (
+              <button type="button" key={periodo} onClick={() => aplicarPeriodo(periodo)} className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${periodoRapido === periodo ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#42574d]"}`}>
+                {rotulo}
+              </button>
+            ))}
+            <button type="button" onClick={() => setPeriodoRapido("personalizado")} className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${periodoRapido === "personalizado" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#42574d]"}`}>
+              Escolher datas
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-xl bg-[#f1f7f3] px-4 py-3 text-sm text-[#174b37]">
+            <span className="font-bold">Você vai gerar: </span>
+            {periodoRapido === "mes"
+              ? `reservas de ${MESES[Number(mesSelecionado) - 1]} de ${anoSelecionado} (${dataBR(dataInicial)} a ${dataBR(dataFinal)})`
+              : periodoRapido === "ano"
+                ? `todas as reservas de ${anoSelecionado} (${dataBR(dataInicial)} a ${dataBR(dataFinal)})`
+                : periodoRapido === "restante"
+                  ? `reservas de ${dataBR(dataInicial)} até ${dataBR(dataFinal)}`
+                  : `reservas entre ${dataBR(dataInicial)} e ${dataBR(dataFinal)}`}
+            .
+            <div className="mt-1 text-xs text-[#4e6a5d]">
+              Para encaminhar por WhatsApp ou e-mail, prefira o PDF. A planilha é indicada para quem precisa filtrar ou trabalhar com os dados no Excel.
+            </div>
+          </div>
+
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Tipo de pessoa<select value={tipoPessoa} onChange={(e) => setTipoPessoa(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos</option><option value="socio">Sócio</option><option value="nao_socio">Não sócio</option></select></label>}
-            <label className="text-sm font-semibold text-gray-600">Espaço<select value={espacoId} onChange={(e) => setEspacoId(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos os espaços</option>{espacos.map((e) => <option key={e.id || e.nome} value={e.id || "todos"}>{e.nome}</option>)}</select></label>
-            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} className="rounded-xl bg-[#005a3c] px-5 py-2.5 text-sm font-bold text-white">Gerar {visualizacao === "limpeza" ? "agenda" : "relatório"}</button>
+            {visualizacao === "administrativo" && <>
+              <label className="text-sm font-semibold text-gray-600">Status
+                <select value={status} onChange={(e) => setStatus(e.target.value as "todos" | Status)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
+                  <option value="todos">Todos</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-600">Pagamento
+                <select value={pagamento} onChange={(e) => setPagamento(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
+                  <option value="todos">Todos</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="debito_em_conta">Débito em conta</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option><option value="outro">Outro</option><option value="sem_pagamento">Sem pagamento</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-600">Tipo de pessoa
+                <select value={tipoPessoa} onChange={(e) => setTipoPessoa(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos</option><option value="socio">Sócio</option><option value="nao_socio">Não sócio</option></select>
+              </label>
+            </>}
+            <label className="text-sm font-semibold text-gray-600">Espaço
+              <select value={espacoId} onChange={(e) => setEspacoId(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2">
+                <option value="todos">Todos os espaços</option>{espacos.map((e) => <option key={e.id || e.nome} value={e.id || "todos"}>{e.nome}</option>)}
+              </select>
+            </label>
+            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} className="rounded-xl bg-[#005a3c] px-5 py-2.5 text-sm font-bold text-white shadow-sm">
+              Gerar {visualizacao === "limpeza" ? "lista para limpeza" : "relatório da diretoria"}
+            </button>
           </div>
         </section>
 
@@ -402,9 +505,15 @@ export default function RelatorioReservasPage() {
               <section className="agenda-limpeza-print rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
                 <div className="mb-5 border-b border-[#dfe7e2] pb-4">
                   <p className="text-xs font-extrabold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
-                  <h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Agenda de limpeza e preparação dos espaços</h2>
+                  <h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">{periodoRapido === "mes" ? `Agenda de reservas — ${MESES[Number(mesSelecionado) - 1]} de ${anoSelecionado}` : "Agenda de limpeza e preparação dos espaços"}</h2>
                   <p className="mt-1 text-sm text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Reservas confirmadas e pendentes; canceladas não aparecem.</p>
                   <p className="mt-1 text-xs text-gray-500">Relatório operacional. Não contém valores financeiros nem dados de pagamento.</p>
+                </div>
+                <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border border-[#dfe7e2] bg-[#f8faf9] p-3"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">Reservas no período</p><p className="mt-1 text-2xl font-extrabold text-[#005a3c]">{reservasLimpeza.length}</p></div>
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-3"><p className="text-xs font-bold uppercase tracking-wide text-green-800">Confirmadas</p><p className="mt-1 text-2xl font-extrabold text-green-800">{reservasLimpeza.filter((r) => r.status === "confirmada").length}</p></div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-bold uppercase tracking-wide text-amber-900">Aguardando confirmação</p><p className="mt-1 text-2xl font-extrabold text-amber-900">{reservasLimpeza.filter((r) => r.status === "pendente").length}</p></div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-bold uppercase tracking-wide text-amber-900">Quiosques sem lista</p><p className="mt-1 text-2xl font-extrabold text-amber-900">{reservasLimpeza.filter((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome).length}</p></div>
                 </div>
                 {reservasLimpeza.some((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome) && (
                   <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
@@ -431,6 +540,11 @@ export default function RelatorioReservasPage() {
               </section>
             ) : (
               <>
+            <section className="hidden print:block mb-6 border-b-2 border-[#005a3c] pb-4">
+              <p className="text-xs font-extrabold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
+              <h1 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Relatório de reservas — Diretoria / Presidência</h1>
+              <p className="mt-1 text-sm text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Gerado em {dataBR(hoje)}</p>
+            </section>
             <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
               {[
                 ["Reservas", resumo.total, ""],
@@ -456,7 +570,7 @@ export default function RelatorioReservasPage() {
 
             <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservasOrdenadas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
             </section>
               </>
             )}
