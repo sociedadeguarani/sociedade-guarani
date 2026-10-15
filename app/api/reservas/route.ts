@@ -433,12 +433,13 @@ export async function POST(request: Request) {
     const data = String(body.data || "").trim();
     const horario = String(body.horario || "").trim();
     const nome = String(body.nome || "").trim();
+    const motivoLocacao = String(body.motivo_locacao || "").trim().slice(0, 200);
     const pagamento = String(body.pagamento || "pendente") as PagamentoEntrada;
     const valor = Number(body.valor || 0);
     const contaBancariaId = String(body.conta_bancaria_id || "").trim();
 
-    if (!espacoInformado || !espacoNome || !data || !horario || !nome) {
-      return NextResponse.json({ error: "Espaço, data, horário e nome são obrigatórios." }, { status: 400 });
+    if (!espacoInformado || !espacoNome || !data || !horario || !nome || !motivoLocacao) {
+      return NextResponse.json({ error: "Espaço, data, horário, responsável e motivo da locação são obrigatórios." }, { status: 400 });
     }
 
     if (!["pix", "dinheiro", "transferencia", "pendente"].includes(pagamento)) {
@@ -458,6 +459,7 @@ export async function POST(request: Request) {
       socio_id: body.socio_id || null,
       dependente_id: body.dependente_id || null,
       responsavel_nome: nome,
+      motivo_locacao: motivoLocacao,
       data_reserva: data,
       hora_inicio: inicio,
       hora_fim: fim,
@@ -733,10 +735,11 @@ export async function PATCH(request: Request) {
       const data = String(body.data || "").trim();
       const horario = String(body.horario || "").trim();
       const nome = String(body.nome || "").trim();
+      const motivoLocacao = String(body.motivo_locacao || "").trim().slice(0, 200);
       const pagamento = String(body.pagamento || "pendente") as PagamentoEntrada;
       const valor = Number(body.valor || 0);
-      if (!espacoInformado || !espacoNome || !data || !horario || !nome) {
-        return NextResponse.json({ error: "Espaço, data, horário e nome são obrigatórios." }, { status: 400 });
+      if (!espacoInformado || !espacoNome || !data || !horario || !nome || !motivoLocacao) {
+        return NextResponse.json({ error: "Espaço, data, horário, responsável e motivo da locação são obrigatórios." }, { status: 400 });
       }
       if (!["pix", "dinheiro", "transferencia", "pendente"].includes(pagamento)) {
         return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
@@ -765,6 +768,7 @@ export async function PATCH(request: Request) {
         socio_id: reserva.socio_id ?? null,
         dependente_id: reserva.dependente_id ?? null,
         responsavel_nome: reserva.responsavel_nome ?? null,
+        motivo_locacao: reserva.motivo_locacao ?? null,
         data_reserva: reserva.data_reserva ?? null,
         hora_inicio: reserva.hora_inicio ?? null,
         hora_fim: reserva.hora_fim ?? null,
@@ -786,6 +790,7 @@ export async function PATCH(request: Request) {
           socio_id: body.socio_id || null,
           dependente_id: body.dependente_id || null,
           responsavel_nome: nome,
+          motivo_locacao: motivoLocacao,
           data_reserva: data,
           hora_inicio: inicio,
           hora_fim: fim,
