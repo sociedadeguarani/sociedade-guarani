@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
-import { BarChart3, Download, Printer, RefreshCw } from "lucide-react";
+import { BarChart3, CalendarDays, ClipboardList, Download, Printer, RefreshCw } from "lucide-react";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
@@ -69,17 +69,63 @@ function escapeCsv(valor: string) {
   return `"${valor.replaceAll('"', '""')}"`;
 }
 
+type PeriodoRapido = "ano" | "restante" | "mes" | "personalizado";
+type Visualizacao = "administrativo" | "limpeza";
+
+const MESES = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+function dataLocalISO(data = new Date()) {
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+function datasDoPeriodo(periodo: PeriodoRapido, ano: string, mes: string, hoje: string) {
+  const anoNumero = Number(ano);
+  const mesNumero = Math.min(12, Math.max(1, Number(mes) || 1));
+  if (periodo === "restante") {
+    const inicio = ano === hoje.slice(0, 4) ? hoje : `${ano}-01-01`;
+    return { inicio, fim: `${ano}-12-31` };
+  }
+  if (periodo === "mes") {
+    const mm = String(mesNumero).padStart(2, "0");
+    const ultimoDia = new Date(anoNumero, mesNumero, 0).getDate();
+    return { inicio: `${ano}-${mm}-01`, fim: `${ano}-${mm}-${String(ultimoDia).padStart(2, "0")}` };
+  }
+  if (periodo === "personalizado") return null;
+  return { inicio: `${ano}-01-01`, fim: `${ano}-12-31` };
+}
+
+function diaSemanaBR(valor: string) {
+  if (!valor) return "";
+  return new Date(`${valor.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "long" });
+}
+
+function tituloMes(valor: string) {
+  const [ano, mes] = valor.slice(0, 7).split("-").map(Number);
+  return new Date(ano, (mes || 1) - 1, 15).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
 function horarioExibicao(r: Pick<Reserva, "espaco_nome" | "hora_inicio" | "hora_fim">) {
   const nome = r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (nome.includes("quiosque") || nome.includes("salao")) return "Diária (dia todo)";
+  if (nome.includes("quiosque") || nome.includes("salao") || nome.includes("pavilhao")) return "Diária (dia todo)";
   return `${r.hora_inicio} - ${r.hora_fim}`;
 }
 
 export default function RelatorioReservasPage() {
-  const hoje = new Date().toISOString().slice(0, 10);
-  const primeiroDiaAno = `${hoje.slice(0, 4)}-01-01`;
-  const [dataInicial, setDataInicial] = useState(primeiroDiaAno);
-  const [dataFinal, setDataFinal] = useState(hoje);
+  const hoje = dataLocalISO();
+  const anoAtual = Number(hoje.slice(0, 4));
+  const [anoSelecionado, setAnoSelecionado] = useState(String(anoAtual));
+  const [periodoRapido, setPeriodoRapido] = useState<PeriodoRapido>("ano");
+  const [mesSelecionado, setMesSelecionado] = useState(String(new Date().getMonth() + 1));
+  const periodoInicial = datasDoPeriodo("ano", String(anoAtual), String(new Date().getMonth() + 1), hoje)!;
+  const [dataInicial, setDataInicial] = useState(periodoInicial.inicio);
+  const [dataFinal, setDataFinal] = useState(periodoInicial.fim);
+  const [visualizacao, setVisualizacao] = useState<Visualizacao>("administrativo");
   const [status, setStatus] = useState<"todos" | Status>("todos");
   const [espacoId, setEspacoId] = useState("todos");
   const [pagamento, setPagamento] = useState("todos");
@@ -94,17 +140,22 @@ export default function RelatorioReservasPage() {
     return sessao.session?.access_token || "";
   }
 
-  async function carregar() {
+  async function carregar(opcoes: { status?: "todos" | Status; pagamento?: string; tipoPessoa?: string; dataInicial?: string; dataFinal?: string } = {}) {
+    const inicioConsulta = opcoes.dataInicial ?? dataInicial;
+    const fimConsulta = opcoes.dataFinal ?? dataFinal;
+    const statusConsulta = opcoes.status ?? status;
+    const pagamentoConsulta = opcoes.pagamento ?? pagamento;
+    const tipoPessoaConsulta = opcoes.tipoPessoa ?? tipoPessoa;
     setCarregando(true);
     setErro("");
     try {
       const params = new URLSearchParams({
-        data_inicial: dataInicial,
-        data_final: dataFinal,
-        status,
+        data_inicial: inicioConsulta,
+        data_final: fimConsulta,
+        status: statusConsulta,
         espaco_id: espacoId,
-        pagamento,
-        tipo_pessoa: tipoPessoa,
+        pagamento: pagamentoConsulta,
+        tipo_pessoa: tipoPessoaConsulta,
       });
       const token = await tokenAtual();
       const resposta = await fetch(`/api/relatorios/reservas?${params.toString()}`, {
@@ -174,7 +225,91 @@ export default function RelatorioReservasPage() {
     window.print();
   }
 
+  const reservasLimpeza = useMemo(
+    () => reservas.filter((r) => r.status !== "cancelada").slice().sort((a, b) =>
+      a.data_reserva.localeCompare(b.data_reserva) ||
+      a.hora_inicio.localeCompare(b.hora_inicio) ||
+      a.espaco_nome.localeCompare(b.espaco_nome, "pt-BR")
+    ),
+    [reservas],
+  );
+
+  const gruposLimpeza = useMemo(() => {
+    const mapa = new Map<string, Reserva[]>();
+    for (const reserva of reservasLimpeza) {
+      const mes = reserva.data_reserva.slice(0, 7);
+      if (!mapa.has(mes)) mapa.set(mes, []);
+      mapa.get(mes)!.push(reserva);
+    }
+    return Array.from(mapa.entries()).map(([mes, itens]) => ({ mes, titulo: tituloMes(`${mes}-15`), reservas: itens }));
+  }, [reservasLimpeza]);
+
+  function aplicarPeriodo(periodo: PeriodoRapido, ano = anoSelecionado, mes = mesSelecionado) {
+    setPeriodoRapido(periodo);
+    const datas = datasDoPeriodo(periodo, ano, mes, hoje);
+    if (datas) {
+      setDataInicial(datas.inicio);
+      setDataFinal(datas.fim);
+    }
+  }
+
+  function mudarAno(ano: string) {
+    setAnoSelecionado(ano);
+    if (periodoRapido !== "personalizado") {
+      const datas = datasDoPeriodo(periodoRapido, ano, mesSelecionado, hoje);
+      if (datas) {
+        setDataInicial(datas.inicio);
+        setDataFinal(datas.fim);
+      }
+    }
+  }
+
+  function mudarMes(mes: string) {
+    setMesSelecionado(mes);
+    if (periodoRapido === "mes") {
+      const datas = datasDoPeriodo("mes", anoSelecionado, mes, hoje);
+      if (datas) {
+        setDataInicial(datas.inicio);
+        setDataFinal(datas.fim);
+      }
+    }
+  }
+
+  function abrirAgendaLimpeza() {
+    setVisualizacao("limpeza");
+    // A agenda de limpeza inclui reservas confirmadas e pendentes, sem filtrar pagamento ou tipo de pessoa.
+    void carregar({ status: "todos", pagamento: "todos", tipoPessoa: "todos" });
+  }
+
+  function abrirRelatorioAdministrativo() {
+    setVisualizacao("administrativo");
+    void carregar();
+  }
+
   function exportarCsv() {
+    if (visualizacao === "limpeza") {
+      const cabecalho = ["Data", "Dia da semana", "Espaço", "Horário", "Responsável / associado", "Situação", "Lista de presença", "Quantidade de convidados"];
+      const linhas = reservasLimpeza.map((r) => [
+        dataBR(r.data_reserva),
+        diaSemanaBR(r.data_reserva),
+        r.espaco_nome,
+        horarioExibicao(r),
+        r.responsavel_nome || "Não informado",
+        statusBR(r.status),
+        r.lista_presenca_nome ? "Lista anexada" : (r.espaco_nome.toLowerCase().includes("quiosque") ? "Lista não anexada" : "Não se aplica"),
+        r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
+      ]);
+      const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\n");
+      const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `agenda-limpeza-${dataInicial}-${dataFinal}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const cabecalho = ["Data", "Horário", "Espaço", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
     const linhas = reservas.map((r) => [
       dataBR(r.data_reserva),
@@ -208,11 +343,17 @@ export default function RelatorioReservasPage() {
       <CabecalhoPadrao />
       <MenuLateralPadrao />
       <style jsx global>{`
+        @page { size: landscape; margin: 10mm; }
         @media print {
           body { background: white !important; }
+          header, aside { display: none !important; }
           .nao-imprimir { display: none !important; }
-          .relatorio-reservas-print { margin: 0 !important; max-width: none !important; }
+          .relatorio-reservas-print { margin: 0 !important; max-width: none !important; padding: 0 !important; }
           .sombra-impressao { box-shadow: none !important; border: 1px solid #dfe7e2 !important; }
+          .agenda-limpeza-print { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
+          .limpeza-mes { break-inside: auto; page-break-inside: auto; }
+          .limpeza-mes tr { break-inside: avoid; page-break-inside: avoid; }
+          .limpeza-mes h3 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
         }
       `}</style>
 
@@ -221,28 +362,33 @@ export default function RelatorioReservasPage() {
           <div>
             <Link href="/relatorios" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar aos relatórios</Link>
             <p className="text-sm font-medium text-gray-500">Administração</p>
-            <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><BarChart3 className="h-8 w-8" /> Relatório de Reservas</h1>
-            <p className="mt-1 text-gray-500">Reservas realizadas, situação, ocupação dos espaços e valores do período.</p>
+            <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]">{visualizacao === "limpeza" ? <><CalendarDays className="h-8 w-8" /> Agenda de limpeza</> : <><BarChart3 className="h-8 w-8" /> Relatório de Reservas</>}</h1>
+            <p className="mt-1 text-gray-500">{visualizacao === "limpeza" ? "Visão operacional dos espaços reservados, sem valores financeiros, para orientar a equipe de limpeza." : "Reservas realizadas, situação, ocupação dos espaços e valores do período."}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => void carregar()} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
-            <button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar CSV</button>
+            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
+            <button onClick={abrirRelatorioAdministrativo} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "administrativo" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><BarChart3 className="h-4 w-4" /> Relatório administrativo</button>
+            <button onClick={abrirAgendaLimpeza} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-bold shadow-sm ${visualizacao === "limpeza" ? "border-[#005a3c] bg-[#e7f3ec] text-[#005a3c]" : "border-[#cbd9d2] bg-white text-[#005a3c]"}`}><ClipboardList className="h-4 w-4" /> Agenda da limpeza</button>
+            <button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
             <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
           </div>
         </div>
 
         <section className="nao-imprimir mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-          <div className="mb-4"><h2 className="font-extrabold text-[#003d2b]">Filtros</h2><p className="mt-1 text-sm text-gray-500">Escolha o período e refine por status, espaço, pagamento ou tipo de pessoa.</p></div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <label className="text-sm font-semibold text-gray-600">Data inicial<input type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            <label className="text-sm font-semibold text-gray-600">Data final<input type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            <label className="text-sm font-semibold text-gray-600">Status<select value={status} onChange={(e) => setStatus(e.target.value as "todos" | Status)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option></select></label>
-            <label className="text-sm font-semibold text-gray-600">Espaço<select value={espacoId} onChange={(e) => setEspacoId(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos os espaços</option>{espacos.map((e) => <option key={e.id || e.nome} value={e.id || "todos"}>{e.nome}</option>)}</select></label>
-            <label className="text-sm font-semibold text-gray-600">Pagamento<select value={pagamento} onChange={(e) => setPagamento(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="debito_em_conta">Débito em conta</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option><option value="outro">Outro</option><option value="sem_pagamento">Sem pagamento</option></select></label>
+          <div className="mb-4"><h2 className="font-extrabold text-[#003d2b]">Período e filtros</h2><p className="mt-1 text-sm text-gray-500">Escolha um ano inteiro, os meses restantes até dezembro, um mês específico ou um período personalizado.</p></div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="text-sm font-semibold text-gray-600">Ano<select value={anoSelecionado} onChange={(e) => mudarAno(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{Array.from({ length: anoAtual - 2000 + 11 }, (_, i) => 2000 + i).map((ano) => <option key={ano} value={String(ano)}>{ano}</option>)}</select></label>
+            <label className="text-sm font-semibold text-gray-600">Período<select value={periodoRapido} onChange={(e) => aplicarPeriodo(e.target.value as PeriodoRapido)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="ano">Ano inteiro</option><option value="restante">Hoje até dezembro (outros anos: ano inteiro)</option><option value="mes">Mês escolhido</option><option value="personalizado">Personalizado</option></select></label>
+            {periodoRapido === "mes" && <label className="text-sm font-semibold text-gray-600">Mês<select value={mesSelecionado} onChange={(e) => mudarMes(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{MESES.map((mes, i) => <option key={mes} value={String(i + 1)}>{mes}</option>)}</select></label>}
+            <label className="text-sm font-semibold text-gray-600">Data inicial<input type="date" value={dataInicial} onChange={(e) => { setDataInicial(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
+            <label className="text-sm font-semibold text-gray-600">Data final<input type="date" value={dataFinal} onChange={(e) => { setDataFinal(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
+            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Status<select value={status} onChange={(e) => setStatus(e.target.value as "todos" | Status)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option></select></label>}
+            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Pagamento<select value={pagamento} onChange={(e) => setPagamento(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="debito_em_conta">Débito em conta</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option><option value="outro">Outro</option><option value="sem_pagamento">Sem pagamento</option></select></label>}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="text-sm font-semibold text-gray-600">Tipo de pessoa<select value={tipoPessoa} onChange={(e) => setTipoPessoa(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos</option><option value="socio">Sócio</option><option value="nao_socio">Não sócio</option></select></label>
-            <button onClick={() => void carregar()} className="rounded-xl bg-[#005a3c] px-5 py-2.5 text-sm font-bold text-white">Gerar relatório</button>
+            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Tipo de pessoa<select value={tipoPessoa} onChange={(e) => setTipoPessoa(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos</option><option value="socio">Sócio</option><option value="nao_socio">Não sócio</option></select></label>}
+            <label className="text-sm font-semibold text-gray-600">Espaço<select value={espacoId} onChange={(e) => setEspacoId(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos os espaços</option>{espacos.map((e) => <option key={e.id || e.nome} value={e.id || "todos"}>{e.nome}</option>)}</select></label>
+            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} className="rounded-xl bg-[#005a3c] px-5 py-2.5 text-sm font-bold text-white">Gerar {visualizacao === "limpeza" ? "agenda" : "relatório"}</button>
           </div>
         </section>
 
@@ -252,6 +398,39 @@ export default function RelatorioReservasPage() {
           <div className="rounded-2xl border bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório de reservas...</div>
         ) : (
           <>
+            {visualizacao === "limpeza" ? (
+              <section className="agenda-limpeza-print rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+                <div className="mb-5 border-b border-[#dfe7e2] pb-4">
+                  <p className="text-xs font-extrabold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
+                  <h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Agenda de limpeza e preparação dos espaços</h2>
+                  <p className="mt-1 text-sm text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Reservas confirmadas e pendentes; canceladas não aparecem.</p>
+                  <p className="mt-1 text-xs text-gray-500">Relatório operacional. Não contém valores financeiros nem dados de pagamento.</p>
+                </div>
+                {reservasLimpeza.some((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome) && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+                    Atenção: {reservasLimpeza.filter((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome).length} reserva(s) de quiosque sem lista de presença anexada. Verifique a lista antes do evento.
+                  </div>
+                )}
+                {gruposLimpeza.map((grupo) => (
+                  <section key={grupo.mes} className="limpeza-mes mb-7 last:mb-0">
+                    <h3 className="mb-2 rounded-lg bg-[#e7f3ec] px-3 py-2 text-lg font-extrabold capitalize text-[#005a3c]">{grupo.titulo}</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-sm">
+                        <thead><tr className="border-b bg-[#f8faf9] text-left text-xs font-extrabold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Horário / período</th><th>Reservado para</th><th>Situação</th><th>Lista / convidados</th></tr></thead>
+                        <tbody>{grupo.reservas.map((r) => {
+                          const ehQuiosque = r.espaco_nome.toLowerCase().includes("quiosque");
+                          const lista = r.lista_presenca_nome ? `Lista anexada${r.quantidade_convidados != null ? ` · ${r.quantidade_convidados} convidados` : ""}` : (ehQuiosque ? "Lista não anexada" : "—");
+                          return <tr key={r.id} className="border-b last:border-b-0 align-top"><td className="whitespace-nowrap px-3 py-3"><b>{dataBR(r.data_reserva)}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(r.data_reserva)}</div></td><td className="py-3 font-bold">{r.espaco_nome}</td><td className="py-3">{horarioExibicao(r)}</td><td className="py-3">{r.responsavel_nome || "Não informado"}</td><td className="py-3"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}>{r.status === "confirmada" ? "Confirmada" : "Pendente de confirmação"}</span></td><td className={`py-3 ${ehQuiosque && !r.lista_presenca_nome ? "font-bold text-amber-700" : "text-gray-600"}`}>{lista}</td></tr>;
+                        })}</tbody>
+                      </table>
+                    </div>
+                  </section>
+                ))}
+                {!reservasLimpeza.length && <p className="py-12 text-center text-gray-500">Nenhuma reserva confirmada ou pendente neste período.</p>}
+                <p className="mt-6 border-t border-[#dfe7e2] pt-3 text-xs text-gray-500">Gerado em {dataBR(hoje)} · Para alterações na agenda, consulte o módulo Reservas.</p>
+              </section>
+            ) : (
+              <>
             <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
               {[
                 ["Reservas", resumo.total, ""],
@@ -279,6 +458,8 @@ export default function RelatorioReservasPage() {
               <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
               <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
             </section>
+              </>
+            )}
           </>
         )}
       </main>
