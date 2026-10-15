@@ -38,6 +38,7 @@ function recorteReserva(row: Record<string, unknown>): Reserva {
     data: String(row.data ?? row.data_reserva ?? ""),
     horario: String(row.horario ?? `${String(row.hora_inicio ?? "").slice(0, 5)} - ${String(row.hora_fim ?? "").slice(0, 5)}`),
     nome: String(row.nome ?? row.responsavel_nome ?? ""),
+    motivoLocacao: row.motivo_locacao == null ? null : String(row.motivo_locacao),
     socioId: row.socio_id ? String(row.socio_id) : undefined,
     dependenteId: row.dependente_id ? String(row.dependente_id) : undefined,
     matricula: row.matricula == null ? null : String(row.matricula),
@@ -82,6 +83,7 @@ export default function ReservasPage() {
   const [data, setData] = useState("");
   const [horario, setHorario] = useState(HORARIOS[0]);
   const [nome, setNome] = useState("");
+  const [motivoLocacao, setMotivoLocacao] = useState("");
   const [socioId, setSocioId] = useState("");
   const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
   const [dependenteId, setDependenteId] = useState("");
@@ -351,6 +353,7 @@ export default function ReservasPage() {
     if (tipoPessoa === "nao_socio" && bloqueadoNaoSocio) return alert("Este espaço não pode ser alugado por não sócios.");
     if (!data) return alert("Selecione a data da reserva.");
     if (!nome.trim()) return alert("Informe o nome do responsável pela reserva.");
+    if (!motivoLocacao.trim()) return alert("Informe o motivo da locação, por exemplo aniversário, jantar, baile ou reunião.");
     if (!editandoReservaId && ocupados.length > 0 && espaco.cobranca === "diaria") {
       return alert("Este espaço é reservado por diária e já possui uma reserva ativa nesta data. Escolha outro dia.");
     }
@@ -429,6 +432,7 @@ export default function ReservasPage() {
     setData(reserva.data);
     setHorario(reserva.horario);
     setNome(reserva.nome);
+    setMotivoLocacao(reserva.motivoLocacao || "");
     setSocioId(reserva.socioId || "");
     setDependenteId(reserva.dependenteId || "");
     setMatriculaResponsavel(reserva.matricula ?? null);
@@ -473,6 +477,7 @@ export default function ReservasPage() {
         data,
         horario,
         nome: nome.trim(),
+        motivo_locacao: motivoLocacao.trim().slice(0, 200),
         socio_id: socioId || null,
         dependente_id: dependenteId || null,
         matricula: matriculaResponsavel ?? null,
@@ -514,7 +519,7 @@ export default function ReservasPage() {
         tipo: "Reserva de espaço",
         nome: reservaSalva.nome || nome,
         matricula: matriculaResponsavel,
-        detalhe: `Espaço: ${espaco.nome}`,
+        detalhe: `Espaço: ${espaco.nome} — Motivo: ${motivoLocacao.trim()}`,
         periodo: `${dataBR(data)} — ${horario}`,
         valor,
         pagamento: pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança",
@@ -525,12 +530,13 @@ export default function ReservasPage() {
 
       await registrarAvisoAdministrativo(
         editandoReservaId ? "✏️ Reserva alterada na portaria" : "📅 Reserva realizada na portaria",
-        `${reservaSalva.nome || nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} — ${espaco.nome} — ${dataBR(data)} ${horario} — ${moeda(valor)} — ${pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança"}.`,
+        `${reservaSalva.nome || nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} — ${espaco.nome} — Motivo: ${motivoLocacao.trim()} — ${dataBR(data)} ${horario} — ${moeda(valor)} — ${pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança"}.`,
       );
 
       setEtapa("selecao");
       setAba("reservas");
       setNome("");
+      setMotivoLocacao("");
       setSocioId("");
       setDependenteId("");
       setMatriculaResponsavel(null);
@@ -850,7 +856,8 @@ export default function ReservasPage() {
                     {tipoPessoa === "nao_socio" && bloqueadoNaoSocio && <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">🔒 Este espaço está bloqueado para não sócios.</div>}
                     <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Data</span><input type="date" value={data} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
                     {espaco?.cobranca === "hora" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Horário</span><select value={horario} onChange={(e) => setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map((h) => <option key={h} value={h} disabled={ocupados.includes(h) && !editandoReservaId}>{h}{ocupados.includes(h) && !editandoReservaId ? " — ocupado" : ""}</option>)}</select></label>}
-                    <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}><div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}<div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div><div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between text-sm"><span>Horário</span><b>{horario}</b></div><div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
+                    <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Motivo da locação / evento *</span><input value={motivoLocacao} onChange={(e) => setMotivoLocacao(e.target.value)} maxLength={200} required placeholder="Ex.: festa de aniversário, jantar, baile, reunião" className="mt-1 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" /><span className="mt-1 block text-xs text-gray-500">Informe a finalidade do aluguel para aparecer nos relatórios.</span></label>
+                    <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}><div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}<div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div><div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between text-sm"><span>Horário</span><b>{horario}</b></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div><div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
                     <button disabled={!espaco || (tipoPessoa === "nao_socio" && bloqueadoNaoSocio)} onClick={continuar} className="mt-4 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">Continuar</button>
                   </aside>
                 </section>
@@ -888,7 +895,7 @@ export default function ReservasPage() {
               {!publico && aba === "admin" && podeConfigurar && <ConfiguracaoEspacos espacos={espacos} salvandoId={salvandoEspacoId} onSalvar={salvarEspaco} />}
 
               {etapa === "confirmacao" && (publico || aba === "reservar") && (
-                <ConfirmacaoReserva tipoPessoa={tipoPessoa} espacoNome={espaco?.nome || ""} data={data} horario={horario} nome={nome} matricula={matriculaResponsavel} valor={valor} publico={publico} formaPagamento={formaPagamentoReserva} pix={pix} copiado={copiado} arquivo={arquivoComprovante} contasBancarias={contasBancarias} contaBancariaId={contaBancariaId} enviando={enviandoComprovante} onVoltar={() => setEtapa("selecao")} onFormaPagamento={setFormaPagamentoReserva} onContaBancaria={setContaBancariaId} onArquivo={setArquivoComprovante} onCopiarPix={copiarPix} onCopiarResumo={copiarResumo} onConfirmar={() => void confirmar()} />
+                <ConfirmacaoReserva tipoPessoa={tipoPessoa} espacoNome={espaco?.nome || ""} data={data} horario={horario} nome={nome} motivoLocacao={motivoLocacao.trim()} matricula={matriculaResponsavel} valor={valor} publico={publico} formaPagamento={formaPagamentoReserva} pix={pix} copiado={copiado} arquivo={arquivoComprovante} contasBancarias={contasBancarias} contaBancariaId={contaBancariaId} enviando={enviandoComprovante} onVoltar={() => setEtapa("selecao")} onFormaPagamento={setFormaPagamentoReserva} onContaBancaria={setContaBancariaId} onArquivo={setArquivoComprovante} onCopiarPix={copiarPix} onCopiarResumo={copiarResumo} onConfirmar={() => void confirmar()} />
               )}
 
               {reservaPixConfirmacao && <ConfirmarPixReserva reserva={reservaPixConfirmacao} espacoNome={espacos.find((e) => e.id === reservaPixConfirmacao.espacoId)?.nome || "—"} contasBancarias={contasBancarias} contaBancariaId={contaPixConfirmacao} salvando={confirmandoPix} arquivo={arquivoConfirmacaoPix} onArquivo={setArquivoConfirmacaoPix} onContaBancaria={setContaPixConfirmacao} onConfirmar={() => void confirmarPixAdmin()} onFechar={() => { if (!confirmandoPix) { setReservaPixConfirmacao(null); setContaPixConfirmacao(""); setArquivoConfirmacaoPix(null); } }} />}
