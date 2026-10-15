@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { BarChart3, CalendarDays, ClipboardList, Download, Printer, RefreshCw } from "lucide-react";
@@ -76,12 +76,15 @@ function textoNormalizado(valor: string) {
 
 function prioridadeEspaco(nome: string) {
   const n = textoNormalizado(nome);
+  // Ordem solicitada pela Sociedade: salões sociais, campo/quadras, CTG,
+  // demais espaços, quiosques e Cancha 48 sempre por último.
   if (n.includes("salao social grande")) return 0;
   if (n.includes("salao social pequeno")) return 1;
-  if (n.includes("ctg")) return 2;
-  if (n.includes("cancha 48")) return 5;
-  if (n.includes("quiosque")) return 4;
-  return 3; // Campo e quadras ficam antes dos quiosques.
+  if (n.includes("cancha 48")) return 99;
+  if (n.includes("campo") || n.includes("quadra") || n.includes("futebol") || n.includes("volei") || n.includes("bocha")) return 2;
+  if (n.includes("ctg")) return 3;
+  if (n.includes("quiosque")) return 5;
+  return 4;
 }
 
 function ordenarEspacos<T extends { nome: string }>(itens: T[]): T[] {
@@ -155,6 +158,10 @@ function horarioExibicao(r: Pick<Reserva, "espaco_nome" | "hora_inicio" | "hora_
 }
 
 export default function RelatorioReservasPage() {
+  const gradeScrollBarRef = useRef<HTMLDivElement>(null);
+  const gradeScrollContentRef = useRef<HTMLDivElement>(null);
+  const gradeTableScrollRef = useRef<HTMLDivElement>(null);
+  const gradeTableRef = useRef<HTMLTableElement>(null);
   const hoje = dataLocalISO();
   const anoAtual = Number(hoje.slice(0, 4));
   const [anoSelecionado, setAnoSelecionado] = useState(String(anoAtual));
@@ -214,6 +221,42 @@ export default function RelatorioReservasPage() {
   useEffect(() => {
     void carregar();
   }, []);
+
+  // Mantém uma barra de rolagem horizontal sempre visível acima da grade,
+  // sincronizada com a tabela para facilitar a navegação entre todos os espaços.
+  useEffect(() => {
+    const barra = gradeScrollBarRef.current;
+    const conteudoBarra = gradeScrollContentRef.current;
+    const viewport = gradeTableScrollRef.current;
+    const tabela = gradeTableRef.current;
+    if (!barra || !conteudoBarra || !viewport || !tabela) return;
+
+    const atualizarLargura = () => {
+      const largura = Math.max(tabela.scrollWidth, viewport.clientWidth);
+      conteudoBarra.style.width = `${largura}px`;
+      if (barra.scrollLeft !== viewport.scrollLeft) barra.scrollLeft = viewport.scrollLeft;
+    };
+    const aoRolarBarra = () => {
+      if (viewport.scrollLeft !== barra.scrollLeft) viewport.scrollLeft = barra.scrollLeft;
+    };
+    const aoRolarTabela = () => {
+      if (barra.scrollLeft !== viewport.scrollLeft) barra.scrollLeft = viewport.scrollLeft;
+    };
+
+    atualizarLargura();
+    barra.addEventListener("scroll", aoRolarBarra, { passive: true });
+    viewport.addEventListener("scroll", aoRolarTabela, { passive: true });
+    window.addEventListener("resize", atualizarLargura);
+    const observador = typeof ResizeObserver !== "undefined" ? new ResizeObserver(atualizarLargura) : null;
+    observador?.observe(tabela);
+    observador?.observe(viewport);
+    return () => {
+      barra.removeEventListener("scroll", aoRolarBarra);
+      viewport.removeEventListener("scroll", aoRolarTabela);
+      window.removeEventListener("resize", atualizarLargura);
+      observador?.disconnect();
+    };
+  }, [espacos.length, dataInicial, dataFinal, carregando, visualizacao, reservas.length]);
 
   const resumo = useMemo(() => {
     const confirmadas = reservas.filter((r) => r.status === "confirmada");
@@ -530,7 +573,16 @@ export default function RelatorioReservasPage() {
               const ativos = reservas.filter(r => r.status !== "cancelada");
               return <section className="mb-6 overflow-hidden rounded-2xl border border-[#cbd9d2] bg-white shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-[#e7f3ec] p-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani</p><h2 className="text-xl font-extrabold capitalize text-[#005a3c]">{tituloMes(`${dataInicial.slice(0,7)}-15`)}</h2><p className="text-sm text-gray-600">Grade mensal · reservas e pagamentos</p></div><div className="flex flex-wrap gap-3 text-xs font-bold"><span className="rounded-full bg-green-100 px-3 py-2 text-green-800">● Pago</span><span className="rounded-full bg-amber-100 px-3 py-2 text-amber-800">● Pendente</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">— Livre</span></div></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[1200px] border-collapse text-sm"><thead><tr className="text-left text-xs uppercase text-gray-700"><th rowSpan={2} className="sticky left-0 z-20 border-b border-r bg-[#e7f3ec] p-3">Dia</th>{espacosGrade.map((e) => <th key={e.id || e.nome} colSpan={3} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="min-w-[390px] border-b border-r p-3 text-center">{e.nome}</th>)}</tr><tr className="text-left text-[10px] font-bold uppercase text-gray-700">{espacosGrade.map((e) => ["Nome", "Motivo", "Pagamento"].map((sub) => <th key={`${e.id || e.nome}-${sub}`} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="border-b border-r px-2 py-2">{sub}</th>))}</tr></thead><tbody>{Array.from({ length: dias }, (_, i) => { const dia = i + 1; const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`; const reservasDia = ativos.filter((r) => r.data_reserva === data); return <tr key={data} className="align-top odd:bg-white even:bg-[#fbfcfb]"><td className="sticky left-0 z-10 border-b border-r bg-[#f7faf8] p-3"><b>{String(dia).padStart(2, "0")}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(data)}</div></td>{espacosGrade.map((e) => { const itens = reservasDia.filter((r) => r.espaco_id && e.id ? r.espaco_id === e.id : r.espaco_nome === e.nome); if (!itens.length) return <td key={e.id || e.nome} colSpan={3} className="border-b border-r p-2 text-xs text-gray-300">Livre</td>; const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "bg-green-50" : "bg-amber-50"; return <Fragment key={e.id || e.nome}><td className={`min-w-[145px] border-b border-r p-2 ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><div className="font-bold text-[#17382c]">{r.responsavel_nome || "Responsável não informado"}</div><div className="text-xs text-gray-600">{horarioExibicao(r)} · {statusBR(r.status)}</div>{r.reservado_por_nome && <div className="mt-1 text-[10px] text-gray-500">Por: {r.reservado_por_nome}</div>}</div>)}</td><td className={`min-w-[125px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0">{r.motivo_locacao || <span className="text-gray-400">Não informado</span>}</div>)}</td><td className={`min-w-[120px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><b className={r.data_pagamento ? "text-green-700" : "text-amber-800"}>{r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"}</b><div className="font-bold">{moeda(r.valor)}</div></div>)}</td></Fragment>; })}</tr>; })}</tbody></table></div>
+                <div className="border-b border-[#dfe7e2] bg-[#f8faf9] px-3 py-2">
+                  <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                    <span>Use a barra para navegar por todos os espaços →</span>
+                    <span>Para preservar as cores ao exportar, use “Excel colorido”.</span>
+                  </div>
+                  <div ref={gradeScrollBarRef} aria-label="Barra de rolagem horizontal da grade mensal" title="Role para a direita para ver os demais espaços" className="h-4 w-full cursor-ew-resize overflow-x-scroll overflow-y-hidden rounded border border-[#cbd5e1] bg-[#e2e8f0]">
+                    <div ref={gradeScrollContentRef} className="h-2" style={{ width: "1200px" }} />
+                  </div>
+                </div>
+                <div ref={gradeTableScrollRef} className="overflow-x-auto"><table ref={gradeTableRef} className="w-max min-w-full border-collapse text-sm"><thead><tr className="text-left text-xs uppercase text-gray-700"><th rowSpan={2} className="sticky left-0 z-20 border-b border-r bg-[#e7f3ec] p-3">Dia</th>{espacosGrade.map((e) => <th key={e.id || e.nome} colSpan={3} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="min-w-[390px] border-b border-r p-3 text-center">{e.nome}</th>)}</tr><tr className="text-left text-[10px] font-bold uppercase text-gray-700">{espacosGrade.map((e) => ["Nome", "Motivo", "Pagamento"].map((sub) => <th key={`${e.id || e.nome}-${sub}`} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="border-b border-r px-2 py-2">{sub}</th>))}</tr></thead><tbody>{Array.from({ length: dias }, (_, i) => { const dia = i + 1; const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`; const reservasDia = ativos.filter((r) => r.data_reserva === data); return <tr key={data} className="align-top odd:bg-white even:bg-[#fbfcfb]"><td className="sticky left-0 z-10 border-b border-r bg-[#f7faf8] p-3"><b>{String(dia).padStart(2, "0")}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(data)}</div></td>{espacosGrade.map((e) => { const itens = reservasDia.filter((r) => r.espaco_id && e.id ? r.espaco_id === e.id : r.espaco_nome === e.nome); if (!itens.length) return <td key={e.id || e.nome} colSpan={3} className="border-b border-r p-2 text-xs text-gray-300">Livre</td>; const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "bg-green-50" : "bg-amber-50"; return <Fragment key={e.id || e.nome}><td className={`min-w-[145px] border-b border-r p-2 ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><div className="font-bold text-[#17382c]">{r.responsavel_nome || "Responsável não informado"}</div><div className="text-xs text-gray-600">{horarioExibicao(r)} · {statusBR(r.status)}</div>{r.reservado_por_nome && <div className="mt-1 text-[10px] text-gray-500">Por: {r.reservado_por_nome}</div>}</div>)}</td><td className={`min-w-[125px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0">{r.motivo_locacao || <span className="text-gray-400">Não informado</span>}</div>)}</td><td className={`min-w-[120px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><b className={r.data_pagamento ? "text-green-700" : "text-amber-800"}>{r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"}</b><div className="font-bold">{moeda(r.valor)}</div></div>)}</td></Fragment>; })}</tr>; })}</tbody></table></div>
                 <div className="border-t bg-[#f7faf8] p-3 text-xs text-gray-500">{ativos.length} reserva(s) ativa(s) no período · Valores e pagamento conforme os dados registrados na reserva. Confirme no Financeiro em caso de dúvida.</div>
               </section>;
             })()}
