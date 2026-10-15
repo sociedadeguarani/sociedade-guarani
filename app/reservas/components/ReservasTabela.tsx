@@ -58,6 +58,15 @@ export default function ReservasTabela(props: Props) {
   } = props;
 
   const espacoNome = (id: string) => espacos.find((e) => e.id === id)?.nome || "Espaço não encontrado";
+  const periodoReserva = (r: Reserva) =>
+    espacos.find((e) => e.id === r.espacoId)?.cobranca === "diaria"
+      ? "Diária (dia inteiro)"
+      : r.horario;
+  const feitoPor = (r: Reserva) => {
+    const perfil = String(r.reservadoPorPerfil || "").toLowerCase();
+    if (perfil === "funcionario" || perfil.includes("funcionario")) return "Portaria";
+    return r.reservadoPorNome?.trim() || "Não identificado";
+  };
 
   const abrirRecibo = async (r: Reserva) => {
     const operador = await operadorAtual();
@@ -68,7 +77,7 @@ export default function ReservasTabela(props: Props) {
       nome: r.nome,
       matricula: r.matricula ?? null,
       detalhe: `Espaço: ${espacoNome(r.espacoId)}`,
-      periodo: `${dataBR(r.data)} — ${r.horario}`,
+      periodo: `${dataBR(r.data)} — ${periodoReserva(r)}`,
       valor: Number(r.valor || 0),
       pagamento: r.pagamento === "pix" ? "PIX" : r.pagamento === "dinheiro" ? "Dinheiro" : r.pagamento,
       status: r.status === "confirmada" ? "Pago" : r.status === "pendente" ? "Pendente" : "Cancelado",
@@ -122,18 +131,19 @@ export default function ReservasTabela(props: Props) {
         )}
 
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1120px] text-left text-sm">
             <thead className="bg-[#e8f3ee]"><tr>
               <th className="p-3">Data</th><th className="p-3">Espaço</th><th className="p-3">Responsável</th>
-              <th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th>
+              <th className="p-3">Feita por</th><th className="p-3">Tipo</th><th className="p-3">Valor</th><th className="p-3">Pagamento</th>
               <th className="p-3">Status</th><th className="p-3">Ação</th>
             </tr></thead>
             <tbody>
               {filtradas.map((r) => (
                 <tr key={r.id} className="border-b">
-                  <td className="p-3">{dataBR(r.data)}<div className="text-xs text-gray-500">{r.horario}</div></td>
+                  <td className="p-3">{dataBR(r.data)}<div className="text-xs text-gray-500">{periodoReserva(r)}</div></td>
                   <td className="p-3 font-semibold">{espacoNome(r.espacoId)}</td>
                   <td className="p-3">{r.nome}<div className="text-xs text-gray-500">{r.matricula ? `Matrícula ${r.matricula}` : r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</div></td>
+                  <td className="p-3">{feitoPor(r)}</td>
                   <td className="p-3">{r.tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</td>
                   <td className="p-3 font-bold">{moeda(r.valor)}</td>
                   <td className="p-3">
