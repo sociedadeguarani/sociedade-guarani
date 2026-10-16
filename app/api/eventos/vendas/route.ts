@@ -187,7 +187,24 @@ export async function PATCH(request: Request) {
         data_conciliacao: null,
         observacoes: `Recebimento do evento na conta ${conta.nome}${conta.banco ? ` (${conta.banco})` : ""}.`,
       });
-      if (movimentoError) throw new Error(`Pagamento aprovado, mas não foi possível lançar no financeiro: ${movimentoError.message}`);
+      if (movimentoError) {
+        // O índice de idempotência no banco pode rejeitar uma segunda
+        // requisição simultânea para a mesma venda. Nesse caso, confirme que
+        // a entrada da primeira requisição existe antes de prosseguir.
+        if (String((movimentoError as { code?: string }).code || "") !== "23505") {
+          throw new Error(`Pagamento aprovado, mas não foi possível lançar no financeiro: ${movimentoError.message}`);
+        }
+
+        const { data: movimentoDepois, error: erroBuscaDepois } = await resultado.supabase
+          .from("movimentacoes_financeiras")
+          .select("id")
+          .eq("origem_tipo", "evento_venda")
+          .eq("origem_id", venda.id)
+          .maybeSingle();
+
+        if (erroBuscaDepois) throw new Error(`Não foi possível confirmar o lançamento financeiro da venda: ${erroBuscaDepois.message}`);
+        if (!movimentoDepois) throw new Error("O lançamento financeiro da venda foi disputado por outra operação. Atualize a tela e tente novamente.");
+      }
     }
 
     // Compatibilidade com compras antigas que ainda não tenham código.
