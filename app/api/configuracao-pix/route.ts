@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { CHAVE_PIX_BANRISUL, ehChavePixLegada } from "@/lib/pix";
 
 export const dynamic = "force-dynamic";
 
-const CHAVE_PIX_PADRAO = "89.649.164/0001-58";
+const CHAVE_PIX_PADRAO = CHAVE_PIX_BANRISUL;
 const NOME_PADRAO = "SOCIEDADE GUARANI";
 const CIDADE_PADRAO = "AUGUSTO PESTANA";
 
@@ -102,9 +103,13 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       if (data?.chave_pix) {
+        const chaveSalva = String(data.chave_pix);
         config = {
           id: data.id ?? null,
-          chave_pix: String(data.chave_pix),
+          // Migra em tempo de leitura a configuração antiga do Sicredi para o
+          // PIX de celular do Banrisul, sem exigir acesso manual ao banco.
+          // Outras chaves configuradas posteriormente continuam sendo respeitadas.
+          chave_pix: ehChavePixLegada(chaveSalva) ? CHAVE_PIX_PADRAO : chaveSalva,
           nome_recebedor: String(data.nome_recebedor || NOME_PADRAO),
           cidade: String(data.cidade || CIDADE_PADRAO),
           ativo: data.ativo !== false,
