@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
-import { BarChart3, CalendarDays, ClipboardList, Download, Printer, RefreshCw } from "lucide-react";
+import { CalendarDays, Download, Printer, RefreshCw } from "lucide-react";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
