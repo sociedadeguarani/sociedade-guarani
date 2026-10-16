@@ -533,7 +533,7 @@ export default function RelatorioReservasPage() {
             <Link href="/relatorios" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar aos relatórios</Link>
             <p className="text-sm font-medium text-gray-500">Administração</p>
             <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><><CalendarDays className="h-8 w-8" /> Agenda mensal de reservas</></h1>
-            <p className="mt-1 text-gray-500">"Veja todos os dias do mês, quais espaços estão reservados, por quem, o valor e a situação do pagamento."</p>
+            <p className="mt-1 text-gray-500">&quot;Veja todos os dias do mês, quais espaços estão reservados, por quem, o valor e a situação do pagamento.&quot;</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
