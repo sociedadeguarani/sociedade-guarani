@@ -110,6 +110,14 @@ const nomes: Record<string, string> = {
   remido: "Remido",
 };
 
+function rotuloTipoSocio(tipo?: string | null) {
+  if (!tipo) return "Não informado";
+  if (nomes[tipo]) return nomes[tipo];
+  return tipo
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letra) => letra.toUpperCase());
+}
+
 const tiposPagamento = [
   { value: "banrisul", label: "Débito Banrisul" },
   { value: "sicredi", label: "Débito Sicredi" },
@@ -146,7 +154,7 @@ function status(s: string | null) {
 
 function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   if (item.situacao === "pago") return false;
-  const texto = String(item.motivo || item.observacoes || "").toLowerCase();
+  const texto = `${item.motivo || ""} ${item.observacoes || ""}`.toLowerCase();
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
@@ -173,6 +181,8 @@ export default function Page() {
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
   const [busca, setBusca] = useState("");
+  const [filtroTipoSocio, setFiltroTipoSocio] = useState("todos");
+  const [filtroSituacaoMensalidade, setFiltroSituacaoMensalidade] = useState("todas");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -553,6 +563,15 @@ export default function Page() {
     }));
   }, [lista, sociosElegiveis, ano, mes, contas]);
 
+  const tiposSocioDisponiveis = useMemo<string[]>(() => {
+    const tipos = sociosElegiveis
+      .map((socio) => String(socio.tipo_socio || "").trim())
+      .filter((tipo): tipo is string => tipo.length > 0);
+    return [...new Set<string>(tipos)].sort((a, b) =>
+      rotuloTipoSocio(a).localeCompare(rotuloTipoSocio(b), "pt-BR")
+    );
+  }, [sociosElegiveis]);
+
   const filtrada = useMemo(() => {
     const q = busca.toLowerCase().trim();
 
@@ -570,9 +589,25 @@ export default function Page() {
         cobrancasSelecionadas.length === 0 ||
         cobrancasSelecionadas.includes(cobrancaAtual);
 
-      return bateBusca && bateCobranca;
+      const bateTipoSocio =
+        filtroTipoSocio === "todos" || String(x.socio?.tipo_socio || "") === filtroTipoSocio;
+      const semSaldo = ehSemSaldo(x);
+      const bateSituacao =
+        filtroSituacaoMensalidade === "todas" ||
+        (filtroSituacaoMensalidade === "sem_saldo"
+          ? semSaldo
+          : !semSaldo && String(x.situacao || "") === filtroSituacaoMensalidade);
+
+      return bateBusca && bateCobranca && bateTipoSocio && bateSituacao;
     });
-  }, [linhasExibicao, busca, cobrancasSelecionadas, contas]);
+  }, [
+    linhasExibicao,
+    busca,
+    cobrancasSelecionadas,
+    contas,
+    filtroTipoSocio,
+    filtroSituacaoMensalidade,
+  ]);
 const selecionadasBaixa = useMemo(
     () =>
       linhasExibicao.filter(
@@ -1045,10 +1080,66 @@ const selecionadasBaixa = useMemo(
                 <input
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  placeholder="Nome ou matrícula..."
+                  placeholder="Nome, CPF ou matrícula..."
                   className="w-full py-3 outline-none"
                 />
               </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                    Tipo de sócio
+                  </span>
+                  <select
+                    value={filtroTipoSocio}
+                    onChange={(e) => setFiltroTipoSocio(e.target.value)}
+                    className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+                  >
+                    <option value="todos">Todos os tipos</option>
+                    {tiposSocioDisponiveis.map((tipo) => (
+                      <option key={tipo} value={tipo}>
+                        {rotuloTipoSocio(tipo)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                    Situação da mensalidade
+                  </span>
+                  <select
+                    value={filtroSituacaoMensalidade}
+                    onChange={(e) => setFiltroSituacaoMensalidade(e.target.value)}
+                    className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+                  >
+                    <option value="todas">Todas as situações</option>
+                    <option value="nao_gerada">Não gerada</option>
+                    <option value="em_aberto">Em aberto</option>
+                    <option value="em_atraso">Em atraso</option>
+                    <option value="pago">Pago</option>
+                    <option value="isento">Isento</option>
+                    <option value="sem_saldo">S.S. — Sem saldo</option>
+                  </select>
+                </label>
+              </div>
+
+              {(busca || filtroTipoSocio !== "todos" || filtroSituacaoMensalidade !== "todas" || cobrancasSelecionadas.length > 0) && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBusca("");
+                      setFiltroTipoSocio("todos");
+                      setFiltroSituacaoMensalidade("todas");
+                      setCobrancasSelecionadas([]);
+                    }}
+                    className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]"
+                  >
+                    Limpar filtros
+                  </button>
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <span className="mr-1 text-sm font-bold text-gray-600">
