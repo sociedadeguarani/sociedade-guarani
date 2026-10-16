@@ -935,7 +935,7 @@ export default function TemporadasPage() {
 
               <label>
                 <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Plano de pagamento</span>
-                <select value={plano} onChange={(e) => setPlano(e.target.value as any)} className="w-full rounded-xl border border-[#d5e0da] px-3 py-3">
+                <select value={plano} onChange={(e) => setPlano(e.target.value as "avista" | "entrada_1" | "entrada_2")} className="w-full rounded-xl border border-[#d5e0da] px-3 py-3">
                   <option value="avista">À vista</option>
                   <option value="entrada_1">Entrada + 1 parcela</option>
                   <option value="entrada_2">Entrada + 2 parcelas</option>
