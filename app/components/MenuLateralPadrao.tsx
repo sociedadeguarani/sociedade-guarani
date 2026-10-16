@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
@@ -182,24 +182,48 @@ function normalizarPerfil(value: unknown): Perfil {
   return "associado";
 }
 
+const CHAVE_PERFIL_LOCAL = "guarani_usuario_perfil";
+
+function assinarMudancasPerfil(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+
+  const aoMudarStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === CHAVE_PERFIL_LOCAL) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", aoMudarStorage);
+  window.addEventListener("guarani:perfil-change", onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", aoMudarStorage);
+    window.removeEventListener("guarani:perfil-change", onStoreChange);
+  };
+}
+
+function obterPerfilArmazenado(): Perfil {
+  try {
+    return normalizarPerfil(window.localStorage.getItem(CHAVE_PERFIL_LOCAL));
+  } catch {
+    return "associado";
+  }
+}
+
+function obterPerfilNoServidor(): Perfil {
+  return "associado";
+}
+
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
   const router = useRouter();
-  const [perfil, setPerfil] = useState<Perfil>("associado");
-  const [abertoMobile, setAbertoMobile] = useState(false);
-
-  useEffect(() => {
-    try {
-      const valor = window.localStorage.getItem("guarani_usuario_perfil");
-      setPerfil(normalizarPerfil(valor));
-    } catch {
-      setPerfil("associado");
-    }
-  }, []);
-
-  useEffect(() => {
-    setAbertoMobile(false);
-  }, [pathname]);
+  const perfil = useSyncExternalStore(
+    assinarMudancasPerfil,
+    obterPerfilArmazenado,
+    obterPerfilNoServidor
+  );
+  const [menuMobileNaRota, setMenuMobileNaRota] = useState<string | null>(null);
+  const abertoMobile = menuMobileNaRota !== null && menuMobileNaRota === pathname;
 
   const itensVisiveis = useMemo(
     () =>
@@ -210,6 +234,8 @@ export default function MenuLateralPadrao() {
   );
 
   function irPara(rota: string) {
+    // Fecha o menu a partir da interação, sem precisar sincronizar estado em useEffect.
+    setMenuMobileNaRota(null);
     if (pathname !== rota) {
       router.push(rota);
     }
@@ -264,7 +290,7 @@ export default function MenuLateralPadrao() {
     <>
       <button
         type="button"
-        onClick={() => setAbertoMobile(true)}
+        onClick={() => setMenuMobileNaRota(pathname ?? "/painel")}
         aria-label="Abrir menu"
         className="fixed left-4 top-[18px] z-50 flex h-10 w-10 items-center justify-center rounded-xl border border-[#d5e0da] bg-white shadow-sm lg:hidden"
       >
@@ -279,13 +305,13 @@ export default function MenuLateralPadrao() {
         <div className="fixed inset-0 z-[60] lg:hidden">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => setAbertoMobile(false)}
+            onClick={() => setMenuMobileNaRota(null)}
           />
 
           <aside className="absolute inset-y-0 left-0 w-[260px] max-w-[80vw] overflow-y-auto bg-[#f7faf8] px-3 py-5 shadow-2xl">
             <button
               type="button"
-              onClick={() => setAbertoMobile(false)}
+              onClick={() => setMenuMobileNaRota(null)}
               aria-label="Fechar menu"
               className="mb-4 ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-[#d5e0da] bg-white"
             >
