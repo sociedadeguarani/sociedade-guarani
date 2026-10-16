@@ -183,7 +183,7 @@ export async function GET(request: Request) {
       .filter(Boolean)
       .map(String);
 
-    let mensalidades: any[] = [];
+    const mensalidades: any[] = [];
 
     // Não usar .in() com todos os IDs de uma vez.
     for (const lote of emLotes(ids, 100)) {
@@ -294,7 +294,7 @@ export async function GET(request: Request) {
 
       const idsTemporadas = (temporadasDb || []).map((t: any) => String(t.id));
 
-      let participantesDb: any[] = [];
+      const participantesDb: any[] = [];
       for (const lote of emLotes(idsTemporadas, 100)) {
         if (!lote.length) continue;
 
