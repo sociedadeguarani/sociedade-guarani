@@ -46,6 +46,25 @@ type Socio = {
   data_ultimo_pagamento: string | null;
 };
 
+/** Normaliza os valores legados de tipo/categoria para que filtros não dependam
+ *  de maiúsculas, acentos, espaços extras ou variações como "Sócio Remido". */
+function normalizarTipoParaFiltro(valor?: string | null): string {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria">): boolean {
+  return (
+    normalizarTipoParaFiltro(socio.tipo_socio).includes("remido") ||
+    normalizarTipoParaFiltro(socio.categoria).includes("remido")
+  );
+}
+
 type Mensalidade = {
   id: string;
   socio_id: string;
@@ -994,27 +1013,37 @@ export default function Home() {
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
-    return socios.filter((socio) => {
-      // Associados com mensalidade ficam em Sócios mesmo quando possuem responsável.
-      // Sócios remidos também ficam nesta tela, embora sejam isentos de mensalidade.
-      if (socio.possui_mensalidade !== true && socio.tipo_socio !== "remido") return false;
+    const tiposSelecionados = filtroTipoSocio.map(normalizarTipoParaFiltro);
 
+    return socios.filter((socio) => {
+      // A listagem Sócios inclui quem possui mensalidade e sócios remidos,
+      // mesmo quando a base legada guardou "Remido" em categoria ou com variação de escrita.
+      const remido = socioEhRemido(socio);
+      if (socio.possui_mensalidade !== true && !remido) return false;
+
+      const termoNome = String(socio.nome || "").toLowerCase();
+      const termoCpf = String(socio.cpf || "").toLowerCase();
+      const termoMatricula = String(socio.matricula || "").toLowerCase();
       const correspondeBusca =
         !termo ||
-        socio.nome?.toLowerCase().includes(termo) ||
-        socio.cpf?.toLowerCase().includes(termo) ||
-        String(socio.matricula || "").includes(termo);
+        termoNome.includes(termo) ||
+        termoCpf.includes(termo) ||
+        termoMatricula.includes(termo);
 
+      const tipoSocioNormalizado = normalizarTipoParaFiltro(socio.tipo_socio);
       const correspondeTipoDependente =
         !mostrarSomenteDependentes ||
         Boolean(socio.responsavel_id) ||
-        (socio.tipo_socio || "").startsWith("dependente_");
+        tipoSocioNormalizado.startsWith("dependente_");
 
+      // O tipo Remido também reconhece categorias legadas como "Remido" ou "Sócio Remido".
       const correspondeTipoSocio =
-        filtroTipoSocio.length === 0 || filtroTipoSocio.includes(socio.tipo_socio || "");
-      const situacao = String(socio.situacao || "ativo").toLowerCase();
+        tiposSelecionados.length === 0 ||
+        tiposSelecionados.includes(tipoSocioNormalizado) ||
+        (remido && tiposSelecionados.includes("remido"));
+      const situacao = normalizarTipoParaFiltro(socio.situacao || "ativo");
       const correspondeSituacao =
-        filtroSituacaoSocio === "todas" || situacao === filtroSituacaoSocio;
+        filtroSituacaoSocio === "todas" || situacao === normalizarTipoParaFiltro(filtroSituacaoSocio);
 
       return (
         correspondeBusca &&
@@ -1108,7 +1137,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true || s.tipo_socio === "remido").length}
+              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true || socioEhRemido(s)).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1118,7 +1147,7 @@ export default function Home() {
             <Socios
               socios={sociosFiltrados}
               sociosCompletos={socios}
-              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true || s.tipo_socio === "remido").length}
+              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true || socioEhRemido(s)).length}
               busca={busca}
               setBusca={setBusca}
               filtroTipoSocio={filtroTipoSocio}
