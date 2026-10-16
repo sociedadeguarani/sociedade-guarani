@@ -16,9 +16,21 @@ export const metadata: Metadata = {
   title: "Sociedade Guarani",
   description: "Sistema de gestão da Sociedade Recreativa Guarani — S.R.G.",
   icons: {
-    icon: "/logo-guarani.png",
-    apple: "/logo-guarani.png",
-    shortcut: "/logo-guarani.png",
+    icon: [
+      {
+        url: "/favicon-guarani.ico?v=20261016",
+        type: "image/x-icon",
+        sizes: "16x16 32x32 48x48 64x64",
+      },
+    ],
+    apple: [
+      {
+        url: "/apple-icon-guarani.png?v=20261016",
+        type: "image/png",
+        sizes: "180x180",
+      },
+    ],
+    shortcut: "/favicon-guarani.ico?v=20261016",
   },
 };
 
