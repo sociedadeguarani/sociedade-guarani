@@ -78,9 +78,8 @@ export default function InadimplenciaPage() {
   const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
 
   async function carregar() {
-    setCarregando(true);
-    setErro("");
-
+    // A tela começa em estado de carregamento e sem erro. Evitamos setState
+    // síncrono antes do primeiro await para não provocar renders em cascata.
     const [sociosResult, dependentesResult, mensalidadesResult] =
       await Promise.all([
         supabase.from("socios").select("id,matricula,nome").order("nome"),
