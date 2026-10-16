@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { assinarArquivosEmLote } from "@/lib/storageSignedUrls";
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +37,6 @@ function inferirCategoriaEspaco(nome: string) {
   if (texto.includes("quadra") || texto.includes("cancha") || texto.includes("campo")) return "esporte";
   if (texto.includes("salao") || texto.includes("ctg")) return "eventos";
   return "lazer";
-}
-
-async function assinarListaPresenca(db: any, caminho: string | null) {
-  if (!caminho) return null;
-  const { data } = await db.storage.from("listas-presenca").createSignedUrl(caminho, 60 * 60);
-  return data?.signedUrl || null;
 }
 
 export async function GET(request: Request) {
@@ -84,7 +79,14 @@ export async function GET(request: Request) {
     if (error) throw error;
     if (erroEspacos) throw erroEspacos;
 
-    const reservas = await Promise.all((data || []).map(async (row: Record<string, unknown>) => {
+    const linhasReservas = data || [];
+    const linksListasPresenca = await assinarArquivosEmLote(
+      db,
+      "listas-presenca",
+      linhasReservas.map((row: Record<string, unknown>) => row.lista_presenca_path == null ? null : String(row.lista_presenca_path)),
+    );
+
+    const reservas = linhasReservas.map((row: Record<string, unknown>) => {
       const rel = Array.isArray(row.espacos)
         ? (row.espacos[0] as Record<string, unknown> | undefined)
         : (row.espacos as Record<string, unknown> | undefined);
@@ -113,9 +115,11 @@ export async function GET(request: Request) {
         reservado_por_perfil: row.reservado_por_perfil == null ? null : String(row.reservado_por_perfil),
         lista_presenca_nome: row.lista_presenca_nome == null ? null : String(row.lista_presenca_nome),
         quantidade_convidados: row.quantidade_convidados == null ? null : Number(row.quantidade_convidados),
-        lista_presenca_url: await assinarListaPresenca(db, row.lista_presenca_path == null ? null : String(row.lista_presenca_path)),
+        lista_presenca_url: row.lista_presenca_path == null
+          ? null
+          : linksListasPresenca.get(String(row.lista_presenca_path)) || null,
       };
-    }));
+    });
 
     const reservasFiltradas = statusFiltro === "todos"
       ? reservas
