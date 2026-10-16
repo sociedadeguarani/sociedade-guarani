@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -76,7 +77,28 @@ function normalizarCategoria(valor: string | null) {
   return valor?.trim() || "Sem categoria";
 }
 
+async function consultarDadosRelatorio() {
+  return Promise.all([
+    supabase
+      .from("contas_bancarias")
+      .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo")
+      .eq("ativo", true)
+      .order("nome"),
+    supabase
+      .from("movimentacoes_financeiras")
+      .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
+      .order("data_movimentacao", { ascending: false }),
+    supabase
+      .from("mensalidades")
+      .select("id,socio_id,referencia,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
+      .order("data_vencimento", { ascending: false }),
+  ]);
+}
+
+type ResultadosRelatorio = Awaited<ReturnType<typeof consultarDadosRelatorio>>;
+
 export default function RelatoriosPage() {
+  const router = useRouter();
   const [contas, setContas] = useState<Conta[]>([]);
   const [movimentos, setMovimentos] = useState<Movimento[]>([]);
   const [mensalidades, setMensalidades] = useState<MensalidadeRelatorio[]>([]);
@@ -88,29 +110,8 @@ export default function RelatoriosPage() {
   const [contaFiltro, setContaFiltro] = useState("todas");
   const [tipoFiltro, setTipoFiltro] = useState("todos");
 
-  async function carregar() {
-    setCarregando(true);
-    setErro("");
-
-    const [contasResult, movimentosResult, mensalidadesResult] = await Promise.all([
-      supabase
-        .from("contas_bancarias")
-        .select(
-          "id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo"
-        )
-        .eq("ativo", true)
-        .order("nome"),
-      supabase
-        .from("movimentacoes_financeiras")
-        .select(
-          "id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes"
-        )
-        .order("data_movimentacao", { ascending: false }),
-      supabase
-        .from("mensalidades")
-        .select("id,socio_id,referencia,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
-        .order("data_vencimento", { ascending: false }),
-    ]);
+  const aplicarResultados = useCallback((resultados: ResultadosRelatorio) => {
+    const [contasResult, movimentosResult, mensalidadesResult] = resultados;
 
     if (contasResult.error) {
       setErro(contasResult.error.message);
@@ -126,14 +127,47 @@ export default function RelatoriosPage() {
 
     setContas((contasResult.data || []) as Conta[]);
     setMovimentos((movimentosResult.data || []) as Movimento[]);
-    if (!mensalidadesResult.error) setMensalidades((mensalidadesResult.data || []) as MensalidadeRelatorio[]);
-    else setMensalidades([]);
+    if (!mensalidadesResult.error) {
+      setMensalidades((mensalidadesResult.data || []) as MensalidadeRelatorio[]);
+    } else {
+      setMensalidades([]);
+    }
+    setErro("");
     setCarregando(false);
+  }, []);
+
+  async function carregar() {
+    setCarregando(true);
+    setErro("");
+
+    try {
+      const resultados = await consultarDadosRelatorio();
+      aplicarResultados(resultados);
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar o relatório.");
+      setCarregando(false);
+    }
   }
 
   useEffect(() => {
-    void carregar();
-  }, []);
+    let ativo = true;
+
+    async function inicializar() {
+      try {
+        const resultados = await consultarDadosRelatorio();
+        if (ativo) aplicarResultados(resultados);
+      } catch (error) {
+        if (!ativo) return;
+        setErro(error instanceof Error ? error.message : "Não foi possível carregar o relatório.");
+        setCarregando(false);
+      }
+    }
+
+    void inicializar();
+    return () => {
+      ativo = false;
+    };
+  }, [aplicarResultados]);
 
   const contaMap = useMemo(
     () => new Map(contas.map((conta) => [conta.id, conta])),
@@ -292,7 +326,7 @@ export default function RelatoriosPage() {
   }
 
   function voltar() {
-    window.location.href = "/painel";
+    router.push("/painel");
   }
 
   return (
