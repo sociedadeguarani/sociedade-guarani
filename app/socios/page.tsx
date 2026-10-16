@@ -250,6 +250,8 @@ export default function Home() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [busca, setBusca] = useState("");
+  const [filtroTipoSocio, setFiltroTipoSocio] = useState("todos");
+  const [filtroSituacaoSocio, setFiltroSituacaoSocio] = useState("todas");
   const [buscaResponsavel, setBuscaResponsavel] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
   const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
@@ -976,14 +978,31 @@ export default function Home() {
         socio.cpf?.toLowerCase().includes(termo) ||
         String(socio.matricula || "").includes(termo);
 
-      const correspondeTipo =
+      const correspondeTipoDependente =
         !mostrarSomenteDependentes ||
         Boolean(socio.responsavel_id) ||
         (socio.tipo_socio || "").startsWith("dependente_");
 
-      return correspondeBusca && correspondeTipo;
+      const correspondeTipoSocio =
+        filtroTipoSocio === "todos" || socio.tipo_socio === filtroTipoSocio;
+      const situacao = String(socio.situacao || "ativo").toLowerCase();
+      const correspondeSituacao =
+        filtroSituacaoSocio === "todas" || situacao === filtroSituacaoSocio;
+
+      return (
+        correspondeBusca &&
+        correspondeTipoDependente &&
+        correspondeTipoSocio &&
+        correspondeSituacao
+      );
     });
-  }, [socios, busca, mostrarSomenteDependentes]);
+  }, [
+    socios,
+    busca,
+    mostrarSomenteDependentes,
+    filtroTipoSocio,
+    filtroSituacaoSocio,
+  ]);
 
   if (verificandoLogin) {
     return (
@@ -1071,9 +1090,14 @@ export default function Home() {
           {menu === "Sócios" && (
             <Socios
               socios={sociosFiltrados}
+              sociosCompletos={socios}
               quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true).length}
               busca={busca}
               setBusca={setBusca}
+              filtroTipoSocio={filtroTipoSocio}
+              setFiltroTipoSocio={setFiltroTipoSocio}
+              filtroSituacaoSocio={filtroSituacaoSocio}
+              setFiltroSituacaoSocio={setFiltroSituacaoSocio}
               novoSocio={novoSocio}
               novoDependente={novoDependente}
               editarSocio={editarSocio}
@@ -1356,9 +1380,14 @@ function categoriaClasse(categoria?: string | null) {
 
 function Socios({
   socios,
+  sociosCompletos,
   quantidadeTotal,
   busca,
   setBusca,
+  filtroTipoSocio,
+  setFiltroTipoSocio,
+  filtroSituacaoSocio,
+  setFiltroSituacaoSocio,
   novoSocio,
   novoDependente,
   editarSocio,
@@ -1369,9 +1398,14 @@ function Socios({
   somenteConsulta,
 }: {
   socios: Socio[];
+  sociosCompletos: Socio[];
   quantidadeTotal: number;
   busca: string;
   setBusca: (valor: string) => void;
+  filtroTipoSocio: string;
+  setFiltroTipoSocio: (valor: string) => void;
+  filtroSituacaoSocio: string;
+  setFiltroSituacaoSocio: (valor: string) => void;
   novoSocio: () => void;
   novoDependente: (responsavel: Socio) => void;
   editarSocio: (socio: Socio) => void;
@@ -1446,22 +1480,67 @@ function Socios({
       </div>
 
       <div className="mb-5 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:p-4">
-
         <div className="flex items-center gap-3">
-
-          <span className="text-xl">
-            🔎
-          </span>
-
+          <span className="text-xl">🔎</span>
           <input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Buscar por nome, CPF ou matrícula..."
             className="w-full min-w-0 bg-transparent py-2 text-sm outline-none sm:text-base"
           />
-
         </div>
 
+        <div className="mt-3 grid grid-cols-1 gap-3 border-t border-[#edf2ef] pt-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+              Tipo de sócio
+            </span>
+            <select
+              value={filtroTipoSocio}
+              onChange={(e) => setFiltroTipoSocio(e.target.value)}
+              className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+            >
+              <option value="todos">Todos os tipos</option>
+              {TIPOS_SOCIO.map((tipo) => (
+                <option key={tipo.value} value={tipo.value}>
+                  {tipo.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+              Situação do sócio
+            </span>
+            <select
+              value={filtroSituacaoSocio}
+              onChange={(e) => setFiltroSituacaoSocio(e.target.value)}
+              className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+            >
+              <option value="todas">Todas as situações</option>
+              <option value="ativo">Ativo</option>
+              <option value="inativo">Inativo</option>
+              <option value="suspenso">Suspenso</option>
+            </select>
+          </label>
+        </div>
+
+        {(busca || filtroTipoSocio !== "todos" || filtroSituacaoSocio !== "todas") && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setBusca("");
+                setFiltroTipoSocio("todos");
+                setFiltroSituacaoSocio("todas");
+              }}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]"
+            >
+              Limpar filtros
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-[#e2ebe6] bg-white shadow-sm">
@@ -1542,19 +1621,26 @@ function Socios({
                     </div>
 
                     <p className="mt-3 font-semibold text-gray-700">
-                      Nenhum sócio encontrado
+                      Nenhum sócio corresponde à busca ou aos filtros.
                     </p>
 
                     <p className="mt-1 text-sm text-gray-500">
-                      Cadastre o primeiro sócio da Sociedade Guarani.
+                      Altere os filtros ou limpe a busca para ver outros associados.
                     </p>
 
-                    <button
-                      onClick={novoSocio}
-                      className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
-                    >
-                      + Cadastrar sócio
-                    </button>
+                    {(busca || filtroTipoSocio !== "todos" || filtroSituacaoSocio !== "todas") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBusca("");
+                          setFiltroTipoSocio("todos");
+                          setFiltroSituacaoSocio("todas");
+                        }}
+                        className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
+                      >
+                        Limpar filtros
+                      </button>
+                    )}
                   </td>
                 </tr>
               )}
@@ -1612,7 +1698,7 @@ function Socios({
 
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {socio.responsavel_id
-                        ? socios.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
+                        ? sociosCompletos.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável"
                         : "—"}
                     </td>
 
