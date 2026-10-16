@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, QrCode, Wallet, Upload, Copy } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import { CHAVE_PIX_BANRISUL, formatarChavePix } from "@/lib/pix";
 
 type Mensalidade = {
   id: string;
@@ -26,8 +27,6 @@ type ConfigPix = {
   cidade: string | null;
   copia_e_cola: string | null;
 } | null;
-
-const CNPJ_PIX = "89.649.164/0001-58";
 
 function formatarMoeda(valor: number | null | undefined) {
   return Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -206,8 +205,8 @@ export default function MinhasMensalidadesPage() {
 
               <div className="mt-4 rounded-xl bg-[#eef7f2] p-4">
                 <p className="flex items-center gap-2 text-sm font-extrabold text-[#005a3c]"><QrCode className="h-4 w-4" /> Pague via PIX</p>
-                <p className="mt-2 text-sm"><strong>CNPJ PIX:</strong> {CNPJ_PIX}</p>
-                <button type="button" onClick={() => void copiar((pix?.chave_pix || CNPJ_PIX).replace(/\D/g, ""), "Chave PIX copiada.")} className="mt-2 inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">
+                <p className="mt-2 text-sm"><strong>Chave PIX · Banrisul:</strong> {formatarChavePix(pix?.chave_pix || CHAVE_PIX_BANRISUL)}</p>
+                <button type="button" onClick={() => void copiar(pix?.chave_pix || CHAVE_PIX_BANRISUL, "Chave PIX copiada.")} className="mt-2 inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">
                   <Copy className="h-4 w-4" /> {copiado ? "Copiado!" : "Copiar chave PIX"}
                 </button>
                 {pix?.copia_e_cola && (
