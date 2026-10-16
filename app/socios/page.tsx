@@ -11,7 +11,7 @@ const supabase = createClient(
 
 type Socio = {
   id: string;
-  matricula: number | null;
+  matricula: string | number | null;
   nome: string;
   cpf: string | null;
   rg: string | null;
@@ -82,6 +82,7 @@ const menus = [
 
 
 const socioInicial: Partial<Socio> = {
+  matricula: "",
   nome: "",
   cpf: "",
   rg: "",
@@ -825,10 +826,18 @@ export default function Home() {
       return;
     }
 
+    const matriculaDigitada = String(form.matricula ?? "").trim().toUpperCase();
+    const tipoEhDependente = Boolean(form.responsavel_id);
+    if (!matriculaDigitada && !tipoEhDependente) {
+      setMensagem("Informe a matrícula do associado. Exemplo: SC0001A.");
+      return;
+    }
+
     setSalvando(true);
     setMensagem("");
 
     const dadosBase = {
+      ...(matriculaDigitada ? { matricula: matriculaDigitada } : {}),
       nome: form.nome?.trim(),
       cpf: form.cpf || null,
       rg: form.rg || null,
@@ -866,6 +875,24 @@ export default function Home() {
     };
 
     try {
+      if (matriculaDigitada) {
+        let consultaMatricula = supabase
+          .from("socios")
+          .select("id")
+          .ilike("matricula", matriculaDigitada)
+          .limit(1);
+        if (socioEditando?.id) {
+          consultaMatricula = consultaMatricula.neq("id", socioEditando.id);
+        }
+        const { data: matriculaExistente, error: erroConsultaMatricula } = await consultaMatricula.maybeSingle();
+
+        if (erroConsultaMatricula) throw erroConsultaMatricula;
+        if (matriculaExistente) {
+          setMensagem("Esta matrícula já está cadastrada. Informe uma matrícula diferente.");
+          return;
+        }
+      }
+
       let socioId = socioEditando?.id || "";
 
       if (socioEditando) {
@@ -3013,6 +3040,20 @@ function ModalSocio({
 
           {/* ASSOCIAÇÃO */}
           <FormularioSecao titulo="🏛️ Dados da associação">
+
+            <div className="md:col-span-2">
+              <Campo
+                label="Matrícula"
+                value={form.matricula}
+                onChange={(v) => alterarCampo("matricula", v.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                placeholder="Ex.: SC0001A"
+                obrigatorio={!form.responsavel_id}
+              />
+              <p className="mt-1.5 text-xs text-gray-500">
+                Informe a matrícula usada pela sociedade, por exemplo SC0001A, SP0001A ou TE0001A. Cada matrícula deve ser única.
+                {form.responsavel_id ? " Para dependentes, informe a matrícula familiar correspondente, como SC0001B ou SC0001C." : ""}
+              </p>
+            </div>
 
             <Campo
               label="Data de associação"
