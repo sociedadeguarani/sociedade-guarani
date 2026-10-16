@@ -294,7 +294,21 @@ async function criarMovimentacao(
     .select("id")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    // Se duas confirmações da mesma parcela ocorrerem juntas e a proteção
+    // única já estiver instalada no banco, reutilize a movimentação vencedora.
+    if (String((error as { code?: string }).code || "") === "23505") {
+      const { data: existenteDepois, error: erroBuscaDepois } = await db
+        .from("movimentacoes_financeiras")
+        .select("id")
+        .eq("origem_tipo", "temporada_parcela")
+        .eq("origem_id", parcelaId)
+        .maybeSingle();
+      if (erroBuscaDepois) throw erroBuscaDepois;
+      if (existenteDepois?.id) return String(existenteDepois.id);
+    }
+    throw error;
+  }
   return String(data.id);
 }
 
