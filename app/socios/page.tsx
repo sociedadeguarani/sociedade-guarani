@@ -251,7 +251,7 @@ export default function Home() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [busca, setBusca] = useState("");
-  const [filtroTipoSocio, setFiltroTipoSocio] = useState("todos");
+  const [filtroTipoSocio, setFiltroTipoSocio] = useState<string[]>([]);
   const [filtroSituacaoSocio, setFiltroSituacaoSocio] = useState("todas");
   const [buscaResponsavel, setBuscaResponsavel] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
@@ -1011,7 +1011,7 @@ export default function Home() {
         (socio.tipo_socio || "").startsWith("dependente_");
 
       const correspondeTipoSocio =
-        filtroTipoSocio === "todos" || socio.tipo_socio === filtroTipoSocio;
+        filtroTipoSocio.length === 0 || filtroTipoSocio.includes(socio.tipo_socio || "");
       const situacao = String(socio.situacao || "ativo").toLowerCase();
       const correspondeSituacao =
         filtroSituacaoSocio === "todas" || situacao === filtroSituacaoSocio;
@@ -1429,8 +1429,8 @@ function Socios({
   quantidadeTotal: number;
   busca: string;
   setBusca: (valor: string) => void;
-  filtroTipoSocio: string;
-  setFiltroTipoSocio: (valor: string) => void;
+  filtroTipoSocio: string[];
+  setFiltroTipoSocio: (valor: string[]) => void;
   filtroSituacaoSocio: string;
   setFiltroSituacaoSocio: (valor: string) => void;
   novoSocio: () => void;
@@ -1442,6 +1442,8 @@ function Socios({
   setMostrarSomenteDependentes: (valor: boolean) => void;
   somenteConsulta: boolean;
 }) {
+  const [tiposFiltroAberto, setTiposFiltroAberto] = useState(false);
+
   return (
     <div>
 
@@ -1518,23 +1520,77 @@ function Socios({
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 border-t border-[#edf2ef] pt-3 sm:grid-cols-2">
-          <label className="block">
+          <div className="relative">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
-              Tipo de sócio
+              Tipo de sócio (selecione vários)
             </span>
-            <select
-              value={filtroTipoSocio}
-              onChange={(e) => setFiltroTipoSocio(e.target.value)}
-              className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+            <button
+              type="button"
+              aria-haspopup="true"
+              aria-expanded={tiposFiltroAberto}
+              onClick={() => setTiposFiltroAberto((aberto) => !aberto)}
+              className="flex w-full items-center justify-between gap-3 rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-left text-sm text-[#173d2e] outline-none transition hover:border-[#9bb9aa] focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
             >
-              <option value="todos">Todos os tipos</option>
-              {TIPOS_SOCIO.map((tipo) => (
-                <option key={tipo.value} value={tipo.value}>
-                  {tipo.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              <span className="truncate">
+                {filtroTipoSocio.length === 0
+                  ? "Todos os tipos"
+                  : filtroTipoSocio.length === 1
+                    ? TIPOS_SOCIO.find((tipo) => tipo.value === filtroTipoSocio[0])?.label || "1 tipo selecionado"
+                    : `${filtroTipoSocio.length} tipos selecionados`}
+              </span>
+              <span aria-hidden="true" className="shrink-0 text-xs">{tiposFiltroAberto ? "▲" : "▼"}</span>
+            </button>
+
+            {tiposFiltroAberto && (
+              <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-[#d5e0da] bg-white shadow-xl">
+                <div className="flex items-center justify-between gap-3 border-b border-[#edf2ef] bg-[#f7fbf8] px-3 py-2">
+                  <span className="text-xs font-semibold text-gray-600">
+                    Marque um ou mais tipos
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFiltroTipoSocio([])}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#e8f3ee]"
+                  >
+                    Mostrar todos
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-y-auto p-2">
+                  <label className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg border-b border-[#edf2ef] px-2 py-2.5 text-sm font-semibold text-[#005a3c] hover:bg-[#f2f8f4]">
+                    <input
+                      type="checkbox"
+                      checked={filtroTipoSocio.length === 0}
+                      onChange={() => setFiltroTipoSocio([])}
+                      className="h-4 w-4 rounded border-[#b9ccc1] accent-[#005a3c]"
+                    />
+                    <span>Todos os tipos</span>
+                  </label>
+                  {TIPOS_SOCIO.map((tipo) => (
+                    <label
+                      key={tipo.value}
+                      className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-sm text-[#173d2e] hover:bg-[#f2f8f4]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={filtroTipoSocio.includes(tipo.value)}
+                        onChange={(e) => {
+                          const selecionados = new Set(filtroTipoSocio);
+                          if (e.target.checked) {
+                            selecionados.add(tipo.value);
+                          } else {
+                            selecionados.delete(tipo.value);
+                          }
+                          setFiltroTipoSocio(Array.from(selecionados));
+                        }}
+                        className="mt-0.5 h-4 w-4 rounded border-[#b9ccc1] accent-[#005a3c]"
+                      />
+                      <span>{tipo.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -1553,13 +1609,13 @@ function Socios({
           </label>
         </div>
 
-        {(busca || filtroTipoSocio !== "todos" || filtroSituacaoSocio !== "todas") && (
+        {(busca || filtroTipoSocio.length > 0 || filtroSituacaoSocio !== "todas") && (
           <div className="mt-3 flex justify-end">
             <button
               type="button"
               onClick={() => {
                 setBusca("");
-                setFiltroTipoSocio("todos");
+                setFiltroTipoSocio([]);
                 setFiltroSituacaoSocio("todas");
               }}
               className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]"
@@ -1655,12 +1711,12 @@ function Socios({
                       Altere os filtros ou limpe a busca para ver outros associados.
                     </p>
 
-                    {(busca || filtroTipoSocio !== "todos" || filtroSituacaoSocio !== "todas") && (
+                    {(busca || filtroTipoSocio.length > 0 || filtroSituacaoSocio !== "todas") && (
                       <button
                         type="button"
                         onClick={() => {
                           setBusca("");
-                          setFiltroTipoSocio("todos");
+                          setFiltroTipoSocio([]);
                           setFiltroSituacaoSocio("todas");
                         }}
                         className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
