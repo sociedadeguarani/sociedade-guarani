@@ -3,6 +3,7 @@
 import { ArrowLeft, Check, Copy, ShieldCheck } from "lucide-react";
 import type { ContaBancaria, FormaPagamentoReserva, PixConfig, TipoPessoa } from "../types";
 import { dataBR, moeda } from "../utils";
+import { formatarChavePix } from "@/lib/pix";
 
 interface Props {
   tipoPessoa: TipoPessoa;
@@ -143,8 +144,8 @@ export default function ConfirmacaoReserva({
               ) : (
                 <>
                   <div className="mt-3 rounded-xl bg-white p-3 text-sm">
-                    <div className="text-xs text-gray-500">Chave PIX</div>
-                    <div className="break-all font-bold">{pix.chave_pix || "—"}</div>
+                    <div className="text-xs text-gray-500">Chave PIX · Banrisul</div>
+                    <div className="break-all font-bold">{formatarChavePix(pix.chave_pix)}</div>
                     {pix.nome_recebedor && <div className="mt-1 text-xs text-gray-500">{pix.nome_recebedor}{pix.cidade ? ` · ${pix.cidade}` : ""}</div>}
                   </div>
                   <div className="mt-3 rounded-xl bg-white p-3">
