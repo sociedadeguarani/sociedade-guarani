@@ -84,8 +84,13 @@ export default function CabecalhoPadrao() {
 
   useEffect(() => {
     let ativo = true;
+    let carregando = false;
+    let intervalo: number | undefined;
 
     async function carregarContagemAvisos() {
+      // Não consulta o servidor em abas ocultas e evita requisições sobrepostas.
+      if (!ativo || document.visibilityState === "hidden" || carregando) return;
+      carregando = true;
       try {
         const { data } = await supabase.auth.getSession();
         const token = data.session?.access_token;
@@ -103,18 +108,43 @@ export default function CabecalhoPadrao() {
         }
       } catch {
         // O cabeçalho continua disponível mesmo se a contagem falhar.
+      } finally {
+        carregando = false;
+      }
+    }
+
+    function iniciarIntervalo() {
+      if (ativo && document.visibilityState !== "hidden" && intervalo === undefined) {
+        intervalo = window.setInterval(() => void carregarContagemAvisos(), 20_000);
+      }
+    }
+
+    function pararIntervalo() {
+      if (intervalo !== undefined) {
+        window.clearInterval(intervalo);
+        intervalo = undefined;
+      }
+    }
+
+    function aoMudarVisibilidade() {
+      if (document.visibilityState === "hidden") {
+        pararIntervalo();
+      } else {
+        void carregarContagemAvisos();
+        iniciarIntervalo();
       }
     }
 
     void carregarContagemAvisos();
-    const intervalo = window.setInterval(() => void carregarContagemAvisos(), 20_000);
-    const aoRetomar = () => void carregarContagemAvisos();
-    window.addEventListener("focus", aoRetomar);
+    iniciarIntervalo();
+    window.addEventListener("focus", carregarContagemAvisos);
+    document.addEventListener("visibilitychange", aoMudarVisibilidade);
 
     return () => {
       ativo = false;
-      window.clearInterval(intervalo);
-      window.removeEventListener("focus", aoRetomar);
+      pararIntervalo();
+      window.removeEventListener("focus", carregarContagemAvisos);
+      document.removeEventListener("visibilitychange", aoMudarVisibilidade);
     };
   }, [perfil]);
 
@@ -160,7 +190,7 @@ export default function CabecalhoPadrao() {
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#005a3c] p-1 shadow-sm lg:hidden">
             <img
-              src="/logo-guarani.png"
+              src="/logo-guarani-header.webp"
               alt="Sociedade Guarani"
               className="h-full w-full object-contain"
             />
