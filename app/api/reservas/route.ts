@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { assinarArquivosEmLote } from "@/lib/storageSignedUrls";
 
 export const dynamic = "force-dynamic";
 
@@ -233,18 +234,6 @@ function normalizarReserva(dbRow: Record<string, unknown>) {
   };
 }
 
-async function assinaturaComprovante(db: any, path: string | null) {
-  if (!path) return null;
-  const { data } = await db.storage.from("comprovantes-financeiro").createSignedUrl(path, 60 * 60);
-  return data?.signedUrl || null;
-}
-
-async function assinaturaListaPresenca(db: any, path: string | null) {
-  if (!path) return null;
-  const { data } = await db.storage.from("listas-presenca").createSignedUrl(path, 60 * 60);
-  return data?.signedUrl || null;
-}
-
 async function verificarMovimentacao(db: any, reservaId: string) {
   const { data, error } = await db
     .from("movimentacoes_financeiras")
@@ -372,6 +361,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status = String(url.searchParams.get("status") || "").trim();
     const publico = url.searchParams.get("publico") === "1";
+    const dados = String(url.searchParams.get("dados") || "").trim();
+    const dataFiltro = String(url.searchParams.get("data") || "").trim();
+    const espacoFiltro = String(url.searchParams.get("espaco_id") || "").trim();
 
     if (!publico) {
       const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
@@ -379,14 +371,44 @@ export async function GET(request: Request) {
     }
 
     const db = getServiceClient();
+
+    // A chamada inicial da tela precisa apenas dos espaços e contas; buscar
+    // todas as reservas e assinar seus anexos aqui era trabalho duplicado.
+    if (dados === "base") {
+      const espacosQuery = db.from("espacos").select("*").order("nome", { ascending: true });
+      const contasQuery = publico
+        ? Promise.resolve({ data: [], error: null })
+        : db.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome");
+      const [{ data: espacosBase, error: erroEspacosBase }, { data: contasBase, error: erroContasBase }] = await Promise.all([
+        espacosQuery,
+        contasQuery,
+      ]);
+      if (erroEspacosBase) throw erroEspacosBase;
+      if (erroContasBase) throw erroContasBase;
+
+      const espacosBaseNormalizados = (espacosBase || [])
+        .map((row: Record<string, unknown>) => normalizarEspacoBanco(row))
+        .filter((espaco: ReturnType<typeof normalizarEspacoBanco>) => espaco.id && espaco.nome && espaco.ativo);
+
+      return NextResponse.json({
+        reservas: [],
+        espacos: espacosBaseNormalizados,
+        contas_bancarias: contasBase || [],
+      });
+    }
+
+    // A tela de nova reserva informa data e espaço; aplique os filtros no
+    // banco, antes de carregar os registros e gerar links temporários.
     let query = publico
       ? db.from("reservas").select("id,espaco_id,data_reserva,hora_inicio,hora_fim,situacao,tipo_pagamento")
-      : db.from("reservas").select("*,espacos:espaco_id(id,nome)");
+      : db.from("reservas").select("id,espaco_id,socio_id,dependente_id,responsavel_nome,motivo_locacao,matricula,tipo_pessoa,valor,situacao,tipo_pagamento,data_pagamento,hora_inicio,hora_fim,data_reserva,comprovante_url,comprovante_nome,comprovante_status,lista_presenca_path,lista_presenca_nome,quantidade_convidados,reservado_por_nome,reservado_por_perfil,created_at,espacos:espaco_id(id,nome)");
     query = query.order("created_at", { ascending: false });
 
     if (status === "cancelada") query = query.eq("situacao", "cancelada");
     else if (status === "confirmada") query = query.in("situacao", ["confirmada", "utilizada"]);
     else if (status === "pendente") query = query.in("situacao", ["solicitada", "aguardando_pagamento"]);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataFiltro)) query = query.eq("data_reserva", dataFiltro);
+    if (espacoFiltro) query = query.eq("espaco_id", espacoFiltro);
 
     const [{ data, error }, { data: espacosDb, error: erroEspacos }] = await Promise.all([
       query,
@@ -396,19 +418,41 @@ export async function GET(request: Request) {
     if (error) throw error;
     if (erroEspacos) throw erroEspacos;
 
-    const reservas = await Promise.all(
-      (data || []).map(async (r: Record<string, unknown>) => ({
+    const linhasReservas = data || [];
+    let linksComprovantes = new Map<string, string | null>();
+    let linksListasPresenca = new Map<string, string | null>();
+
+    if (!publico) {
+      // Assina os arquivos em lotes, evitando uma chamada de Storage por reserva.
+      [linksComprovantes, linksListasPresenca] = await Promise.all([
+        assinarArquivosEmLote(
+          db,
+          "comprovantes-financeiro",
+          linhasReservas.map((r: Record<string, unknown>) => r.comprovante_url ? String(r.comprovante_url) : null),
+        ),
+        assinarArquivosEmLote(
+          db,
+          "listas-presenca",
+          linhasReservas.map((r: Record<string, unknown>) => r.lista_presenca_path ? String(r.lista_presenca_path) : null),
+        ),
+      ]);
+    }
+
+    const reservas = linhasReservas.map((r: Record<string, unknown>) => {
+      const caminhoComprovante = r.comprovante_url ? String(r.comprovante_url) : "";
+      const caminhoLista = r.lista_presenca_path ? String(r.lista_presenca_path) : "";
+      return {
         ...normalizarReserva(r),
         ...(publico ? {} : {
-          comprovante_url: await assinaturaComprovante(db, r.comprovante_url ? String(r.comprovante_url) : null),
+          comprovante_url: caminhoComprovante ? linksComprovantes.get(caminhoComprovante) || null : null,
           comprovante_status: r.comprovante_status || null,
           comprovante_nome: r.comprovante_nome || null,
-          lista_presenca_url: await assinaturaListaPresenca(db, r.lista_presenca_path ? String(r.lista_presenca_path) : null),
+          lista_presenca_url: caminhoLista ? linksListasPresenca.get(caminhoLista) || null : null,
           lista_presenca_nome: r.lista_presenca_nome || null,
           quantidade_convidados: r.quantidade_convidados == null ? null : Number(r.quantidade_convidados),
         }),
-      })),
-    );
+      };
+    });
 
     const espacos = (espacosDb || [])
       .map((row: Record<string, unknown>) => normalizarEspacoBanco(row))
