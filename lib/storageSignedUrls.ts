@@ -5,8 +5,10 @@
  * Se a API em lote falhar, faz fallback para createSignedUrl por arquivo,
  * mantendo o comportamento anterior (arquivo sem link retorna null).
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 export async function assinarArquivosEmLote(
-  db: any,
+  db: SupabaseClient,
   bucket: string,
   caminhos: Array<string | null | undefined>,
   validadeSegundos = 60 * 60,
@@ -91,4 +93,3 @@ export async function assinarArquivosEmLote(
 
   return resultado;
 }
-
