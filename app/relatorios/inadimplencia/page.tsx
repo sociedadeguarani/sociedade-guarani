@@ -66,6 +66,63 @@ function isIsento(m: Mensalidade) {
   return ["isento", "isenta", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
+type DadosInadimplencia = {
+  socios: Socio[];
+  dependentes: Dependente[];
+  mensalidades: Mensalidade[];
+  politicaInadimplencia: PoliticaInadimplencia;
+};
+
+/** Busca os dados sem atualizar estado React; pode ser chamada pelo efeito ou pelo botão Atualizar. */
+async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
+  const [sociosResult, dependentesResult, mensalidadesResult] =
+    await Promise.all([
+      supabase.from("socios").select("id,matricula,nome").order("nome"),
+      supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,ativo")
+        .eq("ativo", true)
+        .order("nome"),
+      supabase
+        .from("mensalidades")
+        .select(
+          "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao"
+        )
+        .order("data_vencimento", { ascending: false }),
+    ]);
+
+  if (sociosResult.error) throw new Error(sociosResult.error.message);
+  if (dependentesResult.error) throw new Error(dependentesResult.error.message);
+  if (mensalidadesResult.error) throw new Error(mensalidadesResult.error.message);
+
+  let politicaInadimplencia = POLITICA_INADIMPLENCIA_PADRAO;
+  try {
+    const { data: authData } = await supabase.auth.getSession();
+    const token = authData.session?.access_token;
+    if (token) {
+      const policyResponse = await fetch("/api/configuracoes/acessos", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const policyJson = await policyResponse.json().catch(() => ({}));
+      if (policyResponse.ok) {
+        politicaInadimplencia = normalizarPoliticaInadimplencia(
+          policyJson?.politica
+        );
+      }
+    }
+  } catch {
+    // Mantém a política padrão caso a configuração não possa ser consultada.
+  }
+
+  return {
+    socios: (sociosResult.data || []) as Socio[],
+    dependentes: (dependentesResult.data || []) as Dependente[],
+    mensalidades: (mensalidadesResult.data || []) as Mensalidade[],
+    politicaInadimplencia,
+  };
+}
+
 export default function InadimplenciaPage() {
   const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -78,69 +135,52 @@ export default function InadimplenciaPage() {
   const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
 
   async function carregar() {
-    // A tela começa em estado de carregamento e sem erro. Evitamos setState
-    // síncrono antes do primeiro await para não provocar renders em cascata.
-    const [sociosResult, dependentesResult, mensalidadesResult] =
-      await Promise.all([
-        supabase.from("socios").select("id,matricula,nome").order("nome"),
-        supabase
-          .from("dependentes")
-          .select("id,socio_id,nome,ativo")
-          .eq("ativo", true)
-          .order("nome"),
-        supabase
-          .from("mensalidades")
-          .select(
-            "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao"
-          )
-          .order("data_vencimento", { ascending: false }),
-      ]);
-
-    if (sociosResult.error) {
-      setErro(sociosResult.error.message);
-      setCarregando(false);
-      return;
-    }
-
-    if (dependentesResult.error) {
-      setErro(dependentesResult.error.message);
-      setCarregando(false);
-      return;
-    }
-
-    if (mensalidadesResult.error) {
-      setErro(mensalidadesResult.error.message);
-      setCarregando(false);
-      return;
-    }
-
-    setSocios((sociosResult.data || []) as Socio[]);
-    setDependentes((dependentesResult.data || []) as Dependente[]);
-    setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
-
+    setCarregando(true);
+    setErro("");
     try {
-      const { data: authData } = await supabase.auth.getSession();
-      const token = authData.session?.access_token;
-      if (token) {
-        const policyResponse = await fetch("/api/configuracoes/acessos", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        const policyJson = await policyResponse.json().catch(() => ({}));
-        if (policyResponse.ok) {
-          setPoliticaInadimplencia(normalizarPoliticaInadimplencia(policyJson?.politica));
-        } else {
-          setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
-        }
-      }
-    } catch {
-      setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
+      const dados = await buscarDadosInadimplencia();
+      setSocios(dados.socios);
+      setDependentes(dados.dependentes);
+      setMensalidades(dados.mensalidades);
+      setPoliticaInadimplencia(dados.politicaInadimplencia);
+    } catch (error: unknown) {
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar o relatório de inadimplência."
+      );
+    } finally {
+      setCarregando(false);
     }
-    setCarregando(false);
   }
 
   useEffect(() => {
-    void carregar();
+    let ativo = true;
+
+    // O efeito só atualiza estado após a Promise de busca concluir; evita setState síncrono no efeito.
+    void buscarDadosInadimplencia()
+      .then((dados) => {
+        if (!ativo) return;
+        setSocios(dados.socios);
+        setDependentes(dados.dependentes);
+        setMensalidades(dados.mensalidades);
+        setPoliticaInadimplencia(dados.politicaInadimplencia);
+      })
+      .catch((error: unknown) => {
+        if (!ativo) return;
+        setErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar o relatório de inadimplência."
+        );
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
+
+    return () => {
+      ativo = false;
+    };
   }, []);
 
   const socioMap = useMemo(
