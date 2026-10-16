@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
@@ -66,6 +67,7 @@ function isIsento(m: Mensalidade) {
 }
 
 export default function InadimplenciaPage() {
+  const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
@@ -278,7 +280,7 @@ export default function InadimplenciaPage() {
   const vermelhos = inadimplentes.filter((i) => i.nivel === "vermelho").length;
 
   function abrirSocio(item: Inadimplente) {
-    window.location.href = `/socios?id=${encodeURIComponent(item.socioId)}`;
+    router.push(`/socios?id=${encodeURIComponent(item.socioId)}`);
   }
 
   function imprimir() {
@@ -327,7 +329,7 @@ export default function InadimplenciaPage() {
         <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
             <button
-              onClick={() => (window.location.href = "/relatorios")}
+              onClick={() => router.push("/relatorios")}
               className="mb-3 text-sm font-semibold text-[#005a3c]"
             >
               ← Voltar para Relatórios
