@@ -190,7 +190,10 @@ export async function GET(request: Request) {
       const { data, error } = await supabase
         .from("mensalidades")
         .select("socio_id,data_vencimento,competencia,situacao,valor")
-        .in("socio_id", lote);
+        .in("socio_id", lote)
+        // O cálculo de inadimplência ignora vencimentos de hoje e futuros.
+        // Filtrar no banco reduz a transferência de histórico desnecessário.
+        .lt("data_vencimento", hoje);
 
       if (error) throw error;
       mensalidades.push(...(data || []));
