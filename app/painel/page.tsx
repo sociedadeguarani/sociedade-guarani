@@ -5,6 +5,37 @@ import { supabase } from "@/lib/supabaseClient";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
+type SocioPainel = {
+  id?: string | null;
+  nome?: string | null;
+  cpf?: string | null;
+  matricula?: string | number | null;
+  possui_mensalidade?: boolean | null;
+  responsavel_id?: string | null;
+  situacao?: string | null;
+  tipo_socio?: string | null;
+  categoria?: string | null;
+  remido?: boolean | null;
+};
+
+function normalizarTipoParaFiltro(valor: unknown): string {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function socioEhRemidoPainel(socio: SocioPainel): boolean {
+  return (
+    socio.remido === true ||
+    normalizarTipoParaFiltro(socio.tipo_socio).includes("remido") ||
+    normalizarTipoParaFiltro(socio.categoria).includes("remido")
+  );
+}
+
 const atalhosAdmin = [
   ["👥", "Sócios", "/socios", "Cadastre, edite e consulte associados."],
   ["💰", "Financeiro", "/financeiro", "Mensalidades, recebimentos e despesas."],
@@ -143,29 +174,30 @@ export default function PainelPage() {
         ========================= */
 
         if (sociosResponse.ok) {
-          const todosSocios = Array.isArray(sociosJson.socios)
-            ? sociosJson.socios
+          const todosSocios: SocioPainel[] = Array.isArray(sociosJson.socios)
+            ? (sociosJson.socios as SocioPainel[])
             : [];
 
-          // A tela /socios usa esta regra:
-          // entram somente os cadastros com mensalidade própria.
+          // Manter os mesmos critérios da tela /socios: associados com
+          // mensalidade própria e titulares remidos, mesmo sem mensalidade.
+          // Remidos dependentes não entram nessa contagem, como na listagem.
           const sociosOficiais = todosSocios.filter(
-            (s: any) => s?.possui_mensalidade === true
+            (socio) =>
+              socio.possui_mensalidade === true ||
+              (socioEhRemidoPainel(socio) && !socio.responsavel_id)
           );
 
           setTotalSocios(sociosOficiais.length);
 
           setSociosAtivos(
             sociosOficiais.filter(
-              (s: any) =>
-                String(s?.situacao || "").toLowerCase() === "ativo"
+              (socio) => String(socio.situacao || "").trim().toLowerCase() === "ativo"
             ).length
           );
 
           setSociosInativos(
             sociosOficiais.filter(
-              (s: any) =>
-                String(s?.situacao || "").toLowerCase() === "inativo"
+              (socio) => String(socio.situacao || "").trim().toLowerCase() === "inativo"
             ).length
           );
 
@@ -179,14 +211,14 @@ export default function PainelPage() {
 
           const dependentesAntigos = todosSocios
             .filter(
-              (s: any) =>
-                Boolean(s?.responsavel_id) &&
-                s?.possui_mensalidade !== true
+              (socio) =>
+                Boolean(socio.responsavel_id) &&
+                socio.possui_mensalidade !== true
             )
-            .map((s: any) => ({
-              socio_id: String(s.responsavel_id),
-              nome: String(s.nome || ""),
-              cpf: String(s.cpf || ""),
+            .map((socio) => ({
+              socio_id: String(socio.responsavel_id),
+              nome: String(socio.nome || ""),
+              cpf: String(socio.cpf || ""),
             }));
 
           const dependentesMigrados = Array.isArray(
