@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
+import { dependenteTemMensalidade, tipoDependenteComMensalidade, tipoDependenteSemMensalidade } from "@/lib/regrasMensalidade";
 import { normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 type Socio = {
@@ -199,25 +200,35 @@ export default function DependentesPage() {
       }
 
       const sociosData = Array.isArray(dados?.socios) ? dados.socios : [];
-      const sociosNormalizados: Socio[] = sociosData.map((s: any) => ({
-        id: String(s.id),
-        matricula: s.matricula == null ? null : String(s.matricula),
-        nome: s.nome ?? "",
-        situacao: s.situacao ?? null,
-        responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
-        tipo_socio: s.tipo_socio ?? null,
-        categoria: s.categoria ?? null,
-        cpf: s.cpf ?? null,
-        data_nascimento: s.data_nascimento ?? null,
-        telefone: s.telefone ?? s.whatsapp ?? null,
-        foto_url: s.foto_url ?? null,
-        possui_mensalidade: s.possui_mensalidade === true,
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
-        tipo_pagamento: s.tipo_pagamento ?? null,
-        situacao_financeira: s.situacao_financeira ?? null,
-        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
-      }));
+      const sociosNormalizados: Socio[] = sociosData.map((s: any) => {
+        const responsavelId = s.responsavel_id == null ? null : String(s.responsavel_id);
+        const ehDependente = Boolean(responsavelId);
+        const paga = ehDependente ? dependenteTemMensalidade(s) : s.possui_mensalidade === true;
+        const tipo = ehDependente
+          ? (paga
+              ? tipoDependenteComMensalidade(s.tipo_socio || "dependente_patrimonial_familiar")
+              : tipoDependenteSemMensalidade(s.tipo_socio || "dependente_patrimonial_familiar"))
+          : (s.tipo_socio ?? null);
+        return {
+          id: String(s.id),
+          matricula: s.matricula == null ? null : String(s.matricula),
+          nome: s.nome ?? "",
+          situacao: s.situacao ?? null,
+          responsavel_id: responsavelId,
+          tipo_socio: tipo,
+          categoria: ehDependente ? (paga ? "Dependente com Mensalidade" : "Dependente") : (s.categoria ?? null),
+          cpf: s.cpf ?? null,
+          data_nascimento: s.data_nascimento ?? null,
+          telefone: s.telefone ?? s.whatsapp ?? null,
+          foto_url: s.foto_url ?? null,
+          possui_mensalidade: ehDependente ? paga : s.possui_mensalidade === true,
+          valor_mensalidade: ehDependente && !paga ? 0 : Number(s.valor_mensalidade || 0),
+          dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
+          tipo_pagamento: s.tipo_pagamento ?? null,
+          situacao_financeira: ehDependente && !paga ? "isento" : (s.situacao_financeira ?? null),
+          data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
+        };
+      });
 
       const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
         .map((d: any) => ({
@@ -293,18 +304,15 @@ export default function DependentesPage() {
   }
 
   useEffect(() => {
-    const agendamento = window.setTimeout(() => {
-      try {
-        const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
-        setPerfilUsuario(
-          perfil === "master" ? "administrador_master" :
-          perfil === "admin" ? "administrador" :
-          perfil
-        );
-      } catch {}
-      void carregarDados();
-    }, 0);
-    return () => window.clearTimeout(agendamento);
+    try {
+      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+      setPerfilUsuario(
+        perfil === "master" ? "administrador_master" :
+        perfil === "admin" ? "administrador" :
+        perfil
+      );
+    } catch {}
+    carregarDados();
   }, []);
 
   function abrirNovo() {
