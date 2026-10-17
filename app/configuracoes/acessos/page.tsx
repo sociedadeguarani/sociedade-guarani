@@ -48,7 +48,10 @@ export default function PoliticaAcessoPage() {
   }
 
   useEffect(() => {
-    void carregar();
+    const agendamento = window.setTimeout(() => {
+      void carregar();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   async function salvar() {
