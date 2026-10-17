@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { Bell, CircleUserRound } from "lucide-react";
 
@@ -55,32 +55,35 @@ function nomePerfil(perfil: Perfil) {
   }
 }
 
+/** Lê o localStorage como store externo: evita setState síncrono no efeito e
+ * preserva um snapshot vazio durante SSR/hidratação para evitar divergências. */
+function subscribeLocalStorage(onChange: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+function readLocalStorage(key: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+const getEmptyServerSnapshot = () => "";
+const getEmailSnapshot = () => readLocalStorage("guarani_usuario_email");
+const getNomeSnapshot = () => readLocalStorage("guarani_usuario_nome");
+const getPerfilSnapshot = () => readLocalStorage("guarani_usuario_perfil");
+
 export default function CabecalhoPadrao() {
-  const [email, setEmail] = useState("");
-  const [nome, setNome] = useState("");
-  const [perfil, setPerfil] = useState<Perfil>("associado");
+  const email = useSyncExternalStore(subscribeLocalStorage, getEmailSnapshot, getEmptyServerSnapshot);
+  const nome = useSyncExternalStore(subscribeLocalStorage, getNomeSnapshot, getEmptyServerSnapshot);
+  const perfilArmazenado = useSyncExternalStore(subscribeLocalStorage, getPerfilSnapshot, getEmptyServerSnapshot);
+  const perfil = normalizarPerfil(perfilArmazenado);
   const [saindo, setSaindo] = useState(false);
   const [avisosAtivos, setAvisosAtivos] = useState(0);
-
-  useEffect(() => {
-    try {
-      setEmail(
-        window.localStorage.getItem("guarani_usuario_email") || ""
-      );
-
-      setNome(
-        window.localStorage.getItem("guarani_usuario_nome") || ""
-      );
-
-      setPerfil(
-        normalizarPerfil(
-          window.localStorage.getItem("guarani_usuario_perfil")
-        )
-      );
-    } catch {
-      // Ignora bloqueio do localStorage.
-    }
-  }, []);
 
   useEffect(() => {
     let ativo = true;
