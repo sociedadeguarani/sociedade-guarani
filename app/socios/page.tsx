@@ -44,6 +44,8 @@ type Socio = {
   fim_temporada: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  /** Condição de remissão por tempo de associação; não é um tipo de sócio. */
+  remido?: boolean | null;
 };
 
 /** Normaliza os valores legados de tipo/categoria para que filtros não dependam
@@ -58,8 +60,9 @@ function normalizarTipoParaFiltro(valor?: string | null): string {
     .replace(/^_+|_+$/g, "");
 }
 
-function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria">): boolean {
+function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria" | "remido">): boolean {
   return (
+    socio.remido === true ||
     normalizarTipoParaFiltro(socio.tipo_socio).includes("remido") ||
     normalizarTipoParaFiltro(socio.categoria).includes("remido")
   );
@@ -122,6 +125,7 @@ const socioInicial: Partial<Socio> = {
   foto_url: "",
 
   tipo_socio: "patrimonial_individual",
+  remido: false,
   responsavel_id: null,
   parentesco: "",
   possui_mensalidade: false,
@@ -139,6 +143,7 @@ const socioInicial: Partial<Socio> = {
 const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
+  { value: "patrimonial", label: "Sócio Patrimonial (tipo individual/familiar a confirmar)" },
   {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
@@ -157,7 +162,7 @@ const TIPOS_SOCIO = [
     value: "dependente_contribuinte_individual_mensalidade",
     label: "Dependente Sócio Contribuinte Individual com Mensalidade",
   },
-  { value: "remido", label: "Sócio Remido" },
+  { value: "patrimonial", label: "Sócio Patrimonial" },
   { value: "temporada_individual", label: "Temporada Individual" },
   { value: "temporada_familiar", label: "Temporada Familiar" },
   { value: "transitorio", label: "Transitório" },
@@ -197,6 +202,7 @@ type ContaBancaria = {
 
 function podeTerDependentes(tipo?: string | null) {
   return [
+    "patrimonial",
     "patrimonial_familiar",
     "contribuinte_familiar",
     "temporada_familiar",
@@ -224,11 +230,17 @@ function tipoDependenteParaResponsavel(tipo?: string | null) {
 }
 
 function tipoSocioLabel(tipo?: string | null) {
-  return TIPOS_SOCIO.find((x) => x.value === tipo)?.label || tipo || "Não informado";
+  // Compatibilidade com a base antiga: "remido" era usado como tipo,
+  // mas o tipo correto é patrimonial e a remissão é uma condição separada.
+  const tipoExibido = normalizarTipoParaFiltro(tipo) === "remido" ? "patrimonial" : tipo;
+  return TIPOS_SOCIO.find((x) => x.value === tipoExibido)?.label || tipoExibido || "Não informado";
 }
 
 function tipoSocioClasse(tipo?: string | null) {
-  switch (tipo) {
+  switch (normalizarTipoParaFiltro(tipo)) {
+    case "patrimonial":
+    case "remido":
+      return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
     case "patrimonial_individual":
       return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
     case "patrimonial_familiar":
@@ -271,6 +283,7 @@ export default function Home() {
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [busca, setBusca] = useState("");
   const [filtroTipoSocio, setFiltroTipoSocio] = useState<string[]>([]);
+  const [filtroRemissao, setFiltroRemissao] = useState("todas");
   const [filtroSituacaoSocio, setFiltroSituacaoSocio] = useState("todas");
   const [buscaResponsavel, setBuscaResponsavel] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
@@ -731,7 +744,20 @@ export default function Home() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || "Erro ao carregar os sócios.");
-      setSocios((payload?.socios || []) as Socio[]);
+      const sociosRecebidos = (payload?.socios || []) as Socio[];
+      setSocios(sociosRecebidos.map((socio) => {
+        const remido = socioEhRemido(socio);
+        const tipoLegadoRemido = normalizarTipoParaFiltro(socio.tipo_socio) === "remido";
+        return {
+          ...socio,
+          remido,
+          // Quando o tipo legado era apenas "remido", mostramos Patrimonial genérico
+          // até que o cadastro familiar/individual seja confirmado.
+          tipo_socio: tipoLegadoRemido
+            ? (socio.responsavel_id ? "dependente_patrimonial_familiar_mensalidade" : "patrimonial")
+            : socio.tipo_socio,
+        };
+      }));
     } catch (error) {
       console.error(error);
       setMensagem(error instanceof Error ? error.message : "Erro ao carregar os sócios.");
@@ -1012,53 +1038,43 @@ export default function Home() {
 
   const sociosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
-
     const tiposSelecionados = filtroTipoSocio.map(normalizarTipoParaFiltro);
 
     return socios.filter((socio) => {
-      // A listagem Sócios inclui quem possui mensalidade e sócios remidos,
-      // mesmo quando a base legada guardou "Remido" em categoria ou com variação de escrita.
       const remido = socioEhRemido(socio);
-      if (socio.possui_mensalidade !== true && !remido) return false;
+      const remidoTitular = remido && !socio.responsavel_id;
+      // A tela Sócios inclui quem possui mensalidade e os titulares patrimoniais remidos.
+      // Dependentes sem mensalidade permanecem na tela Dependentes/Famílias.
+      if (socio.possui_mensalidade !== true && !remidoTitular) return false;
 
       const termoNome = String(socio.nome || "").toLowerCase();
       const termoCpf = String(socio.cpf || "").toLowerCase();
       const termoMatricula = String(socio.matricula || "").toLowerCase();
       const correspondeBusca =
-        !termo ||
-        termoNome.includes(termo) ||
-        termoCpf.includes(termo) ||
-        termoMatricula.includes(termo);
+        !termo || termoNome.includes(termo) || termoCpf.includes(termo) || termoMatricula.includes(termo);
 
-      const tipoSocioNormalizado = normalizarTipoParaFiltro(socio.tipo_socio);
+      let tipoSocioNormalizado = normalizarTipoParaFiltro(socio.tipo_socio);
+      if (tipoSocioNormalizado === "remido") tipoSocioNormalizado = socio.responsavel_id
+        ? "dependente_patrimonial_familiar_mensalidade"
+        : "patrimonial";
       const correspondeTipoDependente =
-        !mostrarSomenteDependentes ||
-        Boolean(socio.responsavel_id) ||
-        tipoSocioNormalizado.startsWith("dependente_");
-
-      // O tipo Remido também reconhece categorias legadas como "Remido" ou "Sócio Remido".
-      const correspondeTipoSocio =
-        tiposSelecionados.length === 0 ||
-        tiposSelecionados.includes(tipoSocioNormalizado) ||
-        (remido && tiposSelecionados.includes("remido"));
+        !mostrarSomenteDependentes || Boolean(socio.responsavel_id) || tipoSocioNormalizado.startsWith("dependente_");
+      const correspondeTipoSocio = tiposSelecionados.length === 0 || tiposSelecionados.some((tipoSelecionado) => {
+        // Este filtro identifica somente o tipo patrimonial genérico legado,
+        // quando a origem não permite afirmar se é individual ou familiar.
+        return tipoSelecionado === tipoSocioNormalizado;
+      });
+      const correspondeRemissao =
+        filtroRemissao === "todas" ||
+        (filtroRemissao === "remidos" && remido) ||
+        (filtroRemissao === "nao_remidos" && !remido);
       const situacao = normalizarTipoParaFiltro(socio.situacao || "ativo");
       const correspondeSituacao =
         filtroSituacaoSocio === "todas" || situacao === normalizarTipoParaFiltro(filtroSituacaoSocio);
 
-      return (
-        correspondeBusca &&
-        correspondeTipoDependente &&
-        correspondeTipoSocio &&
-        correspondeSituacao
-      );
+      return correspondeBusca && correspondeTipoDependente && correspondeTipoSocio && correspondeRemissao && correspondeSituacao;
     });
-  }, [
-    socios,
-    busca,
-    mostrarSomenteDependentes,
-    filtroTipoSocio,
-    filtroSituacaoSocio,
-  ]);
+  }, [socios, busca, mostrarSomenteDependentes, filtroTipoSocio, filtroRemissao, filtroSituacaoSocio]);
 
   if (verificandoLogin) {
     return (
@@ -1137,7 +1153,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true || socioEhRemido(s)).length}
+              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true || (socioEhRemido(s) && !s.responsavel_id)).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1147,11 +1163,13 @@ export default function Home() {
             <Socios
               socios={sociosFiltrados}
               sociosCompletos={socios}
-              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true || socioEhRemido(s)).length}
+              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true || (socioEhRemido(s) && !s.responsavel_id)).length}
               busca={busca}
               setBusca={setBusca}
               filtroTipoSocio={filtroTipoSocio}
               setFiltroTipoSocio={setFiltroTipoSocio}
+              filtroRemissao={filtroRemissao}
+              setFiltroRemissao={setFiltroRemissao}
               filtroSituacaoSocio={filtroSituacaoSocio}
               setFiltroSituacaoSocio={setFiltroSituacaoSocio}
               novoSocio={novoSocio}
@@ -1442,6 +1460,8 @@ function Socios({
   setBusca,
   filtroTipoSocio,
   setFiltroTipoSocio,
+  filtroRemissao,
+  setFiltroRemissao,
   filtroSituacaoSocio,
   setFiltroSituacaoSocio,
   novoSocio,
@@ -1459,7 +1479,9 @@ function Socios({
   busca: string;
   setBusca: (valor: string) => void;
   filtroTipoSocio: string[];
-  setFiltroTipoSocio: (valor: string) => void;
+  setFiltroTipoSocio: (valor: string[]) => void;
+  filtroRemissao: string;
+  setFiltroRemissao: (valor: string) => void;
   filtroSituacaoSocio: string;
   setFiltroSituacaoSocio: (valor: string) => void;
   novoSocio: () => void;
@@ -1546,7 +1568,7 @@ function Socios({
           />
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 border-t border-[#edf2ef] pt-3 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-3 border-t border-[#edf2ef] pt-3 sm:grid-cols-2 lg:grid-cols-3">
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
               Tipo de sócio
@@ -1597,6 +1619,21 @@ function Socios({
 
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
+              Condição de remissão
+            </span>
+            <select
+              value={filtroRemissao}
+              onChange={(e) => setFiltroRemissao(e.target.value)}
+              className="w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5 text-sm text-[#173d2e] outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/10"
+            >
+              <option value="todas">Todas as condições</option>
+              <option value="remidos">Somente remidos</option>
+              <option value="nao_remidos">Não remidos</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">
               Situação do sócio
             </span>
             <select
@@ -1612,13 +1649,14 @@ function Socios({
           </label>
         </div>
 
-        {(busca || filtroTipoSocio.length > 0 || filtroSituacaoSocio !== "todas") && (
+        {(busca || filtroTipoSocio.length > 0 || filtroRemissao !== "todas" || filtroSituacaoSocio !== "todas") && (
           <div className="mt-3 flex justify-end">
             <button
               type="button"
               onClick={() => {
                 setBusca("");
                 setFiltroTipoSocio([]);
+                setFiltroRemissao("todas");
                 setFiltroSituacaoSocio("todas");
               }}
               className="rounded-lg px-3 py-1.5 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]"
@@ -1714,12 +1752,13 @@ function Socios({
                       Altere os filtros ou limpe a busca para ver outros associados.
                     </p>
 
-                    {(busca || filtroTipoSocio.length > 0 || filtroSituacaoSocio !== "todas") && (
+                    {(busca || filtroTipoSocio.length > 0 || filtroRemissao !== "todas" || filtroSituacaoSocio !== "todas") && (
                       <button
                         type="button"
                         onClick={() => {
                           setBusca("");
                           setFiltroTipoSocio([]);
+                          setFiltroRemissao("todas");
                           setFiltroSituacaoSocio("todas");
                         }}
                         className="mt-4 rounded-lg bg-[#063b28] px-4 py-2 text-sm font-bold text-white"
@@ -1777,9 +1816,16 @@ function Socios({
                     </td>
 
                     <td className="px-5 py-4 text-sm">
-                      <span className={`inline-flex max-w-[190px] rounded-full px-3 py-1 text-xs font-extrabold ${tipoSocioClasse(socio.tipo_socio)}`}>
-                        {tipoSocioLabel(socio.tipo_socio)}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-flex max-w-[190px] rounded-full px-3 py-1 text-xs font-extrabold ${tipoSocioClasse(socio.tipo_socio)}`}>
+                          {tipoSocioLabel(socio.tipo_socio)}
+                        </span>
+                        {socioEhRemido(socio) && (
+                          <span className="inline-flex rounded-full bg-[#f0e9f8] px-2.5 py-1 text-[11px] font-extrabold text-[#6d4b91] ring-1 ring-[#d5c5e6]">
+                            Remido
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4 text-sm text-gray-600">
