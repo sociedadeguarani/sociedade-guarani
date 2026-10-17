@@ -268,28 +268,35 @@ export default function ReservasPage() {
 
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const modoPublico = params.get("publico") === "1";
-    setPublico(modoPublico);
-    if (modoPublico) setTipoPessoa("nao_socio");
-    void recarregarDados(modoPublico);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const agendamento = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const modoPublico = params.get("publico") === "1";
+      setPublico(modoPublico);
+      if (modoPublico) setTipoPessoa("nao_socio");
+      void recarregarDados(modoPublico);
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   useEffect(() => {
     if (publico || aba !== "reservas") return;
-    void carregarReservas({ todas: true });
+    const agendamento = window.setTimeout(() => { void carregarReservas({ todas: true }); }, 0);
+    return () => window.clearTimeout(agendamento);
   }, [aba, publico]);
 
   useEffect(() => {
     if (publico || aba !== "reservar" || !data || !espacoId) return;
-    void carregarReservas({ data, espacoId });
+    const agendamento = window.setTimeout(() => { void carregarReservas({ data, espacoId }); }, 0);
+    return () => window.clearTimeout(agendamento);
   }, [aba, publico, data, espacoId]);
 
   useEffect(() => {
-    if (!espacos.some((item) => item.id === espacoId)) {
-      setEspacoId(espacos[0]?.id || "");
-    }
+    if (espacos.length === 0 || espacos.some((item) => item.id === espacoId)) return;
+    let ativo = true;
+    queueMicrotask(() => {
+      if (ativo) setEspacoId(espacos[0]?.id || "");
+    });
+    return () => { ativo = false; };
   }, [espacos, espacoId]);
 
   const espacosDisponiveis = useMemo(
@@ -304,7 +311,9 @@ export default function ReservasPage() {
   useEffect(() => {
     let ativo = true;
     if (valor <= 0) {
-      setPix(null);
+      queueMicrotask(() => {
+        if (ativo) setPix(null);
+      });
       return () => {
         ativo = false;
       };
@@ -547,7 +556,7 @@ export default function ReservasPage() {
       const nomeOperador = await operadorAtual();
       setRecibo({
         id: reservaSalva.id,
-        numero: `RS-${reservaSalva.id.slice(0, 6).toUpperCase() || Date.now().toString().slice(-6)}`,
+        numero: `RS-${String(reservaSalva.id || "RESERVA").slice(0, 6).toUpperCase()}`,
         tipo: "Reserva de espaço",
         nome: reservaSalva.nome || nome,
         matricula: matriculaResponsavel,
