@@ -293,15 +293,18 @@ export default function DependentesPage() {
   }
 
   useEffect(() => {
-    try {
-      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
-      setPerfilUsuario(
-        perfil === "master" ? "administrador_master" :
-        perfil === "admin" ? "administrador" :
-        perfil
-      );
-    } catch {}
-    carregarDados();
+    const agendamento = window.setTimeout(() => {
+      try {
+        const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+        setPerfilUsuario(
+          perfil === "master" ? "administrador_master" :
+          perfil === "admin" ? "administrador" :
+          perfil
+        );
+      } catch {}
+      void carregarDados();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   function abrirNovo() {
