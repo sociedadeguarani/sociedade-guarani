@@ -461,7 +461,10 @@ export default function FinanceiroPage() {
   }
 
   useEffect(() => {
-    void carregarFinanceiro();
+    const agendamento = window.setTimeout(() => {
+      void carregarFinanceiro();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   const saldosPorConta = useMemo(() => {
