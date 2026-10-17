@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Camera, CheckCircle2, Clock3, Search, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
+
+// Recurso estático do navegador: não precisa de estado mutável nem efeito.
+const subscribeSemMudancas = () => () => {};
+const obterSuporteLeituraQr = () =>
+  typeof window !== "undefined" && "BarcodeDetector" in window;
+const obterSuporteLeituraQrServidor = () => true;
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
@@ -36,14 +42,14 @@ export default function AcessosPage() {
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [cameraAberta, setCameraAberta] = useState(false);
-  const [suportaLeituraQr, setSuportaLeituraQr] = useState(true);
+  const suportaLeituraQr = useSyncExternalStore(
+    subscribeSemMudancas,
+    obterSuporteLeituraQr,
+    obterSuporteLeituraQrServidor
+  );
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setSuportaLeituraQr("BarcodeDetector" in window);
-  }, []);
 
   async function validar(dados: { matricula?: string; qr?: string; socio_id?: string }) {
     setErro("");
