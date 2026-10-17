@@ -84,7 +84,10 @@ export default function UsuariosPage() {
     finally { setCarregando(false); }
   }
 
-  useEffect(() => { void carregar(); }, []);
+  useEffect(() => {
+    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, []);
 
   const usuariosFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
