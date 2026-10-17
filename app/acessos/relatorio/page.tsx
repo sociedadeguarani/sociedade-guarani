@@ -69,36 +69,47 @@ export default function RelatorioAcessosPage() {
   const [data, setData] = useState(hojeISO());
   const [acessos, setAcessos] = useState<Acesso[]>([]);
   const [busca, setBusca] = useState("");
-  const [carregando, setCarregando] = useState(true);
+  const [dataCarregada, setDataCarregada] = useState<string | null>(null);
   const [erro, setErro] = useState("");
-
-  async function carregar(dataEscolhida: string) {
-    setCarregando(true);
-    setErro("");
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        window.location.href = "/login?redirect=/acessos/relatorio";
-        return;
-      }
-      const r = await fetch(`/api/acessos?de=${dataEscolhida}&ate=${dataEscolhida}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Não foi possível carregar os acessos.");
-      setAcessos(d.acessos || []);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar os acessos.");
-      setAcessos([]);
-    } finally {
-      setCarregando(false);
-    }
-  }
+  const carregando = dataCarregada !== data;
 
   useEffect(() => {
-    carregar(data);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let ativo = true;
+
+    async function carregarAcessos() {
+      try {
+        // Aguarda a sessão antes de atualizar estados: evita atualização
+        // síncrona durante o efeito e reduz renderizações em cascata.
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!ativo) return;
+        setErro("");
+
+        if (!session) {
+          window.location.href = "/login?redirect=/acessos/relatorio";
+          return;
+        }
+
+        const r = await fetch(`/api/acessos?de=${data}&ate=${data}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Não foi possível carregar os acessos.");
+        if (!ativo) return;
+        setAcessos(Array.isArray(d.acessos) ? d.acessos : []);
+      } catch (e) {
+        if (!ativo) return;
+        setErro(e instanceof Error ? e.message : "Erro ao carregar os acessos.");
+        setAcessos([]);
+      } finally {
+        if (ativo) setDataCarregada(data);
+      }
+    }
+
+    void carregarAcessos();
+    return () => {
+      ativo = false;
+    };
   }, [data]);
 
   const termo = busca.trim().toLowerCase();
