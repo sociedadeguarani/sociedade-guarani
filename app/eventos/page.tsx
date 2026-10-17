@@ -63,7 +63,10 @@ export default function EventosPage() {
       if ((j.perfil || "") === "associado") { const rp = await fetch("/api/configuracao-pix", { cache: "no-store" }); const jp = await rp.json(); if (rp.ok) setPix(jp.config || null); }
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar."); } finally { setCarregando(false); }
   }
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => {
+    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, []);
 
   // Gera um PIX com o valor exato da compra (ou venda pendente), usando a
   // chave global atual quando o evento ainda guarda o copia e cola do Sicredi.
@@ -73,13 +76,18 @@ export default function EventosPage() {
       : detalhe?.status === "pendente"
         ? Number(detalhe.valor_total || 0)
         : 0;
+    let cancelado = false;
+
+    // Limpa o PIX anterior depois da fase síncrona do efeito, antes de a
+    // consulta assíncrona poder retornar um novo código.
+    queueMicrotask(() => {
+      if (!cancelado) setPixCheckoutCopiaECola("");
+    });
+
     if (valorAtual <= 0) {
-      setPixCheckoutCopiaECola("");
-      return;
+      return () => { cancelado = true; };
     }
 
-    let cancelado = false;
-    setPixCheckoutCopiaECola("");
     fetch(`/api/configuracao-pix?valor=${encodeURIComponent(valorAtual.toFixed(2))}`, { cache: "no-store" })
       .then(async (resposta) => {
         const json = await resposta.json().catch(() => ({}));
