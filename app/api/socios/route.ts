@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 const COLUNAS_BASE = [
   "matricula", "nome", "cpf", "rg", "data_nascimento", "telefone", "whatsapp", "email",
   "endereco", "numero", "bairro", "cidade", "estado", "cep", "data_associacao", "categoria",
-  "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade",
+  "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade", "remido",
 ];
 const COLUNAS_EXTRAS = [
   "foto_url", "parentesco", "valor_mensalidade",
@@ -30,14 +30,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     if (url.searchParams.get("resumo") === "1") {
       const [total, ativos, inativos] = await Promise.all([
-        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true),
-        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "ativo"),
-        db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "inativo"),
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)"),
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "ativo"),
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "inativo"),
       ]);
       const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
       return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0 });
     }
+    // Não filtrar por possui_mensalidade: remidos e dependentes sem cobrança continuam fazendo parte do cadastro.
     const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
     return NextResponse.json({ socios: data || [] });
