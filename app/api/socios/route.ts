@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { dependenteTemMensalidade } from "@/lib/regrasMensalidade";
 import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
-    const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
+    const possuiMensalidadeTitular = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
     const responsavelId = String(body.responsavel_id || "").trim();
     if (!matricula && !responsavelId) {
       return NextResponse.json({ error: "Informe a matrícula-base do associado. Dependentes sem mensalidade recebem a matrícula automaticamente." }, { status: 400 });
@@ -69,13 +70,16 @@ export async function POST(request: Request) {
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
     const ehDependente = Boolean(responsavelId);
+    const possuiMensalidade = ehDependente
+      ? dependenteTemMensalidade({ categoria: body.categoria, tipo_socio: body.tipo_socio })
+      : possuiMensalidadeTitular;
     const dadosNormalizados = {
       ...body,
       matricula: matricula || null,
       nome,
       cpf: body.cpf || null,
-      possui_mensalidade: ehDependente ? false : possuiMensalidade,
-      ...(ehDependente ? { valor_mensalidade: 0 } : {}),
+      possui_mensalidade: possuiMensalidade,
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0, situacao_financeira: "isento" } : {}),
     };
     const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
     if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
@@ -101,20 +105,27 @@ export async function PUT(request: Request) {
     const nome = String(body.nome ?? "").trim();
     const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
-    const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade").eq("id", id).maybeSingle();
+    const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade,categoria,tipo_socio").eq("id", id).maybeSingle();
     const responsavelId = body.responsavel_id !== undefined
       ? String(body.responsavel_id || "").trim()
       : String(atual?.responsavel_id || "").trim();
-    const possuiMensalidade = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
+    const possuiMensalidadeInformada = body.possui_mensalidade !== undefined
+      ? body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true"
+      : atual?.possui_mensalidade === true;
     const ehDependente = Boolean(responsavelId);
+    const categoriaFinal = body.categoria !== undefined ? body.categoria : atual?.categoria;
+    const tipoFinal = body.tipo_socio !== undefined ? body.tipo_socio : atual?.tipo_socio;
+    const possuiMensalidade = ehDependente
+      ? dependenteTemMensalidade({ categoria: categoriaFinal, tipo_socio: tipoFinal })
+      : possuiMensalidadeInformada;
     const dadosNormalizados = {
       ...body,
       matricula: matricula || null,
       nome,
       cpf: body.cpf || null,
       responsavel_id: responsavelId || null,
-      possui_mensalidade: ehDependente ? false : possuiMensalidade,
-      ...(ehDependente ? { valor_mensalidade: 0 } : {}),
+      possui_mensalidade: possuiMensalidade,
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0, situacao_financeira: "isento" } : {}),
     };
     const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
     if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
