@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import RegistrarPagamentoMensalidade from "./components/RegistrarPagamentoMensalidade";
+import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
 
 // Captura o instante de referência fora da renderização para que os cálculos
 // de status não dependam de uma função impura chamada a cada render.
@@ -122,6 +123,19 @@ function rotuloTipoSocio(tipo?: string | null) {
     .replace(/\b\w/g, (letra) => letra.toUpperCase());
 }
 
+/** Busca tolerante a acentos e diferenças de formatação em CPF/matrícula. */
+function normalizarBusca(valor: unknown): string {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+function compactarBusca(valor: unknown): string {
+  return normalizarBusca(valor).replace(/[^a-z0-9]/g, "");
+}
+
 const tiposPagamento = [
   { value: "banrisul", label: "Débito Banrisul" },
   { value: "sicredi", label: "Débito Sicredi" },
@@ -229,6 +243,11 @@ export default function Page() {
   const [processandoBaixa, setProcessandoBaixa] = useState(false);
   const [pagamentoMensalidade, setPagamentoMensalidade] = useState<M | null>(null);
 
+  // Índice reutilizável evita varrer a lista de contas em cada linha filtrada.
+  const contasPorId = useMemo(
+    () => new Map(contas.map((conta) => [String(conta.id), conta] as const)),
+    [contas]
+  );
 
   async function h() {
     const {
@@ -391,28 +410,16 @@ export default function Page() {
     void carregar();
   }, [ano, mes]);
 
-  function socioElegivelParaGeracao(s: Socio) {
-    // Regra oficial:
-    // - Titular com mensalidade própria: entra.
-    // - Dependente com mensalidade própria: entra.
-    // - Dependente sem mensalidade própria: não entra.
-    // - Isento: não entra.
-    // - Inativo: não entra.
-    //
-    // Não usamos matrícula, categoria ou tipo_socio para decidir isso,
-    // pois existem dependentes com mensalidade própria em diferentes tipos.
-    if (
-      s.ativo === false ||
-      String(s.situacao || "").trim().toLowerCase() === "inativo"
-    ) {
-      return false;
-    }
-
-    return s.possui_mensalidade === true;
-  }
-
+  // A tela usa exatamente a mesma regra da API de geração. Isso impede
+  // que dependentes com categoria "Dependente"/"Titular" e um indicador
+  // legado possui_mensalidade=true apareçam como cobraveis virtuais.
   const sociosElegiveis = useMemo(
-    () => socios.filter(socioElegivelParaGeracao),
+    () => socios.filter(socioElegivelParaMensalidade),
+    [socios]
+  );
+
+  const dependentesComConflitoMensalidade = useMemo(
+    () => socios.filter((s) => Boolean(s.responsavel_id) && s.possui_mensalidade === true && !socioElegivelParaMensalidade(s)),
     [socios]
   );
 
@@ -465,7 +472,7 @@ export default function Page() {
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
     const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
-    const conta = contas.find((c) => String(c.id) === String(contaId));
+    const conta = contasPorId.get(String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
     if (
@@ -565,7 +572,7 @@ export default function Page() {
       ...item,
       situacao: situacaoVisual(item),
     }));
-  }, [lista, sociosElegiveis, ano, mes, contas]);
+  }, [lista, sociosElegiveis, ano, mes]);
 
   const tiposSocioDisponiveis = useMemo<string[]>(() => {
     const tipos = sociosElegiveis
@@ -577,14 +584,22 @@ export default function Page() {
   }, [sociosElegiveis]);
 
   const filtrada = useMemo(() => {
-    const q = busca.toLowerCase().trim();
+    const q = normalizarBusca(busca);
+    const qCompacta = compactarBusca(busca);
 
     return linhasExibicao.filter((x) => {
+      const nome = normalizarBusca(x.socio?.nome);
+      const matricula = normalizarBusca(x.socio?.matricula);
+      const cpf = normalizarBusca(x.socio?.cpf);
+      const matriculaCompacta = compactarBusca(x.socio?.matricula);
+      const cpfCompacto = compactarBusca(x.socio?.cpf);
       const bateBusca =
         !q ||
-        `${x.socio?.nome || ""} ${x.socio?.matricula || ""} ${x.socio?.cpf || ""}`
-          .toLowerCase()
-          .includes(q);
+        nome.includes(q) ||
+        matricula.includes(q) ||
+        cpf.includes(q) ||
+        (qCompacta.length > 0 &&
+          (matriculaCompacta.includes(qCompacta) || cpfCompacto.includes(qCompacta)));
 
       // Linhas ainda não geradas não devem desaparecer quando um filtro
       // de banco é aplicado: o banco/tipo de cobrança vem do cadastro do sócio.
@@ -608,7 +623,7 @@ export default function Page() {
     linhasExibicao,
     busca,
     cobrancasSelecionadas,
-    contas,
+    contasPorId,
     filtroTipoSocio,
     filtroSituacaoMensalidade,
   ]);
@@ -632,7 +647,7 @@ const selecionadasBaixa = useMemo(
     for (const item of selecionadasBaixa) {
       const socio = socioPorId.get(String(item.socio_id));
       const contaId = contaRecebimentoSelecionada || item.conta_pagadora_id || socio?.conta_bancaria_id || "";
-      const conta = contas.find((c) => String(c.id) === String(contaId));
+      const conta = contasPorId.get(String(contaId));
       const nomeConta = conta?.nome || "Conta não identificada";
       const chave = String(contaId || nomeConta);
 
@@ -658,7 +673,7 @@ const selecionadasBaixa = useMemo(
       totalCobrado,
       contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
     };
-  }, [selecionadasBaixa, socioPorId, contas, contaRecebimentoSelecionada]);
+  }, [selecionadasBaixa, socioPorId, contasPorId, contaRecebimentoSelecionada]);
 
 
   async function confirmarBaixaSelecionadas() {
@@ -672,7 +687,7 @@ const selecionadasBaixa = useMemo(
       const semConta = !contaRecebimentoSelecionada && selecionadasBaixa.some((item) => {
         const socio = socioPorId.get(String(item.socio_id));
         const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id;
-        return !contaId || !contas.some((conta) => String(conta.id) === String(contaId));
+        return !contaId || !contasPorId.has(String(contaId));
       });
       if (semConta) {
         setErro("Selecione a conta bancária de destino (por exemplo, Banrisul ou Sicredi) antes de confirmar a baixa.");
@@ -1034,6 +1049,15 @@ const selecionadasBaixa = useMemo(
             </div>
           )}
 
+          {dependentesComConflitoMensalidade.length > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+              <p className="font-extrabold">Conflito de classificação de dependentes</p>
+              <p className="mt-1">
+                {dependentesComConflitoMensalidade.length} dependente(s) estão marcados com mensalidade no cadastro, mas a categoria não indica cobrança própria. Eles foram excluídos da geração automática. Se já houver lançamentos financeiros anteriores, eles permanecem visíveis para conferência do histórico.
+              </p>
+            </div>
+          )}
+
           <section className="min-w-0 rounded-2xl border bg-white p-3 sm:p-4">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <label className="min-w-[260px] flex-1">
@@ -1155,13 +1179,17 @@ const selecionadasBaixa = useMemo(
                   ["bb", "Banco do Brasil"],
                   ["boleto", "Boleto"],
                   ["pix", "PIX"],
-                  ["sem_pagamento", "Sem pagamento"],
+                  ["dinheiro", "Dinheiro"],
+                  ["transferencia", "Transferência"],
+                  ["outro", "Outro"],
+                  ["sem_pagamento", "Não identificado"],
                 ].map(([valor, label]) => {
                   const ativo = cobrancasSelecionadas.includes(valor);
                   return (
                     <button
                       key={valor}
                       type="button"
+                      aria-pressed={ativo}
                       onClick={() =>
                         setCobrancasSelecionadas((atual) =>
                           ativo
