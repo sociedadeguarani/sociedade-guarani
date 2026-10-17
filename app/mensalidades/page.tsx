@@ -7,6 +7,10 @@ import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import RegistrarPagamentoMensalidade from "./components/RegistrarPagamentoMensalidade";
 
+// Captura o instante de referência fora da renderização para que os cálculos
+// de status não dependam de uma função impura chamada a cada render.
+const INSTANTE_REFERENCIA_MS = Date.now();
+
 type Socio = {
   id: string;
   nome: string;
@@ -514,7 +518,7 @@ export default function Page() {
   function situacaoVisual(item: M) {
     if (item.situacao === "em_aberto" && item.data_vencimento) {
       const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
-      if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < Date.now()) {
+      if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < INSTANTE_REFERENCIA_MS) {
         return "em_atraso";
       }
     }
