@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Megaphone, Plus, Edit3, Trash2, Pin, Upload, X, Bell, CheckCheck, ExternalLink, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -29,6 +30,7 @@ async function getToken(){
 }
 
 export default function AvisosPage(){
+  const router = useRouter();
   const [avisos,setAvisos]=useState<Aviso[]>([]);
   const [notificacoes,setNotificacoes]=useState<Notificacao[]>([]);
   const [contas,setContas]=useState<Conta[]>([]);
@@ -52,16 +54,16 @@ export default function AvisosPage(){
     fixado:false,ativo:true,publico:"todos",data_inicio:"",data_fim:""
   });
 
-  async function api(url:string,init?:RequestInit){
+  const api = useCallback(async (url:string,init?:RequestInit) => {
     const t=await getToken();
     return fetch(url,{
       ...init,
       headers:{"Content-Type":"application/json",Authorization:`Bearer ${t}`},
       cache:"no-store"
     });
-  }
+  }, []);
 
-  async function carregarReservasPendentes(headers: HeadersInit){
+  const carregarReservasPendentes = useCallback(async (headers: HeadersInit) => {
     try{
       const r=await fetch("/api/reservas?status=pendente",{headers,cache:"no-store"});
       const j=await r.json().catch(()=>({}));
@@ -70,15 +72,17 @@ export default function AvisosPage(){
     }catch{
       setReservasPendentes([]);
     }
-  }
+  }, []);
 
-  async function carregar(){
-    setErro("");
-    setCarregando(true);
+  const carregar = useCallback(async () => {
     try {
+      // Suspender antes das atualizações de estado evita o padrão síncrono
+      // dentro do useEffect no carregamento inicial.
       const t=await getToken();
+      setErro("");
+      setCarregando(true);
       if(!t){
-        window.location.href="/login";
+        router.replace("/login");
         return;
       }
 
@@ -120,9 +124,11 @@ export default function AvisosPage(){
     } finally {
       setCarregando(false);
     }
-  }
+  }, [carregarReservasPendentes, router]);
 
-  useEffect(()=>{void carregar()},[]);
+  useEffect(() => {
+    void carregar();
+  }, [carregar]);
 
   function abrirPagamento(n:Notificacao){
     setErro("");
