@@ -324,15 +324,18 @@ export default function Home() {
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
 
   useEffect(() => {
-    try {
-      const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
-      setPerfilUsuario(
-        perfil === "funcionario" ? "funcionario" :
-        perfil === "master" ? "administrador_master" :
-        perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
-        perfil
-      );
-    } catch {}
+    const agendamento = window.setTimeout(() => {
+      try {
+        const perfil = (window.localStorage.getItem("guarani_usuario_perfil") || "").trim().toLowerCase();
+        setPerfilUsuario(
+          perfil === "funcionario" ? "funcionario" :
+          perfil === "master" ? "administrador_master" :
+          perfil === "admin" || perfil === "administrador" ? "administrador_normal" :
+          perfil
+        );
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   useEffect(() => {
@@ -767,9 +770,12 @@ export default function Home() {
   }
 
   useEffect(() => {
-    carregarSocios();
-    void carregarContasBancarias();
-    void carregarMensalidades(competenciaFinanceiro);
+    const agendamento = window.setTimeout(() => {
+      void carregarSocios();
+      void carregarContasBancarias();
+      void carregarMensalidades(competenciaFinanceiro);
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   function novoSocio() {
