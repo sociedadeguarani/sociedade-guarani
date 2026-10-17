@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
@@ -1479,7 +1479,7 @@ function Socios({
   busca: string;
   setBusca: (valor: string) => void;
   filtroTipoSocio: string[];
-  setFiltroTipoSocio: (valor: string[]) => void;
+  setFiltroTipoSocio: Dispatch<SetStateAction<string[]>>;
   filtroRemissao: string;
   setFiltroRemissao: (valor: string) => void;
   filtroSituacaoSocio: string;
