@@ -12,8 +12,14 @@ export default function LoginPage() {
   const [redirect, setRedirect] = useState("/painel");
 
   useEffect(() => {
-    const destino = new URLSearchParams(window.location.search).get("redirect");
-    if (destino && destino.startsWith("/")) setRedirect(destino);
+    const agendamento = window.setTimeout(() => {
+      const destino = new URLSearchParams(window.location.search).get("redirect");
+      // Aceita apenas destinos internos para evitar redirecionamento externo.
+      if (destino && destino.startsWith("/") && !destino.startsWith("//")) {
+        setRedirect(destino);
+      }
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   async function entrar(e: React.FormEvent) {
