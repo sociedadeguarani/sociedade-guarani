@@ -33,7 +33,20 @@ jobs:
       # some direct dependencies. npm install reconciles it in the CI workspace;
       # commit a locally regenerated package-lock.json as a follow-up cleanup.
       - name: Install dependencies
+        id: install_dependencies
         run: npm install --no-audit --no-fund
+
+      # npm resolves a fresh lockfile after version and override changes.
+      # Upload it so it can be committed back to the repository even if a
+      # later validation (e.g. audit) fails.
+      - name: Upload regenerated package lock
+        if: steps.install_dependencies.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: guarani-regenerated-package-lock
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Business logic and security regression tests
         run: npm test
