@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import { dependenteTemMensalidade, tipoDependenteComMensalidade, tipoDependenteSemMensalidade } from "@/lib/regrasMensalidade";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,6 +59,19 @@ function normalizarTipoParaFiltro(valor?: string | null): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+/** Normaliza consultas de busca para aceitar texto com ou sem acentos. */
+function normalizarBusca(valor: unknown): string {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+function compactarBusca(valor: unknown): string {
+  return normalizarBusca(valor).replace(/[^a-z0-9]/g, "");
 }
 
 function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria" | "remido">): boolean {
@@ -144,6 +158,10 @@ const TIPOS_SOCIO = [
   { value: "patrimonial_individual", label: "Sócio Patrimonial Individual" },
   { value: "patrimonial_familiar", label: "Sócio Patrimonial Familiar" },
   { value: "patrimonial", label: "Sócio Patrimonial (tipo individual/familiar a confirmar)" },
+  { value: "dependente_patrimonial_familiar", label: "Dependente Patrimonial Familiar (sem mensalidade)" },
+  { value: "dependente_patrimonial_individual", label: "Dependente Patrimonial Individual (sem mensalidade)" },
+  { value: "dependente_contribuinte_familiar", label: "Dependente Contribuinte Familiar (sem mensalidade)" },
+  { value: "dependente_contribuinte_individual", label: "Dependente Contribuinte Individual (sem mensalidade)" },
   {
     value: "dependente_patrimonial_familiar_mensalidade",
     label: "Dependente Sócio Patrimonial Familiar com Mensalidade",
@@ -215,17 +233,27 @@ function podeTerDependentes(tipo?: string | null) {
 function tipoDependenteParaResponsavel(tipo?: string | null) {
   switch (tipo) {
     case "patrimonial_familiar":
+    case "dependente_patrimonial_familiar":
     case "dependente_patrimonial_familiar_mensalidade":
-      return "dependente_patrimonial_familiar_mensalidade";
+      return "dependente_patrimonial_familiar";
+    case "patrimonial_individual":
+    case "dependente_patrimonial_individual":
+    case "dependente_patrimonial_individual_mensalidade":
+      return "dependente_patrimonial_individual";
     case "contribuinte_familiar":
+    case "dependente_contribuinte_familiar":
     case "dependente_contribuinte_familiar_mensalidade":
-      return "dependente_contribuinte_familiar_mensalidade";
+      return "dependente_contribuinte_familiar";
+    case "contribuinte_individual":
+    case "dependente_contribuinte_individual":
+    case "dependente_contribuinte_individual_mensalidade":
+      return "dependente_contribuinte_individual";
     case "temporada_familiar":
-      return "dependente_patrimonial_familiar_mensalidade";
+      return "dependente_patrimonial_familiar";
     case "transitorio":
       return "dependente_transitorio";
     default:
-      return "dependente_patrimonial_familiar_mensalidade";
+      return "dependente_patrimonial_familiar";
   }
 }
 
@@ -751,14 +779,26 @@ export default function Home() {
       setSocios(sociosRecebidos.map((socio) => {
         const remido = socioEhRemido(socio);
         const tipoLegadoRemido = normalizarTipoParaFiltro(socio.tipo_socio) === "remido";
+        const ehDependente = Boolean(socio.responsavel_id);
+        const dependentePaga = ehDependente ? dependenteTemMensalidade(socio) : false;
+        const tipoDependente = ehDependente
+          ? (dependentePaga
+              ? tipoDependenteComMensalidade(socio.tipo_socio || "dependente_patrimonial_familiar")
+              : tipoDependenteSemMensalidade(socio.tipo_socio || "dependente_patrimonial_familiar"))
+          : socio.tipo_socio;
         return {
           ...socio,
           remido,
+          ...(ehDependente ? {
+            categoria: dependentePaga ? "Dependente com Mensalidade" : "Dependente",
+            possui_mensalidade: dependentePaga,
+            valor_mensalidade: dependentePaga ? Number(socio.valor_mensalidade || 0) : 0,
+          } : {}),
           // Quando o tipo legado era apenas "remido", mostramos Patrimonial genérico
           // até que o cadastro familiar/individual seja confirmado.
           tipo_socio: tipoLegadoRemido
-            ? (socio.responsavel_id ? "dependente_patrimonial_familiar_mensalidade" : "patrimonial")
-            : socio.tipo_socio,
+            ? (ehDependente ? tipoDependente : "patrimonial")
+            : (ehDependente ? tipoDependente : socio.tipo_socio),
         };
       }));
     } catch (error) {
@@ -803,6 +843,7 @@ export default function Home() {
     setForm({
       ...socioInicial,
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
+      categoria: "Dependente",
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
       // Novo dependente começa sem mensalidade. Se passar a pagar,
@@ -839,31 +880,59 @@ export default function Home() {
     setForm((atual) => {
       const proximo = {
         ...atual,
-        [campo]:
-          campo === "possui_mensalidade"
-            ? valor === "true"
-            : valor,
+        [campo]: campo === "possui_mensalidade" ? valor === "true" : valor,
       };
+
+      if (campo === "responsavel_id" && valor.trim()) {
+        proximo.categoria = proximo.possui_mensalidade
+          ? "Dependente com Mensalidade"
+          : "Dependente";
+        proximo.tipo_socio = proximo.possui_mensalidade
+          ? tipoDependenteComMensalidade(String(proximo.tipo_socio || "dependente_patrimonial_familiar"))
+          : tipoDependenteSemMensalidade(String(proximo.tipo_socio || "dependente_patrimonial_familiar"));
+      }
+
+      if (campo === "possui_mensalidade" && proximo.responsavel_id) {
+        if (proximo.possui_mensalidade) {
+          proximo.tipo_socio = tipoDependenteComMensalidade(String(proximo.tipo_socio || "dependente_patrimonial_familiar"));
+          proximo.categoria = "Dependente com Mensalidade";
+          if (proximo.situacao_financeira === "isento") proximo.situacao_financeira = "em_dia";
+        } else {
+          proximo.tipo_socio = tipoDependenteSemMensalidade(String(proximo.tipo_socio || "dependente_patrimonial_familiar"));
+          proximo.categoria = "Dependente";
+          proximo.valor_mensalidade = 0;
+          proximo.situacao_financeira = "isento";
+        }
+      }
 
       if (campo === "tipo_socio") {
         const tipo = valor;
-        const mensalidadeObrigatoria = [
-          "dependente_patrimonial_familiar_mensalidade",
-          "dependente_patrimonial_individual_mensalidade",
-          "dependente_contribuinte_familiar_mensalidade",
-          "dependente_contribuinte_individual_mensalidade",
-        ].includes(tipo);
+        const tipoEhDependente = tipo.startsWith("dependente_");
+        const mensalidadeObrigatoria = tipoEhDependente && tipo.endsWith("_mensalidade");
 
-        if (tipo === "remido") {
+        if (tipoEhDependente) {
+          proximo.possui_mensalidade = mensalidadeObrigatoria;
+          proximo.categoria = mensalidadeObrigatoria
+            ? "Dependente com Mensalidade"
+            : "Dependente";
+          if (!mensalidadeObrigatoria) {
+            proximo.valor_mensalidade = 0;
+            proximo.situacao_financeira = "isento";
+          } else if (proximo.situacao_financeira === "isento") {
+            proximo.situacao_financeira = "em_dia";
+          }
+        } else if (tipo === "remido") {
           proximo.possui_mensalidade = false;
           proximo.valor_mensalidade = 0;
-        } else if (mensalidadeObrigatoria) {
-          proximo.possui_mensalidade = true;
+          proximo.situacao_financeira = "isento";
         }
 
-        if (!tipo.startsWith("dependente_")) {
+        if (!tipoEhDependente) {
           proximo.responsavel_id = null;
           proximo.parentesco = "";
+          if (String(proximo.categoria || "").toLowerCase().includes("dependente")) {
+            proximo.categoria = "Titular";
+          }
         }
       }
 
@@ -1043,7 +1112,8 @@ export default function Home() {
   }
 
   const sociosFiltrados = useMemo(() => {
-    const termo = busca.toLowerCase().trim();
+    const termo = normalizarBusca(busca);
+    const termoCompacto = compactarBusca(busca);
     const tiposSelecionados = filtroTipoSocio.map(normalizarTipoParaFiltro);
 
     return socios.filter((socio) => {
@@ -1053,11 +1123,18 @@ export default function Home() {
       // Dependentes sem mensalidade permanecem na tela Dependentes/Famílias.
       if (socio.possui_mensalidade !== true && !remidoTitular) return false;
 
-      const termoNome = String(socio.nome || "").toLowerCase();
-      const termoCpf = String(socio.cpf || "").toLowerCase();
-      const termoMatricula = String(socio.matricula || "").toLowerCase();
+      const termoNome = normalizarBusca(socio.nome);
+      const termoCpf = normalizarBusca(socio.cpf);
+      const termoMatricula = normalizarBusca(socio.matricula);
+      const cpfCompacto = compactarBusca(socio.cpf);
+      const matriculaCompacta = compactarBusca(socio.matricula);
       const correspondeBusca =
-        !termo || termoNome.includes(termo) || termoCpf.includes(termo) || termoMatricula.includes(termo);
+        !termo ||
+        termoNome.includes(termo) ||
+        termoCpf.includes(termo) ||
+        termoMatricula.includes(termo) ||
+        (termoCompacto.length > 0 &&
+          (cpfCompacto.includes(termoCompacto) || matriculaCompacta.includes(termoCompacto)));
 
       let tipoSocioNormalizado = normalizarTipoParaFiltro(socio.tipo_socio);
       if (tipoSocioNormalizado === "remido") tipoSocioNormalizado = socio.responsavel_id
