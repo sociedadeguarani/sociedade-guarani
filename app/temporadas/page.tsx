@@ -254,21 +254,29 @@ export default function TemporadasPage() {
   }
 
   useEffect(() => {
-    void carregar();
+    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   useEffect(() => {
-    const total = Number(valor || 0);
-    setParcelas(criarParcelas(total, plano, inicio || hoje, formaPadrao));
+    let ativo = true;
+    queueMicrotask(() => {
+      if (!ativo) return;
+      const total = Number(valor || 0);
+      setParcelas(criarParcelas(total, plano, inicio || hoje, formaPadrao));
+    });
+    return () => { ativo = false; };
   }, [valor, plano, inicio, formaPadrao]);
 
-  useEffect(() => {
-    if (tipo === "temporada_familiar") {
-      setValor((atual) => (atual === "600" ? "1100" : atual || "1100"));
-    } else {
-      setValor((atual) => (atual === "1100" ? "600" : atual || "600"));
-    }
-  }, [tipo]);
+  function alterarTipoTemporada(novoTipo: "temporada_individual" | "temporada_familiar") {
+    setTipo(novoTipo);
+    setValor((atual) => {
+      if (novoTipo === "temporada_familiar") {
+        return atual === "600" ? "1100" : atual || "1100";
+      }
+      return atual === "1100" ? "600" : atual || "600";
+    });
+  }
 
 
   const filtradas = useMemo(() => {
@@ -913,8 +921,8 @@ export default function TemporadasPage() {
               <div>
                 <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Tipo</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setTipo("temporada_familiar")} className={`rounded-xl border p-3 text-sm font-bold ${tipo === "temporada_familiar" ? "border-[#b65308] bg-[#ffead9] text-[#b65308]" : "border-[#d5e0da]"}`}>Familiar<br /><span className="text-xs">R$ 1.100 padrão</span></button>
-                  <button type="button" onClick={() => setTipo("temporada_individual")} className={`rounded-xl border p-3 text-sm font-bold ${tipo === "temporada_individual" ? "border-[#b65308] bg-[#ffead9] text-[#b65308]" : "border-[#d5e0da]"}`}>Individual<br /><span className="text-xs">R$ 600 padrão</span></button>
+                  <button type="button" onClick={() => alterarTipoTemporada("temporada_familiar")} className={`rounded-xl border p-3 text-sm font-bold ${tipo === "temporada_familiar" ? "border-[#b65308] bg-[#ffead9] text-[#b65308]" : "border-[#d5e0da]"}`}>Familiar<br /><span className="text-xs">R$ 1.100 padrão</span></button>
+                  <button type="button" onClick={() => alterarTipoTemporada("temporada_individual")} className={`rounded-xl border p-3 text-sm font-bold ${tipo === "temporada_individual" ? "border-[#b65308] bg-[#ffead9] text-[#b65308]" : "border-[#d5e0da]"}`}>Individual<br /><span className="text-xs">R$ 600 padrão</span></button>
                 </div>
               </div>
 
