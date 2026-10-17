@@ -7,6 +7,12 @@ import {
   classificarMesesAtraso,
 } from '../lib/politicaInadimplencia.ts';
 import {
+  dependenteTemMensalidade,
+  socioElegivelParaMensalidade,
+  tipoDependenteSemMensalidade,
+  tipoDependenteComMensalidade,
+} from '../lib/regrasMensalidade.ts';
+import {
   CHAVE_PIX_BANRISUL,
   CHAVE_PIX_BANRISUL_EXIBICAO,
   CHAVE_PIX_LEGADA_CNPJ,
@@ -67,3 +73,34 @@ test('detecção da chave PIX legada compara os dígitos, não a pontuação', (
   assert.equal(codigoPixUsaChaveLegada('BR-CODE-123-FIM'), false);
 });
 
+
+
+test('dependente sem categoria de cobrança não entra na geração só por possuir_mensalidade legado', () => {
+  const dependente = {
+    responsavel_id: 'titular-1',
+    categoria: 'Titular',
+    tipo_socio: 'dependente_patrimonial_familiar_mensalidade',
+    possui_mensalidade: true,
+    situacao: 'ativo',
+  };
+  assert.equal(dependenteTemMensalidade(dependente), false);
+  assert.equal(socioElegivelParaMensalidade(dependente), false);
+});
+
+test('dependente explicitamente classificado com mensalidade pode ser cobrado', () => {
+  const dependente = {
+    responsavel_id: 'titular-1',
+    categoria: 'Dependente com Mensalidade',
+    tipo_socio: 'dependente_patrimonial_familiar_mensalidade',
+    possui_mensalidade: true,
+    situacao: 'ativo',
+  };
+  assert.equal(dependenteTemMensalidade(dependente), true);
+  assert.equal(socioElegivelParaMensalidade(dependente), true);
+});
+
+test('novos dependentes começam em tipo sem mensalidade e podem ser convertidos explicitamente', () => {
+  assert.equal(tipoDependenteSemMensalidade('dependente_contribuinte_familiar_mensalidade'), 'dependente_contribuinte_familiar');
+  assert.equal(tipoDependenteSemMensalidade('contribuinte_familiar'), 'dependente_contribuinte_familiar');
+  assert.equal(tipoDependenteComMensalidade('dependente_contribuinte_familiar'), 'dependente_contribuinte_familiar_mensalidade');
+});
