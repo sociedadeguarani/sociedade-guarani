@@ -127,7 +127,10 @@ export default function AvisosPage(){
   }, [carregarReservasPendentes, router]);
 
   useEffect(() => {
-    void carregar();
+    const agendamento = window.setTimeout(() => {
+      void carregar();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, [carregar]);
 
   function abrirPagamento(n:Notificacao){
