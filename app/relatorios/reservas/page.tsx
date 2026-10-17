@@ -219,7 +219,8 @@ export default function RelatorioReservasPage() {
   }
 
   useEffect(() => {
-    void carregar();
+    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
+    return () => window.clearTimeout(agendamento);
   }, []);
 
   // Mantém uma barra de rolagem horizontal sempre visível acima da grade,
