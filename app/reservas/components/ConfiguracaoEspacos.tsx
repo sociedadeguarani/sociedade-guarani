@@ -15,17 +15,22 @@ export default function ConfiguracaoEspacos({ espacos, salvandoId, onSalvar }: P
   const [rascunhos, setRascunhos] = useState<Record<string, Rascunho>>({});
 
   useEffect(() => {
-    setRascunhos((atual) => {
-      const proximo = { ...atual };
-      for (const e of espacos) {
-        proximo[e.id] ||= {
-          precoSocio: String(e.precoSocio),
-          precoNaoSocio: String(e.precoNaoSocio),
-          permiteNaoSocio: e.permiteNaoSocio,
-        };
-      }
-      return proximo;
+    let ativo = true;
+    queueMicrotask(() => {
+      if (!ativo) return;
+      setRascunhos((atual) => {
+        const proximo = { ...atual };
+        for (const e of espacos) {
+          proximo[e.id] ||= {
+            precoSocio: String(e.precoSocio),
+            precoNaoSocio: String(e.precoNaoSocio),
+            permiteNaoSocio: e.permiteNaoSocio,
+          };
+        }
+        return proximo;
+      });
     });
+    return () => { ativo = false; };
   }, [espacos]);
 
   const atualizar = (id: string, campo: keyof Rascunho, valor: string | boolean) => {
