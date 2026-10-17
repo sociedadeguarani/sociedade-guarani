@@ -98,10 +98,14 @@ export default function PainelPage() {
   const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
-    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
-    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
-
     let ativo = true;
+    // localStorage é uma fonte externa do navegador; sincronize após o efeito
+    // concluir sua fase síncrona para evitar renderizações em cascata.
+    const agendamentoPerfil = window.setTimeout(() => {
+      if (!ativo) return;
+      setNome(window.localStorage.getItem("guarani_usuario_nome") || "Usuário");
+      setPerfil(window.localStorage.getItem("guarani_usuario_perfil") || "");
+    }, 0);
 
     (async () => {
       try {
@@ -315,6 +319,7 @@ export default function PainelPage() {
 
     return () => {
       ativo = false;
+      window.clearTimeout(agendamentoPerfil);
     };
   }, []);
 
