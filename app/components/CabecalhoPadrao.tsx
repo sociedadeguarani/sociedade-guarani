@@ -169,11 +169,15 @@ export default function CabecalhoPadrao() {
           "guarani_usuario_perfil",
           "guarani_usuario_socio_id",
           "guarani_usuario_nome",
+          "guarani_usuario_permissoes",
         ];
 
         chaves.forEach((chave) =>
           window.localStorage.removeItem(chave)
         );
+        window.sessionStorage.removeItem("guarani_permissoes_schema_v1");
+        window.dispatchEvent(new Event("guarani:perfil-change"));
+        window.dispatchEvent(new Event("guarani:permissions-change"));
       } catch {
         // Ignora bloqueio do localStorage.
       }
