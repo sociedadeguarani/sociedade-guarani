@@ -78,6 +78,11 @@ export default function LoginPage() {
       localStorage.setItem("guarani_usuario_id", data.user.id);
       localStorage.setItem("guarani_usuario_perfil", perfil.trim().toLowerCase());
       localStorage.setItem(
+        "guarani_usuario_permissoes",
+        JSON.stringify(Array.isArray(usuario.permissoes) ? usuario.permissoes : [])
+      );
+      window.dispatchEvent(new Event("guarani:permissions-change"));
+      localStorage.setItem(
         "guarani_usuario_socio_id",
         usuario.socio_id || ""
       );
