@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
+// The selected column list is built dynamically according to permissions. The
+// generated Supabase type cannot infer that runtime string, so narrow only the
+// fields needed for family grouping before using the query result.
+type SocioGrupoFamiliar = {
+  id: string;
+  responsavel_id: string | null;
+};
+
 function isPago(situacao: unknown) {
   const status = String(situacao || "")
     .toLowerCase()
@@ -135,22 +143,24 @@ export async function GET(request: Request) {
     let socios: any[] = [];
 
     if (auth.usuario.perfil === "associado") {
-      const { data: proprio, error: proprioError } = await supabase
+      const { data: proprioRaw, error: proprioError } = await supabase
         .from("socios")
         .select(base)
         .eq("id", auth.usuario.socio_id)
         .maybeSingle();
 
       if (proprioError) throw proprioError;
+      const proprio = proprioRaw as unknown as SocioGrupoFamiliar | null;
 
       if (proprio) {
-        const { data: todos, error: todosError } = await supabase
+        const { data: todosRaw, error: todosError } = await supabase
           .from("socios")
           .select(base)
           .order("nome")
           .limit(5000);
 
         if (todosError) throw todosError;
+        const todos = (todosRaw || []) as unknown as SocioGrupoFamiliar[];
 
         const familia = new Set<string>([String(proprio.id)]);
         let mudou = true;
@@ -158,7 +168,7 @@ export async function GET(request: Request) {
         while (mudou) {
           mudou = false;
 
-          for (const s of todos || []) {
+          for (const s of todos) {
             if (
               s.responsavel_id &&
               familia.has(String(s.responsavel_id)) &&
@@ -170,7 +180,7 @@ export async function GET(request: Request) {
           }
         }
 
-        socios = (todos || []).filter((s) =>
+        socios = todos.filter((s) =>
           familia.has(String(s.id))
         );
       }
