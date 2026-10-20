@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +9,12 @@ export const dynamic = "force-dynamic";
  * avisos ativos, não "não lidos".
  */
 export async function GET(request: Request) {
-  const auth = await usuarioAutenticado(request);
-  if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
-  }
+  const auth = await requireRoles(
+    request,
+    ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"],
+    "menu.avisos"
+  );
+  if ("response" in auth) return auth.response;
 
   try {
     const db = getServiceClient();
@@ -34,7 +36,7 @@ export async function GET(request: Request) {
       .or(`data_inicio.is.null,data_inicio.lte.${hoje}`)
       .or(`data_fim.is.null,data_fim.gte.${hoje}`);
 
-    const perfil = String(auth.perfil || "").toLowerCase();
+    const perfil = String(auth.usuario.perfil || "").toLowerCase();
     if (perfil === "associado") {
       query = query.in("publico", ["todos", "associados"]);
     } else if (perfil === "funcionario") {
