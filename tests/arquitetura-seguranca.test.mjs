@@ -120,3 +120,14 @@ test('permissões individuais usam tabela protegida por RLS', () => {
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
   assert.match(migration, /REVOKE ALL ON TABLE public\.permissoes_usuario FROM PUBLIC, anon, authenticated/);
 });
+
+
+test('API de inventário aplica restrições de visibilidade aos dois perfis de funcionários', () => {
+  const source = read('app/api/inventario/route.ts');
+  assert.match(source, /perfil === "funcionario" \|\| perfil === "funcionario_inventario"/);
+  assert.match(source, /acesso_funcionario === true/);
+  assert.match(source, /inventario\.vincular_associado/);
+  assert.match(source, /socio: null, socio_id: null/);
+  const upload = read('app/api/inventario/upload/route.ts');
+  assert.match(upload, /Este item não está liberado para funcionários/);
+});

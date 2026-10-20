@@ -138,3 +138,16 @@ test('perfil Funcionário — Inventário é reconhecido com acento e travessão
   assert.equal(codigoPerfilPermissoes('funcionario-inventario'), 'funcionario_inventario');
   assert.equal(codigoPerfilPermissoes('Administrador Normal'), 'administrador');
 });
+
+
+test('funcionário de inventário recebe permissão específica para vincular associado a empréstimo', () => {
+  const permissoes = permissoesPadraoPerfil('funcionario_inventario');
+  assert.equal(permissoes.includes('inventario.vincular_associado'), true);
+});
+
+test('permissão individual desativada bloqueia vincular associado mesmo com padrão do perfil', () => {
+  const permissoes = permissoesEfetivas('funcionario_inventario', [
+    { chave: 'inventario.vincular_associado', permitido: false },
+  ]);
+  assert.equal(permissoes.includes('inventario.vincular_associado'), false);
+});
