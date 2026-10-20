@@ -1266,7 +1266,8 @@ export default function Home() {
               excluirSocio={excluirSocio}
               carregando={carregando}
               mostrarSomenteDependentes={mostrarSomenteDependentes}
-            somenteConsulta={somenteConsulta}
+              somenteConsulta={somenteConsulta}
+              camposVisiveis={camposVisiveis}
               setMostrarSomenteDependentes={setMostrarSomenteDependentes}
             />
           )}
@@ -1560,6 +1561,7 @@ function Socios({
   mostrarSomenteDependentes,
   setMostrarSomenteDependentes,
   somenteConsulta,
+  camposVisiveis,
 }: {
   socios: Socio[];
   sociosCompletos: Socio[];
@@ -1580,6 +1582,7 @@ function Socios({
   mostrarSomenteDependentes: boolean;
   setMostrarSomenteDependentes: (valor: boolean) => void;
   somenteConsulta: boolean;
+  camposVisiveis: { financeiro: boolean; exameMedico: boolean };
 }) {
   return (
     <div>
