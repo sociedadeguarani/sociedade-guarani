@@ -5,10 +5,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const resultado = await usuarioAutenticado(request);
-    if ("error" in resultado) return NextResponse.json({ error: resultado.error }, { status: resultado.status });
+    const auth = await requireRoles(
+      request,
+      ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"],
+      "menu.avisos"
+    );
+    if ("response" in auth) return auth.response;
+    const resultado = { ...auth, perfil: auth.usuario.perfil, usuario: auth.usuario };
 
-    let query = resultado.supabase
+    let query = auth.supabase
       .from("avisos")
       .select("*")
       .eq("ativo", true)
