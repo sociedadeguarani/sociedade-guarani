@@ -28,6 +28,20 @@ export async function POST(request: Request) {
     if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) return NextResponse.json({ error: "Formato permitido: JPG, PNG, WEBP ou GIF." }, { status: 400 });
 
     const supabase = admin();
+    const perfil = String(auth.usuario.perfil || "").trim().toLowerCase();
+    const perfilFuncionario = perfil === "funcionario" || perfil === "funcionario_inventario";
+    if (perfilFuncionario) {
+      const { data: item, error: itemError } = await supabase
+        .from("inventario_itens")
+        .select("id,acesso_funcionario")
+        .eq("id", itemId)
+        .maybeSingle();
+      if (itemError) throw itemError;
+      if (!item) return NextResponse.json({ error: "Item não encontrado." }, { status: 404 });
+      if (item.acesso_funcionario !== true) {
+        return NextResponse.json({ error: "Este item não está liberado para funcionários." }, { status: 403 });
+      }
+    }
     const bucket = "fotos-inventario";
     await supabase.storage.createBucket(bucket, { public: true }).catch(() => undefined);
     const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : file.type === "image/gif" ? "gif" : "jpg";
