@@ -11,43 +11,86 @@ function admin() {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario", "funcionario_inventario"], ["menu.inventario", "inventario.consultar"]);
+    const auth = await requireRoles(
+      request,
+      ["administrador", "administrador_master", "funcionario", "funcionario_inventario"],
+      ["menu.inventario", "inventario.consultar"]
+    );
     if ("response" in auth) return auth.response;
-    const perfil = String(auth.usuario.perfil || "").toLowerCase();
+
+    const perfil = String(auth.usuario.perfil || "").trim().toLowerCase();
+    const perfilAdminMaster = perfil === "administrador_master";
+    const perfilFuncionario = perfil === "funcionario" || perfil === "funcionario_inventario";
+    const permissoes = Array.isArray(auth.usuario.permissoes) ? auth.usuario.permissoes : [];
+    // Vincular um associado ao empréstimo exige apenas nome/matrícula; isso é
+    // separado da permissão de consultar o cadastro geral de sócios.
+    const podeVincularAssociado = perfilAdminMaster || permissoes.includes("inventario.vincular_associado");
+
     const supabase = admin();
-    const [{ data: itens, error: itensError }, { data: socios, error: sociosError }, { data: emprestimos, error: empError }, { data: categorias, error: categoriasError }, { data: localizacoes, error: localizacoesError }] = await Promise.all([
+    const [itensResult, sociosResult, emprestimosResult, categoriasResult, localizacoesResult] = await Promise.all([
       supabase.from("inventario_itens").select("*").eq("ativo", true).order("nome"),
       supabase.from("socios").select("id,nome,matricula").order("nome"),
       supabase.from("inventario_emprestimos").select("id,item_id,socio_id,quantidade,data_emprestimo,data_prevista_devolucao,data_devolucao,status,responsavel_emprestimo,responsavel_devolucao,observacoes,item:inventario_itens(nome),socio:socios(nome,matricula)").order("data_emprestimo", { ascending: false }),
       supabase.from("inventario_categorias").select("id,nome,codigo,ativo").eq("ativo", true).order("nome"),
       supabase.from("inventario_localizacoes").select("id,nome,ativo").eq("ativo", true).order("nome"),
     ]);
+
+    const { data: itens, error: itensError } = itensResult;
+    const { data: socios, error: sociosError } = sociosResult;
+    const { data: emprestimos, error: empError } = emprestimosResult;
+    const { data: categorias, error: categoriasError } = categoriasResult;
+    const { data: localizacoes, error: localizacoesError } = localizacoesResult;
     if (itensError) throw new Error(itensError.message);
-    const itensVisiveis = perfil === "funcionario" ? (itens || []).filter((item: any) => item.acesso_funcionario === true) : (itens || []);
     if (sociosError) throw new Error(sociosError.message);
     if (empError) throw new Error(empError.message);
     if (categoriasError) throw new Error(categoriasError.message);
     if (localizacoesError) throw new Error(localizacoesError.message);
-    return NextResponse.json({ itens: itensVisiveis, socios: socios || [], emprestimos: emprestimos || [], categorias: categorias || [], localizacoes: localizacoes || [], perfil });
+
+    // A visibilidade aplica-se aos dois perfis operacionais. Empréstimos ainda
+    // ativos continuam disponíveis para que a equipe consiga registrar a devolução.
+    const itensVisiveis = perfilFuncionario
+      ? (itens || []).filter((item: any) => item.acesso_funcionario === true)
+      : (itens || []);
+    const idsItensVisiveis = new Set(itensVisiveis.map((item: any) => String(item.id)));
+    const statusAtivos = new Set(["emprestado", "atrasado"]);
+    const emprestimosDoPerfil = perfilFuncionario
+      ? (emprestimos || []).filter((emprestimo: any) =>
+          idsItensVisiveis.has(String(emprestimo.item_id)) || statusAtivos.has(String(emprestimo.status || "").toLowerCase())
+        )
+      : (emprestimos || []);
+    const emprestimosSeguros = podeVincularAssociado
+      ? emprestimosDoPerfil
+      : emprestimosDoPerfil.map((emprestimo: any) => ({ ...emprestimo, socio: null, socio_id: null }));
+
+    return NextResponse.json({
+      itens: itensVisiveis,
+      socios: podeVincularAssociado ? (socios || []) : [],
+      emprestimos: emprestimosSeguros,
+      categorias: categorias || [],
+      localizacoes: localizacoes || [],
+      perfil,
+      podeVincularAssociado,
+      permissoes,
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar inventário." }, { status: 500 });
   }
 }
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const permissoesAcao: Record<string, string[]> = {
       criar_item: ["menu.inventario", "inventario.consultar", "inventario.cadastrar"],
       editar_item: ["menu.inventario", "inventario.consultar", "inventario.editar"],
-      emprestar: ["menu.inventario", "inventario.consultar", "inventario.emprestar"],
+      emprestar: ["menu.inventario", "inventario.consultar", "inventario.emprestar", "inventario.vincular_associado"],
       criar_categoria: ["menu.inventario", "inventario.consultar"],
       criar_localizacao: ["menu.inventario", "inventario.consultar"],
     };
     const obrigatorias = permissoesAcao[String(body.acao || "")] || ["menu.inventario", "inventario.consultar"];
     const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario", "funcionario_inventario"], obrigatorias);
     if ("response" in auth) return auth.response;
-    const perfil = String(auth.usuario.perfil || "").toLowerCase();
+    const perfil = String(auth.usuario.perfil || "").trim().toLowerCase();
+    const perfilFuncionario = perfil === "funcionario" || perfil === "funcionario_inventario";
     const perfilAdmin = ["administrador", "administrador_master", "master", "admin"].includes(perfil);
     const supabase = admin();
 
@@ -93,8 +136,20 @@ export async function POST(request: Request) {
       };
       if (body.acao === "editar_item") {
         if (!body.id) return NextResponse.json({ error: "Informe o item." }, { status: 400 });
-        // Funcionários podem editar os campos operacionais, mas nunca liberar
-        // para o perfil comum os itens cuja visibilidade é configuração administrativa.
+        if (perfilFuncionario) {
+          const { data: itemAtual, error: itemAtualError } = await supabase
+            .from("inventario_itens")
+            .select("id,acesso_funcionario")
+            .eq("id", body.id)
+            .maybeSingle();
+          if (itemAtualError) throw new Error(itemAtualError.message);
+          if (!itemAtual) return NextResponse.json({ error: "Item não encontrado." }, { status: 404 });
+          if (itemAtual.acesso_funcionario !== true) {
+            return NextResponse.json({ error: "Este item não está liberado para funcionários." }, { status: 403 });
+          }
+        }
+        // Funcionários podem editar campos operacionais, mas não podem alterar
+        // a configuração administrativa que libera itens para a equipe.
         const payloadEdicao = perfilAdmin
           ? { ...payloadBase, acesso_funcionario: body.acesso_funcionario === true }
           : payloadBase;
@@ -102,7 +157,7 @@ export async function POST(request: Request) {
         if (error) throw new Error(error.message);
         return NextResponse.json({ ok: true, id: body.id });
       }
-      const payloadNovo = { ...payloadBase, acesso_funcionario: perfilAdmin && body.acesso_funcionario === true };
+      const payloadNovo = { ...payloadBase, acesso_funcionario: perfilAdmin ? body.acesso_funcionario === true : perfilFuncionario };
       const { data, error } = await supabase.from("inventario_itens").insert({ ...payloadNovo, quantidade_disponivel: quantidade }).select("id").single();
       if (error) throw new Error(error.message);
       return NextResponse.json({ ok: true, id: data?.id });
@@ -110,8 +165,8 @@ export async function POST(request: Request) {
 
     if (body.acao === "emprestar") {
       if (!body.item_id || !body.socio_id) return NextResponse.json({ error: "Item e associado são obrigatórios." }, { status: 400 });
-      if (perfil === "funcionario") {
-        const { data: item, error: itemError } = await supabase.from("inventario_itens").select("acesso_funcionario,emprestimo_permitido,quantidade_disponivel").eq("id", body.item_id).maybeSingle();
+      if (perfilFuncionario) {
+        const { data: item, error: itemError } = await supabase.from("inventario_itens").select("id,acesso_funcionario,emprestimo_permitido,quantidade_disponivel").eq("id", body.item_id).maybeSingle();
         if (itemError) throw new Error(itemError.message);
         if (!item?.acesso_funcionario) return NextResponse.json({ error: "Este item não está liberado para funcionários." }, { status: 403 });
         if (!item?.emprestimo_permitido || Number(item?.quantidade_disponivel || 0) < Math.max(1, Number(body.quantidade || 1))) return NextResponse.json({ error: "Este item não está disponível para empréstimo." }, { status: 400 });
