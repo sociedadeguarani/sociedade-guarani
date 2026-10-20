@@ -27,24 +27,89 @@ export async function GET(request: Request) {
     const podeVincularAssociado = perfilAdminMaster || permissoes.includes("inventario.vincular_associado");
 
     const supabase = admin();
-    const [itensResult, sociosResult, emprestimosResult, categoriasResult, localizacoesResult] = await Promise.all([
+    const [itensResult, sociosResult, dependentesResult, emprestimosResult, categoriasResult, localizacoesResult] = await Promise.all([
       supabase.from("inventario_itens").select("*").eq("ativo", true).order("nome"),
       supabase.from("socios").select("id,nome,matricula").order("nome"),
-      supabase.from("inventario_emprestimos").select("id,item_id,socio_id,quantidade,data_emprestimo,data_prevista_devolucao,data_devolucao,status,responsavel_emprestimo,responsavel_devolucao,observacoes,item:inventario_itens(nome),socio:socios(nome,matricula)").order("data_emprestimo", { ascending: false }),
+      supabase.from("dependentes").select("id,socio_id,nome,matricula,ativo").order("nome"),
+      supabase.from("inventario_emprestimos").select("id,item_id,socio_id,dependente_id,quantidade,data_emprestimo,data_prevista_devolucao,data_devolucao,status,responsavel_emprestimo,responsavel_devolucao,observacoes,item:inventario_itens(nome),socio:socios(nome,matricula)").order("data_emprestimo", { ascending: false }),
       supabase.from("inventario_categorias").select("id,nome,codigo,ativo").eq("ativo", true).order("nome"),
       supabase.from("inventario_localizacoes").select("id,nome,ativo").eq("ativo", true).order("nome"),
     ]);
 
     const { data: itens, error: itensError } = itensResult;
     const { data: socios, error: sociosError } = sociosResult;
+    const { data: dependentes, error: dependentesError } = dependentesResult;
     const { data: emprestimos, error: empError } = emprestimosResult;
     const { data: categorias, error: categoriasError } = categoriasResult;
     const { data: localizacoes, error: localizacoesError } = localizacoesResult;
     if (itensError) throw new Error(itensError.message);
     if (sociosError) throw new Error(sociosError.message);
+    if (dependentesError) throw new Error(dependentesError.message);
     if (empError) throw new Error(empError.message);
     if (categoriasError) throw new Error(categoriasError.message);
     if (localizacoesError) throw new Error(localizacoesError.message);
+
+    const sociosPorId = new Map<string, any>((socios || []).map((s: any) => [String(s.id), s] as [string, any]));
+    const dependentesPorId = new Map<string, any>((dependentes || []).map((d: any) => [String(d.id), d] as [string, any]));
+
+    // A tabela public.socios contém os titulares e também alguns dependentes legados.
+    // Os dependentes familiares atuais ficam em public.dependentes e precisam ser
+    // apresentados como pessoa que retirou o item, mantendo socio_id apontando ao titular.
+    const normalizarNome = (valor: unknown) => String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    const matriculasDosDependentesAtivos = new Set((dependentes || [])
+      .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+      .map((d: any) => normalizarNome(d.matricula))
+      .filter(Boolean));
+    // Se um dependente ainda existir também em public.socios com a mesma
+    // matrícula, priorizamos o registro de public.dependentes para vinculá-lo
+    // ao titular correto e evitar duas opções iguais na busca.
+    const sociosParaEmprestimo = (socios || []).filter((s: any) => {
+      const matricula = normalizarNome(s.matricula);
+      return !matricula || !matriculasDosDependentesAtivos.has(matricula);
+    });
+    const matriculasJaEmSocios = new Set(sociosParaEmprestimo
+      .map((s: any) => normalizarNome(s.matricula))
+      .filter(Boolean));
+    const associadosParaEmprestimo = [
+      ...sociosParaEmprestimo.map((s: any) => ({
+        id: String(s.id), socio_id: String(s.id), dependente_id: null,
+        nome: s.nome, matricula: s.matricula || null, tipo_pessoa: "socio", titular_nome: null,
+      })),
+      ...(dependentes || [])
+        .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+        .filter((d: any) => {
+          const matricula = normalizarNome(d.matricula);
+          return !(matricula && matriculasJaEmSocios.has(matricula));
+        })
+        .map((d: any) => ({
+          id: `dependente:${String(d.id)}`,
+          socio_id: String(d.socio_id),
+          dependente_id: String(d.id),
+          nome: d.nome,
+          matricula: d.matricula || null,
+          tipo_pessoa: "dependente",
+          titular_nome: sociosPorId.get(String(d.socio_id))?.nome || null,
+        })),
+    ].sort((a: any, b: any) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+
+    const emprestimosComDependente = (emprestimos || []).map((emprestimo: any) => {
+      const dependente = emprestimo.dependente_id
+        ? dependentesPorId.get(String(emprestimo.dependente_id))
+        : null;
+      return {
+        ...emprestimo,
+        dependente: dependente ? {
+          nome: dependente.nome,
+          matricula: dependente.matricula || null,
+          titular_nome: sociosPorId.get(String(dependente.socio_id))?.nome || emprestimo.socio?.nome || null,
+        } : null,
+      };
+    });
 
     // A visibilidade aplica-se aos dois perfis operacionais. Empréstimos ainda
     // ativos continuam disponíveis para que a equipe consiga registrar a devolução.
@@ -54,17 +119,17 @@ export async function GET(request: Request) {
     const idsItensVisiveis = new Set(itensVisiveis.map((item: any) => String(item.id)));
     const statusAtivos = new Set(["emprestado", "atrasado"]);
     const emprestimosDoPerfil = perfilFuncionario
-      ? (emprestimos || []).filter((emprestimo: any) =>
+      ? emprestimosComDependente.filter((emprestimo: any) =>
           idsItensVisiveis.has(String(emprestimo.item_id)) || statusAtivos.has(String(emprestimo.status || "").toLowerCase())
         )
-      : (emprestimos || []);
+      : emprestimosComDependente;
     const emprestimosSeguros = podeVincularAssociado
       ? emprestimosDoPerfil
-      : emprestimosDoPerfil.map((emprestimo: any) => ({ ...emprestimo, socio: null, socio_id: null }));
+      : emprestimosDoPerfil.map((emprestimo: any) => ({ ...emprestimo, socio: null, socio_id: null, dependente: null, dependente_id: null }));
 
     return NextResponse.json({
       itens: itensVisiveis,
-      socios: podeVincularAssociado ? (socios || []) : [],
+      socios: podeVincularAssociado ? associadosParaEmprestimo : [],
       emprestimos: emprestimosSeguros,
       categorias: categorias || [],
       localizacoes: localizacoes || [],
@@ -165,16 +230,41 @@ export async function POST(request: Request) {
 
     if (body.acao === "emprestar") {
       if (!body.item_id || !body.socio_id) return NextResponse.json({ error: "Item e associado são obrigatórios." }, { status: 400 });
+      const dependenteId = String(body.dependente_id || "").trim();
+      if (dependenteId) {
+        const { data: dependente, error: dependenteError } = await supabase
+          .from("dependentes")
+          .select("id,socio_id,nome,matricula,ativo")
+          .eq("id", dependenteId)
+          .maybeSingle();
+        if (dependenteError) throw new Error(dependenteError.message);
+        if (!dependente || dependente.ativo === false) {
+          return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 400 });
+        }
+        if (String(dependente.socio_id) !== String(body.socio_id)) {
+          return NextResponse.json({ error: "O dependente não pertence ao titular selecionado." }, { status: 400 });
+        }
+      }
       if (perfilFuncionario) {
         const { data: item, error: itemError } = await supabase.from("inventario_itens").select("id,acesso_funcionario,emprestimo_permitido,quantidade_disponivel").eq("id", body.item_id).maybeSingle();
         if (itemError) throw new Error(itemError.message);
         if (!item?.acesso_funcionario) return NextResponse.json({ error: "Este item não está liberado para funcionários." }, { status: 403 });
         if (!item?.emprestimo_permitido || Number(item?.quantidade_disponivel || 0) < Math.max(1, Number(body.quantidade || 1))) return NextResponse.json({ error: "Este item não está disponível para empréstimo." }, { status: 400 });
       }
-      const { data, error } = await supabase.rpc("registrar_emprestimo_inventario", {
-        p_item_id: body.item_id, p_socio_id: body.socio_id, p_quantidade: Math.max(1, Number(body.quantidade || 1)),
-        p_data_prevista: body.data_prevista_devolucao || null, p_responsavel: body.responsavel || "Administração", p_observacoes: body.observacoes || null,
-      });
+      const argumentosEmprestimo = {
+        p_item_id: body.item_id,
+        p_socio_id: body.socio_id,
+        p_quantidade: Math.max(1, Number(body.quantidade || 1)),
+        p_data_prevista: body.data_prevista_devolucao || null,
+        p_responsavel: body.responsavel || "Administração",
+        p_observacoes: body.observacoes || null,
+      };
+      const { data, error } = dependenteId
+        ? await supabase.rpc("registrar_emprestimo_inventario_com_dependente", {
+            ...argumentosEmprestimo,
+            p_dependente_id: dependenteId,
+          })
+        : await supabase.rpc("registrar_emprestimo_inventario", argumentosEmprestimo);
       if (error) throw new Error(error.message);
       return NextResponse.json({ ok: true, id: data });
     }
