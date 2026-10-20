@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { permissoesEfetivas } from "@/lib/permissoes";
 
 export function normalizarPerfil(value: unknown, nome?: unknown) {
   const codigo = String(value ?? "")
@@ -11,7 +12,10 @@ export function normalizarPerfil(value: unknown, nome?: unknown) {
     .trim()
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ");
+  const codigoNormalizado = codigo.replace(/[–—]/g, "-").replace(/\s+/g, "_");
 
   // ADMINISTRADOR MASTER
   if (
@@ -26,8 +30,10 @@ export function normalizarPerfil(value: unknown, nome?: unknown) {
   // ADMINISTRADOR
   if (
     codigo === "administrador" ||
+    codigo === "administrador_normal" ||
     codigo === "admin" ||
     rotulo === "administrador" ||
+    rotulo === "administrador normal" ||
     rotulo === "admin"
   ) {
     return "administrador";
@@ -35,7 +41,8 @@ export function normalizarPerfil(value: unknown, nome?: unknown) {
 
   // FUNCIONÁRIO - INVENTÁRIO
   if (
-    codigo === "funcionario_inventario" ||
+    codigoNormalizado === "funcionario_inventario" ||
+    codigoNormalizado.includes("funcionario") && codigoNormalizado.includes("inventario") ||
     rotulo.includes("funcionario - inventario") ||
     rotulo.includes("funcionario inventario")
   ) {
@@ -174,14 +181,23 @@ export async function usuarioAutenticado(request: Request) {
   return {
     supabase,
     authUser: authData.user,
-    usuario: usuarioComVinculo,
+    // Inclui o perfil canônico também dentro do usuário para que as rotas
+    // que usam usuarioAutenticado diretamente interpretem os mesmos códigos
+    // que requireRoles (incluindo "funcionario_inventario").
+    usuario: {
+      ...usuarioComVinculo,
+      email: authData.user.email || null,
+      perfil,
+    },
     perfil,
   };
 }
 
 export async function requireRoles(
   request: Request,
-  roles: string[]
+  roles: string[],
+  permissionRequired?: string | string[],
+  permissionMode: "all" | "any" = "all"
 ) {
   const resultado = await usuarioAutenticado(request);
 
@@ -212,24 +228,57 @@ export async function requireRoles(
   if (!permitidos.includes(resultado.perfil) && !masterHerdaAdministrador) {
     return {
       response: new Response(
-        JSON.stringify({
-          error: "Sem permissão para esta operação.",
-        }),
+        JSON.stringify({ error: "Sem permissão para esta operação." }),
         {
           status: 403,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
         }
       ),
     };
   }
 
+  let permissoes: string[] | undefined;
+  if (permissionRequired && resultado.perfil !== "administrador_master") {
+    const { data: registros, error: permissaoError } = await resultado.supabase
+      .from("permissoes_usuario")
+      .select("chave,permitido")
+      .eq("usuario_id", resultado.usuario.id);
+
+    if (permissaoError) {
+      return {
+        response: new Response(
+          JSON.stringify({ error: "Não foi possível validar as permissões do usuário." }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        ),
+      };
+    }
+
+    permissoes = permissoesEfetivas(resultado.perfil, (registros || []).map((registro) => ({
+      chave: String(registro.chave),
+      permitido: registro.permitido === true,
+    })));
+    const necessarias = Array.isArray(permissionRequired) ? permissionRequired : [permissionRequired];
+    const permitido = permissionMode === "any"
+      ? necessarias.some((chave) => permissoes!.includes(chave))
+      : necessarias.every((chave) => permissoes!.includes(chave));
+
+    if (!permitido) {
+      return {
+        response: new Response(
+          JSON.stringify({ error: "Seu usuário não possui permissão para esta operação. Peça ao Administrador Master para ajustar seu acesso." }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        ),
+      };
+    }
+  }
+
   return {
+    supabase: resultado.supabase,
     usuario: {
       ...resultado.usuario,
       email: resultado.authUser.email || null,
       perfil: resultado.perfil,
+      ...(permissoes ? { permissoes } : {}),
     },
   };
 }
