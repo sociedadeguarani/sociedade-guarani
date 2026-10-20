@@ -538,13 +538,26 @@ export default function Page() {
     return mapa;
   }, [socios]);
 
+  // A API retorna também lançamentos antigos de associados que hoje não têm
+  // direito a cobrança própria. Eles permanecem preservados no banco e no
+  // histórico individual, mas não entram na grade principal de mensalidades.
+  const mensalidadesElegiveisParaExibicao = useMemo<M[]>(
+    () => lista.filter((item) => {
+      const socio = item.socio || socioPorId.get(String(item.socio_id));
+      // Se o vínculo não veio na resposta, mantemos a linha para não ocultar
+      // um registro financeiro cuja titularidade ainda não conseguimos validar.
+      return !socio || socioElegivelParaMensalidade(socio);
+    }),
+    [lista, socioPorId]
+  );
+
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
-    lista.forEach((m) => existentes.set(String(m.socio_id), m));
+    mensalidadesElegiveisParaExibicao.forEach((m) => existentes.set(String(m.socio_id), m));
 
     // Quando a competência ainda não foi gerada, mostramos os associados
-    // elegíveis como linhas "Não gerada". Assim o ano histórico não parece
-    // vazio e o administrador consegue conferir os 329 associados antes de gerar.
+    // elegíveis como linhas "Não gerada". Assim o administrador consegue
+    // conferir os associados que realmente podem ter cobrança própria.
     const virtuais: M[] = sociosElegiveis
       .filter((s) => !existentes.has(String(s.id)))
       .map((s) => ({
@@ -568,11 +581,11 @@ export default function Page() {
         socio: s,
       }));
 
-    return [...lista, ...virtuais].map((item) => ({
+    return [...mensalidadesElegiveisParaExibicao, ...virtuais].map((item) => ({
       ...item,
       situacao: situacaoVisual(item),
     }));
-  }, [lista, sociosElegiveis, ano, mes]);
+  }, [mensalidadesElegiveisParaExibicao, sociosElegiveis, ano, mes]);
 
   const tiposSocioDisponiveis = useMemo<string[]>(() => {
     const tipos = sociosElegiveis
