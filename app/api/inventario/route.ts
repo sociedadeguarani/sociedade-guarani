@@ -11,7 +11,7 @@ function admin() {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario", "funcionario_inventario"], ["menu.inventario", "inventario.consultar"]);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
     const supabase = admin();
@@ -37,9 +37,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
+    const permissoesAcao: Record<string, string[]> = {
+      criar_item: ["menu.inventario", "inventario.consultar", "inventario.cadastrar"],
+      editar_item: ["menu.inventario", "inventario.consultar", "inventario.editar"],
+      emprestar: ["menu.inventario", "inventario.consultar", "inventario.emprestar"],
+      criar_categoria: ["menu.inventario", "inventario.consultar"],
+      criar_localizacao: ["menu.inventario", "inventario.consultar"],
+    };
+    const obrigatorias = permissoesAcao[String(body.acao || "")] || ["menu.inventario", "inventario.consultar"];
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario", "funcionario_inventario"], obrigatorias);
     if ("response" in auth) return auth.response;
     const perfil = String(auth.usuario.perfil || "").toLowerCase();
+    const perfilAdmin = ["administrador", "administrador_master", "master", "admin"].includes(perfil);
     const supabase = admin();
 
     if (body.acao === "criar_categoria" || body.acao === "criar_localizacao") {
@@ -61,7 +70,6 @@ export async function POST(request: Request) {
     }
 
     if (body.acao === "criar_item" || body.acao === "editar_item") {
-      if (!["administrador", "administrador_master", "master", "admin"].includes(perfil)) return NextResponse.json({ error: "Funcionário não pode criar ou editar itens." }, { status: 403 });
       if (!body.nome?.trim()) return NextResponse.json({ error: "Informe o nome do item." }, { status: 400 });
       const quantidade = Math.max(1, Number(body.quantidade_total || 1));
       let patrimonio = body.numero_patrimonio || null;
@@ -77,20 +85,25 @@ export async function POST(request: Request) {
         if (patrimonioError) throw new Error(patrimonioError.message);
         patrimonio = gerado;
       }
-      const payload = {
+      const payloadBase = {
         nome: body.nome.trim(), categoria: body.categoria || "Geral", quantidade_total: quantidade,
         unidade: body.unidade || "unidade", estado_conservacao: body.estado_conservacao || "Bom", localizacao: body.localizacao || null,
         numero_patrimonio: patrimonio, emprestimo_permitido: body.emprestimo_permitido !== false,
-        foto_url: body.foto_url || null,
-        acesso_funcionario: body.acesso_funcionario === true, observacoes: body.observacoes || null,
+        foto_url: body.foto_url || null, observacoes: body.observacoes || null,
       };
       if (body.acao === "editar_item") {
         if (!body.id) return NextResponse.json({ error: "Informe o item." }, { status: 400 });
-        const { error } = await supabase.from("inventario_itens").update(payload).eq("id", body.id);
+        // Funcionários podem editar os campos operacionais, mas nunca liberar
+        // para o perfil comum os itens cuja visibilidade é configuração administrativa.
+        const payloadEdicao = perfilAdmin
+          ? { ...payloadBase, acesso_funcionario: body.acesso_funcionario === true }
+          : payloadBase;
+        const { error } = await supabase.from("inventario_itens").update(payloadEdicao).eq("id", body.id);
         if (error) throw new Error(error.message);
         return NextResponse.json({ ok: true, id: body.id });
       }
-      const { data, error } = await supabase.from("inventario_itens").insert({ ...payload, quantidade_disponivel: quantidade }).select("id").single();
+      const payloadNovo = { ...payloadBase, acesso_funcionario: perfilAdmin && body.acesso_funcionario === true };
+      const { data, error } = await supabase.from("inventario_itens").insert({ ...payloadNovo, quantidade_disponivel: quantidade }).select("id").single();
       if (error) throw new Error(error.message);
       return NextResponse.json({ ok: true, id: data?.id });
     }
@@ -120,9 +133,9 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
-    if ("response" in auth) return auth.response;
     if (body.acao !== "devolver" || !body.id) return NextResponse.json({ error: "Informe o empréstimo a devolver." }, { status: 400 });
+    const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario", "funcionario_inventario"], ["menu.inventario", "inventario.consultar", "inventario.devolver"]);
+    if ("response" in auth) return auth.response;
     const supabase = admin();
     const { data, error } = await supabase.rpc("devolver_emprestimo_inventario", { p_emprestimo_id: body.id, p_responsavel: body.responsavel || "Administração", p_observacoes: body.observacoes || null });
     if (error) throw new Error(error.message);
