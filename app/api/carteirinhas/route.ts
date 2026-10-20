@@ -106,23 +106,31 @@ function temporadaValida(temporada: any) {
 
 export async function GET(request: Request) {
   const modoDependentes = new URL(request.url).searchParams.get("modo") === "dependentes";
-  const auth = await requireRoles(request, [
-    "administrador",
-    
-    "administrador_master",
-    "funcionario",
-    "associado",
-  ]);
+  const auth = await requireRoles(
+    request,
+    ["administrador", "administrador_master", "funcionario", "funcionario_inventario", "associado"],
+    "menu.carteirinhas"
+  );
 
   if ("response" in auth) return auth.response;
 
   try {
     const supabase = getServiceClient();
-    const politicaInadimplencia = await carregarPolitica(supabase);
+    const permissoes = Array.isArray(auth.usuario.permissoes) ? auth.usuario.permissoes : [];
+    const podeVerFinanceiro = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
+    const podeVerExameMedico = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
+    const politicaInadimplencia = podeVerFinanceiro
+      ? await carregarPolitica(supabase)
+      : POLITICA_INADIMPLENCIA_PADRAO;
     const hoje = dataHojeBrasil();
 
-    const base =
-      "id,matricula,nome,cpf,categoria,tipo_socio,situacao,data_associacao,foto_url,inicio_temporada,fim_temporada,exame_medico_validade,responsavel_id,parentesco,possui_mensalidade,valor_mensalidade";
+    const colunasBase = [
+      "id", "matricula", "nome", "cpf", "categoria", "tipo_socio", "situacao",
+      "data_associacao", "foto_url", "inicio_temporada", "fim_temporada", "responsavel_id", "parentesco",
+    ];
+    if (podeVerExameMedico) colunasBase.push("exame_medico_validade");
+    if (podeVerFinanceiro) colunasBase.push("possui_mensalidade", "valor_mensalidade");
+    const base = colunasBase.join(",");
 
     let socios: any[] = [];
 
@@ -185,22 +193,24 @@ export async function GET(request: Request) {
 
     const mensalidades: any[] = [];
 
-    // Não usar .in() com todos os IDs de uma vez.
-    for (const lote of emLotes(ids, 100)) {
-      const { data, error } = await supabase
-        .from("mensalidades")
-        .select("socio_id,data_vencimento,competencia,situacao,valor")
-        .in("socio_id", lote)
-        // O cálculo de inadimplência ignora vencimentos de hoje e futuros.
-        // Filtrar no banco reduz a transferência de histórico desnecessário.
-        .lt("data_vencimento", hoje);
+    // Histórico financeiro só é consultado quando a permissão de exibição foi concedida.
+    if (podeVerFinanceiro) {
+      // Não usar .in() com todos os IDs de uma vez.
+      for (const lote of emLotes(ids, 100)) {
+        const { data, error } = await supabase
+          .from("mensalidades")
+          .select("socio_id,data_vencimento,competencia,situacao,valor")
+          .in("socio_id", lote)
+          .lt("data_vencimento", hoje);
 
-      if (error) throw error;
-      mensalidades.push(...(data || []));
+        if (error) throw error;
+        mensalidades.push(...(data || []));
+      }
     }
 
-    const atrasosPorSocio = statusPorMensalidades(mensalidades, hoje);
+    const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
     const resultado = socios.map((s) => {
+      if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito" };
       const alvoId = String(s.responsavel_id || s.id);
       const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
@@ -211,9 +221,16 @@ export async function GET(request: Request) {
 
     // Os dependentes familiares agora ficam na tabela public.dependentes.
     // A tabela socios contém somente quem possui matrícula própria.
+    const colunasDependente = [
+      "id", "socio_id", "matricula", "nome", "cpf", "data_nascimento", "parentesco",
+      "telefone", "whatsapp", "email", "ativo", "created_at", "updated_at", "foto_url", "observacoes",
+    ];
+    if (podeVerFinanceiro) colunasDependente.push(
+      "possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento",
+    );
     let dependentesQuery = supabase
       .from("dependentes")
-      .select("id,socio_id,matricula,nome,cpf,data_nascimento,parentesco,telefone,whatsapp,email,ativo,created_at,updated_at,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,situacao_financeira,data_ultimo_pagamento,foto_url,observacoes")
+      .select(colunasDependente.join(","))
       .order("nome");
 
     if (!modoDependentes) {
@@ -233,15 +250,17 @@ export async function GET(request: Request) {
     const dependentes = (dependentesDb || []).map((d: any) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
-      const status = titular
-        ? {
-            financeiro_status: titular.financeiro_status || "em_dia",
-            dias_atraso: titular.dias_atraso || 0,
-            meses_atraso: titular.meses_atraso || 0,
-            meses_atencao: titular.meses_atencao || politicaInadimplencia.meses_atencao,
-            meses_bloqueio: titular.meses_bloqueio || politicaInadimplencia.meses_bloqueio,
-          }
-        : { financeiro_status: "em_dia", dias_atraso: 0 };
+      const status: { financeiro_status: string; dias_atraso?: number; meses_atraso?: number; meses_atencao?: number; meses_bloqueio?: number } = !podeVerFinanceiro
+        ? { financeiro_status: "restrito" }
+        : titular
+          ? {
+              financeiro_status: titular.financeiro_status || "em_dia",
+              dias_atraso: titular.dias_atraso || 0,
+              meses_atraso: titular.meses_atraso || 0,
+              meses_atencao: titular.meses_atencao || politicaInadimplencia.meses_atencao,
+              meses_bloqueio: titular.meses_bloqueio || politicaInadimplencia.meses_bloqueio,
+            }
+          : { financeiro_status: "em_dia", dias_atraso: 0 };
 
       return {
         id: String(d.id),
@@ -256,23 +275,30 @@ export async function GET(request: Request) {
         email: d.email || null,
         created_at: d.created_at || null,
         updated_at: d.updated_at || null,
-        valor_mensalidade: Number(d.valor_mensalidade || 0),
-        dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
-        tipo_pagamento: d.tipo_pagamento || null,
-        data_ultimo_pagamento: d.data_ultimo_pagamento || null,
+        ...(podeVerFinanceiro ? {
+          valor_mensalidade: Number(d.valor_mensalidade || 0),
+          dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
+          tipo_pagamento: d.tipo_pagamento || null,
+          data_ultimo_pagamento: d.data_ultimo_pagamento || null,
+          possui_mensalidade: d.possui_mensalidade === true,
+          situacao: d.situacao_financeira || "isento",
+          ...status,
+        } : {
+          situacao: d.ativo === false ? "Inativo" : "Ativo",
+          financeiro_status: "restrito",
+        }),
         observacoes: d.observacoes || null,
         ativo: d.ativo !== false,
         foto_url: d.foto_url || null,
         titular_nome: titular?.nome || null,
         titular_matricula: titular?.matricula || null,
-        financeiro_status: status.financeiro_status,
-        dias_atraso: status.dias_atraso,
-        meses_atraso: status.meses_atraso,
-        meses_atencao: status.meses_atencao,
-        meses_bloqueio: status.meses_bloqueio,
-        situacao: d.situacao_financeira || "isento",
+        ...(!podeVerFinanceiro ? {} : {
+          dias_atraso: status.dias_atraso,
+          meses_atraso: status.meses_atraso,
+          meses_atencao: status.meses_atencao,
+          meses_bloqueio: status.meses_bloqueio,
+        }),
         responsavel_id: titularId,
-        possui_mensalidade: false,
       };
     });
 
@@ -282,11 +308,11 @@ export async function GET(request: Request) {
     let temporadas: any[] = [];
 
     if (auth.usuario.perfil !== "associado") {
+      const colunasTemporada = ["id", "tipo", "modalidade", "codigo", "matricula", "inicio", "fim", "situacao", "responsavel_nome", "responsavel_cpf", "responsavel_telefone", "responsavel_email"];
+      if (podeVerFinanceiro) colunasTemporada.push("valor_total");
       const { data: temporadasDb, error: temporadasError } = await supabase
         .from("temporadas")
-        .select(
-          "id,tipo,modalidade,codigo,matricula,inicio,fim,valor_total,situacao,responsavel_nome,responsavel_cpf,responsavel_telefone,responsavel_email"
-        )
+        .select(colunasTemporada.join(","))
         .order("inicio", { ascending: false })
         .limit(1000);
 
@@ -298,11 +324,11 @@ export async function GET(request: Request) {
       for (const lote of emLotes(idsTemporadas, 100)) {
         if (!lote.length) continue;
 
+        const colunasParticipante = ["id", "temporada_id", "socio_id", "papel", "matricula", "nome", "cpf", "telefone", "parentesco", "foto_url"];
+        if (podeVerExameMedico) colunasParticipante.push("exame_medico_validade");
         const { data, error } = await supabase
           .from("temporadas_participantes")
-          .select(
-            "id,temporada_id,socio_id,papel,matricula,nome,cpf,telefone,parentesco,foto_url,exame_medico_validade"
-          )
+          .select(colunasParticipante.join(","))
           .in("temporada_id", lote)
           .order("papel", { ascending: true })
           .order("nome", { ascending: true });
@@ -330,8 +356,8 @@ export async function GET(request: Request) {
           matricula: t.matricula || null,
           inicio: t.inicio || null,
           fim: t.fim || null,
-          valor_total: Number(t.valor_total || 0),
-          situacao: t.situacao || "pendente",
+          ...(podeVerFinanceiro ? { valor_total: Number(t.valor_total || 0) } : {}),
+          situacao: podeVerFinanceiro ? (t.situacao || "pendente") : "restrito",
           responsavel_nome: t.responsavel_nome || null,
           responsavel_cpf: t.responsavel_cpf || null,
           responsavel_telefone: t.responsavel_telefone || null,
@@ -345,7 +371,8 @@ export async function GET(request: Request) {
       dependentes,
       temporadas,
       politicaInadimplencia,
-      statusResponsaveis: Object.fromEntries(resultado.map((s: any) => [String(s.id), s.financeiro_status || "em_dia"])),
+      statusResponsaveis: Object.fromEntries(resultado.map((s: any) => [String(s.id), s.financeiro_status || "restrito"])),
+      camposVisiveis: { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico },
     });
   } catch (error) {
     console.error("GET /api/carteirinhas:", error);
