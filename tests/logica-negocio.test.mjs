@@ -21,6 +21,12 @@ import {
   formatarChavePix,
 } from '../lib/pix.ts';
 
+import {
+  codigoPerfilPermissoes,
+  permissoesEfetivas,
+  permissoesPadraoPerfil,
+} from '../lib/permissoes.ts';
+
 test('política de inadimplência tem padrão controlado', () => {
   assert.deepEqual(POLITICA_INADIMPLENCIA_PADRAO, {
     meses_atencao: 3,
@@ -103,4 +109,32 @@ test('novos dependentes começam em tipo sem mensalidade e podem ser convertidos
   assert.equal(tipoDependenteSemMensalidade('dependente_contribuinte_familiar_mensalidade'), 'dependente_contribuinte_familiar');
   assert.equal(tipoDependenteSemMensalidade('contribuinte_familiar'), 'dependente_contribuinte_familiar');
   assert.equal(tipoDependenteComMensalidade('dependente_contribuinte_familiar'), 'dependente_contribuinte_familiar_mensalidade');
+});
+
+
+test('permissões antigas mantêm padrões de ações que ainda não foram configuradas', () => {
+  const permissoes = permissoesEfetivas('funcionario_inventario', [
+    { chave: 'menu.inventario', permitido: true },
+  ]);
+  assert.equal(permissoes.includes('menu.inventario'), true);
+  assert.equal(permissoes.includes('inventario.consultar'), true);
+  assert.equal(permissoes.includes('inventario.cadastrar'), true);
+  assert.equal(permissoes.includes('menu.carteirinhas'), false);
+  assert.equal(permissoes.includes('menu.usuarios'), false);
+});
+
+test('permissão individual explicitamente desativada prevalece sobre o padrão', () => {
+  const permissoes = permissoesEfetivas('funcionario_inventario', [
+    { chave: 'menu.inventario', permitido: true },
+    { chave: 'inventario.consultar', permitido: false },
+  ]);
+  assert.equal(permissoes.includes('inventario.consultar'), false);
+  assert.deepEqual(permissoesPadraoPerfil('funcionario_inventario').includes('inventario.consultar'), true);
+});
+
+
+test('perfil Funcionário — Inventário é reconhecido com acento e travessão', () => {
+  assert.equal(codigoPerfilPermissoes('Funcionário — Inventário'), 'funcionario_inventario');
+  assert.equal(codigoPerfilPermissoes('funcionario-inventario'), 'funcionario_inventario');
+  assert.equal(codigoPerfilPermissoes('Administrador Normal'), 'administrador');
 });

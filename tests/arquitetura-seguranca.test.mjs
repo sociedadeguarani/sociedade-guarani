@@ -49,8 +49,8 @@ test('operações administrativas críticas mantêm validação de sessão e per
     ['app/api/mensalidades/admin/route.ts', /exigirAdministrador\(request\)/],
     ['app/api/financeiro/route.ts', /requireRoles\(request/],
     ['app/api/configuracao-pix/route.ts', /exigirAdministrador\(request\)/],
-    ['app/api/carteirinhas/route.ts', /requireRoles\(request/],
-    ['app/api/relatorios/reservas/route.ts', /requireRoles\(request/],
+    ['app/api/carteirinhas/route.ts', /requireRoles\(\s*request/],
+    ['app/api/relatorios/reservas/route.ts', /requireRoles\(\s*request/],
   ];
   for (const [file, guard] of checks) assert.match(read(file), guard, `${file} não parece exigir autorização`);
 });
@@ -111,3 +111,12 @@ test('trilha de auditoria financeira tem RLS e snapshots antes/depois', () => {
   assert.match(audit, /dados_depois/);
 });
 
+
+
+test('permissões individuais usam tabela protegida por RLS', () => {
+  const migration = read('docs/sql/04_permissoes_usuario.sql');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.permissoes_usuario/);
+  assert.match(migration, /PRIMARY KEY \(usuario_id, chave\)/);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(migration, /REVOKE ALL ON TABLE public\.permissoes_usuario FROM PUBLIC, anon, authenticated/);
+});
