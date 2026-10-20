@@ -33,6 +33,7 @@ export const PERMISSOES_ACOES = [
   ["inventario.cadastrar", "Cadastrar itens no inventário"],
   ["inventario.editar", "Editar itens do inventário"],
   ["inventario.emprestar", "Registrar empréstimos do inventário"],
+  ["inventario.vincular_associado", "Vincular associado a empréstimo"],
   ["inventario.devolver", "Registrar devoluções do inventário"],
 ] as const;
 
@@ -82,14 +83,14 @@ const PADROES: Record<string, string[]> = {
     "menu.avisos", "menu.reservas", "menu.eventos", "menu.convites",
     "menu.carteirinhas", "menu.socios", "menu.dependentes", "menu.inventario", "menu.acessos",
     "socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico",
-    "propria.mensalidade", "propria.reservas", "convites.comprar", "inventario.consultar", "inventario.emprestar", "inventario.devolver",
+    "propria.mensalidade", "propria.reservas", "convites.comprar", "inventario.consultar", "inventario.emprestar", "inventario.vincular_associado", "inventario.devolver",
   ],
   funcionario_inventario: [
     // O perfil de inventário pode ver os avisos destinados à equipe e gerenciar
     // o inventário. Carteirinhas permanecem opcionais por conterem dados
     // médicos e financeiros; o Administrador Master pode liberá-las se precisar.
-    "menu.avisos", "menu.inventario", "socios.consultar", "inventario.consultar", "inventario.cadastrar",
-    "inventario.editar", "inventario.emprestar", "inventario.devolver",
+    "menu.avisos", "menu.inventario", "inventario.consultar", "inventario.cadastrar",
+    "inventario.editar", "inventario.emprestar", "inventario.vincular_associado", "inventario.devolver",
   ],
   associado: [
     "menu.avisos", "menu.minhas_mensalidades", "menu.reservas", "menu.eventos",
