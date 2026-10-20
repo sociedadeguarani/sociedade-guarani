@@ -324,7 +324,8 @@ export default function Home() {
   const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
   const [mostrarSomenteDependentes, setMostrarSomenteDependentes] = useState(false);
   const [perfilUsuario, setPerfilUsuario] = useState("");
-  const somenteConsulta = perfilUsuario === "funcionario";
+  const [camposVisiveis, setCamposVisiveis] = useState({ financeiro: true, exameMedico: true });
+  const somenteConsulta = perfilUsuario === "funcionario" || !camposVisiveis.financeiro;
 
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [competenciaFinanceiro, setCompetenciaFinanceiro] = useState(
@@ -776,6 +777,10 @@ export default function Home() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || "Erro ao carregar os sócios.");
       const sociosRecebidos = (payload?.socios || []) as Socio[];
+      setCamposVisiveis({
+        financeiro: payload?.camposVisiveis?.financeiro !== false,
+        exameMedico: payload?.camposVisiveis?.exameMedico !== false,
+      });
       setSocios(sociosRecebidos.map((socio) => {
         const remido = socioEhRemido(socio);
         const tipoLegadoRemido = normalizarTipoParaFiltro(socio.tipo_socio) === "remido";
@@ -1788,9 +1793,7 @@ function Socios({
                   Responsável
                 </th>
 
-                <th className="px-3 py-3 sm:px-5 sm:py-4">
-                  Mensalidade
-                </th>
+                {camposVisiveis.financeiro && <th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th>}
 
                 <th className="px-3 py-3 sm:px-5 sm:py-4">
                   Situação
@@ -1809,7 +1812,7 @@ function Socios({
               {carregando && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={camposVisiveis.financeiro ? 10 : 9}
                     className="px-3 py-10 text-center text-gray-500 sm:px-5 sm:py-12"
                   >
                     Carregando sócios...
@@ -1820,7 +1823,7 @@ function Socios({
               {!carregando && socios.length === 0 && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={camposVisiveis.financeiro ? 10 : 9}
                     className="px-3 py-10 text-center sm:px-5 sm:py-12"
                   >
                     <div className="text-4xl">
@@ -1917,11 +1920,11 @@ function Socios({
                         : "—"}
                     </td>
 
-                    <td className="px-5 py-4 text-sm">
+                    {camposVisiveis.financeiro && <td className="px-5 py-4 text-sm">
                       {socio.possui_mensalidade
                         ? `R$ ${Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}`
                         : "Sem mensalidade"}
-                    </td>
+                    </td>}
 
                     <td className="px-3 py-3 sm:px-5 sm:py-4">
 
