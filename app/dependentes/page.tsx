@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
@@ -213,7 +213,7 @@ export default function DependentesPage() {
   const totalAtivos = dependentes.filter((d) => d.ativo === true).length;
   const totalInativos = dependentes.filter((d) => d.ativo !== true).length;
 
-  async function carregarDados() {
+  const carregarDados = useCallback(async () => {
     setCarregando(true);
     setErro("");
 
@@ -329,11 +329,13 @@ export default function DependentesPage() {
     } finally {
       setCarregando(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    void carregarDados();
-  }, []);
+    // Adia a execução para fora do corpo síncrono do efeito: carregarDados
+    // atualiza o estado antes da primeira consulta assíncrona.
+    void Promise.resolve().then(carregarDados);
+  }, [carregarDados]);
 
   function abrirNovo() {
     if (somenteConsulta) return;
