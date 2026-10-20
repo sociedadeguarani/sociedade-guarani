@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { permissoesPadraoPerfil } from "@/lib/permissoes";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 
@@ -74,15 +75,35 @@ const atalhosInventario = [
 
 const atalhosAssociado = [
   ["🎫", "Carteirinhas", "/carteirinhas", "Sua carteirinha e a da sua família."],
-  ["💰", "Minhas mensalidades", "/mensalidades", "Veja suas mensalidades e pague pendências."],
+  ["💰", "Minhas mensalidades", "/minhas-mensalidades", "Veja suas mensalidades e pague pendências."],
   ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
   ["🎉", "Eventos", "/eventos", "Eventos e ingressos."],
   ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
 ];
 
+const permissaoPorRota: Record<string, string> = {
+  "/avisos": "menu.avisos",
+  "/minhas-mensalidades": "menu.minhas_mensalidades",
+  "/reservas": "menu.reservas",
+  "/eventos": "menu.eventos",
+  "/convites": "menu.convites",
+  "/carteirinhas": "menu.carteirinhas",
+  "/socios": "menu.socios",
+  "/dependentes": "menu.dependentes",
+  "/mensalidades": "menu.mensalidades",
+  "/temporadas": "menu.temporadas",
+  "/financeiro": "menu.financeiro",
+  "/inventario": "menu.inventario",
+  "/acessos": "menu.acessos",
+  "/relatorios": "menu.relatorios",
+  "/usuarios": "menu.usuarios",
+  "/configuracoes/acessos": "menu.politica_acesso",
+};
+
 export default function PainelPage() {
   const [nome, setNome] = useState("Usuário");
   const [perfil, setPerfil] = useState("");
+  const [permissoesRaw, setPermissoesRaw] = useState<string | null>(null);
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -101,11 +122,17 @@ export default function PainelPage() {
     let ativo = true;
     // localStorage é uma fonte externa do navegador; sincronize após o efeito
     // concluir sua fase síncrona para evitar renderizações em cascata.
-    const agendamentoPerfil = window.setTimeout(() => {
-      if (!ativo) return;
-      setNome(window.localStorage.getItem("guarani_usuario_nome") || "Usuário");
-      setPerfil(window.localStorage.getItem("guarani_usuario_perfil") || "");
-    }, 0);
+    const sincronizarPerfilLocal = () => {
+      window.setTimeout(() => {
+        if (!ativo) return;
+        setNome(window.localStorage.getItem("guarani_usuario_nome") || "Usuário");
+        setPerfil(window.localStorage.getItem("guarani_usuario_perfil") || "");
+        setPermissoesRaw(window.localStorage.getItem("guarani_usuario_permissoes"));
+      }, 0);
+    };
+    const agendamentoPerfil = window.setTimeout(sincronizarPerfilLocal, 0);
+    window.addEventListener("guarani:perfil-change", sincronizarPerfilLocal);
+    window.addEventListener("guarani:permissions-change", sincronizarPerfilLocal);
 
     (async () => {
       try {
@@ -118,6 +145,16 @@ export default function PainelPage() {
         }
 
         if (!session?.access_token) return;
+
+        // Os cards de indicadores consultam dados administrativos. Não faça
+        // essas consultas para perfis limitados, que usam somente os atalhos
+        // autorizados abaixo.
+        const perfilArmazenado = String(window.localStorage.getItem("guarani_usuario_perfil") || "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+        if (!["administrador", "admin", "administrador_master", "master"].includes(perfilArmazenado)) return;
 
         const headers = {
           Authorization: `Bearer ${session.access_token}`,
@@ -320,6 +357,8 @@ export default function PainelPage() {
     return () => {
       ativo = false;
       window.clearTimeout(agendamentoPerfil);
+      window.removeEventListener("guarani:perfil-change", sincronizarPerfilLocal);
+      window.removeEventListener("guarani:permissions-change", sincronizarPerfilLocal);
     };
   }, []);
 
@@ -354,6 +393,22 @@ export default function PainelPage() {
         : funcionario
           ? atalhosFuncionario
           : atalhosAssociado;
+
+  const permissoesEfetivasLocal = useMemo(() => {
+    if (permissoesRaw === null) return new Set(permissoesPadraoPerfil(perfil));
+    try {
+      const values: unknown = JSON.parse(permissoesRaw);
+      return new Set(Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []);
+    } catch {
+      return new Set(permissoesPadraoPerfil(perfil));
+    }
+  }, [perfil, permissoesRaw]);
+
+  const atalhosVisiveis = useMemo(() => atalhos.filter(([, , rota]) => {
+    const rotaInterna = String(rota).split("?")[0];
+    const permissao = permissaoPorRota[rotaInterna];
+    return !permissao || permissoesEfetivasLocal.has(permissao);
+  }), [atalhos, permissoesEfetivasLocal]);
 
   const nomeDoPerfil =
     master
@@ -439,7 +494,7 @@ export default function PainelPage() {
              CARDS PRINCIPAIS
           ========================= */}
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          {(master || admin) && <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
 
             {/* SÓCIOS */}
 
@@ -547,7 +602,7 @@ export default function PainelPage() {
               </p>
             </a>
 
-          </div>
+          </div>}
 
           {/* =========================
              ALERTAS
@@ -652,7 +707,7 @@ export default function PainelPage() {
 
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
 
-              {atalhos.map(
+              {atalhosVisiveis.map(
                 ([icone, titulo, rota, descricao]) => (
                   <a
                     key={rota}
