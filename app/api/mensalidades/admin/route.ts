@@ -4,6 +4,7 @@ import {
   exigirAdministrador,
   getServiceClient,
 } from "@/lib/guaraniAuth";
+import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
 
 export const dynamic = "force-dynamic";
 
@@ -17,54 +18,12 @@ const MOTIVOS = [
   "Outro",
 ];
 
-const TIPOS_DEPENDENTES_COM_MENSALIDADE = [
-  "dependente_patrimonial_familiar_mensalidade",
-  "dependente_patrimonial_individual_mensalidade",
-  "dependente_contribuinte_familiar_mensalidade",
-  "dependente_contribuinte_individual_mensalidade",
-];
-
 function normalizarTexto(valor: unknown) {
   return String(valor || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-}
-
-/**
- * Para dependentes, a categoria importada do sistema antigo é a
- * referência principal para saber se aquela pessoa realmente paga
- * mensalidade. Isso evita transformar automaticamente esposa, filhos
- * e outros dependentes em pagadores apenas porque o tipo_socio foi
- * normalizado durante a migração/sincronização.
- *
- * Exemplos de categorias pagantes:
- * - Dependente Patrimonial C/ Mensalidade
- * - Dependente Contribuinte C/ Mensalidade
- * - Sócio dependente c/ mensalidade
- *
- * Quando a categoria não estiver preenchida, usamos o tipo_socio como
- * fallback para manter compatibilidade com novos cadastros.
- */
-function dependenteTemMensalidade(socio: any) {
-  const categoria = normalizarTexto(socio?.categoria);
-
-  if (categoria) {
-    if (
-      categoria.includes("c/ mensalidade") ||
-      categoria.includes("com mensalidade")
-    ) {
-      return true;
-    }
-
-    // Categoria preenchida e sem indicação de mensalidade: não cobrar.
-    return false;
-  }
-
-  return TIPOS_DEPENDENTES_COM_MENSALIDADE.includes(
-    String(socio?.tipo_socio || "")
-  );
 }
 
 const primeiroDia = (ano: number, mes: number) =>
@@ -464,20 +423,7 @@ export async function POST(request: Request) {
 
       if (erroSocios) throw erroSocios;
 
-      const cobraveis = (socios || []).filter((s: any) => {
-        if (
-          String(s.situacao || "").toLowerCase() === "inativo" ||
-          s.ativo === false
-        ) {
-          return false;
-        }
-
-        if (!s.responsavel_id) {
-          return Boolean(s.possui_mensalidade);
-        }
-
-        return dependenteTemMensalidade(s);
-      });
+      const cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
@@ -675,22 +621,7 @@ export async function POST(request: Request) {
        * que passa a pagar individualmente) poderá ser ajustada no
        * cadastro do associado antes da geração.
        */
-      let cobraveis = (socios || []).filter((s: any) => {
-        if (
-          String(s.situacao || "").toLowerCase() === "inativo" ||
-          s.ativo === false
-        ) {
-          return false;
-        }
-
-        const ehDependente = Boolean(s.responsavel_id);
-
-        if (!ehDependente) {
-          return Boolean(s.possui_mensalidade);
-        }
-
-        return dependenteTemMensalidade(s);
-      });
+      let cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
 
       // Quando o administrador seleciona associados na tela, gerar somente
       // aqueles registros. Sem socio_ids, mantém o comportamento atual:
