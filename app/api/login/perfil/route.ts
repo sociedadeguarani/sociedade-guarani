@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { normalizarPerfil } from "@/lib/guaraniAuth";
+import { permissoesEfetivas } from "@/lib/permissoes";
 
 export const dynamic = "force-dynamic";
 
@@ -128,6 +129,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: registrosPermissao, error: permissoesError } = await supabaseAdmin
+      .from("permissoes_usuario")
+      .select("chave,permitido")
+      .eq("usuario_id", usuario.id);
+
+    if (permissoesError) {
+      console.error("Erro ao carregar permissões do usuário:", permissoesError);
+      return NextResponse.json(
+        { error: "Não foi possível carregar as permissões do usuário." },
+        { status: 500 }
+      );
+    }
+
+    const permissoes = permissoesEfetivas(perfilCanonico, (registrosPermissao || []).map((registro) => ({
+      chave: String(registro.chave),
+      permitido: registro.permitido === true,
+    })));
+
     return NextResponse.json({
       usuario: {
         id: usuario.id,
@@ -145,6 +164,7 @@ export async function GET(request: NextRequest) {
         ativo: usuario.ativo,
         nome_exibicao: usuario.nome_exibicao,
         email: user.email,
+        permissoes,
       },
     });
   } catch (error) {
