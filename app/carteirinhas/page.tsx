@@ -19,7 +19,7 @@ type Dependente = {
   matricula?: number | string | null;
   foto_url?: string | null;
   situacao?: string | null;
-  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
+  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado" | "restrito";
   dias_atraso?: number;
   meses_atraso?: number;
   meses_atencao?: number;
@@ -69,11 +69,11 @@ type Socio = {
   foto_url: string | null;
   inicio_temporada: string | null;
   fim_temporada: string | null;
-  exame_medico_validade: string | null;
+  exame_medico_validade?: string | null;
   responsavel_id?: string | null;
   parentesco?: string | null;
   possui_mensalidade?: boolean | null;
-  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado";
+  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado" | "restrito";
   dias_atraso?: number;
   meses_atraso?: number;
   meses_atencao?: number;
@@ -133,6 +133,7 @@ export default function CarteirinhasPage() {
   const [dependenteSelecionado, setDependenteSelecionado] = useState<Dependente | null>(null);
   const [erro, setErro] = useState("");
   const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
+  const [camposVisiveis, setCamposVisiveis] = useState({ financeiro: true, exameMedico: true });
   const [digitalAberta, setDigitalAberta] = useState(false);
   const [modoQr, setModoQr] = useState(false);
 
@@ -168,6 +169,10 @@ export default function CarteirinhasPage() {
         setSocios(listaSocios);
         setDependentes(d.dependentes || []);
         setTemporadas(listaTemporadas);
+        setCamposVisiveis({
+          financeiro: d.camposVisiveis?.financeiro !== false,
+          exameMedico: d.camposVisiveis?.exameMedico !== false,
+        });
         setPoliticaInadimplencia(normalizarPoliticaInadimplencia(d.politicaInadimplencia));
         const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
         const dependenteQrObj = dependenteQr ? (d.dependentes || []).find((dep: Dependente) => String(dep.id) === String(dependenteQr)) : null;
@@ -301,8 +306,8 @@ export default function CarteirinhasPage() {
   const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
   const validade = selecionado?.fim_temporada || null;
   const statusFinanceiro = selecionado?.financeiro_status || "em_dia";
-  const statusFinanceiroLabel = statusFinanceiro === "em_dia" ? "EM DIA" : statusFinanceiro === "atrasado" ? "ATENÇÃO" : "BLOQUEIO";
-  const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : "bg-red-500";
+  const statusFinanceiroLabel = statusFinanceiro === "em_dia" ? "EM DIA" : statusFinanceiro === "atrasado" ? "ATENÇÃO" : statusFinanceiro === "restrito" ? "RESTRITO" : "BLOQUEIO";
+  const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : statusFinanceiro === "restrito" ? "bg-gray-400" : "bg-red-500";
   const mesesSelecionado = Number(selecionado?.meses_atraso || 0);
   const statusFinanceiroText = statusFinanceiro === "atrasado"
     ? `${mesesSelecionado} competência(s) vencida(s) — atenção; entrada liberada`
@@ -445,12 +450,12 @@ export default function CarteirinhasPage() {
                 <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula ou CPF..." className="w-full py-3 outline-none" />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {[
+                {([
                   ["todos", `Todos (${socios.length})`],
                   ["ativos", `Ativos (${contadores.ativos})`],
                   ["inativos", `Inativos (${contadores.inativos})`],
-                  ["exame_vencido", `Exame vencido (${contadores.examesVencidos})`],
-                ].map(([valor, rotulo]) => (
+                  ...(camposVisiveis.exameMedico ? [["exame_vencido", `Exame vencido (${contadores.examesVencidos})`] as [string, string]] : []),
+                ] as [string, string][]).map(([valor, rotulo]) => (
                   <button key={valor} type="button" onClick={() => setFiltroStatus(valor as typeof filtroStatus)} className={`rounded-lg border px-2 py-2 text-xs font-bold ${filtroStatus === valor ? "border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
                     {rotulo}
                   </button>
@@ -580,7 +585,7 @@ export default function CarteirinhasPage() {
                       <div className="space-y-2 text-sm">
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className={`font-black ${statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}`}>{statusTemporadaTexto}</div></div>
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade da temporada</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
-                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>
+                        {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
                       </div>
                       <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
                     </div>
@@ -624,7 +629,7 @@ export default function CarteirinhasPage() {
                     <div className="flex gap-4"><div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
                         {dependenteSelecionado.foto_url ? <img src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
-                    <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div><div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : "BLOQUEIO"}</div></div></div></div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div>{camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div></div>}</div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
                   </div>
                 </div>
                 <div className={`${modoQr ? "hidden" : "grid grid-cols-2 gap-2"}`}><button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white hover:bg-[#003d2b]"><Printer className="h-4 w-4" /> Imprimir</button><button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button></div>
@@ -666,8 +671,8 @@ export default function CarteirinhasPage() {
                       <div className="space-y-2 text-sm">
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div></div>
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{validade ? formatarData(validade) : "Conforme cadastro"}</div></div>
-                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>
-                        <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exame.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exame.textoClasse}`}>{exame.texto}</div></div></div>
+                        {camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>}
+                        {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exame.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exame.textoClasse}`}>{exame.texto}</div></div></div>}
                       </div>
                       <QRCodeSVG className="card-qr" value={qrValue} size={112} includeMargin />
                     </div>
@@ -694,9 +699,9 @@ export default function CarteirinhasPage() {
                         <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <img src={selecionado.foto_url} alt={selecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
                         <div className="min-w-0"><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
                       </div>
-                      <div className="mt-5 rounded-2xl bg-[#f4f7f5] p-4">
+                      {camposVisiveis.financeiro && <div className="mt-5 rounded-2xl bg-[#f4f7f5] p-4">
                         <div className="flex items-center gap-3"><span className={`h-5 w-5 rounded-full ${statusFinanceiroClass} ring-4 ring-white shadow`} /><div><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black">{statusFinanceiroLabel}</div><div className="text-xs text-gray-500">{statusFinanceiroText}</div></div></div>
-                      </div>
+                      </div>}
                       <div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><b>{selecionado.situacao || "Não informada"}</b></div><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><b>{validade ? formatarData(validade) : "Conforme cadastro"}</b></div></div>
                       {erro && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{erro}</div>}
                       <div className="mt-5 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Acesso contabilizado automaticamente na leitura do QR Code.</div>
@@ -722,7 +727,7 @@ export default function CarteirinhasPage() {
                 <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
                 <p className="mt-3 text-sm text-gray-500">Situação: <b className={statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}>{statusTemporadaTexto}</b></p>
                 <p className="text-sm text-gray-500">Validade da temporada: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
-                <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 p-3"><span className={`h-3 w-3 shrink-0 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`text-sm font-black ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>
+                {camposVisiveis.exameMedico && <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 p-3"><span className={`h-3 w-3 shrink-0 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`text-sm font-black ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
                 <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
               </div>
             </div>
@@ -758,7 +763,7 @@ export default function CarteirinhasPage() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
           <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
             <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
-            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div><div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : "BLOQUEIO"}</div></div><div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
           </div>
         </div>
       )}
