@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import { permissoesPadraoPerfil } from "@/lib/permissoes";
 import {
   Home,
   Users,
@@ -34,6 +36,7 @@ type ItemMenu = {
   rota: string;
   icone: typeof Home;
   perfis: readonly Perfil[];
+  permissao?: string;
 };
 
 const ITENS_MENU: readonly ItemMenu[] = [
@@ -51,72 +54,84 @@ const ITENS_MENU: readonly ItemMenu[] = [
   },
   {
     nome: "Avisos",
+    permissao: "menu.avisos",
     rota: "/avisos",
     icone: Megaphone,
-    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
+    perfis: ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"],
   },
   {
     nome: "Minhas mensalidades",
+    permissao: "menu.minhas_mensalidades",
     rota: "/minhas-mensalidades",
     icone: Wallet,
     perfis: ["associado"],
   },
   {
     nome: "Reservas",
+    permissao: "menu.reservas",
     rota: "/reservas",
     icone: CalendarDays,
     perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Eventos",
+    permissao: "menu.eventos",
     rota: "/eventos",
     icone: PartyPopper,
     perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Convites",
+    permissao: "menu.convites",
     rota: "/convites",
     icone: Ticket,
     perfis: ["associado", "funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Carteirinhas",
+    permissao: "menu.carteirinhas",
     rota: "/carteirinhas",
     icone: CreditCard,
-    perfis: ["associado", "funcionario", "administrador", "administrador_master"],
+    perfis: ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"],
   },
   {
     nome: "Sócios",
+    permissao: "menu.socios",
     rota: "/socios",
     icone: Users,
     perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Dependentes",
+    permissao: "menu.dependentes",
     rota: "/dependentes",
     icone: UsersRound,
     perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Mensalidades",
+    permissao: "menu.mensalidades",
     rota: "/mensalidades",
     icone: Wallet,
     perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Temporada",
+    permissao: "menu.temporadas",
     rota: "/temporadas",
     icone: Umbrella,
     perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Financeiro",
+    permissao: "menu.financeiro",
     rota: "/financeiro",
     icone: Wallet,
     perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Inventário",
+    permissao: "menu.inventario",
     rota: "/inventario",
     icone: Boxes,
     perfis: [
@@ -128,24 +143,28 @@ const ITENS_MENU: readonly ItemMenu[] = [
   },
   {
     nome: "Acessos",
+    permissao: "menu.acessos",
     rota: "/acessos",
     icone: DoorOpen,
     perfis: ["funcionario", "administrador", "administrador_master"],
   },
   {
     nome: "Relatórios",
+    permissao: "menu.relatorios",
     rota: "/relatorios",
     icone: BarChart3,
     perfis: ["administrador", "administrador_master"],
   },
   {
     nome: "Usuários",
+    permissao: "menu.usuarios",
     rota: "/usuarios",
     icone: UserCog,
     perfis: ["administrador_master"],
   },
   {
     nome: "Política de acesso",
+    permissao: "menu.politica_acesso",
     rota: "/configuracoes/acessos",
     icone: Settings,
     perfis: ["administrador", "administrador_master"],
@@ -188,17 +207,19 @@ function assinarMudancasPerfil(onStoreChange: () => void) {
   if (typeof window === "undefined") return () => {};
 
   const aoMudarStorage = (event: StorageEvent) => {
-    if (event.key === null || event.key === CHAVE_PERFIL_LOCAL) {
+    if (event.key === null || event.key === CHAVE_PERFIL_LOCAL || event.key === "guarani_usuario_permissoes") {
       onStoreChange();
     }
   };
 
   window.addEventListener("storage", aoMudarStorage);
   window.addEventListener("guarani:perfil-change", onStoreChange);
+  window.addEventListener("guarani:permissions-change", onStoreChange);
 
   return () => {
     window.removeEventListener("storage", aoMudarStorage);
     window.removeEventListener("guarani:perfil-change", onStoreChange);
+    window.removeEventListener("guarani:permissions-change", onStoreChange);
   };
 }
 
@@ -214,23 +235,88 @@ function obterPerfilNoServidor(): Perfil {
   return "associado";
 }
 
+function obterPermissoesArmazenadas(): string | null {
+  try {
+    return window.localStorage.getItem("guarani_usuario_permissoes");
+  } catch {
+    return null;
+  }
+}
+
+function obterPermissoesNoServidor(): string | null {
+  return null;
+}
+
+const CHAVE_VERSAO_PERMISSOES = "guarani_permissoes_schema_v1";
+
 export default function MenuLateralPadrao() {
   const pathname = usePathname();
   const router = useRouter();
+
+  // Atualiza uma vez por sessão as permissões vindas do banco. Isso corrige
+  // sessões antigas que ainda guardam permissões locais de versões anteriores.
+  useEffect(() => {
+    let ativo = true;
+    if (window.sessionStorage.getItem(CHAVE_VERSAO_PERMISSOES) === "1") return;
+
+    async function sincronizarPermissoes() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) return;
+
+        const resposta = await fetch("/api/login/perfil", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const payload = await resposta.json().catch(() => ({}));
+        if (!ativo || !resposta.ok || !payload?.usuario) return;
+
+        window.localStorage.setItem("guarani_usuario_perfil", String(payload.usuario.perfil || "associado"));
+        window.localStorage.setItem("guarani_usuario_permissoes", JSON.stringify(Array.isArray(payload.usuario.permissoes) ? payload.usuario.permissoes : []));
+        if (payload.usuario.nome_exibicao) window.localStorage.setItem("guarani_usuario_nome", String(payload.usuario.nome_exibicao));
+        window.sessionStorage.setItem(CHAVE_VERSAO_PERMISSOES, "1");
+        window.dispatchEvent(new Event("guarani:perfil-change"));
+        window.dispatchEvent(new Event("guarani:permissions-change"));
+      } catch {
+        // A navegação permanece disponível se a sincronização temporária falhar.
+      }
+    }
+
+    void sincronizarPermissoes();
+    return () => { ativo = false; };
+  }, []);
   const perfil = useSyncExternalStore(
     assinarMudancasPerfil,
     obterPerfilArmazenado,
     obterPerfilNoServidor
   );
+  const permissoesRaw = useSyncExternalStore(
+    assinarMudancasPerfil,
+    obterPermissoesArmazenadas,
+    obterPermissoesNoServidor
+  );
+  const permissoes = useMemo(() => {
+    if (permissoesRaw === null) return new Set<string>(permissoesPadraoPerfil(perfil));
+    try {
+      const valores: unknown = JSON.parse(permissoesRaw);
+      return Array.isArray(valores)
+        ? new Set<string>(valores.filter((item): item is string => typeof item === "string"))
+        : new Set<string>(permissoesPadraoPerfil(perfil));
+    } catch {
+      return new Set<string>(permissoesPadraoPerfil(perfil));
+    }
+  }, [perfil, permissoesRaw]);
   const [menuMobileNaRota, setMenuMobileNaRota] = useState<string | null>(null);
   const abertoMobile = menuMobileNaRota !== null && menuMobileNaRota === pathname;
 
   const itensVisiveis = useMemo(
-    () =>
-      ITENS_MENU.filter((item) =>
-        item.perfis.includes(perfil)
-      ),
-    [perfil]
+    () => ITENS_MENU.filter((item) => {
+      if (!item.perfis.includes(perfil)) return false;
+      if (!item.permissao) return true;
+      return permissoes.has(item.permissao);
+    }),
+    [perfil, permissoes]
   );
 
   function irPara(rota: string) {
