@@ -1,33 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getServiceClient, normalizarPerfil } from "@/lib/guaraniAuth";
+import { CHAVES_PERMISSOES, permissoesEfetivas, permissoesPadraoPerfil, permissoesValidas } from "@/lib/permissoes";
 
 export const dynamic = "force-dynamic";
 
-const TODAS_PERMISSOES = [
-  "administracao.tudo",
-  "socios.consultar",
-  "socios.ver_financeiro",
-  "socios.ver_exame_medico",
-  "propria.mensalidade",
-  "propria.reservas",
-  "convites.comprar",
-  "inventario.consultar",
-  "inventario.emprestar",
-  "inventario.devolver",
-  "inventario.cadastrar",
-  "inventario.editar",
-];
-
-const DEFAULTS: Record<string, string[]> = {
-  administrador: TODAS_PERMISSOES,
-  // O Master herda todas as permissões do Administrador e ainda possui
-  // a função exclusiva de gerenciar usuários/perfis.
-  administrador_master: TODAS_PERMISSOES,
-  funcionario: ["socios.consultar", "socios.ver_financeiro", "socios.ver_exame_medico", "propria.mensalidade", "propria.reservas", "convites.comprar"],
-  associado: ["propria.mensalidade", "propria.reservas", "convites.comprar"],
-  funcionario_inventario: ["socios.consultar", "inventario.consultar", "inventario.cadastrar", "inventario.editar", "inventario.emprestar", "inventario.devolver"],
-};
+const TODAS_PERMISSOES: string[] = [...CHAVES_PERMISSOES];
 
 async function somenteMaster(request: Request) {
   const authorization = request.headers.get("authorization") || "";
@@ -177,21 +155,27 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
 
   const perfilMap = new Map(perfisAtuais.map((x) => [x.id, x]));
   const emailMap = new Map((a.data?.users || []).map((x) => [x.id, x.email || ""]));
-  const permMap = new Map<string, string[]>();
-  for (const x of perm.data || []) {
-    if (!x.permitido) continue;
-    permMap.set(x.usuario_id, [...(permMap.get(x.usuario_id) || []), x.chave]);
+  const permMap = new Map<string, { chave: string; permitido: boolean }[]>();
+  for (const row of perm.data || []) {
+    permMap.set(row.usuario_id, [
+      ...(permMap.get(row.usuario_id) || []),
+      { chave: String(row.chave), permitido: row.permitido === true },
+    ]);
   }
 
   return {
     perfis: perfisAtuais,
     socios: s.data || [],
-    usuarios: (u.data || []).map((x) => ({
-      ...x,
-      email: emailMap.get(x.id) || "",
-      perfil: perfilMap.get(x.perfil_id) || null,
-      permissoes: permMap.get(x.id) || DEFAULTS[perfilMap.get(x.perfil_id)?.nome || ""] || [],
-    })),
+    usuarios: (u.data || []).map((x) => {
+      const perfil = perfilMap.get(x.perfil_id) || null;
+      const perfilCanonico = normalizarPerfil(perfil?.codigo, perfil?.nome);
+      return {
+        ...x,
+        email: emailMap.get(x.id) || "",
+        perfil,
+        permissoes: permissoesEfetivas(perfilCanonico, permMap.get(x.id) || []),
+      };
+    }),
   };
 }
 
@@ -201,7 +185,7 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await carregarDados(getServiceClient()));
   } catch (error) {
-    return NextResponse.json({ error: "Não foi possível carregar os usuários." }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível carregar os usuários." }, { status: 500 });
   }
 }
 
@@ -218,7 +202,7 @@ export async function POST(request: Request) {
     const db = getServiceClient();
     const { data: perfil, error: perfilError } = await db.from("perfis").select("id,nome,codigo,ativo").eq("id", perfil_id).eq("ativo", true).single();
     if (perfilError || !perfil) return NextResponse.json({ error: "Perfil não encontrado ou inativo." }, { status: 400 });
-    if (perfil.nome === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
+    if (normalizarPerfil(perfil.codigo, perfil.nome) === "associado" && !socio_id) return NextResponse.json({ error: "Usuário associado precisa estar vinculado a um sócio." }, { status: 400 });
 
     const { data: authData, error: authError } = await db.auth.admin.createUser({
       email: String(email).trim().toLowerCase(),
@@ -244,19 +228,22 @@ export async function POST(request: Request) {
     const perfilChave = normalizarPerfil(perfil.codigo, perfil.nome);
     const escolhidas = perfilChave === "administrador_master"
       ? TODAS_PERMISSOES
-      : perfilChave === "administrador"
-        ? TODAS_PERMISSOES
-        : Array.isArray(permissoes)
-        ? permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x))
-        : (DEFAULTS[perfilChave] || []);
+      : Array.isArray(permissoes)
+        ? permissoesValidas(permissoes).filter((chave) => chave !== "menu.usuarios")
+        : permissoesPadraoPerfil(perfilChave);
 
-    if (escolhidas.length) {
-      const { error: permError } = await db.from("permissoes_usuario").insert(escolhidas.map((chave) => ({ usuario_id: authData.user.id, chave, permitido: true })));
-      if (permError) {
-        await db.from("usuarios_sistema").delete().eq("id", authData.user.id);
-        await db.auth.admin.deleteUser(authData.user.id);
-        return NextResponse.json({ error: `Usuário criado, mas as permissões falharam: ${permError.message}` }, { status: 500 });
-      }
+    // Armazenar permissões permitidas e negadas deixa registrada uma seleção
+    // explícita, inclusive quando o administrador desmarca todas as opções.
+    const linhasPermissoes = TODAS_PERMISSOES.map((chave) => ({
+      usuario_id: authData.user.id,
+      chave,
+      permitido: escolhidas.includes(chave),
+    }));
+    const { error: permError } = await db.from("permissoes_usuario").insert(linhasPermissoes);
+    if (permError) {
+      await db.from("usuarios_sistema").delete().eq("id", authData.user.id);
+      await db.auth.admin.deleteUser(authData.user.id);
+      return NextResponse.json({ error: `Usuário criado, mas as permissões falharam: ${permError.message}` }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, id: authData.user.id, message: "Usuário criado com sucesso." });
@@ -278,13 +265,35 @@ export async function PATCH(request: Request) {
       if (error) throw new Error(error.message);
     }
     if (Array.isArray(body.permissoes)) {
-      const validas = body.permissoes.filter((x: unknown) => typeof x === "string" && TODAS_PERMISSOES.includes(x));
+      const { data: alvo, error: alvoError } = await db
+        .from("usuarios_sistema")
+        .select("id,perfil_id")
+        .eq("id", id)
+        .maybeSingle();
+      if (alvoError) throw new Error(alvoError.message);
+      if (!alvo) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
+
+      const { data: perfilAlvo, error: perfilAlvoError } = await db
+        .from("perfis")
+        .select("codigo,nome")
+        .eq("id", alvo.perfil_id)
+        .maybeSingle();
+      if (perfilAlvoError) throw new Error(perfilAlvoError.message);
+      if (normalizarPerfil(perfilAlvo?.codigo, perfilAlvo?.nome) === "administrador_master") {
+        return NextResponse.json({ error: "As permissões do Administrador Master não podem ser alteradas por esta tela." }, { status: 403 });
+      }
+
+      const validas = permissoesValidas(body.permissoes).filter((chave) => chave !== "menu.usuarios");
       const { error: delError } = await db.from("permissoes_usuario").delete().eq("usuario_id", id);
       if (delError) throw new Error(delError.message);
-      if (validas.length) {
-        const { error } = await db.from("permissoes_usuario").insert(validas.map((chave: string) => ({ usuario_id: id, chave, permitido: true })));
-        if (error) throw new Error(error.message);
-      }
+
+      const linhasPermissoes = TODAS_PERMISSOES.map((chave) => ({
+        usuario_id: id,
+        chave,
+        permitido: validas.includes(chave),
+      }));
+      const { error } = await db.from("permissoes_usuario").insert(linhasPermissoes);
+      if (error) throw new Error(error.message);
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
