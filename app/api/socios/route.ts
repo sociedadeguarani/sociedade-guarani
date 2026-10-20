@@ -25,9 +25,18 @@ function erroBanco(error: unknown) {
 
 export async function GET(request: Request) {
   try {
-    const auth = await requireRoles(request, ["funcionario", "administrador_master", "administrador"]);
+    const auth = await requireRoles(request, ["funcionario", "funcionario_inventario", "administrador_master", "administrador"], ["menu.socios", "socios.consultar"]);
     if ("response" in auth) return auth.response;
     const db = getServiceClient();
+    const permissoes = Array.isArray(auth.usuario.permissoes) ? auth.usuario.permissoes : [];
+    const podeVerFinanceiro = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
+    const podeVerExameMedico = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
+    const colunasFinanceiras = new Set(["possui_mensalidade", ...COLUNAS_EXTRAS.filter((coluna) => ["valor_mensalidade", "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "situacao_financeira", "data_ultimo_pagamento"].includes(coluna))]);
+    const colunas = [
+      ...COLUNAS_BASE.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+      ...COLUNAS_EXTRAS.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+    ];
+    const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
     if (url.searchParams.get("resumo") === "1") {
       const [total, ativos, inativos] = await Promise.all([
@@ -37,12 +46,12 @@ export async function GET(request: Request) {
       ]);
       const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
-      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0 });
+      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0, camposVisiveis });
     }
     // Não filtrar por possui_mensalidade: remidos e dependentes sem cobrança continuam fazendo parte do cadastro.
-    const { data, error } = await db.from("socios").select("*").order("matricula", { ascending: true });
+    const { data, error } = await db.from("socios").select(colunas.join(",")).order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-    return NextResponse.json({ socios: data || [] });
+    return NextResponse.json({ socios: data || [], camposVisiveis });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
