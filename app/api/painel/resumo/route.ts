@@ -1,44 +1,219 @@
 import { NextResponse } from "next/server";
-import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { dependenteTemMensalidade } from "@/lib/regrasMensalidade";
+import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+
 export const dynamic = "force-dynamic";
+
+const COLUNAS_BASE = [
+  "matricula", "nome", "cpf", "rg", "data_nascimento", "telefone", "whatsapp", "email",
+  "endereco", "numero", "bairro", "cidade", "estado", "cep", "data_associacao", "categoria",
+  "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade", "remido",
+];
+const COLUNAS_EXTRAS = [
+  "foto_url", "parentesco", "valor_mensalidade",
+  "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "modalidade_temporada", "inicio_temporada", "fim_temporada",
+  "situacao_financeira", "data_ultimo_pagamento",
+];
+
+function limparObjeto(body: Record<string, unknown>, colunas: string[]) {
+  return Object.fromEntries(colunas.filter((c) => body[c] !== undefined).map((c) => [c, body[c]]));
+}
+function erroBanco(error: unknown) {
+  const e = error as { message?: string; details?: string; hint?: string; code?: string } | null;
+  return [e?.message, e?.details, e?.hint, e?.code ? `Código ${e.code}` : ""].filter(Boolean).join(" — ");
+}
+
+function normalizarClassificacao(valor: unknown): string {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
+  const tipo = normalizarClassificacao(socio.tipo_socio);
+  const categoria = normalizarClassificacao(socio.categoria);
+  const ehDependente = Boolean(socio.responsavel_id) || tipo.startsWith("dependente_") || categoria.includes("dependente");
+
+  // Titulares são registros de associados e não podem desaparecer da tela
+  // só porque a cobrança própria está desativada ou o cadastro é remido.
+  if (!ehDependente) return true;
+
+  // Em dependentes, vale a classificação explícita. Isso evita que um
+  // possui_mensalidade antigo ou uma categoria textual genérica gere conflito.
+  return dependenteTemMensalidade({
+    categoria: typeof socio.categoria === "string" ? socio.categoria : null,
+    tipo_socio: typeof socio.tipo_socio === "string" ? socio.tipo_socio : null,
+  });
+}
+
 export async function GET(request: Request) {
-  const auth = await requireRoles(request, ["associado", "funcionario", "funcionario_inventario", "administrador", "administrador_master"]);
-  if ("response" in auth) return auth.response;
   try {
+    const auth = await requireRoles(request, ["funcionario", "funcionario_inventario", "administrador_master", "administrador"], ["menu.socios", "socios.consultar"]);
+    if ("response" in auth) return auth.response;
     const db = getServiceClient();
-    const [socios, ativos, inativos, dependentesDb, dependentesLegados, reservas, notificacoes] = await Promise.all([
-      db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true),
-      db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "ativo"),
-      db.from("socios").select("id", { count: "exact", head: true }).eq("possui_mensalidade", true).ilike("situacao", "inativo"),
-      db.from("dependentes").select("id,socio_id,nome,cpf"),
-      db.from("socios").select("id,responsavel_id,nome,cpf").not("responsavel_id", "is", null).eq("possui_mensalidade", false),
-      db.from("reservas").select("id", { count: "exact", head: true }).in("situacao", ["solicitada", "aguardando_pagamento"]),
-      db.from("notificacoes_admin").select("id", { count: "exact", head: true }).eq("lida", false).in("origem_tipo", ["mensalidade", "mensalidade_lote", "convite", "reserva", "reserva_pagamento", "pagamento_reserva", "temporada_parcela"]),
-    ]);
-    const erro = [socios, ativos, inativos, dependentesDb, dependentesLegados, reservas, notificacoes].find((r) => r.error)?.error;
-    if (erro) throw erro;
+    const permissoes = Array.isArray(auth.usuario.permissoes) ? auth.usuario.permissoes : [];
+    const podeVerFinanceiro = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
+    const podeVerExameMedico = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
+    const colunasFinanceiras = new Set(["possui_mensalidade", ...COLUNAS_EXTRAS.filter((coluna) => ["valor_mensalidade", "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "situacao_financeira", "data_ultimo_pagamento"].includes(coluna))]);
+    const colunas = [
+      ...COLUNAS_BASE.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+      ...COLUNAS_EXTRAS.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+    ];
+    const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
+    const url = new URL(request.url);
+    if (url.searchParams.get("resumo") === "1") {
+      // O resumo deve usar exatamente a mesma regra de visibilidade da lista
+      // /socios: todos os titulares (inclusive sem mensalidade/remidos) e apenas
+      // dependentes explicitamente elegíveis. Filtrar apenas por possui_mensalidade
+      // fazia o painel divergir da quantidade exibida na página Sócios.
+      const resumo = await db
+        .from("socios")
+        .select("id, situacao, possui_mensalidade, remido, responsavel_id, tipo_socio, categoria");
+      if (resumo.error) {
+        return NextResponse.json({ error: erroBanco(resumo.error) }, { status: 500 });
+      }
 
-    const chaveDependente = (d: any) => {
-      const responsavel = String(d?.socio_id || d?.responsavel_id || "");
-      const cpf = String(d?.cpf || "").replace(/\D/g, "");
-      const nome = String(d?.nome || "").trim().toLowerCase().replace(/\s+/g, " ");
-      return `${responsavel}|${cpf}|${nome}`;
-    };
-    const dependentesUnicos = new Set([
-      ...(dependentesDb.data || []).map(chaveDependente),
-      ...(dependentesLegados.data || []).map(chaveDependente),
-    ]);
+      const registros = (resumo.data ?? []) as unknown as Array<Record<string, unknown>>;
+      const visiveis = registros.filter(deveExibirNaListaSocios);
+      const ativos = visiveis.filter((socio) => String(socio.situacao ?? "").toLocaleLowerCase("pt-BR") === "ativo").length;
+      const inativos = visiveis.filter((socio) => String(socio.situacao ?? "").toLocaleLowerCase("pt-BR") === "inativo").length;
+      return NextResponse.json({ total: visiveis.length, ativos, inativos, camposVisiveis });
+    }
+    // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
+    // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
+    // nunca o campo financeiro nem valores de mensalidade.
+    const colunasConsulta = Array.from(new Set(["id", ...colunas, "possui_mensalidade"]));
+    const consulta = await db
+      .from("socios")
+      .select(colunasConsulta.join(","))
+      .order("matricula", { ascending: true });
+    if (consulta.error) {
+      return NextResponse.json({ error: erroBanco(consulta.error) }, { status: 500 });
+    }
 
-    return NextResponse.json({
-      socios: socios.count || 0,
-      sociosAtivos: ativos.count || 0,
-      sociosInativos: inativos.count || 0,
-      dependentes: dependentesUnicos.size,
-      reservasPendentes: reservas.count || 0,
-      pixPendentes: notificacoes.count || 0,
+    // O select dinâmico do Supabase pode produzir GenericStringError no tipo
+    // estático, embora a resposta bem-sucedida seja uma lista de registros.
+    // A conversão passa por unknown para manter a fronteira explícita.
+    const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
+    const socios = registros.map((socio) => {
+      const resultado: Record<string, unknown> = {
+        ...socio,
+        exibir_na_lista_socios: deveExibirNaListaSocios(socio),
+      };
+      if (!podeVerFinanceiro) delete resultado.possui_mensalidade;
+      return resultado;
     });
+
+    return NextResponse.json({ socios, camposVisiveis });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar resumo do painel." }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
 }
 
+async function autenticarAdmin(request: Request) {
+  const auth = await exigirAdministrador(request);
+  if ("error" in auth) return { response: NextResponse.json({ error: auth.error }, { status: auth.status }) };
+  return { supabase: getServiceClient() };
+}
+
+export async function POST(request: Request) {
+  try {
+    const auth = await autenticarAdmin(request);
+    if ("response" in auth) return auth.response;
+    const body = await request.json() as Record<string, unknown>;
+    const matricula = String(body.matricula ?? "").trim().toUpperCase();
+    const nome = String(body.nome ?? "").trim();
+    const cpf = String(body.cpf ?? "").replace(/\D/g, "");
+    const possuiMensalidadeTitular = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
+    const responsavelId = String(body.responsavel_id || "").trim();
+    if (!matricula && !responsavelId) {
+      return NextResponse.json({ error: "Informe a matrícula-base do associado. Dependentes sem mensalidade recebem a matrícula automaticamente." }, { status: 400 });
+    }
+    if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
+    if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
+    const ehDependente = Boolean(responsavelId);
+    const possuiMensalidade = ehDependente
+      ? dependenteTemMensalidade({ categoria: body.categoria, tipo_socio: body.tipo_socio })
+      : possuiMensalidadeTitular;
+    const dadosNormalizados = {
+      ...body,
+      matricula: matricula || null,
+      nome,
+      cpf: body.cpf || null,
+      possui_mensalidade: possuiMensalidade,
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0, situacao_financeira: "isento" } : {}),
+    };
+    const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
+    if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
+    const { data, error } = await auth.supabase.from("socios").insert(dadosCompletos).select("*").single();
+    if (error) {
+      if (String(error.code) === "23505") return NextResponse.json({ error: "Esta matrícula já está cadastrada." }, { status: 409 });
+      return NextResponse.json({ error: `Não foi possível cadastrar o sócio: ${erroBanco(error)}` }, { status: 500 });
+    }
+    return NextResponse.json({ socio: data, avisos: [] });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar sócio." }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const auth = await autenticarAdmin(request);
+    if ("response" in auth) return auth.response;
+    const body = await request.json() as Record<string, unknown>;
+    const id = String(body.id ?? "").trim();
+    if (!id) return NextResponse.json({ error: "Sócio não informado." }, { status: 400 });
+    const matricula = String(body.matricula ?? "").trim().toUpperCase();
+    const nome = String(body.nome ?? "").trim();
+    const cpf = String(body.cpf ?? "").replace(/\D/g, "");
+    if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
+    const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade,categoria,tipo_socio").eq("id", id).maybeSingle();
+    const responsavelId = body.responsavel_id !== undefined
+      ? String(body.responsavel_id || "").trim()
+      : String(atual?.responsavel_id || "").trim();
+    const possuiMensalidadeInformada = body.possui_mensalidade !== undefined
+      ? body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true"
+      : atual?.possui_mensalidade === true;
+    const ehDependente = Boolean(responsavelId);
+    const categoriaFinal = body.categoria !== undefined ? body.categoria : atual?.categoria;
+    const tipoFinal = body.tipo_socio !== undefined ? body.tipo_socio : atual?.tipo_socio;
+    const possuiMensalidade = ehDependente
+      ? dependenteTemMensalidade({ categoria: categoriaFinal, tipo_socio: tipoFinal })
+      : possuiMensalidadeInformada;
+    const dadosNormalizados = {
+      ...body,
+      matricula: matricula || null,
+      nome,
+      cpf: body.cpf || null,
+      responsavel_id: responsavelId || null,
+      possui_mensalidade: possuiMensalidade,
+      ...(ehDependente && !possuiMensalidade ? { valor_mensalidade: 0, situacao_financeira: "isento" } : {}),
+    };
+    const dadosCompletos = { ...limparObjeto(dadosNormalizados, COLUNAS_BASE), ...limparObjeto(dadosNormalizados, COLUNAS_EXTRAS) };
+    if (!dadosCompletos.foto_url) delete dadosCompletos.foto_url;
+    const { data, error } = await auth.supabase.from("socios").update(dadosCompletos).eq("id", id).select("*").single();
+    if (error) return NextResponse.json({ error: `Não foi possível atualizar o sócio: ${erroBanco(error)}` }, { status: 500 });
+    return NextResponse.json({ socio: data });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao atualizar sócio." }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const auth = await autenticarAdmin(request);
+    if ("response" in auth) return auth.response;
+    const body = await request.json() as Record<string, unknown>;
+    const id = String(body.id ?? "").trim();
+    if (!id) return NextResponse.json({ error: "Sócio não informado." }, { status: 400 });
+    const { error } = await auth.supabase.from("socios").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: `Não foi possível excluir o sócio: ${erroBanco(error)}` }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir sócio." }, { status: 500 });
+  }
+}
