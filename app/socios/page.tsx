@@ -36,6 +36,8 @@ type Socio = {
   responsavel_id: string | null;
   parentesco: string | null;
   possui_mensalidade: boolean | null;
+  /** Indicador não financeiro usado para filtrar a lista sem expor a cobrança. */
+  exibir_na_lista_socios?: boolean | null;
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
@@ -80,6 +82,11 @@ function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria" | "remido">
     normalizarTipoParaFiltro(socio.tipo_socio).includes("remido") ||
     normalizarTipoParaFiltro(socio.categoria).includes("remido")
   );
+}
+
+function socioDeveAparecerNaLista(socio: Pick<Socio, "exibir_na_lista_socios" | "possui_mensalidade" | "responsavel_id" | "tipo_socio" | "categoria" | "remido">): boolean {
+  if (typeof socio.exibir_na_lista_socios === "boolean") return socio.exibir_na_lista_socios;
+  return socio.possui_mensalidade === true || (socioEhRemido(socio) && !socio.responsavel_id);
 }
 
 type Mensalidade = {
@@ -1126,7 +1133,7 @@ export default function Home() {
       const remidoTitular = remido && !socio.responsavel_id;
       // A tela Sócios inclui quem possui mensalidade e os titulares patrimoniais remidos.
       // Dependentes sem mensalidade permanecem na tela Dependentes/Famílias.
-      if (socio.possui_mensalidade !== true && !remidoTitular) return false;
+      if (!socioDeveAparecerNaLista(socio)) return false;
 
       const termoNome = normalizarBusca(socio.nome);
       const termoCpf = normalizarBusca(socio.cpf);
@@ -1241,7 +1248,7 @@ export default function Home() {
           {menu === "Início" && (
             <Inicio
               socios={socios}
-              quantidadeSocios={socios.filter((s) => s.possui_mensalidade === true || (socioEhRemido(s) && !s.responsavel_id)).length}
+              quantidadeSocios={socios.filter(socioDeveAparecerNaLista).length}
               abrirCadastro={novoSocio}
             />
           )}
@@ -1251,7 +1258,7 @@ export default function Home() {
             <Socios
               socios={sociosFiltrados}
               sociosCompletos={socios}
-              quantidadeTotal={socios.filter((s) => s.possui_mensalidade === true || (socioEhRemido(s) && !s.responsavel_id)).length}
+              quantidadeTotal={socios.filter(socioDeveAparecerNaLista).length}
               busca={busca}
               setBusca={setBusca}
               filtroTipoSocio={filtroTipoSocio}
@@ -1266,8 +1273,7 @@ export default function Home() {
               excluirSocio={excluirSocio}
               carregando={carregando}
               mostrarSomenteDependentes={mostrarSomenteDependentes}
-              somenteConsulta={somenteConsulta}
-              camposVisiveis={camposVisiveis}
+            somenteConsulta={somenteConsulta}
               setMostrarSomenteDependentes={setMostrarSomenteDependentes}
             />
           )}
@@ -1561,7 +1567,6 @@ function Socios({
   mostrarSomenteDependentes,
   setMostrarSomenteDependentes,
   somenteConsulta,
-  camposVisiveis,
 }: {
   socios: Socio[];
   sociosCompletos: Socio[];
@@ -1582,7 +1587,6 @@ function Socios({
   mostrarSomenteDependentes: boolean;
   setMostrarSomenteDependentes: (valor: boolean) => void;
   somenteConsulta: boolean;
-  camposVisiveis: { financeiro: boolean; exameMedico: boolean };
 }) {
   return (
     <div>
