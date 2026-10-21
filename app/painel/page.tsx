@@ -50,8 +50,16 @@ const atalhosAssociado = [
 ];
 
 export default function PainelPage() {
-  const [nome, setNome] = useState("Usuário");
-  const [perfil, setPerfil] = useState("");
+  const [nome] = useState(() =>
+    typeof window === "undefined"
+      ? "Usuário"
+      : window.localStorage.getItem("guarani_usuario_nome") || "Usuário",
+  );
+  const [perfil] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : window.localStorage.getItem("guarani_usuario_perfil") || "",
+  );
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -67,9 +75,6 @@ export default function PainelPage() {
   const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
-    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
-    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
-
     let ativo = true;
 
     (async () => {
