@@ -34,20 +34,20 @@ function normalizarClassificacao(valor: unknown): string {
 }
 
 function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
-  const ehDependente = Boolean(socio.responsavel_id);
-  const remido = socio.remido === true ||
-    normalizarClassificacao(socio.tipo_socio).includes("remido") ||
-    normalizarClassificacao(socio.categoria).includes("remido");
-  const possuiMensalidadeElegivel = ehDependente
-    ? dependenteTemMensalidade({
-        categoria: typeof socio.categoria === "string" ? socio.categoria : null,
-        tipo_socio: typeof socio.tipo_socio === "string" ? socio.tipo_socio : null,
-      })
-    : socio.possui_mensalidade === true;
+  const tipo = normalizarClassificacao(socio.tipo_socio);
+  const categoria = normalizarClassificacao(socio.categoria);
+  const ehDependente = Boolean(socio.responsavel_id) || tipo.startsWith("dependente_") || categoria.includes("dependente");
 
-  // A página precisa saber quais registros exibir, mas não precisa receber
-  // o indicador financeiro quando o perfil não tem permissão para vê-lo.
-  return possuiMensalidadeElegivel || (remido && !ehDependente);
+  // Titulares são registros de associados e não podem desaparecer da tela
+  // só porque a cobrança própria está desativada ou o cadastro é remido.
+  if (!ehDependente) return true;
+
+  // Em dependentes, vale a classificação explícita. Isso evita que um
+  // possui_mensalidade antigo ou uma categoria textual genérica gere conflito.
+  return dependenteTemMensalidade({
+    categoria: typeof socio.categoria === "string" ? socio.categoria : null,
+    tipo_socio: typeof socio.tipo_socio === "string" ? socio.tipo_socio : null,
+  });
 }
 
 export async function GET(request: Request) {
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
     // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
     // nunca o campo financeiro nem valores de mensalidade.
-    const colunasConsulta = Array.from(new Set([...colunas, "possui_mensalidade"]));
+    const colunasConsulta = Array.from(new Set(["id", ...colunas, "possui_mensalidade"]));
     const consulta = await db
       .from("socios")
       .select(colunasConsulta.join(","))
