@@ -543,10 +543,11 @@ export default function Page() {
   // histórico individual, mas não entram na grade principal de mensalidades.
   const mensalidadesElegiveisParaExibicao = useMemo<M[]>(
     () => lista.filter((item) => {
-      const socio = item.socio || socioPorId.get(String(item.socio_id));
-      // Se o vínculo não veio na resposta, mantemos a linha para não ocultar
-      // um registro financeiro cuja titularidade ainda não conseguimos validar.
-      return !socio || socioElegivelParaMensalidade(socio);
+      const socio = socioPorId.get(String(item.socio_id)) || item.socio;
+      // A grade principal mostra somente associados com cobrança própria.
+      // Lançamentos antigos de dependentes sem mensalidade ficam preservados
+      // no banco e no histórico individual, mas não aparecem nesta lista.
+      return Boolean(socio) && socioElegivelParaMensalidade(socio);
     }),
     [lista, socioPorId]
   );
@@ -1236,12 +1237,12 @@ const selecionadasBaixa = useMemo(
                   Exibindo <b>{filtrada.length}</b> de <b>{linhasExibicao.length}</b> associado(s)
                 </div>
 
-                <div className="flex w-full flex-wrap gap-2 lg:w-auto">
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
                 <button
                   type="button"
                   onClick={selecionarTodosParaGeracao}
                   disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
-                  className="rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 font-bold text-[#005a3c] disabled:opacity-40"
+                  className="w-full rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-40 sm:w-auto"
                 >
                   Selecionar pendentes
                 </button>
@@ -1250,7 +1251,7 @@ const selecionadasBaixa = useMemo(
                   type="button"
                   disabled={!selGeracao.length}
                   onClick={() => void gerarSelecionados()}
-                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                  className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
                 >
                   ⚡ Gerar selecionadas ({selGeracao.length})
                 </button>
@@ -1262,7 +1263,7 @@ const selecionadasBaixa = useMemo(
                     setTipoBaixaSelecionada("pago");
                     setAbrirConfirmacaoBaixa(true);
                   }}
-                  className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white disabled:opacity-40"
+                  className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
                 >
                   💰 Baixar selecionadas ({selecionadasBaixa.length})
                 </button>
@@ -1292,7 +1293,62 @@ const selecionadasBaixa = useMemo(
               </div>
             )}
 
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-4 grid gap-3 md:hidden">
+              {filtrada.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500">
+                  Nenhum associado encontrado com os filtros atuais.
+                </div>
+              ) : (
+                filtrada.map((x) => {
+                  const st = statusMensalidade(x, podeMarcarSemSaldo(x));
+                  const acrescimos = Number(x.multa || 0) + Number(x.juros || 0);
+                  const total = x.total_cobrado ?? Number(x.valor_base ?? x.valor) + Number(x.tarifa_pagamento || 0) + Number(x.multa || 0) + Number(x.juros || 0) - Number(x.desconto || 0);
+                  const marcado = x.situacao === "nao_gerada"
+                    ? selGeracao.includes(String(x.socio_id))
+                    : x.situacao !== "pago" && sel.includes(x.id);
+                  return (
+                    <article key={`mobile-${x.id}`} className="min-w-0 rounded-xl border border-[#d8e7df] bg-white p-3 shadow-sm">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-5 w-5 shrink-0 accent-[#005a3c]"
+                          disabled={x.situacao === "pago"}
+                          checked={marcado}
+                          aria-label={`Selecionar mensalidade de ${x.socio?.nome || "associado"}`}
+                          onChange={() => {
+                            if (x.situacao === "nao_gerada") {
+                              alternarGeracaoSocio(String(x.socio_id));
+                              return;
+                            }
+                            if (x.situacao === "pago") return;
+                            setSel((atual) => atual.includes(x.id) ? atual.filter((id) => id !== x.id) : [...atual, x.id]);
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <button type="button" onClick={() => void abrirDetalhesSocio(x)} className="break-words text-left font-bold text-[#005a3c] underline-offset-2 hover:underline">
+                            {x.socio?.nome || "Associado sem identificação"}
+                          </button>
+                          <p className="mt-1 break-words text-xs text-gray-500">Matrícula: {x.socio?.matricula || "—"}</p>
+                          <p className="mt-1 break-words text-sm text-gray-700">{nomes[x.socio?.tipo_socio] || x.socio?.tipo_socio || "Tipo não informado"}</p>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${st[1]}`}>{st[0]}</span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-gray-100 pt-3 text-sm">
+                        <div><p className="text-xs text-gray-500">Vencimento</p><p className="font-medium">{data(x.data_vencimento)}</p></div>
+                        <div><p className="text-xs text-gray-500">Total cobrado</p><p className="font-black text-[#005a3c]">{moeda(total)}</p></div>
+                        <div><p className="text-xs text-gray-500">Base</p><p>{moeda(x.valor_base ?? x.valor)}</p></div>
+                        <div><p className="text-xs text-gray-500">Tarifa + acréscimos</p><p>{moeda(Number(x.tarifa_pagamento || 0) + acrescimos)}</p></div>
+                      </div>
+                      {(x.motivo || x.observacoes) && <p className="mt-2 break-words text-xs text-gray-500">Motivo: {x.motivo || x.observacoes}</p>}
+                      {x.situacao === "pago" && <button type="button" onClick={() => void estornarBaixa(x)} className="mt-3 w-full rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-700">↩️ Estornar baixa</button>}
+                      {x.situacao === "nao_gerada" && <p className="mt-3 text-xs text-gray-400">Gere a competência primeiro.</p>}
+                    </article>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-4 hidden overflow-x-auto md:block">
               <table className="w-full min-w-[1200px] text-sm">
                 <thead className="bg-[#e8f3ee]">
                   <tr>
