@@ -1,35 +1,3 @@
-/** Regras centralizadas para decidir quem pode receber mensalidade própria. */
-export type CadastroMensalidade = {
-  categoria?: unknown;
-  tipo_socio?: unknown;
-  responsavel_id?: unknown;
-  possui_mensalidade?: unknown;
-  situacao?: unknown;
-  ativo?: unknown;
-};
-
-const TIPOS_DEPENDENTE_COM_MENSALIDADE = new Set([
-  "dependente_patrimonial_familiar_mensalidade",
-  "dependente_patrimonial_individual_mensalidade",
-  "dependente_contribuinte_familiar_mensalidade",
-  "dependente_contribuinte_individual_mensalidade",
-]);
-
-function normalizarCategoria(valor: unknown): string {
-  return String(valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function normalizarTipo(valor: unknown): string {
-  return String(valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
     .replace(/[\s-]+/g, "_");
 }
 
@@ -51,13 +19,18 @@ export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
   const tipo = normalizarTipo(socio.tipo_socio);
   const categoria = normalizarCategoria(socio.categoria);
 
-  // O tipo estruturado diferencia inequivocamente dependentes cobrados dos
-  // dependentes sem mensalidade. Ele deve prevalecer sobre categoria legada.
-  if (TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo)) return true;
-  if (tipo.startsWith("dependente_")) return false;
+  // Uma categoria legada de titular nunca pode classificar a pessoa como
+  // dependente pagante, mesmo que o tipo antigo esteja inconsistente.
+  if (categoria === "titular") return false;
 
-  // Compatibilidade com registros antigos que ainda não têm tipo estruturado:
-  // só aceitamos cobrança quando a categoria declarar isso expressamente.
+  // O tipo estruturado prevalece sobre categorias antigas/genéricas de
+  // dependente, evitando que uma categoria desatualizada cobre indevidamente.
+  if (tipo.startsWith("dependente_")) {
+    return TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo);
+  }
+
+  // Compatibilidade com registros antigos sem tipo estruturado: a categoria
+  // precisa declarar explicitamente que é um dependente com mensalidade.
   return Boolean(categoria) && categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
 }
 
