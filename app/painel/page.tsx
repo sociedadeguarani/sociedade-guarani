@@ -1,41 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { permissoesPadraoPerfil } from "@/lib/permissoes";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-
-type SocioPainel = {
-  id?: string | null;
-  nome?: string | null;
-  cpf?: string | null;
-  matricula?: string | number | null;
-  possui_mensalidade?: boolean | null;
-  responsavel_id?: string | null;
-  situacao?: string | null;
-  tipo_socio?: string | null;
-  categoria?: string | null;
-  remido?: boolean | null;
-};
-
-function normalizarTipoParaFiltro(valor: unknown): string {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function socioEhRemidoPainel(socio: SocioPainel): boolean {
-  return (
-    socio.remido === true ||
-    normalizarTipoParaFiltro(socio.tipo_socio).includes("remido") ||
-    normalizarTipoParaFiltro(socio.categoria).includes("remido")
-  );
-}
 
 const atalhosAdmin = [
   ["👥", "Sócios", "/socios", "Cadastre, edite e consulte associados."],
@@ -75,35 +43,15 @@ const atalhosInventario = [
 
 const atalhosAssociado = [
   ["🎫", "Carteirinhas", "/carteirinhas", "Sua carteirinha e a da sua família."],
-  ["💰", "Minhas mensalidades", "/minhas-mensalidades", "Veja suas mensalidades e pague pendências."],
+  ["💰", "Minhas mensalidades", "/mensalidades", "Veja suas mensalidades e pague pendências."],
   ["📅", "Reservas", "/reservas", "Salões, quiosques e espaços."],
   ["🎉", "Eventos", "/eventos", "Eventos e ingressos."],
   ["📢", "Avisos", "/avisos", "Comunicados da Sociedade."],
 ];
 
-const permissaoPorRota: Record<string, string> = {
-  "/avisos": "menu.avisos",
-  "/minhas-mensalidades": "menu.minhas_mensalidades",
-  "/reservas": "menu.reservas",
-  "/eventos": "menu.eventos",
-  "/convites": "menu.convites",
-  "/carteirinhas": "menu.carteirinhas",
-  "/socios": "menu.socios",
-  "/dependentes": "menu.dependentes",
-  "/mensalidades": "menu.mensalidades",
-  "/temporadas": "menu.temporadas",
-  "/financeiro": "menu.financeiro",
-  "/inventario": "menu.inventario",
-  "/acessos": "menu.acessos",
-  "/relatorios": "menu.relatorios",
-  "/usuarios": "menu.usuarios",
-  "/configuracoes/acessos": "menu.politica_acesso",
-};
-
 export default function PainelPage() {
   const [nome, setNome] = useState("Usuário");
   const [perfil, setPerfil] = useState("");
-  const [permissoesRaw, setPermissoesRaw] = useState<string | null>(null);
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -119,20 +67,10 @@ export default function PainelPage() {
   const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
+    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
+    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
+
     let ativo = true;
-    // localStorage é uma fonte externa do navegador; sincronize após o efeito
-    // concluir sua fase síncrona para evitar renderizações em cascata.
-    const sincronizarPerfilLocal = () => {
-      window.setTimeout(() => {
-        if (!ativo) return;
-        setNome(window.localStorage.getItem("guarani_usuario_nome") || "Usuário");
-        setPerfil(window.localStorage.getItem("guarani_usuario_perfil") || "");
-        setPermissoesRaw(window.localStorage.getItem("guarani_usuario_permissoes"));
-      }, 0);
-    };
-    const agendamentoPerfil = window.setTimeout(sincronizarPerfilLocal, 0);
-    window.addEventListener("guarani:perfil-change", sincronizarPerfilLocal);
-    window.addEventListener("guarani:permissions-change", sincronizarPerfilLocal);
 
     (async () => {
       try {
@@ -146,16 +84,6 @@ export default function PainelPage() {
 
         if (!session?.access_token) return;
 
-        // Os cards de indicadores consultam dados administrativos. Não faça
-        // essas consultas para perfis limitados, que usam somente os atalhos
-        // autorizados abaixo.
-        const perfilArmazenado = String(window.localStorage.getItem("guarani_usuario_perfil") || "")
-          .trim()
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "");
-        if (!["administrador", "admin", "administrador_master", "master"].includes(perfilArmazenado)) return;
-
         const headers = {
           Authorization: `Bearer ${session.access_token}`,
         };
@@ -168,12 +96,14 @@ export default function PainelPage() {
           notificacoesResponse,
           temporadasResponse,
         ] = await Promise.all([
-          fetch("/api/socios", {
+          fetch("/api/socios?resumo=1", {
             headers,
             cache: "no-store",
           }),
 
-          fetch("/api/dependentes/migrar", {
+          // Usar a mesma fonte da tela Dependentes, que combina a tabela
+          // dependentes com os dependentes familiares legados em socios.
+          fetch("/api/carteirinhas?modo=dependentes", {
             headers,
             cache: "no-store",
           }),
@@ -215,82 +145,70 @@ export default function PainelPage() {
         ========================= */
 
         if (sociosResponse.ok) {
-          const todosSocios: SocioPainel[] = Array.isArray(sociosJson.socios)
-            ? (sociosJson.socios as SocioPainel[])
+          // Usar o resumo calculado pela própria API, em vez de repetir aqui
+          // filtros de negócio que podem divergir da página /socios.
+          const total = Number(sociosJson.total);
+          const ativos = Number(sociosJson.ativos);
+          const inativos = Number(sociosJson.inativos);
+
+          if (Number.isFinite(total)) setTotalSocios(total);
+          if (Number.isFinite(ativos)) setSociosAtivos(ativos);
+          if (Number.isFinite(inativos)) setSociosInativos(inativos);
+        }
+
+        /* =========================
+           DEPENDENTES
+        ========================= */
+        if (dependentesResponse.ok) {
+          const sociosParaDependentes = Array.isArray(dependentesJson.socios)
+            ? dependentesJson.socios
             : [];
-
-          // Manter os mesmos critérios da tela /socios: associados com
-          // mensalidade própria e titulares remidos, mesmo sem mensalidade.
-          // Remidos dependentes não entram nessa contagem, como na listagem.
-          const sociosOficiais = todosSocios.filter(
-            (socio) =>
-              socio.possui_mensalidade === true ||
-              (socioEhRemidoPainel(socio) && !socio.responsavel_id)
-          );
-
-          setTotalSocios(sociosOficiais.length);
-
-          setSociosAtivos(
-            sociosOficiais.filter(
-              (socio) => String(socio.situacao || "").trim().toLowerCase() === "ativo"
-            ).length
-          );
-
-          setSociosInativos(
-            sociosOficiais.filter(
-              (socio) => String(socio.situacao || "").trim().toLowerCase() === "inativo"
-            ).length
-          );
-
-          /* =========================
-             DEPENDENTES
-          ========================= */
-
-          // Dependentes antigos ainda podem existir em `socios`.
-          // Eles são somados aos já migrados para `dependentes`,
-          // sem duplicação.
-
-          const dependentesAntigos = todosSocios
-            .filter(
-              (socio) =>
-                Boolean(socio.responsavel_id) &&
-                socio.possui_mensalidade !== true
-            )
-            .map((socio) => ({
-              socio_id: String(socio.responsavel_id),
-              nome: String(socio.nome || ""),
-              cpf: String(socio.cpf || ""),
-            }));
-
-          const dependentesMigrados = Array.isArray(
-            dependentesJson.dependentes
-          )
+          const dependentesCadastrados = Array.isArray(dependentesJson.dependentes)
             ? dependentesJson.dependentes
             : [];
 
-          const chaveDependente = (d: any) => {
-            const responsavel = String(d?.socio_id || "");
-
-            const cpf = String(d?.cpf || "").replace(/\D/g, "");
-
-            const nome = String(d?.nome || "")
+          // A listagem /dependentes usa a mesma normalização e classificação.
+          const normalizarTextoDependente = (valor: unknown) =>
+            String(valor || "")
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
               .trim()
-              .toLowerCase()
-              .replace(/\s+/g, " ");
+              .toLowerCase();
 
-            return `${responsavel}|${cpf}|${nome}`;
+          const ehDependenteFamiliarSocio = (socio: any) => {
+            if (!socio?.responsavel_id) return false;
+            const tipo = normalizarTextoDependente(socio.tipo_socio);
+            const categoria = normalizarTextoDependente(socio.categoria);
+            return (
+              tipo === "dependente_patrimonial_familiar" ||
+              tipo === "dependente_patrimonial_familiar_mensalidade" ||
+              tipo === "dependente_contribuinte_familiar" ||
+              tipo === "dependente_contribuinte_familiar_mensalidade" ||
+              categoria.includes("dependente patrimonial familiar") ||
+              categoria.includes("dependente contribuinte familiar")
+            );
           };
 
-          const unicos = new Set<string>();
+          // A tela /dependentes elimina duplicatas por nome ou matrícula,
+          // sem criar uma segunda pessoa para cadastros familiares legados.
+          const chavesExistentes = new Set(
+            dependentesCadastrados
+              .flatMap((dependente: any) => [
+                normalizarTextoDependente(dependente.nome),
+                normalizarTextoDependente(dependente.matricula),
+              ])
+              .filter(Boolean)
+          );
 
-          for (const d of [
-            ...dependentesMigrados,
-            ...dependentesAntigos,
-          ]) {
-            unicos.add(chaveDependente(d));
-          }
+          const dependentesLegados = sociosParaDependentes
+            .filter(ehDependenteFamiliarSocio)
+            .filter(
+              (socio: any) =>
+                !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
+                !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
+            );
 
-          setTotalDependentes(unicos.size);
+          setTotalDependentes(dependentesCadastrados.length + dependentesLegados.length);
         }
 
         /* =========================
@@ -356,9 +274,6 @@ export default function PainelPage() {
 
     return () => {
       ativo = false;
-      window.clearTimeout(agendamentoPerfil);
-      window.removeEventListener("guarani:perfil-change", sincronizarPerfilLocal);
-      window.removeEventListener("guarani:permissions-change", sincronizarPerfilLocal);
     };
   }, []);
 
@@ -393,22 +308,6 @@ export default function PainelPage() {
         : funcionario
           ? atalhosFuncionario
           : atalhosAssociado;
-
-  const permissoesEfetivasLocal = useMemo(() => {
-    if (permissoesRaw === null) return new Set(permissoesPadraoPerfil(perfil));
-    try {
-      const values: unknown = JSON.parse(permissoesRaw);
-      return new Set(Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []);
-    } catch {
-      return new Set(permissoesPadraoPerfil(perfil));
-    }
-  }, [perfil, permissoesRaw]);
-
-  const atalhosVisiveis = useMemo(() => atalhos.filter(([, , rota]) => {
-    const rotaInterna = String(rota).split("?")[0];
-    const permissao = permissaoPorRota[rotaInterna];
-    return !permissao || permissoesEfetivasLocal.has(permissao);
-  }), [atalhos, permissoesEfetivasLocal]);
 
   const nomeDoPerfil =
     master
@@ -494,7 +393,7 @@ export default function PainelPage() {
              CARDS PRINCIPAIS
           ========================= */}
 
-          {(master || admin) && <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
 
             {/* SÓCIOS */}
 
@@ -602,7 +501,7 @@ export default function PainelPage() {
               </p>
             </a>
 
-          </div>}
+          </div>
 
           {/* =========================
              ALERTAS
@@ -707,7 +606,7 @@ export default function PainelPage() {
 
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
 
-              {atalhosVisiveis.map(
+              {atalhos.map(
                 ([icone, titulo, rota, descricao]) => (
                   <a
                     key={rota}
