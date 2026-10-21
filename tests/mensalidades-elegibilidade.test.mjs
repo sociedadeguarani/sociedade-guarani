@@ -40,3 +40,21 @@ test('dependente inativo não é elegível', () => {
     situacao: 'inativo',
   }), false);
 });
+
+test('tipo dependente sem mensalidade prevalece sobre categoria legada que diga com mensalidade', () => {
+  assert.equal(socioElegivelParaMensalidade({
+    categoria: 'Dependente com Mensalidade',
+    tipo_socio: 'dependente_patrimonial_familiar',
+    possui_mensalidade: true,
+    situacao: 'ativo',
+  }), false);
+});
+
+test('tipo dependente com mensalidade prevalece sobre categoria genérica antiga', () => {
+  assert.equal(socioElegivelParaMensalidade({
+    categoria: 'Dependente Patrimonial Familiar',
+    tipo_socio: 'dependente_patrimonial_familiar_mensalidade',
+    possui_mensalidade: false,
+    situacao: 'ativo',
+  }), true);
+});
