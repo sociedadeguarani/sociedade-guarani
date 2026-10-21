@@ -48,12 +48,17 @@ function ehDependente(socio: CadastroMensalidade): boolean {
  * Quando a categoria está vazia, usamos o tipo específico *_mensalidade.
  */
 export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
+  const tipo = normalizarTipo(socio.tipo_socio);
   const categoria = normalizarCategoria(socio.categoria);
-  if (categoria) {
-    return categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
-  }
 
-  return TIPOS_DEPENDENTE_COM_MENSALIDADE.has(normalizarTipo(socio.tipo_socio));
+  // O tipo estruturado diferencia inequivocamente dependentes cobrados dos
+  // dependentes sem mensalidade. Ele deve prevalecer sobre categoria legada.
+  if (TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo)) return true;
+  if (tipo.startsWith("dependente_")) return false;
+
+  // Compatibilidade com registros antigos que ainda não têm tipo estruturado:
+  // só aceitamos cobrança quando a categoria declarar isso expressamente.
+  return Boolean(categoria) && categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
 }
 
 /** Aplica a mesma regra na tela, na prévia e na API de geração. */
