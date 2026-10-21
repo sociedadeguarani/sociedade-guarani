@@ -24,32 +24,48 @@ function normalizarCategoria(valor: unknown): string {
     .replace(/\s+/g, " ");
 }
 
+function normalizarTipo(valor: unknown): string {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, "_");
+}
+
+function ehDependente(socio: CadastroMensalidade): boolean {
+  const categoria = normalizarCategoria(socio.categoria);
+  const tipo = normalizarTipo(socio.tipo_socio);
+  // Nem todos os cadastros antigos têm responsavel_id preenchido. O tipo
+  // e a categoria também identificam dependentes, evitando tratá-los como
+  // titulares por causa de possui_mensalidade legado = true.
+  return Boolean(socio.responsavel_id) || categoria.includes("dependente") || tipo.startsWith("dependente_");
+}
+
 /**
- * Para dependentes, a categoria explícita continua sendo a fonte principal:
- * só marca como pagante quando informa "c/ mensalidade" ou "com mensalidade".
- * Se a categoria estiver vazia, usa o tipo_socio como compatibilidade legada.
+ * Para dependentes, a categoria explícita é a referência principal.
+ * Se estiver preenchida, só há cobrança quando declara mensalidade própria.
+ * Quando a categoria está vazia, usamos o tipo específico *_mensalidade.
  */
 export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
   const categoria = normalizarCategoria(socio.categoria);
   if (categoria) {
-    return /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
+    return categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
   }
 
-  return TIPOS_DEPENDENTE_COM_MENSALIDADE.has(
-    String(socio.tipo_socio ?? "").trim().toLowerCase()
-  );
+  return TIPOS_DEPENDENTE_COM_MENSALIDADE.has(normalizarTipo(socio.tipo_socio));
 }
 
-/** Aplica uma regra única para a tela e para a API de geração. */
+/** Aplica a mesma regra na tela, na prévia e na API de geração. */
 export function socioElegivelParaMensalidade(socio: CadastroMensalidade): boolean {
   if (
     socio.ativo === false ||
-    String(socio.situacao ?? "").trim().toLowerCase() === "inativo"
+    normalizarCategoria(socio.situacao) === "inativo"
   ) {
     return false;
   }
 
-  if (Boolean(socio.responsavel_id)) {
+  if (ehDependente(socio)) {
     return dependenteTemMensalidade(socio);
   }
 
