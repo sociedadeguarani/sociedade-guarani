@@ -23,6 +23,33 @@ function erroBanco(error: unknown) {
   return [e?.message, e?.details, e?.hint, e?.code ? `Código ${e.code}` : ""].filter(Boolean).join(" — ");
 }
 
+function normalizarClassificacao(valor: unknown): string {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
+  const ehDependente = Boolean(socio.responsavel_id);
+  const remido = socio.remido === true ||
+    normalizarClassificacao(socio.tipo_socio).includes("remido") ||
+    normalizarClassificacao(socio.categoria).includes("remido");
+  const possuiMensalidadeElegivel = ehDependente
+    ? dependenteTemMensalidade({
+        categoria: typeof socio.categoria === "string" ? socio.categoria : null,
+        tipo_socio: typeof socio.tipo_socio === "string" ? socio.tipo_socio : null,
+      })
+    : socio.possui_mensalidade === true;
+
+  // A página precisa saber quais registros exibir, mas não precisa receber
+  // o indicador financeiro quando o perfil não tem permissão para vê-lo.
+  return possuiMensalidadeElegivel || (remido && !ehDependente);
+}
+
 export async function GET(request: Request) {
   try {
     const auth = await requireRoles(request, ["funcionario", "funcionario_inventario", "administrador_master", "administrador"], ["menu.socios", "socios.consultar"]);
@@ -48,10 +75,23 @@ export async function GET(request: Request) {
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
       return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0, camposVisiveis });
     }
-    // Não filtrar por possui_mensalidade: remidos e dependentes sem cobrança continuam fazendo parte do cadastro.
-    const { data, error } = await db.from("socios").select(colunas.join(",")).order("matricula", { ascending: true });
+    // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
+    // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
+    // nunca o campo financeiro nem valores de mensalidade.
+    const colunasConsulta = Array.from(new Set([...colunas, "possui_mensalidade"]));
+    const { data, error } = await db.from("socios").select(colunasConsulta.join(",")).order("matricula", { ascending: true });
     if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-    return NextResponse.json({ socios: data || [], camposVisiveis });
+
+    const socios = (data || []).map((socio) => {
+      const resultado: Record<string, unknown> = {
+        ...socio,
+        exibir_na_lista_socios: deveExibirNaListaSocios(socio as Record<string, unknown>),
+      };
+      if (!podeVerFinanceiro) delete resultado.possui_mensalidade;
+      return resultado;
+    });
+
+    return NextResponse.json({ socios, camposVisiveis });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
