@@ -85,8 +85,19 @@ function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria" | "remido">
 }
 
 function socioDeveAparecerNaLista(socio: Pick<Socio, "exibir_na_lista_socios" | "possui_mensalidade" | "responsavel_id" | "tipo_socio" | "categoria" | "remido">): boolean {
-  if (typeof socio.exibir_na_lista_socios === "boolean") return socio.exibir_na_lista_socios;
-  return socio.possui_mensalidade === true || (socioEhRemido(socio) && !socio.responsavel_id);
+  const tipo = normalizarTipoParaFiltro(socio.tipo_socio);
+  const categoria = normalizarTipoParaFiltro(socio.categoria);
+  const ehDependente = Boolean(socio.responsavel_id) || tipo.startsWith("dependente_") || categoria.includes("dependente");
+
+  // A lista Sócios deve continuar mostrando os titulares, inclusive remidos
+  // e cadastros sem cobrança própria. A elegibilidade de mensalidade não pode
+  // esconder o cadastro principal. Somente dependentes sem cobrança própria
+  // ficam na área específica de Dependentes/Famílias.
+  if (!ehDependente) return true;
+
+  // Para dependentes, o tipo explícito *_mensalidade é a fonte de verdade.
+  // Não usamos o possui_mensalidade legado, que pode estar desatualizado.
+  return dependenteTemMensalidade(socio);
 }
 
 type Mensalidade = {
