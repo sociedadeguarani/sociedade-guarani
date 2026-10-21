@@ -79,13 +79,22 @@ export async function GET(request: Request) {
     // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
     // nunca o campo financeiro nem valores de mensalidade.
     const colunasConsulta = Array.from(new Set([...colunas, "possui_mensalidade"]));
-    const { data, error } = await db.from("socios").select(colunasConsulta.join(",")).order("matricula", { ascending: true });
-    if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
+    const consulta = await db
+      .from("socios")
+      .select(colunasConsulta.join(","))
+      .order("matricula", { ascending: true });
+    if (consulta.error) {
+      return NextResponse.json({ error: erroBanco(consulta.error) }, { status: 500 });
+    }
 
-    const socios = (data || []).map((socio) => {
+    // O select dinâmico do Supabase pode produzir GenericStringError no tipo
+    // estático, embora a resposta bem-sucedida seja uma lista de registros.
+    // A conversão passa por unknown para manter a fronteira explícita.
+    const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
+    const socios = registros.map((socio) => {
       const resultado: Record<string, unknown> = {
         ...socio,
-        exibir_na_lista_socios: deveExibirNaListaSocios(socio as Record<string, unknown>),
+        exibir_na_lista_socios: deveExibirNaListaSocios(socio),
       };
       if (!podeVerFinanceiro) delete resultado.possui_mensalidade;
       return resultado;
