@@ -1,5 +1,6 @@
 /** Regras centralizadas para decidir quem pode receber mensalidade própria. */
 export type CadastroMensalidade = {
+  matricula?: unknown;
   categoria?: unknown;
   tipo_socio?: unknown;
   responsavel_id?: unknown;
@@ -48,15 +49,17 @@ function ehDependente(socio: CadastroMensalidade): boolean {
  * Quando a categoria está vazia, usamos o tipo específico *_mensalidade.
  */
 export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
+  const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+  // Regra oficial de matrícula: A paga mensalidade própria; B não paga.
+  // A regra do sufixo prevalece sobre categorias/tipos legados inconsistentes.
+  if (/A$/.test(matricula)) return true;
+  if (/B$/.test(matricula)) return false;
+
   const tipo = normalizarTipo(socio.tipo_socio);
   const categoria = normalizarCategoria(socio.categoria);
 
-  // Uma categoria legada de titular nunca pode liberar cobrança de dependente.
-  // Isso protege cadastros inconsistentes com responsavel_id preenchido.
-  if (categoria === "titular") return false;
-
-  // O tipo estruturado diferencia dependentes cobrados dos sem mensalidade.
-  // Ele prevalece sobre categorias antigas/genéricas de dependente.
+  // O tipo estruturado diferencia inequivocamente dependentes cobrados dos
+  // dependentes sem mensalidade. Ele deve prevalecer sobre categoria legada.
   if (TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo)) return true;
   if (tipo.startsWith("dependente_")) return false;
 
@@ -67,12 +70,16 @@ export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
 
 /** Aplica a mesma regra na tela, na prévia e na API de geração. */
 export function socioElegivelParaMensalidade(socio: CadastroMensalidade): boolean {
+  const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+  if (/B$/.test(matricula)) return false;
   if (
     socio.ativo === false ||
     normalizarCategoria(socio.situacao) === "inativo"
   ) {
     return false;
   }
+
+  if (/A$/.test(matricula)) return true;
 
   if (ehDependente(socio)) {
     return dependenteTemMensalidade(socio);
