@@ -84,7 +84,13 @@ function socioEhRemido(socio: Pick<Socio, "tipo_socio" | "categoria" | "remido">
   );
 }
 
-function socioDeveAparecerNaLista(socio: Pick<Socio, "exibir_na_lista_socios" | "possui_mensalidade" | "responsavel_id" | "tipo_socio" | "categoria" | "remido">): boolean {
+function socioDeveAparecerNaLista(socio: Pick<Socio, "matricula" | "exibir_na_lista_socios" | "possui_mensalidade" | "responsavel_id" | "tipo_socio" | "categoria" | "remido">): boolean {
+  const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+  // A matrícula A sempre pertence à lista Sócios, mesmo quando o tipo legado
+  // contém a palavra dependente. A matrícula B permanece na lista Dependentes.
+  if (/A$/.test(matricula)) return true;
+  if (/B$/.test(matricula)) return false;
+
   const tipo = normalizarTipoParaFiltro(socio.tipo_socio);
   const categoria = normalizarTipoParaFiltro(socio.categoria);
   const ehDependente = Boolean(socio.responsavel_id) || tipo.startsWith("dependente_") || categoria.includes("dependente");
