@@ -50,16 +50,8 @@ const atalhosAssociado = [
 ];
 
 export default function PainelPage() {
-  const [nome] = useState(() =>
-    typeof window === "undefined"
-      ? "Usuário"
-      : window.localStorage.getItem("guarani_usuario_nome") || "Usuário",
-  );
-  const [perfil] = useState(() =>
-    typeof window === "undefined"
-      ? ""
-      : window.localStorage.getItem("guarani_usuario_perfil") || "",
-  );
+  const [nome, setNome] = useState("Usuário");
+  const [perfil, setPerfil] = useState("");
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -75,6 +67,9 @@ export default function PainelPage() {
   const [carregandoPainel, setCarregandoPainel] = useState(true);
 
   useEffect(() => {
+    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
+    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
+
     let ativo = true;
 
     (async () => {
@@ -166,10 +161,14 @@ export default function PainelPage() {
         ========================= */
         if (dependentesResponse.ok) {
           const sociosParaDependentes = Array.isArray(dependentesJson.socios)
-            ? dependentesJson.socios
+            ? dependentesJson.socios.filter(
+                (socio: any) => !String(socio?.matricula || "").trim().toUpperCase().endsWith("A")
+              )
             : [];
           const dependentesCadastrados = Array.isArray(dependentesJson.dependentes)
-            ? dependentesJson.dependentes
+            ? dependentesJson.dependentes.filter(
+                (dependente: any) => !String(dependente?.matricula || "").trim().toUpperCase().endsWith("A")
+              )
             : [];
 
           // A listagem /dependentes usa a mesma normalização e classificação.
