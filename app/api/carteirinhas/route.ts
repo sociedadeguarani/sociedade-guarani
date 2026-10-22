@@ -317,7 +317,7 @@ export async function GET(request: Request) {
     // usa a matrícula TE e não cria/duplica registro em `socios`.
     let temporadas: any[] = [];
 
-    if (auth.usuario.perfil !== "associado") {
+    if (auth.usuario.perfil !== "associado" && !modoDependentes) {
       const colunasTemporada = ["id", "tipo", "modalidade", "codigo", "matricula", "inicio", "fim", "situacao", "responsavel_nome", "responsavel_cpf", "responsavel_telefone", "responsavel_email"];
       if (podeVerFinanceiro) colunasTemporada.push("valor_total");
       const { data: temporadasDb, error: temporadasError } = await supabase
