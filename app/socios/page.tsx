@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import { dependenteTemMensalidade, tipoDependenteComMensalidade, tipoDependenteSemMensalidade } from "@/lib/regrasMensalidade";
+import { dependenteTemMensalidade, socioElegivelParaMensalidade, tipoDependenteComMensalidade, tipoDependenteSemMensalidade } from "@/lib/regrasMensalidade";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -484,8 +484,8 @@ export default function Home() {
     try {
       const pessoasComMensalidade = socios.filter(
         (s) =>
-          s.possui_mensalidade === true &&
-          Number(s.valor_mensalidade || 0) >= 0 &&
+          socioElegivelParaMensalidade(s) &&
+          Number(s.valor_mensalidade || 0) > 0 &&
           s.situacao?.toLowerCase() !== "inativo"
       );
 
@@ -808,8 +808,13 @@ export default function Home() {
       setSocios(sociosRecebidos.map((socio) => {
         const remido = socioEhRemido(socio);
         const tipoLegadoRemido = normalizarTipoParaFiltro(socio.tipo_socio) === "remido";
+        const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+        const terminaA = /A$/.test(matricula);
+        const terminaB = /B$/.test(matricula);
         const ehDependente = Boolean(socio.responsavel_id);
-        const dependentePaga = ehDependente ? dependenteTemMensalidade(socio) : false;
+        // A matrícula A é um associado pagador próprio, mesmo que mantenha
+        // vínculo familiar com outro responsável. B nunca recebe cobrança própria.
+        const dependentePaga = terminaA || (!terminaB && ehDependente && dependenteTemMensalidade(socio));
         const tipoDependente = ehDependente
           ? (dependentePaga
               ? tipoDependenteComMensalidade(socio.tipo_socio || "dependente_patrimonial_familiar")
@@ -821,8 +826,10 @@ export default function Home() {
           ...(ehDependente ? {
             categoria: dependentePaga ? "Dependente com Mensalidade" : "Dependente",
             possui_mensalidade: dependentePaga,
-            valor_mensalidade: dependentePaga ? Number(socio.valor_mensalidade || 0) : 0,
-          } : {}),
+            // Preserva valor configurado em A; B fica sem valor de cobrança própria.
+            valor_mensalidade: terminaB ? 0 : (dependentePaga ? Number(socio.valor_mensalidade || 0) : 0),
+          } : (terminaA ? { possui_mensalidade: true } : {})),
+          ...(terminaB ? { possui_mensalidade: false, valor_mensalidade: 0 } : {}),
           // Quando o tipo legado era apenas "remido", mostramos Patrimonial genérico
           // até que o cadastro familiar/individual seja confirmado.
           tipo_socio: tipoLegadoRemido
