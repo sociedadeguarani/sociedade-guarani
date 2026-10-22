@@ -1902,6 +1902,8 @@ function Socios({
                         <img
                           src={socio.foto_url}
                           alt={`Foto de ${socio.nome}`}
+                          loading="lazy"
+                          decoding="async"
                           className="h-11 w-11 rounded-full object-cover ring-2 ring-[#eef3ef]"
                         />
                       ) : (
