@@ -259,6 +259,8 @@ export default function DependentesPage() {
       }));
 
       const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
+        // Matrícula terminada em A é titular e deve ser exibida em Sócios, nunca como dependente.
+        .filter((d: any) => !String(d.matricula || "").trim().toUpperCase().endsWith("A"))
         .map((d: any) => ({
           id: String(d.id),
           socio_id: String(d.socio_id),
@@ -271,8 +273,8 @@ export default function DependentesPage() {
           telefone: d.telefone ?? d.whatsapp ?? null,
           ativo: d.ativo !== false,
           created_at: d.created_at ?? null,
-          possui_mensalidade: Boolean(d.possui_mensalidade),
-          valor_mensalidade: Number(d.valor_mensalidade || 0),
+          possui_mensalidade: String(d.matricula || "").trim().toUpperCase().endsWith("B") ? false : Boolean(d.possui_mensalidade),
+          valor_mensalidade: String(d.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(d.valor_mensalidade || 0),
           dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
           tipo_pagamento: d.tipo_pagamento ?? null,
           situacao_financeira: d.situacao_financeira ?? null,
@@ -292,6 +294,8 @@ export default function DependentesPage() {
 
       const dependentesSocios: Dependente[] = sociosNormalizados
         .filter((s) => ehDependenteFamiliarSocio(s))
+        // Titulares com matrícula A permanecem exclusivamente na listagem de Sócios.
+        .filter((s) => !String(s.matricula || "").trim().toUpperCase().endsWith("A"))
         .filter((s) => !chavesExistentes.has(normalizarTexto(s.nome)) && !chavesExistentes.has(normalizarTexto(s.matricula)))
         .map((s) => ({
           id: `socio:${s.id}`,
@@ -305,8 +309,8 @@ export default function DependentesPage() {
           telefone: s.telefone ?? null,
           ativo: s.situacao !== "inativo",
           created_at: null,
-          possui_mensalidade: s.possui_mensalidade === true,
-          valor_mensalidade: Number(s.valor_mensalidade || 0),
+          possui_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? false : s.possui_mensalidade === true,
+          valor_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(s.valor_mensalidade || 0),
           dia_vencimento: s.dia_vencimento ?? 10,
           tipo_pagamento: s.tipo_pagamento ?? null,
           situacao_financeira: s.situacao_financeira ?? null,
@@ -454,11 +458,11 @@ export default function DependentesPage() {
       parentesco: form.parentesco || null,
       telefone: form.telefone.trim() || null,
       ativo: form.ativo,
-      possui_mensalidade: form.possui_mensalidade,
-      valor_mensalidade: form.possui_mensalidade ? Number(form.valor_mensalidade || 0) : 0,
+      possui_mensalidade: Boolean(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) ? false : form.possui_mensalidade,
+      valor_mensalidade: Boolean(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) ? 0 : form.possui_mensalidade ? Number(form.valor_mensalidade || 0) : 0,
       dia_vencimento: Number(form.dia_vencimento || 10),
-      tipo_pagamento: form.possui_mensalidade ? form.tipo_pagamento : "pix",
-      situacao_financeira: form.possui_mensalidade ? form.situacao_financeira : "isento",
+      tipo_pagamento: !(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) && form.possui_mensalidade ? form.tipo_pagamento : "pix",
+      situacao_financeira: !(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) && form.possui_mensalidade ? form.situacao_financeira : "isento",
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
