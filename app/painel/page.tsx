@@ -88,184 +88,89 @@ export default function PainelPage() {
           Authorization: `Bearer ${session.access_token}`,
         };
 
-        // Consultas independentes em paralelo.
-        const [
-          sociosResponse,
-          dependentesResponse,
-          reservasResponse,
-          notificacoesResponse,
-          temporadasResponse,
-        ] = await Promise.all([
-          fetch("/api/socios?resumo=1", {
-            headers,
-            cache: "no-store",
-          }),
+        // Cada card é atualizado assim que sua própria consulta termina.
+        // Assim, uma API lenta não segura as quantidades das demais.
+        const consultar = async (url: string) => {
+          const response = await fetch(url, { headers, cache: "no-store" });
+          const json = await response.json().catch(() => ({}));
+          return { response, json };
+        };
 
-          // Usar a mesma fonte da tela Dependentes, que combina a tabela
-          // dependentes com os dependentes familiares legados em socios.
-          fetch("/api/carteirinhas?modo=dependentes", {
-            headers,
-            cache: "no-store",
-          }),
+        const tarefas = [
+          (async () => {
+            try {
+              const { response, json } = await consultar("/api/socios?resumo=1");
+              if (!ativo || !response.ok) return;
+              const total = Number(json.total);
+              const ativos = Number(json.ativos);
+              const inativos = Number(json.inativos);
+              if (Number.isFinite(total)) setTotalSocios(total);
+              if (Number.isFinite(ativos)) setSociosAtivos(ativos);
+              if (Number.isFinite(inativos)) setSociosInativos(inativos);
+            } catch { /* Mantém o card indisponível se esta fonte falhar. */ }
+          })(),
+          (async () => {
+            try {
+              const { response, json } = await consultar("/api/carteirinhas?modo=dependentes");
+              if (!ativo || !response.ok) return;
+              const sociosParaDependentes = Array.isArray(json.socios)
+                ? json.socios.filter((socio: any) => !String(socio?.matricula || "").trim().toUpperCase().endsWith("A"))
+                : [];
+              const dependentesCadastrados = Array.isArray(json.dependentes)
+                ? json.dependentes.filter((dependente: any) => !String(dependente?.matricula || "").trim().toUpperCase().endsWith("A"))
+                : [];
+              const normalizar = (valor: unknown) => String(valor || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+              const ehDependenteFamiliarSocio = (socio: any) => {
+                if (!socio?.responsavel_id) return false;
+                const tipo = normalizar(socio.tipo_socio);
+                const categoria = normalizar(socio.categoria);
+                return [
+                  "dependente_patrimonial_familiar",
+                  "dependente_patrimonial_familiar_mensalidade",
+                  "dependente_contribuinte_familiar",
+                  "dependente_contribuinte_familiar_mensalidade",
+                ].includes(tipo) || categoria.includes("dependente patrimonial familiar") || categoria.includes("dependente contribuinte familiar");
+              };
+              const chavesExistentes = new Set(
+                dependentesCadastrados.flatMap((dependente: any) => [normalizar(dependente.nome), normalizar(dependente.matricula)]).filter(Boolean)
+              );
+              const dependentesLegados = sociosParaDependentes
+                .filter(ehDependenteFamiliarSocio)
+                .filter((socio: any) => !chavesExistentes.has(normalizar(socio.nome)) && !chavesExistentes.has(normalizar(socio.matricula)));
+              setTotalDependentes(dependentesCadastrados.length + dependentesLegados.length);
+            } catch { /* Mantém o card indisponível se esta fonte falhar. */ }
+          })(),
+          (async () => {
+            try {
+              const { response, json } = await consultar("/api/reservas?status=pendente");
+              if (!ativo || !response.ok) return;
+              const lista = Array.isArray(json.reservas) ? json.reservas : [];
+              setReservasPendentes(lista.filter((r: any) => r.status === "pendente").length);
+            } catch { /* Mantém o card indisponível se esta fonte falhar. */ }
+          })(),
+          (async () => {
+            try {
+              const { response, json } = await consultar("/api/notificacoes/admin?nao_lidas=true&limite=50");
+              if (!ativo || !response.ok) return;
+              const lista = Array.isArray(json.notificacoes) ? json.notificacoes : [];
+              const pendentes = lista.filter((n: any) =>
+                String(n.comprovante_status || "").toLowerCase() === "pendente" ||
+                String(n.origem_tipo || "").toLowerCase() === "pagamento"
+              );
+              setPixPendentes(pendentes.length);
+            } catch { /* Mantém o card indisponível se esta fonte falhar. */ }
+          })(),
+          (async () => {
+            try {
+              const { response, json } = await consultar("/api/temporadas");
+              if (!ativo || !response.ok) return;
+              const lista = Array.isArray(json.temporadas) ? json.temporadas : [];
+              setTotalTemporadas(lista.length);
+            } catch { /* Mantém o card indisponível se esta fonte falhar. */ }
+          })(),
+        ];
+        await Promise.all(tarefas);
 
-          fetch("/api/reservas?status=pendente", {
-            headers,
-            cache: "no-store",
-          }),
-
-          fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", {
-            headers,
-            cache: "no-store",
-          }),
-
-          fetch("/api/temporadas", {
-            headers,
-            cache: "no-store",
-          }),
-        ]);
-
-        const [
-          sociosJson,
-          dependentesJson,
-          reservasJson,
-          notificacoesJson,
-          temporadasJson,
-        ] = await Promise.all([
-          sociosResponse.json().catch(() => ({})),
-          dependentesResponse.json().catch(() => ({})),
-          reservasResponse.json().catch(() => ({})),
-          notificacoesResponse.json().catch(() => ({})),
-          temporadasResponse.json().catch(() => ({})),
-        ]);
-
-        if (!ativo) return;
-
-        /* =========================
-           SÓCIOS
-        ========================= */
-
-        if (sociosResponse.ok) {
-          // Usar o resumo calculado pela própria API, em vez de repetir aqui
-          // filtros de negócio que podem divergir da página /socios.
-          const total = Number(sociosJson.total);
-          const ativos = Number(sociosJson.ativos);
-          const inativos = Number(sociosJson.inativos);
-
-          if (Number.isFinite(total)) setTotalSocios(total);
-          if (Number.isFinite(ativos)) setSociosAtivos(ativos);
-          if (Number.isFinite(inativos)) setSociosInativos(inativos);
-        }
-
-        /* =========================
-           DEPENDENTES
-        ========================= */
-        if (dependentesResponse.ok) {
-          const sociosParaDependentes = Array.isArray(dependentesJson.socios)
-            ? dependentesJson.socios.filter(
-                (socio: any) => !String(socio?.matricula || "").trim().toUpperCase().endsWith("A")
-              )
-            : [];
-          const dependentesCadastrados = Array.isArray(dependentesJson.dependentes)
-            ? dependentesJson.dependentes.filter(
-                (dependente: any) => !String(dependente?.matricula || "").trim().toUpperCase().endsWith("A")
-              )
-            : [];
-
-          // A listagem /dependentes usa a mesma normalização e classificação.
-          const normalizarTextoDependente = (valor: unknown) =>
-            String(valor || "")
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .trim()
-              .toLowerCase();
-
-          const ehDependenteFamiliarSocio = (socio: any) => {
-            if (!socio?.responsavel_id) return false;
-            const tipo = normalizarTextoDependente(socio.tipo_socio);
-            const categoria = normalizarTextoDependente(socio.categoria);
-            return (
-              tipo === "dependente_patrimonial_familiar" ||
-              tipo === "dependente_patrimonial_familiar_mensalidade" ||
-              tipo === "dependente_contribuinte_familiar" ||
-              tipo === "dependente_contribuinte_familiar_mensalidade" ||
-              categoria.includes("dependente patrimonial familiar") ||
-              categoria.includes("dependente contribuinte familiar")
-            );
-          };
-
-          // A tela /dependentes elimina duplicatas por nome ou matrícula,
-          // sem criar uma segunda pessoa para cadastros familiares legados.
-          const chavesExistentes = new Set(
-            dependentesCadastrados
-              .flatMap((dependente: any) => [
-                normalizarTextoDependente(dependente.nome),
-                normalizarTextoDependente(dependente.matricula),
-              ])
-              .filter(Boolean)
-          );
-
-          const dependentesLegados = sociosParaDependentes
-            .filter(ehDependenteFamiliarSocio)
-            .filter(
-              (socio: any) =>
-                !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
-                !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
-            );
-
-          setTotalDependentes(dependentesCadastrados.length + dependentesLegados.length);
-        }
-
-        /* =========================
-           TEMPORADAS
-        ========================= */
-
-        if (temporadasResponse.ok) {
-          const listaTemporadas = Array.isArray(
-            temporadasJson.temporadas
-          )
-            ? temporadasJson.temporadas
-            : [];
-
-          setTotalTemporadas(listaTemporadas.length);
-        }
-
-        /* =========================
-           RESERVAS
-        ========================= */
-
-        if (reservasResponse.ok) {
-          const lista = Array.isArray(reservasJson.reservas)
-            ? reservasJson.reservas
-            : [];
-
-          setReservasPendentes(
-            lista.filter(
-              (r: any) => r.status === "pendente"
-            ).length
-          );
-        }
-
-        /* =========================
-           PIX
-        ========================= */
-
-        if (notificacoesResponse.ok) {
-          const lista = Array.isArray(
-            notificacoesJson.notificacoes
-          )
-            ? notificacoesJson.notificacoes
-            : [];
-
-          const pendentes = lista.filter(
-            (n: any) =>
-              String(n.comprovante_status || "").toLowerCase() ===
-                "pendente" ||
-              String(n.origem_tipo || "").toLowerCase() ===
-                "pagamento"
-          );
-
-          setPixPendentes(pendentes.length);
-        }
       } catch {
         // Os cards individuais permanecem com "—"
         // quando alguma fonte falhar.
