@@ -665,7 +665,7 @@ export default function DependentesPage() {
                             <td className="px-3 py-3 sm:px-5 sm:py-4">
                               <div className="flex items-center gap-3">
                                 {d.foto_url ? (
-                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} loading="lazy" decoding="async" className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
                                 ) : (
                                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
                                     {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
