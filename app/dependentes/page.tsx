@@ -210,8 +210,19 @@ export default function DependentesPage() {
     });
   }, [dependentes, socioPorId, busca, filtroSocio, filtroStatus]);
 
-  const totalAtivos = dependentes.filter((d) => d.ativo === true).length;
-  const totalInativos = dependentes.filter((d) => d.ativo !== true).length;
+  // Calcula os totais apenas quando a lista de dependentes muda,
+  // evitando percorrer a lista novamente a cada alteração de filtro ou modal.
+  const { totalAtivos, totalInativos } = useMemo(() => {
+    let ativos = 0;
+    let inativos = 0;
+
+    for (const dependente of dependentes) {
+      if (dependente.ativo === true) ativos += 1;
+      else inativos += 1;
+    }
+
+    return { totalAtivos: ativos, totalInativos: inativos };
+  }, [dependentes]);
 
   const carregarDados = useCallback(async () => {
     setCarregando(true);
