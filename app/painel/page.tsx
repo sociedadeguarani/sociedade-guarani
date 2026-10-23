@@ -102,7 +102,10 @@ export default function PainelPage() {
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
           const sociosParaDependentes = Array.isArray(json.socios) ? json.socios : [];
-          const dependentesCadastrados = Array.isArray(json.dependentes) ? json.dependentes : [];
+          // Manter a mesma regra da tela /dependentes: matrículas terminadas em A
+          // identificam titulares e não devem entrar na contagem de dependentes.
+          const dependentesCadastrados = (Array.isArray(json.dependentes) ? json.dependentes : [])
+            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"));
           const normalizarTextoDependente = (valor: unknown) => String(valor || "")
             .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
           const ehDependenteFamiliarSocio = (socio: any) => {
@@ -124,6 +127,8 @@ export default function PainelPage() {
           );
           const dependentesLegados = sociosParaDependentes
             .filter(ehDependenteFamiliarSocio)
+            // Igual à tela de Dependentes: titulares com matrícula A ficam em Sócios.
+            .filter((socio: any) => !String(socio.matricula || "").trim().toUpperCase().endsWith("A"))
             .filter((socio: any) =>
               !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
               !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
