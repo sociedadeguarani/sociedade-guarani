@@ -205,17 +205,23 @@ export async function GET(request: Request) {
 
     // Histórico financeiro só é consultado quando a permissão de exibição foi concedida.
     if (podeVerFinanceiro) {
-      // Não usar .in() com todos os IDs de uma vez.
-      for (const lote of emLotes(ids, 100)) {
-        const { data, error } = await supabase
-          .from("mensalidades")
-          .select("socio_id,data_vencimento,competencia,situacao,valor")
-          .in("socio_id", lote)
-          .lt("data_vencimento", hoje);
+      // Consulta os lotes em paralelo para reduzir o tempo de espera.
+      // Mantém o limite de 100 IDs por consulta e só continua se todos os lotes
+      // forem lidos com sucesso, preservando os cálculos financeiros existentes.
+      const lotesMensalidades = emLotes(ids, 100);
+      const resultadosMensalidades = await Promise.all(
+        lotesMensalidades.map(async (lote) => {
+          const { data, error } = await supabase
+            .from("mensalidades")
+            .select("socio_id,data_vencimento,competencia,situacao,valor")
+            .in("socio_id", lote)
+            .lt("data_vencimento", hoje);
 
-        if (error) throw error;
-        mensalidades.push(...(data || []));
-      }
+          if (error) throw error;
+          return data || [];
+        })
+      );
+      mensalidades.push(...resultadosMensalidades.flat());
     }
 
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
