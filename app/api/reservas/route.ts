@@ -372,6 +372,18 @@ export async function GET(request: Request) {
 
     const db = getServiceClient();
 
+    // Resumo leve para o painel: contar reservas pendentes sem carregar
+    // dados pessoais, comprovantes, espaços ou gerar links temporários.
+    if (url.searchParams.get("resumo") === "pendentes") {
+      const { count, error } = await db
+        .from("reservas")
+        .select("id", { count: "exact", head: true })
+        .in("situacao", ["solicitada", "aguardando_pagamento"]);
+
+      if (error) throw error;
+      return NextResponse.json({ total: count ?? 0 });
+    }
+
     // A chamada inicial da tela precisa apenas dos espaços e contas; buscar
     // todas as reservas e assinar seus anexos aqui era trabalho duplicado.
     if (dados === "base") {
