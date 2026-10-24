@@ -1,4 +1,4 @@
-"use client";
+use client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -50,16 +50,8 @@ const atalhosAssociado = [
 ];
 
 export default function PainelPage() {
-  const [nome] = useState(() =>
-    typeof window !== "undefined"
-      ? window.localStorage.getItem("guarani_usuario_nome") || "Usuário"
-      : "Usuário"
-  );
-  const [perfil] = useState(() =>
-    typeof window !== "undefined"
-      ? window.localStorage.getItem("guarani_usuario_perfil") || ""
-      : ""
-  );
+  const [nome, setNome] = useState("Usuário");
+  const [perfil, setPerfil] = useState("");
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -74,6 +66,9 @@ export default function PainelPage() {
 
 
   useEffect(() => {
+    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
+    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
+
     let ativo = true;
 
     async function carregarResumo() {
@@ -107,10 +102,7 @@ export default function PainelPage() {
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
           const sociosParaDependentes = Array.isArray(json.socios) ? json.socios : [];
-          // Manter a mesma regra da tela /dependentes: matrículas terminadas em A
-          // identificam titulares e não devem entrar na contagem de dependentes.
-          const dependentesCadastrados = (Array.isArray(json.dependentes) ? json.dependentes : [])
-            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"));
+          const dependentesCadastrados = Array.isArray(json.dependentes) ? json.dependentes : [];
           const normalizarTextoDependente = (valor: unknown) => String(valor || "")
             .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
           const ehDependenteFamiliarSocio = (socio: any) => {
@@ -132,8 +124,6 @@ export default function PainelPage() {
           );
           const dependentesLegados = sociosParaDependentes
             .filter(ehDependenteFamiliarSocio)
-            // Igual à tela de Dependentes: titulares com matrícula A ficam em Sócios.
-            .filter((socio: any) => !String(socio.matricula || "").trim().toUpperCase().endsWith("A"))
             .filter((socio: any) =>
               !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
               !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
