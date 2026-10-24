@@ -102,42 +102,12 @@ export default function PainelPage() {
           if (Number.isFinite(inativos)) setSociosInativos(inativos);
         })(),
         (async () => {
-          const response = await fetch("/api/carteirinhas?modo=dependentes", { headers, cache: "no-store" });
+          // O painel precisa apenas do total; não carrega carteirinhas nem dados financeiros.
+          const response = await fetch("/api/dependentes/resumo", { headers, cache: "no-store" });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
-          const sociosParaDependentes = Array.isArray(json.socios) ? json.socios : [];
-          // Manter a mesma regra da tela /dependentes: matrículas terminadas em A
-          // identificam titulares e não devem entrar na contagem de dependentes.
-          const dependentesCadastrados = (Array.isArray(json.dependentes) ? json.dependentes : [])
-            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"));
-          const normalizarTextoDependente = (valor: unknown) => String(valor || "")
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-          const ehDependenteFamiliarSocio = (socio: any) => {
-            if (!socio?.responsavel_id) return false;
-            const tipo = normalizarTextoDependente(socio.tipo_socio);
-            const categoria = normalizarTextoDependente(socio.categoria);
-            return tipo === "dependente_patrimonial_familiar" ||
-              tipo === "dependente_patrimonial_familiar_mensalidade" ||
-              tipo === "dependente_contribuinte_familiar" ||
-              tipo === "dependente_contribuinte_familiar_mensalidade" ||
-              categoria.includes("dependente patrimonial familiar") ||
-              categoria.includes("dependente contribuinte familiar");
-          };
-          const chavesExistentes = new Set(
-            dependentesCadastrados.flatMap((dependente: any) => [
-              normalizarTextoDependente(dependente.nome),
-              normalizarTextoDependente(dependente.matricula),
-            ]).filter(Boolean)
-          );
-          const dependentesLegados = sociosParaDependentes
-            .filter(ehDependenteFamiliarSocio)
-            // Igual à tela de Dependentes: titulares com matrícula A ficam em Sócios.
-            .filter((socio: any) => !String(socio.matricula || "").trim().toUpperCase().endsWith("A"))
-            .filter((socio: any) =>
-              !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
-              !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
-            );
-          setTotalDependentes(dependentesCadastrados.length + dependentesLegados.length);
+          const total = Number(json.total);
+          if (Number.isFinite(total)) setTotalDependentes(total);
         })(),
         (async () => {
           const response = await fetch("/api/reservas?status=pendente", { headers, cache: "no-store" });
