@@ -50,8 +50,16 @@ const atalhosAssociado = [
 ];
 
 export default function PainelPage() {
-  const [nome, setNome] = useState("Usuário");
-  const [perfil, setPerfil] = useState("");
+  const [nome] = useState(() =>
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("guarani_usuario_nome") || "Usuário"
+      : "Usuário"
+  );
+  const [perfil] = useState(() =>
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("guarani_usuario_perfil") || ""
+      : ""
+  );
 
   const [totalSocios, setTotalSocios] = useState<number | null>(null);
   const [sociosAtivos, setSociosAtivos] = useState<number | null>(null);
@@ -66,9 +74,6 @@ export default function PainelPage() {
 
 
   useEffect(() => {
-    setNome(localStorage.getItem("guarani_usuario_nome") || "Usuário");
-    setPerfil(localStorage.getItem("guarani_usuario_perfil") || "");
-
     let ativo = true;
 
     async function carregarResumo() {
@@ -154,11 +159,11 @@ export default function PainelPage() {
           setPixPendentes(pendentes.length);
         })(),
         (async () => {
-          const response = await fetch("/api/temporadas", { headers, cache: "no-store" });
+          const response = await fetch("/api/temporadas?resumo=1", { headers, cache: "no-store" });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
-          const lista = Array.isArray(json.temporadas) ? json.temporadas : [];
-          setTotalTemporadas(lista.length);
+          const total = Number(json.total);
+          if (Number.isFinite(total)) setTotalTemporadas(total);
         })(),
       ];
 
