@@ -317,15 +317,14 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    // O painel principal precisa somente da quantidade de temporadas.
-    // Mantém a consulta completa abaixo para a tela de gerenciamento.
+    // O painel precisa apenas do total. Não carregue parcelas, participantes
+    // e dados completos das temporadas para atualizar um único indicador.
     if (new URL(request.url).searchParams.get("resumo") === "1") {
       const { count, error } = await auth.db
         .from("temporadas")
         .select("id", { count: "exact", head: true });
-
       if (error) throw error;
-      return NextResponse.json({ total: count ?? 0 });
+      return NextResponse.json({ total: count || 0 });
     }
 
     const { data: temporadas, error } = await auth.db
