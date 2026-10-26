@@ -147,13 +147,21 @@ export default function PainelPage() {
           if (Number.isFinite(total)) setReservasPendentes(total);
         })(),
         (async () => {
-          const response = await fetch("/api/notificacoes/admin?nao_lidas=true&limite=50", { headers, cache: "no-store" });
+          // Marcar uma notificação como lida não confirma o pagamento.
+          // Consultamos lidas e não lidas e contamos somente PIX explicitamente
+          // identificado com comprovante ainda pendente.
+          const response = await fetch("/api/notificacoes/admin?nao_lidas=false&limite=100", { headers, cache: "no-store" });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
           const lista = Array.isArray(json.notificacoes) ? json.notificacoes : [];
+          const normalizar = (valor: unknown) => String(valor || "")
+            .normalize("NFD")
+            .replace(/[\\u0300-\\u036f]/g, "")
+            .trim()
+            .toLowerCase();
           const pendentes = lista.filter((n: any) =>
-            String(n.comprovante_status || "").toLowerCase() === "pendente" ||
-            String(n.origem_tipo || "").toLowerCase() === "pagamento"
+            normalizar(n.comprovante_status) === "pendente" &&
+            normalizar(n.forma_pagamento).includes("pix")
           );
           setPixPendentes(pendentes.length);
         })(),
