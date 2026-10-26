@@ -457,17 +457,50 @@ export default function RelatoriosPage() {
             margin: 10mm;
             @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #64748b; }
           }
-          body { background: white !important; font-size: 9pt !important; }
-          table { width: 100% !important; min-width: 0 !important; border-collapse: collapse !important; }
+          html, body { width: 100% !important; min-width: 0 !important; height: auto !important; overflow: visible !important; }
+          body { background: white !important; font-size: 8.5pt !important; }
+          table { width: 100% !important; min-width: 0 !important; border-collapse: collapse !important; table-layout: auto !important; }
           thead { display: table-header-group !important; }
           tfoot { display: table-footer-group !important; }
           tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          th, td { padding: 5px 6px !important; font-size: 8pt !important; }
-          h1 { font-size: 20pt !important; }
-          h2 { break-after: avoid-page; }
-          .relatorio-tabela { overflow: visible !important; }
+          th, td { padding: 4px 5px !important; font-size: 7.5pt !important; vertical-align: top !important; }
+          h1 { font-size: 19pt !important; line-height: 1.15 !important; }
+          h2 { break-after: avoid-page; font-size: 11pt !important; }
+          p { orphans: 2; widows: 2; }
+          .relatorio-tabela { overflow: visible !important; width: 100% !important; }
           .relatorio-linha { break-inside: avoid !important; }
           .print-apenas { display: block !important; }
+          .print-resumo-grade { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-resumo-grade > div { min-width: 0 !important; padding: 8px !important; }
+          .print-resumo-grade > div p:first-child { font-size: 7.5pt !important; line-height: 1.2 !important; }
+          .print-resumo-grade > div p:nth-child(2) { font-size: 13pt !important; line-height: 1.2 !important; overflow-wrap: anywhere !important; }
+          .print-resumo-grade > div p:last-child { font-size: 6.5pt !important; line-height: 1.2 !important; }
+          .print-categorias-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+          .print-categorias-grade > section { min-width: 0 !important; padding: 10px !important; }
+          .print-categorias-grade .print-lista-categoria { margin-top: 7px !important; }
+          .print-categorias-grade .print-lista-categoria > div { padding: 5px 7px !important; }
+          .print-categorias-grade .print-lista-categoria > div + div { margin-top: 4px !important; }
+          .print-formas-grade { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-formas-grade > div { min-width: 0 !important; padding: 8px !important; }
+          .print-formas-grade > div p:nth-child(2) { font-size: 12pt !important; }
+          .print-bancos-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-bancos-grade > div { min-width: 0 !important; padding: 8px !important; }
+          .print-bancos-grade h3 { font-size: 10pt !important; line-height: 1.2 !important; }
+          .print-bancos-grade .print-saldo-banco { margin-top: 7px !important; font-size: 14pt !important; line-height: 1.15 !important; }
+          .print-bancos-grade .print-detalhe-banco { margin-top: 7px !important; padding-top: 6px !important; }
+          .print-resumo-final-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-resumo-final-grade > div { padding: 8px !important; }
+          .relatorio-impressao section { margin-bottom: 9px !important; }
+          .relatorio-impressao .p-5 { padding: 10px !important; }
+          .relatorio-impressao .mb-6 { margin-bottom: 8px !important; }
+          .relatorio-impressao .mb-5 { margin-bottom: 7px !important; }
+          .relatorio-impressao .mb-4 { margin-bottom: 6px !important; }
+          .relatorio-impressao .mt-5 { margin-top: 7px !important; }
+          .relatorio-impressao .mt-4 { margin-top: 6px !important; }
+          .relatorio-impressao .mt-2 { margin-top: 3px !important; }
+          .relatorio-impressao .gap-6 { gap: 8px !important; }
+          .relatorio-impressao .gap-4 { gap: 7px !important; }
+          .relatorio-impressao .py-10, .relatorio-impressao .py-12 { padding-top: 6px !important; padding-bottom: 6px !important; }
 
           body * {
             visibility: hidden !important;
@@ -481,16 +514,22 @@ export default function RelatoriosPage() {
           .relatorio-impressao {
             position: absolute !important;
             left: 0 !important;
+            right: 0 !important;
             top: 0 !important;
-            width: 100% !important;
+            width: auto !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
             background: white !important;
           }
 
           .nao-imprimir { display: none !important; }
           .relatorio-impressao { margin: 0 !important; max-width: none !important; padding: 0 !important; }
           .sombra-impressao { box-shadow: none !important; border-color: #cbd5d1 !important; }
-          .relatorio-impressao section { break-inside: auto; page-break-inside: auto; }
+          .relatorio-impressao section { break-inside: auto !important; page-break-inside: auto !important; }
           .relatorio-impressao .rounded-2xl { border-radius: 4px !important; }
+          .relatorio-impressao .overflow-x-auto { overflow: visible !important; }
 
           .sombra-impressao {
             box-shadow: none !important;
@@ -628,7 +667,7 @@ export default function RelatoriosPage() {
           </div>
         ) : (
           <>
-            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="print-resumo-grade mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <Resumo
                 titulo="Saldo inicial"
                 valor={moeda(saldoInicialSelecionado)}
@@ -685,7 +724,7 @@ export default function RelatoriosPage() {
               </div>
             </div>
 
-            <div className="mb-6 grid gap-6 lg:grid-cols-2">
+            <div className="print-categorias-grade mb-6 grid gap-6 lg:grid-cols-2">
               <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-extrabold text-[#003d2b]">
                   Entradas por categoria
@@ -694,7 +733,7 @@ export default function RelatoriosPage() {
                   De onde vieram os recursos.
                 </p>
 
-                <div className="mt-5 space-y-3">
+                <div className="print-lista-categoria mt-5 space-y-3">
                   {categoriasEntrada.length === 0 ? (
                     <p className="text-sm text-gray-500">
                       Nenhuma entrada no período.
@@ -730,7 +769,7 @@ export default function RelatoriosPage() {
                   Onde os recursos foram utilizados.
                 </p>
 
-                <div className="mt-5 space-y-3">
+                <div className="print-lista-categoria mt-5 space-y-3">
                   {categoriasSaida.length === 0 ? (
                     <p className="text-sm text-gray-500">
                       Nenhuma saída no período.
@@ -764,7 +803,7 @@ export default function RelatoriosPage() {
                 <h2 className="text-lg font-extrabold text-[#003d2b]">Recebimentos por forma de pagamento</h2>
                 <p className="mt-1 text-sm text-gray-500">Entradas efetivamente registradas no livro financeiro; não soma a tabela de pagamentos novamente.</p>
               </div>
-              {recebimentosPorForma.length === 0 ? <p className="py-4 text-sm text-gray-500">Nenhum recebimento registrado no período.</p> : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{recebimentosPorForma.map((item) => <div key={item.forma} className="rounded-xl border border-[#e1e9e4] bg-[#f8fbf9] p-4"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{item.forma.replaceAll("_", " ")}</p><p className="mt-2 text-xl font-extrabold text-[#005a3c]">{moeda(item.valor)}</p><p className="mt-1 text-xs text-gray-500">{item.quantidade} lançamento(s)</p></div>)}</div>}
+              {recebimentosPorForma.length === 0 ? <p className="py-4 text-sm text-gray-500">Nenhum recebimento registrado no período.</p> : <div className="print-formas-grade grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{recebimentosPorForma.map((item) => <div key={item.forma} className="rounded-xl border border-[#e1e9e4] bg-[#f8fbf9] p-4"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{item.forma.replaceAll("_", " ")}</p><p className="mt-2 text-xl font-extrabold text-[#005a3c]">{moeda(item.valor)}</p><p className="mt-1 text-xs text-gray-500">{item.quantidade} lançamento(s)</p></div>)}</div>}
             </section>
 
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
@@ -777,7 +816,7 @@ export default function RelatoriosPage() {
                 </p>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="print-bancos-grade grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {linhasBancos.length === 0 ? (
                   <p className="text-sm text-gray-500">
                     Nenhuma conta bancária cadastrada.
@@ -801,11 +840,11 @@ export default function RelatoriosPage() {
                         </p>
                       )}
 
-                      <p className="mt-4 text-2xl font-extrabold text-[#005a3c]">
+                      <p className="print-saldo-banco mt-4 text-2xl font-extrabold text-[#005a3c]">
                         {moeda(linha.saldo)}
                       </p>
 
-                      <div className="mt-4 space-y-2 border-t border-[#dfe7e2] pt-3 text-xs">
+                      <div className="print-detalhe-banco mt-4 space-y-2 border-t border-[#dfe7e2] pt-3 text-xs">
                         <div className="flex justify-between">
                           <span className="text-gray-500">Entradas</span>
                           <strong className="text-green-700">
@@ -967,7 +1006,7 @@ export default function RelatoriosPage() {
                 Resumo para prestação de contas
               </h2>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="print-resumo-final-grade mt-5 grid gap-4 md:grid-cols-3">
                 <div className="rounded-xl bg-green-50 p-4">
                   <p className="text-xs font-bold uppercase text-gray-500">
                     Recursos recebidos
