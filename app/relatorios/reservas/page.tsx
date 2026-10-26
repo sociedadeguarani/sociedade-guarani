@@ -531,7 +531,7 @@ export default function RelatorioReservasPage() {
       <main className="relatorio-reservas-print mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
         <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <Link href="/relatorios" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar aos relatórios</Link>
+            <Link href="/reservas" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar às reservas</Link>
             <p className="text-sm font-medium text-gray-500">Administração</p>
             <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><><CalendarDays className="h-8 w-8" /> Agenda mensal de reservas</></h1>
             <p className="mt-1 text-gray-500">&quot;Veja todos os dias do mês, quais espaços estão reservados, por quem, o valor e a situação do pagamento.&quot;</p>
