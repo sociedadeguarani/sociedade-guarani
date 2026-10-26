@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -37,8 +36,8 @@ type Movimento = {
 };
 
 type MensalidadeRelatorio = {
-  id: string; socio_id: string | null; referencia: string; competencia: string | null; valor: number;
-  data_vencimento: string | null; situacao: string | null; data_pagamento: string | null;
+  id: string; socio_id: string | null; competencia: string | null; valor: number;
+  total_cobrado?: number | null; data_vencimento: string | null; situacao: string | null; data_pagamento: string | null;
   tipo_pagamento: string | null; numero_recibo: string | null;
 };
 
@@ -52,8 +51,40 @@ type LinhaBanco = {
 };
 
 const hoje = new Date();
+const hojeISO = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-${String(hoje.getDate()).padStart(2, "0")}`;
 const primeiroDiaAno = `${hoje.getFullYear()}-01-01`;
-const hojeISO = hoje.toISOString().slice(0, 10);
+const MESES_RELATORIO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+function statusMensalidade(valor: string | null | undefined) {
+  return String(valor || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+function mensalidadeFoiPaga(m: MensalidadeRelatorio) {
+  return Boolean(m.data_pagamento) || ["pago", "paga", "quitado", "quitada", "recebido", "recebida"].includes(statusMensalidade(m.situacao));
+}
+
+function valorMensalidade(m: MensalidadeRelatorio) {
+  return Number(m.total_cobrado != null && Number(m.total_cobrado) > 0 ? m.total_cobrado : m.valor ?? 0);
+}
+
+function mensalidadeIsenta(m: MensalidadeRelatorio) {
+  return ["isento", "isenta", "cancelado", "cancelada", "abonado", "abonada"].includes(statusMensalidade(m.situacao));
+}
+
+function origemFinanceira(m: Movimento) {
+  const origem = statusMensalidade(m.origem_tipo);
+  const categoria = statusMensalidade(m.categoria);
+  const texto = statusMensalidade(`${m.descricao} ${m.categoria || ""}`);
+  if (origem.includes("estorno") || origem.includes("ajuste")) return "Estornos e ajustes";
+  if (origem.includes("tarifa_mensalidade")) return "Tarifas de cobrança";
+  if (origem.includes("mensalidade")) return "Mensalidades";
+  if (origem.includes("reserva") || texto.includes("aluguel") || texto.includes("locacao")) return "Reservas e locações";
+  if (origem.includes("convite") || categoria.includes("convite")) return "Convites";
+  if (origem.includes("temporada") || categoria.includes("temporada")) return "Temporadas";
+  if (origem.includes("evento") || categoria.includes("evento")) return "Eventos";
+  if (origem.includes("manual")) return categoria && categoria !== "sem categoria" ? m.categoria!.trim() : "Lançamentos manuais";
+  return normalizarCategoria(m.categoria);
+}
 
 function moeda(valor: number | string | null | undefined) {
   return Number(valor || 0).toLocaleString("pt-BR", {
@@ -68,6 +99,13 @@ function dataBR(valor: string | null | undefined) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function competenciaBR(valor: string | null | undefined) {
+  if (!valor) return "—";
+  const [ano, mes] = valor.slice(0, 7).split("-");
+  const nomeMes = MESES_RELATORIO[Number(mes) - 1];
+  return nomeMes ? `${nomeMes}/${ano}` : valor;
+}
+
 function percentual(valor: number, total: number) {
   if (!total) return "0,0%";
   return `${((valor / total) * 100).toFixed(1).replace(".", ",")}%`;
@@ -77,6 +115,40 @@ function normalizarCategoria(valor: string | null) {
   return valor?.trim() || "Sem categoria";
 }
 
+async function consultarMovimentosPaginados() {
+  const todos: Movimento[] = [];
+  let offset = 0;
+  while (true) {
+    const pagina = await supabase
+      .from("movimentacoes_financeiras")
+      .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
+      .order("data_movimentacao", { ascending: false })
+      .range(offset, offset + 999);
+    if (pagina.error) return { data: null, error: pagina.error };
+    const itens = (pagina.data || []) as Movimento[];
+    todos.push(...itens);
+    if (itens.length < 1000) return { data: todos, error: null };
+    offset += itens.length;
+  }
+}
+
+async function consultarMensalidadesPaginadas() {
+  const todas: MensalidadeRelatorio[] = [];
+  let offset = 0;
+  while (true) {
+    const pagina = await supabase
+      .from("mensalidades")
+      .select("id,socio_id,competencia,valor,total_cobrado,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
+      .order("data_vencimento", { ascending: false })
+      .range(offset, offset + 999);
+    if (pagina.error) return { data: null, error: pagina.error };
+    const itens = (pagina.data || []) as MensalidadeRelatorio[];
+    todas.push(...itens);
+    if (itens.length < 1000) return { data: todas, error: null };
+    offset += itens.length;
+  }
+}
+
 async function consultarDadosRelatorio() {
   return Promise.all([
     supabase
@@ -84,14 +156,8 @@ async function consultarDadosRelatorio() {
       .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo")
       .eq("ativo", true)
       .order("nome"),
-    supabase
-      .from("movimentacoes_financeiras")
-      .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
-      .order("data_movimentacao", { ascending: false }),
-    supabase
-      .from("mensalidades")
-      .select("id,socio_id,referencia,competencia,valor,data_vencimento,situacao,data_pagamento,tipo_pagamento,numero_recibo")
-      .order("data_vencimento", { ascending: false }),
+    consultarMovimentosPaginados(),
+    consultarMensalidadesPaginadas(),
   ]);
 }
 
@@ -107,6 +173,8 @@ export default function RelatoriosPage() {
 
   const [dataInicial, setDataInicial] = useState(primeiroDiaAno);
   const [dataFinal, setDataFinal] = useState(hojeISO);
+  const [anoFiltro, setAnoFiltro] = useState(String(hoje.getFullYear()));
+  const [mesesFiltro, setMesesFiltro] = useState<number[]>([]);
   const [contaFiltro, setContaFiltro] = useState("todas");
   const [tipoFiltro, setTipoFiltro] = useState("todos");
 
@@ -174,34 +242,51 @@ export default function RelatoriosPage() {
     [contas]
   );
 
+  const usarMesesEspecificos = mesesFiltro.length > 0;
+  const dataInicioCalculo = useMemo(() => {
+    if (!usarMesesEspecificos) return dataInicial;
+    return `${anoFiltro}-${String(Math.min(...mesesFiltro)).padStart(2, "0")}-01`;
+  }, [usarMesesEspecificos, mesesFiltro, anoFiltro, dataInicial]);
+  const dataFimCalculo = useMemo(() => {
+    if (!usarMesesEspecificos) return dataFinal;
+    const ultimoMes = Math.max(...mesesFiltro);
+    return `${anoFiltro}-${String(ultimoMes).padStart(2, "0")}-${String(new Date(Number(anoFiltro), ultimoMes, 0).getDate()).padStart(2, "0")}`;
+  }, [usarMesesEspecificos, mesesFiltro, anoFiltro, dataFinal]);
+
   const movimentosPeriodo = useMemo(() => {
     return movimentos.filter((mov) => {
-      const dentroData =
-        (!dataInicial || mov.data_movimentacao >= dataInicial) &&
-        (!dataFinal || mov.data_movimentacao <= dataFinal);
+      const data = String(mov.data_movimentacao || "").slice(0, 10);
+      const dentroData = usarMesesEspecificos
+        ? data.startsWith(`${anoFiltro}-`) && mesesFiltro.includes(Number(data.slice(5, 7)))
+        : (!dataInicial || data >= dataInicial) && (!dataFinal || data <= dataFinal);
 
-      const dentroConta =
-        contaFiltro === "todas" ||
-        mov.conta_bancaria_id === contaFiltro ||
-        (mov.tipo === "transferencia" && mov.conta_destino_id === contaFiltro);
-
-      const dentroTipo =
-        tipoFiltro === "todos" || mov.tipo === tipoFiltro;
-
+      const dentroConta = contaFiltro === "todas" || mov.conta_bancaria_id === contaFiltro || (mov.tipo === "transferencia" && mov.conta_destino_id === contaFiltro);
+      const dentroTipo = tipoFiltro === "todos" || mov.tipo === tipoFiltro;
       return dentroData && dentroConta && dentroTipo;
     });
-  }, [movimentos, dataInicial, dataFinal, contaFiltro, tipoFiltro]);
+  }, [movimentos, dataInicial, dataFinal, anoFiltro, mesesFiltro, usarMesesEspecificos, contaFiltro, tipoFiltro]);
+
+  // Os saldos usam um intervalo contínuo mesmo quando a análise seleciona meses avulsos;
+  // os totais e categorias continuam limitados aos meses marcados.
+  const movimentosPeriodoSaldo = useMemo(() => movimentos.filter((mov) => {
+    const data = String(mov.data_movimentacao || "").slice(0, 10);
+    const dentroData = (!dataInicioCalculo || data >= dataInicioCalculo) && (!dataFimCalculo || data <= dataFimCalculo);
+    const dentroConta = contaFiltro === "todas" || mov.conta_bancaria_id === contaFiltro || (mov.tipo === "transferencia" && mov.conta_destino_id === contaFiltro);
+    return dentroData && dentroConta;
+  }), [movimentos, dataInicioCalculo, dataFimCalculo, contaFiltro]);
 
   const mensalidadesPeriodo = useMemo(() => mensalidades.filter((m) => {
-    const d = (m.data_pagamento || m.data_vencimento || m.competencia || "").slice(0, 10);
+    // A situação da cobrança é apurada por competência/vencimento; recebimentos efetivos
+    // continuam contabilizados exclusivamente no livro financeiro.
+    const d = (m.data_vencimento || m.competencia || m.data_pagamento || "").slice(0, 10);
+    if (usarMesesEspecificos) return d.startsWith(`${anoFiltro}-`) && mesesFiltro.includes(Number(d.slice(5, 7)));
     return (!dataInicial || d >= dataInicial) && (!dataFinal || d <= dataFinal);
-  }), [mensalidades, dataInicial, dataFinal]);
+  }), [mensalidades, dataInicial, dataFinal, anoFiltro, mesesFiltro, usarMesesEspecificos]);
 
-  const totalMensalidadesLancadas = useMemo(() => mensalidadesPeriodo.reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
-  const totalMensalidadesPagas = useMemo(() => mensalidadesPeriodo.filter((m) => ["pago", "paga", "quitado", "quitada"].includes(String(m.situacao || "").trim().toLowerCase())).reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
-  const mensalidadesEmAberto = useMemo(() => mensalidadesPeriodo.filter((m) => !(["pago", "paga", "quitado", "quitada"].includes(String(m.situacao || "").trim().toLowerCase()))), [mensalidadesPeriodo]);
-  const totalMensalidadesEmAberto = useMemo(() => mensalidadesEmAberto.reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesEmAberto]);
-  const totalMensalidadesVencidas = useMemo(() => mensalidadesEmAberto.filter((m) => Boolean(m.data_vencimento) && String(m.data_vencimento).slice(0, 10) < hojeISO).reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesEmAberto]);
+  const totalMensalidadesLancadas = useMemo(() => mensalidadesPeriodo.filter((m) => !mensalidadeIsenta(m)).reduce((t, m) => t + valorMensalidade(m), 0), [mensalidadesPeriodo]);
+  const totalMensalidadesPagas = useMemo(() => mensalidadesPeriodo.filter(mensalidadeFoiPaga).reduce((t, m) => t + valorMensalidade(m), 0), [mensalidadesPeriodo]);
+  const totalMensalidadesVencidas = useMemo(() => mensalidadesPeriodo.filter((m) => !mensalidadeFoiPaga(m) && !mensalidadeIsenta(m) && Boolean(m.data_vencimento) && m.data_vencimento!.slice(0, 10) < hojeISO).reduce((t, m) => t + valorMensalidade(m), 0), [mensalidadesPeriodo]);
+  const totalMensalidadesEmAberto = useMemo(() => mensalidadesPeriodo.filter((m) => !mensalidadeFoiPaga(m) && !mensalidadeIsenta(m) && (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hojeISO)).reduce((t, m) => t + valorMensalidade(m), 0), [mensalidadesPeriodo]);
 
   const entradas = useMemo(
     () =>
@@ -227,21 +312,41 @@ export default function RelatoriosPage() {
     [movimentosPeriodo]
   );
 
-  const saldoInicialSelecionado = useMemo(() => {
-    if (contaFiltro !== "todas") {
-      return Number(contaMap.get(contaFiltro)?.saldo_inicial || 0);
+  const saldoNaData = useCallback((conta: Conta, corte: string) => {
+    let saldo = Number(conta.saldo_inicial || 0);
+    const base = (conta.data_saldo_inicial || "").slice(0, 10);
+    for (const mov of movimentos) {
+      const data = String(mov.data_movimentacao || "").slice(0, 10);
+      const deltaConta = mov.tipo === "entrada"
+        ? (mov.conta_bancaria_id === conta.id ? Number(mov.valor || 0) : 0)
+        : mov.tipo === "saida"
+          ? (mov.conta_bancaria_id === conta.id ? -Number(mov.valor || 0) : 0)
+          : (mov.conta_destino_id === conta.id ? Number(mov.valor || 0) : 0) - (mov.conta_bancaria_id === conta.id ? Number(mov.valor || 0) : 0);
+      if (!deltaConta) continue;
+      if (base) {
+        if (corte > base && data > base && data < corte) saldo += deltaConta;
+        else if (corte <= base && data >= corte && data <= base) saldo -= deltaConta;
+      } else if (data < corte) saldo += deltaConta;
     }
+    return saldo;
+  }, [movimentos]);
 
-    return contas.reduce(
-      (total, conta) => total + Number(conta.saldo_inicial || 0),
-      0
-    );
-  }, [contaFiltro, contaMap, contas]);
+  const saldoInicialSelecionado = useMemo(() => {
+    const dataCorte = dataInicioCalculo || dataInicial || primeiroDiaAno;
+    const selecionadas = contas.filter((conta) => contaFiltro === "todas" || conta.id === contaFiltro);
+    return selecionadas.reduce((total, conta) => total + saldoNaData(conta, dataCorte), 0);
+  }, [contaFiltro, contas, saldoNaData, dataInicioCalculo, dataInicial]);
 
-  const saldoFinal = useMemo(
-    () => saldoInicialSelecionado + entradas - saidas,
-    [saldoInicialSelecionado, entradas, saidas]
-  );
+  const variacaoSaldoPeriodo = useMemo(() => movimentosPeriodoSaldo.reduce((total, mov) => {
+    const valor = Number(mov.valor || 0);
+    if (mov.tipo === "entrada") return total + valor;
+    if (mov.tipo === "saida") return total - valor;
+    if (contaFiltro === "todas") return total;
+    if (mov.conta_bancaria_id === contaFiltro) return total - valor;
+    if (mov.conta_destino_id === contaFiltro) return total + valor;
+    return total;
+  }, 0), [movimentosPeriodoSaldo, contaFiltro]);
+  const saldoFinal = saldoInicialSelecionado + variacaoSaldoPeriodo;
 
   const categoriasEntrada = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -249,7 +354,7 @@ export default function RelatoriosPage() {
     movimentosPeriodo
       .filter((m) => m.tipo === "entrada")
       .forEach((m) => {
-        const categoria = normalizarCategoria(m.categoria);
+        const categoria = origemFinanceira(m);
         mapa.set(categoria, (mapa.get(categoria) || 0) + Number(m.valor || 0));
       });
 
@@ -264,13 +369,25 @@ export default function RelatoriosPage() {
     movimentosPeriodo
       .filter((m) => m.tipo === "saida")
       .forEach((m) => {
-        const categoria = normalizarCategoria(m.categoria);
+        const categoria = origemFinanceira(m);
         mapa.set(categoria, (mapa.get(categoria) || 0) + Number(m.valor || 0));
       });
 
     return Array.from(mapa.entries())
       .map(([categoria, valor]) => ({ categoria, valor }))
       .sort((a, b) => b.valor - a.valor);
+  }, [movimentosPeriodo]);
+
+  const recebimentosPorForma = useMemo(() => {
+    const mapa = new Map<string, { quantidade: number; valor: number }>();
+    movimentosPeriodo.filter((m) => m.tipo === "entrada").forEach((m) => {
+      const forma = m.forma_pagamento?.trim() || "Não informado";
+      const item = mapa.get(forma) || { quantidade: 0, valor: 0 };
+      item.quantidade += 1;
+      item.valor += Number(m.valor || 0);
+      mapa.set(forma, item);
+    });
+    return Array.from(mapa.entries()).map(([forma, item]) => ({ forma, ...item })).sort((a, b) => b.valor - a.valor);
   }, [movimentosPeriodo]);
 
   const linhasBancos = useMemo<LinhaBanco[]>(() => {
@@ -282,7 +399,7 @@ export default function RelatoriosPage() {
         let transferenciasEntrada = 0;
         let transferenciasSaida = 0;
 
-        movimentosPeriodo.forEach((mov) => {
+        movimentosPeriodoSaldo.forEach((mov) => {
           const valor = Number(mov.valor || 0);
 
           if (mov.tipo === "entrada" && mov.conta_bancaria_id === conta.id) {
@@ -303,12 +420,8 @@ export default function RelatoriosPage() {
           }
         });
 
-        const saldo =
-          Number(conta.saldo_inicial || 0) +
-          entradasBanco -
-          saidasBanco +
-          transferenciasEntrada -
-          transferenciasSaida;
+        const saldoInicialBanco = saldoNaData(conta, dataInicioCalculo || dataInicial || primeiroDiaAno);
+        const saldo = saldoInicialBanco + entradasBanco - saidasBanco + transferenciasEntrada - transferenciasSaida;
 
         return {
           conta,
@@ -319,7 +432,7 @@ export default function RelatoriosPage() {
           transferenciasSaida,
         };
       });
-  }, [contas, contaFiltro, movimentosPeriodo]);
+  }, [contas, contaFiltro, movimentosPeriodoSaldo, saldoNaData, dataInicioCalculo, dataInicial]);
 
   const conciliados = movimentosPeriodo.filter((m) => m.conciliado).length;
   const pendentesConciliacao = movimentosPeriodo.length - conciliados;
@@ -340,13 +453,21 @@ export default function RelatoriosPage() {
       <style jsx global>{`
         @media print {
           @page {
-            size: A4 portrait;
-            margin: 12mm;
+            size: A4 landscape;
+            margin: 10mm;
+            @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #64748b; }
           }
-
-          body {
-            background: white !important;
-          }
+          body { background: white !important; font-size: 9pt !important; }
+          table { width: 100% !important; min-width: 0 !important; border-collapse: collapse !important; }
+          thead { display: table-header-group !important; }
+          tfoot { display: table-footer-group !important; }
+          tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          th, td { padding: 5px 6px !important; font-size: 8pt !important; }
+          h1 { font-size: 20pt !important; }
+          h2 { break-after: avoid-page; }
+          .relatorio-tabela { overflow: visible !important; }
+          .relatorio-linha { break-inside: avoid !important; }
+          .print-apenas { display: block !important; }
 
           body * {
             visibility: hidden !important;
@@ -365,9 +486,11 @@ export default function RelatoriosPage() {
             background: white !important;
           }
 
-          .nao-imprimir {
-            display: none !important;
-          }
+          .nao-imprimir { display: none !important; }
+          .relatorio-impressao { margin: 0 !important; max-width: none !important; padding: 0 !important; }
+          .sombra-impressao { box-shadow: none !important; border-color: #cbd5d1 !important; }
+          .relatorio-impressao section { break-inside: auto; page-break-inside: auto; }
+          .relatorio-impressao .rounded-2xl { border-radius: 4px !important; }
 
           .sombra-impressao {
             box-shadow: none !important;
@@ -377,26 +500,22 @@ export default function RelatoriosPage() {
       `}</style>
 
       <main className="relatorio-impressao mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
-        <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
             <button
               onClick={voltar}
-              className="mb-3 text-sm font-semibold text-[#005a3c]"
+              className="nao-imprimir mb-3 text-sm font-semibold text-[#005a3c]"
             >
               ← Voltar ao painel
             </button>
-            <p className="text-sm font-medium text-gray-500">
-              Administração
-            </p>
-            <h1 className="mt-1 text-3xl font-extrabold text-[#005a3c]">
-              Relatório Fiscal
-            </h1>
-            <p className="mt-1 text-gray-500">
-              Prestação de contas, fluxo financeiro e saldos bancários.
-            </p>
+            <p className="text-sm font-bold uppercase tracking-wide text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
+            <p className="mt-1 text-xs font-medium text-gray-500">Administração · Prestação de contas</p>
+            <h1 className="mt-1 text-3xl font-extrabold text-[#005a3c]">Relatório Financeiro</h1>
+            <p className="mt-1 text-gray-500">Entradas, saídas, mensalidades, recebimentos, despesas e saldos bancários.</p>
+            <p className="print-apenas mt-2 hidden text-xs text-gray-600">Emitido em {dataBR(hojeISO)} · Documento interno de prestação de contas da Sociedade Recreativa Guarani.</p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="nao-imprimir flex flex-wrap gap-2">
             <button onClick={() => void carregar()} disabled={carregando} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60">
               {carregando ? "Atualizando..." : "↻ Gerar / Atualizar relatório"}
             </button>
@@ -424,7 +543,7 @@ export default function RelatoriosPage() {
               <input
                 type="date"
                 value={dataInicial}
-                onChange={(e) => setDataInicial(e.target.value)}
+                onChange={(e) => { setMesesFiltro([]); setDataInicial(e.target.value); }}
                 className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
               />
             </div>
@@ -436,7 +555,7 @@ export default function RelatoriosPage() {
               <input
                 type="date"
                 value={dataFinal}
-                onChange={(e) => setDataFinal(e.target.value)}
+                onChange={(e) => { setMesesFiltro([]); setDataFinal(e.target.value); }}
                 className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
               />
             </div>
@@ -475,6 +594,25 @@ export default function RelatoriosPage() {
                 <option value="transferencia">Transferências</option>
               </select>
             </div>
+          </div>
+          <div className="mt-5 border-t border-[#e5ece8] pt-4">
+            <div className="mb-3 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-500">Ano dos meses</label>
+                <select value={anoFiltro} onChange={(e) => { setAnoFiltro(e.target.value); setDataInicial(`${e.target.value}-01-01`); setDataFinal(e.target.value === String(hoje.getFullYear()) ? hojeISO : `${e.target.value}-12-31`); }} className="rounded-xl border border-[#d5e0da] bg-white px-3 py-2.5">
+                  {Array.from({ length: 9 }, (_, i) => hoje.getFullYear() - 4 + i).map((ano) => <option key={ano} value={String(ano)}>{ano}</option>)}
+                </select>
+              </div>
+              <p className="text-sm text-gray-500">Meses para analisar (pode marcar mais de um). Sem seleção, valem as datas inicial e final acima.</p>
+              {mesesFiltro.length > 0 && <button type="button" onClick={() => setMesesFiltro([])} className="rounded-lg border border-[#cbd9d2] px-3 py-2 text-sm font-bold text-[#005a3c]">Limpar meses</button>}
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12">
+              {MESES_RELATORIO.map((mes, index) => {
+                const selecionado = mesesFiltro.includes(index + 1);
+                return <button key={mes} type="button" aria-pressed={selecionado} onClick={() => setMesesFiltro((atuais) => selecionado ? atuais.filter((m) => m !== index + 1) : [...atuais, index + 1].sort((a, b) => a - b))} className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${selecionado ? "border-[#005a3c] bg-[#005a3c] text-white" : "border-[#d5e0da] bg-white text-gray-600 hover:border-[#005a3c]"}`}>{mes.slice(0, 3)}.</button>;
+              })}
+            </div>
+            {mesesFiltro.length > 0 && <p className="mt-2 text-xs text-[#005a3c]">Selecionados: {mesesFiltro.map((m) => MESES_RELATORIO[m - 1]).join(", ")} de {anoFiltro}. Os totais usam somente esses meses; os saldos bancários consideram o intervalo contínuo entre o primeiro e o último mês selecionado.</p>}
           </div>
         </div>
 
@@ -515,9 +653,9 @@ export default function RelatoriosPage() {
                 azul
               />
               <Resumo
-                titulo="Saldo final"
+                titulo="Saldo final projetado"
                 valor={moeda(saldoFinal)}
-                descricao="Saldo calculado"
+                descricao="Saldo no fim do intervalo"
                 destaque
               />
             </div>
@@ -529,7 +667,7 @@ export default function RelatoriosPage() {
                     Prestação de contas
                   </h2>
                   <p className="mt-1 text-sm text-gray-500">
-                    Período: {dataBR(dataInicial)} até {dataBR(dataFinal)}
+                    Período: {mesesFiltro.length > 0 ? `${mesesFiltro.map((m) => MESES_RELATORIO[m - 1]).join(", ")} de ${anoFiltro}` : `${dataBR(dataInicial)} até ${dataBR(dataFinal)}`}
                     {contaFiltro !== "todas"
                       ? ` · ${contaMap.get(contaFiltro)?.nome || "Conta"}`
                       : " · Todas as contas"}
@@ -622,12 +760,20 @@ export default function RelatoriosPage() {
             </div>
 
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+              <div className="mb-4">
+                <h2 className="text-lg font-extrabold text-[#003d2b]">Recebimentos por forma de pagamento</h2>
+                <p className="mt-1 text-sm text-gray-500">Entradas efetivamente registradas no livro financeiro; não soma a tabela de pagamentos novamente.</p>
+              </div>
+              {recebimentosPorForma.length === 0 ? <p className="py-4 text-sm text-gray-500">Nenhum recebimento registrado no período.</p> : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{recebimentosPorForma.map((item) => <div key={item.forma} className="rounded-xl border border-[#e1e9e4] bg-[#f8fbf9] p-4"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{item.forma.replaceAll("_", " ")}</p><p className="mt-2 text-xl font-extrabold text-[#005a3c]">{moeda(item.valor)}</p><p className="mt-1 text-xs text-gray-500">{item.quantidade} lançamento(s)</p></div>)}</div>}
+            </section>
+
+            <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
               <div className="mb-5">
                 <h2 className="text-lg font-extrabold text-[#003d2b]">
                   Saldos por banco
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Saldo inicial + entradas − saídas ± transferências internas.
+                  Saldo calculado até o fim do intervalo; transferências alteram o saldo da conta, mas não são receita/despesa. Em meses avulsos, usa o intervalo contínuo entre o primeiro e o último mês.
                 </p>
               </div>
 
@@ -693,12 +839,12 @@ export default function RelatoriosPage() {
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
               <div className="border-b border-[#e3ebe6] p-5">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-                  <div><h2 className="text-lg font-extrabold text-[#003d2b]">Mensalidades lançadas</h2><p className="mt-1 text-sm text-gray-500">As cobranças geradas no Financeiro aparecem aqui mesmo quando ainda não foram pagas.</p></div>
-                  <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">{mensalidadesPeriodo.length} lançamento(s)</span><span className="rounded-full bg-green-50 px-3 py-2 text-green-700">Recebido: {moeda(totalMensalidadesPagas)}</span><span className="rounded-full bg-amber-50 px-3 py-2 text-amber-800">Em aberto: {moeda(totalMensalidadesEmAberto)}</span><span className="rounded-full bg-red-50 px-3 py-2 text-red-700">Vencido: {moeda(totalMensalidadesVencidas)}</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">Total lançado: {moeda(totalMensalidadesLancadas)}</span></div>
+                  <div><h2 className="text-lg font-extrabold text-[#003d2b]">Controle de mensalidades</h2><p className="mt-1 text-sm text-gray-500">Cobranças por vencimento/competência. Estes valores são informativos e não são somados novamente às entradas do livro financeiro.</p></div>
+                  <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">{mensalidadesPeriodo.filter((m) => !mensalidadeIsenta(m)).length} cobrança(s)</span><span className="rounded-full bg-green-50 px-3 py-2 text-green-700">Pagas: {moeda(totalMensalidadesPagas)}</span><span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-800">Em aberto: {moeda(totalMensalidadesEmAberto)}</span><span className="rounded-full bg-red-50 px-3 py-2 text-red-700">Vencidas: {moeda(totalMensalidadesVencidas)}</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">Total lançado: {moeda(totalMensalidadesLancadas)}</span></div>
                 </div>
               </div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Referência</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th><th className="px-5 py-3">Recibo</th></tr></thead>
-                <tbody className="divide-y divide-[#e6ede9]">{mensalidadesPeriodo.length === 0 ? <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-500">Nenhuma mensalidade encontrada para o período.</td></tr> : mensalidadesPeriodo.map((m) => <tr key={m.id}><td className="px-5 py-4 text-sm font-semibold">{m.referencia || m.competencia || "—"}</td><td className="px-5 py-4 text-sm">{dataBR(m.data_vencimento)}</td><td className="px-5 py-4 text-sm font-bold">{moeda(m.valor)}</td><td className="px-5 py-4 text-sm">{m.situacao || "—"}</td><td className="px-5 py-4 text-sm">{m.data_pagamento ? `${dataBR(m.data_pagamento)}${m.tipo_pagamento ? ` · ${m.tipo_pagamento}` : ""}` : "—"}</td><td className="px-5 py-4 text-sm">{m.numero_recibo || "—"}</td></tr>)}</tbody></table></div>
+              <div className="relatorio-tabela overflow-x-auto"><table className="w-full min-w-[900px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Competência</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th><th className="px-5 py-3">Recibo</th></tr></thead>
+                <tbody className="divide-y divide-[#e6ede9]">{mensalidadesPeriodo.length === 0 ? <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-500">Nenhuma mensalidade encontrada para o período.</td></tr> : mensalidadesPeriodo.map((m) => <tr key={m.id}><td className="px-5 py-4 text-sm font-semibold">{competenciaBR(m.competencia)}</td><td className="px-5 py-4 text-sm">{dataBR(m.data_vencimento)}</td><td className="px-5 py-4 text-sm font-bold">{moeda(valorMensalidade(m))}</td><td className="px-5 py-4 text-sm">{m.situacao || "—"}</td><td className="px-5 py-4 text-sm">{m.data_pagamento ? `${dataBR(m.data_pagamento)}${m.tipo_pagamento ? ` · ${m.tipo_pagamento}` : ""}` : "—"}</td><td className="px-5 py-4 text-sm">{m.numero_recibo || "—"}</td></tr>)}</tbody></table></div>
             </section>
 
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
@@ -711,7 +857,7 @@ export default function RelatoriosPage() {
                 </p>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="relatorio-tabela overflow-x-auto">
                 <table className="w-full min-w-[1050px]">
                   <thead className="bg-[#e8f3ee]">
                     <tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -851,11 +997,7 @@ export default function RelatoriosPage() {
               </div>
 
               <p className="mt-5 text-xs leading-5 text-gray-500">
-                Este relatório é calculado exclusivamente a partir dos
-                lançamentos registrados no sistema. Transferências entre
-                contas são tratadas como movimentações internas e não entram
-                como receita ou despesa, evitando duplicidade na prestação de
-                contas.
+                Este relatório usa o livro de movimentações financeiras como fonte oficial para entradas e saídas. As cobranças de mensalidades são exibidas à parte para conferência e não são adicionadas novamente às entradas. Transferências entre contas alteram os saldos bancários, mas não são tratadas como receita ou despesa. Os saldos inicial e final por banco são estimados conforme a data-base cadastrada e os movimentos do período.
               </p>
             </section>
           </>
