@@ -147,23 +147,24 @@ export default function PainelPage() {
           if (Number.isFinite(total)) setReservasPendentes(total);
         })(),
         (async () => {
-          // Marcar uma notificação como lida não confirma o pagamento.
-          // Consultamos lidas e não lidas e contamos somente PIX explicitamente
-          // identificado com comprovante ainda pendente.
-          const response = await fetch("/api/notificacoes/admin?nao_lidas=false&limite=100", { headers, cache: "no-store" });
+          // O contador de PIX deve consultar as reservas reais, não os avisos.
+          // Avisos podem estar lidos, duplicados ou sem os campos do pagamento.
+          const response = await fetch("/api/reservas?status=pendente", {
+            headers,
+            cache: "no-store",
+          });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
-          const lista = Array.isArray(json.notificacoes) ? json.notificacoes : [];
-          const normalizar = (valor: unknown) => String(valor || "")
-            .normalize("NFD")
-            .replace(/[\\u0300-\\u036f]/g, "")
-            .trim()
-            .toLowerCase();
-          const pendentes = lista.filter((n: any) =>
-            normalizar(n.comprovante_status) === "pendente" &&
-            normalizar(n.forma_pagamento).includes("pix")
-          );
-          setPixPendentes(pendentes.length);
+
+          const lista = Array.isArray(json.reservas) ? json.reservas : [];
+          const pendentesPix = lista.filter((reserva: any) => {
+            const forma = String(
+              reserva.tipo_pagamento || reserva.pagamento || ""
+            ).trim().toLowerCase();
+            return reserva.status === "pendente" && forma === "pix";
+          });
+
+          setPixPendentes(pendentesPix.length);
         })(),
         (async () => {
           const response = await fetch("/api/temporadas?resumo=1", { headers, cache: "no-store" });
