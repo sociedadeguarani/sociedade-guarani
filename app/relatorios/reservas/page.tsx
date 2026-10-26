@@ -264,43 +264,57 @@ export default function RelatorioReservasPage() {
     const pendentes = reservas.filter((r) => r.status === "pendente");
     const canceladas = reservas.filter((r) => r.status === "cancelada");
     const naoCanceladas = reservas.filter((r) => r.status !== "cancelada");
+    const pagas = naoCanceladas.filter((r) => Boolean(r.data_pagamento));
+    const emAberto = naoCanceladas.filter((r) => !r.data_pagamento && r.tipo_pagamento !== "sem_pagamento");
+    const semCobranca = naoCanceladas.filter((r) => r.tipo_pagamento === "sem_pagamento");
     return {
       total: reservas.length,
       confirmadas: confirmadas.length,
       pendentes: pendentes.length,
       canceladas: canceladas.length,
       valorConfirmado: confirmadas.reduce((s, r) => s + r.valor, 0),
-      valorPendente: pendentes.reduce((s, r) => s + r.valor, 0),
+      valorPendente: emAberto.reduce((s, r) => s + r.valor, 0),
       valorPrevisto: naoCanceladas.reduce((s, r) => s + r.valor, 0),
+      valorRecebido: pagas.reduce((s, r) => s + r.valor, 0),
+      valorEmAberto: emAberto.reduce((s, r) => s + r.valor, 0),
+      valorSemCobranca: semCobranca.reduce((s, r) => s + r.valor, 0),
     };
   }, [reservas]);
 
   const porEspaco = useMemo(() => {
-    const mapa = new Map<string, { nome: string; quantidade: number; confirmadas: number; pendentes: number; canceladas: number; valor: number }>();
+    const mapa = new Map<string, { nome: string; quantidade: number; confirmadas: number; pendentes: number; canceladas: number; valor: number; recebido: number; emAberto: number }>();
     for (const r of reservas) {
       const chave = r.espaco_id || r.espaco_nome;
-      const item = mapa.get(chave) || { nome: r.espaco_nome, quantidade: 0, confirmadas: 0, pendentes: 0, canceladas: 0, valor: 0 };
+      const item = mapa.get(chave) || { nome: r.espaco_nome, quantidade: 0, confirmadas: 0, pendentes: 0, canceladas: 0, valor: 0, recebido: 0, emAberto: 0 };
       item.quantidade += 1;
       if (r.status === "confirmada") item.confirmadas += 1;
       if (r.status === "pendente") item.pendentes += 1;
       if (r.status === "cancelada") item.canceladas += 1;
-      if (r.status !== "cancelada") item.valor += r.valor;
+      if (r.status !== "cancelada") {
+        item.valor += r.valor;
+        if (r.data_pagamento) item.recebido += r.valor;
+        else if (r.tipo_pagamento !== "sem_pagamento") item.emAberto += r.valor;
+      }
       mapa.set(chave, item);
     }
     return Array.from(mapa.values()).sort((a, b) => b.valor - a.valor || b.quantidade - a.quantidade);
   }, [reservas]);
 
   const porPagamento = useMemo(() => {
-    const mapa = new Map<string, { quantidade: number; valor: number }>();
+    const mapa = new Map<string, { quantidade: number; valorPrevisto: number; recebido: number; emAberto: number }>();
     for (const r of reservas) {
-      const item = mapa.get(r.tipo_pagamento) || { quantidade: 0, valor: 0 };
+      const item = mapa.get(r.tipo_pagamento) || { quantidade: 0, valorPrevisto: 0, recebido: 0, emAberto: 0 };
       item.quantidade += 1;
-      if (r.status !== "cancelada") item.valor += r.valor;
+      if (r.status !== "cancelada") {
+        item.valorPrevisto += r.valor;
+        if (r.data_pagamento) item.recebido += r.valor;
+        else if (r.tipo_pagamento !== "sem_pagamento") item.emAberto += r.valor;
+      }
       mapa.set(r.tipo_pagamento, item);
     }
     return Array.from(mapa.entries())
       .map(([forma, item]) => ({ forma, ...item }))
-      .sort((a, b) => b.valor - a.valor || b.quantidade - a.quantidade);
+      .sort((a, b) => b.valorPrevisto - a.valorPrevisto || b.quantidade - a.quantidade);
   }, [reservas]);
 
   function imprimir() {
@@ -514,29 +528,43 @@ export default function RelatorioReservasPage() {
       <CabecalhoPadrao />
       <MenuLateralPadrao />
       <style jsx global>{`
-        @page { size: landscape; margin: 10mm; }
+        @page {
+          size: A4 landscape;
+          margin: 9mm;
+          @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #64748b; }
+        }
         @media print {
-          body { background: white !important; }
+          body { background: white !important; font-size: 9pt !important; }
           header, aside { display: none !important; }
           .nao-imprimir { display: none !important; }
           .relatorio-reservas-print { margin: 0 !important; max-width: none !important; padding: 0 !important; }
-          .sombra-impressao { box-shadow: none !important; border: 1px solid #dfe7e2 !important; }
+          .sombra-impressao { box-shadow: none !important; border: 1px solid #cbd5d1 !important; }
           .agenda-limpeza-print { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
           .limpeza-mes { break-inside: auto; page-break-inside: auto; }
           .limpeza-mes tr { break-inside: avoid; page-break-inside: avoid; }
           .limpeza-mes h3 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .relatorio-reservas-print .overflow-x-auto { overflow: visible !important; }
+          .relatorio-reservas-print table { width: 100% !important; min-width: 0 !important; table-layout: auto; border-collapse: collapse !important; }
+          .relatorio-reservas-print thead { display: table-header-group !important; }
+          .relatorio-reservas-print tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .relatorio-reservas-print th, .relatorio-reservas-print td { padding: 4px 5px !important; font-size: 8pt !important; }
+          .relatorio-reservas-print section { break-inside: auto; page-break-inside: auto; }
+          .agenda-grade-impressao { display: none !important; }
+          .print-apenas { display: block !important; }
         }
       `}</style>
 
       <main className="relatorio-reservas-print mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
-        <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <Link href="/reservas" className="mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar às reservas</Link>
-            <p className="text-sm font-medium text-gray-500">Administração</p>
-            <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><><CalendarDays className="h-8 w-8" /> Agenda mensal de reservas</></h1>
-            <p className="mt-1 text-gray-500">&quot;Veja todos os dias do mês, quais espaços estão reservados, por quem, o valor e a situação do pagamento.&quot;</p>
+            <Link href="/reservas" className="nao-imprimir mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar às reservas</Link>
+            <p className="text-sm font-bold uppercase tracking-wide text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
+            <p className="mt-1 text-xs font-medium text-gray-500">Administração · Relatórios de reservas</p>
+            <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><><CalendarDays className="nao-imprimir h-8 w-8" /> Agenda e relatório de reservas</></h1>
+            <p className="mt-1 text-gray-500">Reservas por período, espaços utilizados, valores previstos, recebidos e pendentes.</p>
+            <p className="print-apenas mt-2 hidden text-xs text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Emitido em {dataBR(hoje)}. A grade visual foi substituída no PDF pelo detalhamento para manter a leitura das colunas.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="nao-imprimir flex flex-wrap gap-2">
             <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
             {visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7) && <button onClick={exportarExcelGrade} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-[#e8f3ee] px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Excel colorido</button>}<button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
             <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
@@ -572,7 +600,7 @@ export default function RelatorioReservasPage() {
               const dias = new Date(anoGrade, mesGrade, 0).getDate();
               const espacosGrade = obterEspacosGrade();
               const ativos = reservas.filter(r => r.status !== "cancelada");
-              return <section className="mb-6 overflow-hidden rounded-2xl border border-[#cbd9d2] bg-white shadow-sm">
+              return <section className="agenda-grade-impressao mb-6 overflow-hidden rounded-2xl border border-[#cbd9d2] bg-white shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-[#e7f3ec] p-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani</p><h2 className="text-xl font-extrabold capitalize text-[#005a3c]">{tituloMes(`${dataInicial.slice(0,7)}-15`)}</h2><p className="text-sm text-gray-600">Grade mensal · reservas e pagamentos</p></div><div className="flex flex-wrap gap-3 text-xs font-bold"><span className="rounded-full bg-green-100 px-3 py-2 text-green-800">● Pago</span><span className="rounded-full bg-amber-100 px-3 py-2 text-amber-800">● Pendente</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">— Livre</span></div></div>
                 <div className="border-b border-[#dfe7e2] bg-[#f8faf9] px-3 py-2">
                   <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
@@ -620,32 +648,33 @@ export default function RelatorioReservasPage() {
               </section>
             ) : (
               <>
-            <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+            <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                ["Reservas", resumo.total, ""],
-                ["Confirmadas", resumo.confirmadas, ""],
-                ["Pendentes", resumo.pendentes, ""],
-                ["Canceladas", resumo.canceladas, ""],
-                ["Valor confirmado", moeda(resumo.valorConfirmado), ""],
-                ["Valor pendente", moeda(resumo.valorPendente), ""],
-                ["Valor previsto", moeda(resumo.valorPrevisto), ""],
+                ["Reservas no período", resumo.total],
+                ["Confirmadas", resumo.confirmadas],
+                ["Pendentes de confirmação", resumo.pendentes],
+                ["Canceladas", resumo.canceladas],
+                ["Total previsto", moeda(resumo.valorPrevisto)],
+                ["Total recebido", moeda(resumo.valorRecebido)],
+                ["Em aberto para cobrança", moeda(resumo.valorEmAberto)],
+                ["Sem pagamento previsto", moeda(resumo.valorSemCobranca)],
               ].map(([titulo, valor]) => <div key={String(titulo)} className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-4 shadow-sm"><div className="text-xs font-bold uppercase tracking-wide text-gray-500">{titulo}</div><div className="mt-2 text-2xl font-extrabold text-[#005a3c]">{valor}</div></div>)}
             </section>
 
             <section className="mb-6 grid gap-6 xl:grid-cols-2">
               <div className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
                 <h2 className="mb-4 text-lg font-extrabold text-[#005a3c]">Resumo por espaço</h2>
-                <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-2 py-3">Espaço</th><th>Qtd.</th><th>Conf.</th><th>Pend.</th><th>Canc.</th><th className="text-right">Valor</th></tr></thead><tbody>{porEspaco.map((item) => <tr key={item.nome} className="border-b last:border-b-0"><td className="px-2 py-3 font-bold">{item.nome}</td><td>{item.quantidade}</td><td>{item.confirmadas}</td><td>{item.pendentes}</td><td>{item.canceladas}</td><td className="text-right font-bold text-[#005a3c]">{moeda(item.valor)}</td></tr>)}</tbody></table>{!porEspaco.length && <p className="py-8 text-center text-gray-500">Nenhuma reserva encontrada.</p>}</div>
+                <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-2 py-3">Espaço</th><th>Qtd.</th><th>Conf.</th><th>Pend.</th><th>Canc.</th><th className="text-right">Previsto</th><th className="text-right">Recebido</th><th className="text-right">Em aberto</th></tr></thead><tbody>{porEspaco.map((item) => <tr key={item.nome} className="border-b last:border-b-0"><td className="px-2 py-3 font-bold">{item.nome}</td><td>{item.quantidade}</td><td>{item.confirmadas}</td><td>{item.pendentes}</td><td>{item.canceladas}</td><td className="text-right font-bold">{moeda(item.valor)}</td><td className="text-right font-bold text-green-700">{moeda(item.recebido)}</td><td className="text-right font-bold text-amber-700">{moeda(item.emAberto)}</td></tr>)}</tbody></table>{!porEspaco.length && <p className="py-8 text-center text-gray-500">Nenhuma reserva encontrada.</p>}</div>
               </div>
               <div className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
                 <h2 className="mb-4 text-lg font-extrabold text-[#005a3c]">Resumo por pagamento</h2>
-                <div className="space-y-3">{porPagamento.map((item) => <div key={item.forma} className="flex items-center justify-between rounded-xl bg-[#f8faf9] px-4 py-3"><div><div className="font-bold">{pagamentoBR(item.forma)}</div><div className="text-xs text-gray-500">{item.quantidade} reserva(s)</div></div><div className="font-extrabold text-[#005a3c]">{moeda(item.valor)}</div></div>)}{!porPagamento.length && <p className="py-8 text-center text-gray-500">Nenhum pagamento no período.</p>}</div>
+                <div className="space-y-3">{porPagamento.map((item) => <div key={item.forma} className="rounded-xl bg-[#f8faf9] px-4 py-3"><div className="flex items-start justify-between gap-3"><div><div className="font-bold">{pagamentoBR(item.forma)}</div><div className="text-xs text-gray-500">{item.quantidade} reserva(s) · previsto {moeda(item.valorPrevisto)}</div></div><div className="text-right"><div className="font-extrabold text-green-700">Recebido {moeda(item.recebido)}</div><div className="text-xs font-bold text-amber-700">Em aberto {moeda(item.emAberto)}</div></div></div></div>)}{!porPagamento.length && <p className="py-8 text-center text-gray-500">Nenhuma reserva no período.</p>}</div>
               </div>
             </section>
 
             <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Motivo da locação</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td>{r.motivo_locacao || "—"}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td>{pagamentoBR(r.tipo_pagamento)}</td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
+              <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual. O recebimento é identificado pela data de pagamento registrada na reserva.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Motivo da locação</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td>{r.motivo_locacao || "—"}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td><div>{pagamentoBR(r.tipo_pagamento)}</div><div className={`mt-1 text-xs font-bold ${r.data_pagamento ? "text-green-700" : r.tipo_pagamento === "sem_pagamento" ? "text-gray-500" : "text-amber-700"}`}>{r.data_pagamento ? `Pago em ${dataBR(r.data_pagamento)}` : r.tipo_pagamento === "sem_pagamento" ? "Sem pagamento previsto" : "Em aberto"}</div></td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
             </section>
               </>
             )}
