@@ -297,11 +297,29 @@ export async function DELETE(request: Request) {
     if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const body = await request.json();
     if (!body.id) return NextResponse.json({ error: "Informe o item." }, { status: 400 });
-    const { data: ativos, error: emprestimoError } = await auth.supabase.from("inventario_emprestimos").select("id").eq("item_id", body.id).in("status", ["emprestado", "atrasado"]).limit(1);
+    // O banco usa ON DELETE RESTRICT para preservar o histórico de empréstimos.
+    // Verificamos todos os empréstimos, não apenas os ativos, para retornar uma
+    // mensagem clara em vez de expor o erro bruto de chave estrangeira.
+    const { data: emprestimosVinculados, error: emprestimoError } = await auth.supabase
+      .from("inventario_emprestimos")
+      .select("id,status")
+      .eq("item_id", body.id)
+      .limit(1);
     if (emprestimoError) return NextResponse.json({ error: emprestimoError.message }, { status: 500 });
-    if ((ativos || []).length) return NextResponse.json({ error: "Não é possível excluir um item que está emprestado." }, { status: 409 });
+    if ((emprestimosVinculados || []).length) {
+      const status = String(emprestimosVinculados[0]?.status || "").toLowerCase();
+      const mensagem = ["emprestado", "atrasado"].includes(status)
+        ? "Não é possível excluir este item porque ele possui um empréstimo em aberto. Registre a devolução primeiro."
+        : "Não é possível excluir este item porque existe histórico de empréstimos vinculado a ele. Para preservar o histórico, mantenha o item cadastrado ou solicite uma limpeza específica dos registros de teste.";
+      return NextResponse.json({ error: mensagem }, { status: 409 });
+    }
     const { error } = await auth.supabase.from("inventario_itens").delete().eq("id", body.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      if (error.code === "23503") {
+        return NextResponse.json({ error: "Este item possui registros vinculados e não pode ser excluído. O histórico foi preservado." }, { status: 409 });
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao excluir item." }, { status: 500 });
