@@ -837,6 +837,7 @@ export default function ReservasPage() {
             <div><p className="text-sm text-gray-500">{publico ? "Reserva online" : "Administração"}</p><h1 className="text-3xl font-extrabold text-[#005a3c]">Reservas</h1><p className="mt-1 text-sm text-gray-500">Agendamento de quadras, quiosques e salões.</p></div>
             {!publico && (
               <div className="flex flex-wrap gap-2">
+                {(perfil === "administrador" || perfil === "administrador_master") && <a href="/relatorios/reservas" className="rounded-xl border border-[#cbd9d2] bg-white px-4 py-2.5 font-bold text-[#005a3c] shadow-sm">Relatórios de reservas</a>}
                 <button onClick={() => setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservar" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Nova reserva</button>
                 <button onClick={() => setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservas" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Reservas</button>
                 {podeConfigurar && <button onClick={() => setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "admin" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}><Settings className="mr-2 inline h-4 w-4" />Configurar espaços</button>}
