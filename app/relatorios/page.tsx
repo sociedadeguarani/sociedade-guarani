@@ -198,7 +198,10 @@ export default function RelatoriosPage() {
   }), [mensalidades, dataInicial, dataFinal]);
 
   const totalMensalidadesLancadas = useMemo(() => mensalidadesPeriodo.reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
-  const totalMensalidadesPagas = useMemo(() => mensalidadesPeriodo.filter((m) => String(m.situacao || "").toLowerCase() === "pago").reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
+  const totalMensalidadesPagas = useMemo(() => mensalidadesPeriodo.filter((m) => ["pago", "paga", "quitado", "quitada"].includes(String(m.situacao || "").trim().toLowerCase())).reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesPeriodo]);
+  const mensalidadesEmAberto = useMemo(() => mensalidadesPeriodo.filter((m) => !(["pago", "paga", "quitado", "quitada"].includes(String(m.situacao || "").trim().toLowerCase()))), [mensalidadesPeriodo]);
+  const totalMensalidadesEmAberto = useMemo(() => mensalidadesEmAberto.reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesEmAberto]);
+  const totalMensalidadesVencidas = useMemo(() => mensalidadesEmAberto.filter((m) => Boolean(m.data_vencimento) && String(m.data_vencimento).slice(0, 10) < hojeISO).reduce((t, m) => t + Number(m.valor || 0), 0), [mensalidadesEmAberto]);
 
   const entradas = useMemo(
     () =>
@@ -394,7 +397,6 @@ export default function RelatoriosPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Link href="/relatorios/reservas" className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm">📅 Relatório de Reservas</Link>
             <button onClick={() => void carregar()} disabled={carregando} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60">
               {carregando ? "Atualizando..." : "↻ Gerar / Atualizar relatório"}
             </button>
@@ -692,7 +694,7 @@ export default function RelatoriosPage() {
               <div className="border-b border-[#e3ebe6] p-5">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                   <div><h2 className="text-lg font-extrabold text-[#003d2b]">Mensalidades lançadas</h2><p className="mt-1 text-sm text-gray-500">As cobranças geradas no Financeiro aparecem aqui mesmo quando ainda não foram pagas.</p></div>
-                  <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">{mensalidadesPeriodo.length} lançamento(s)</span><span className="rounded-full bg-green-50 px-3 py-2 text-green-700">Pagas: {moeda(totalMensalidadesPagas)}</span><span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-800">Lançado: {moeda(totalMensalidadesLancadas)}</span></div>
+                  <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-blue-50 px-3 py-2 text-blue-700">{mensalidadesPeriodo.length} lançamento(s)</span><span className="rounded-full bg-green-50 px-3 py-2 text-green-700">Recebido: {moeda(totalMensalidadesPagas)}</span><span className="rounded-full bg-amber-50 px-3 py-2 text-amber-800">Em aberto: {moeda(totalMensalidadesEmAberto)}</span><span className="rounded-full bg-red-50 px-3 py-2 text-red-700">Vencido: {moeda(totalMensalidadesVencidas)}</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">Total lançado: {moeda(totalMensalidadesLancadas)}</span></div>
                 </div>
               </div>
               <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead className="bg-[#e8f3ee]"><tr className="text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-5 py-3">Referência</th><th className="px-5 py-3">Vencimento</th><th className="px-5 py-3">Valor</th><th className="px-5 py-3">Situação</th><th className="px-5 py-3">Pagamento</th><th className="px-5 py-3">Recibo</th></tr></thead>
