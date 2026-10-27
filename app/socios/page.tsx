@@ -1753,7 +1753,7 @@ function Socios({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-[#005a3c] sm:text-3xl">
-            {socios.filter((s) => s.situacao?.toLowerCase() === "ativo").length}
+            {socios.filter((s) => String(s.situacao ?? "").trim().toLowerCase() === "ativo").length}
           </p>
         </div>
 
