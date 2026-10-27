@@ -249,22 +249,39 @@ export async function GET(request: Request) {
     if (podeVerFinanceiro) colunasDependente.push(
       "possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento",
     );
-    let dependentesQuery = supabase
-      .from("dependentes")
-      .select(colunasDependente.join(","))
-      .order("nome");
+    // A coluna de rastreamento da migração é adicionada por uma migração SQL
+    // separada. Enquanto o banco ainda não a tiver (por exemplo, em publicação
+    // parcial), as carteirinhas e a tela Dependentes devem continuar funcionando.
+    const consultarDependentes = async (colunas: string[]) => {
+      let query = supabase
+        .from("dependentes")
+        .select(colunas.join(","))
+        .order("nome");
 
-    if (!modoDependentes) {
-      dependentesQuery = dependentesQuery.eq("ativo", true);
+      if (!modoDependentes) {
+        query = query.eq("ativo", true);
+      }
+
+      // Associado comum vê somente sua família. Administradores e funcionários
+      // podem consultar todos os dependentes.
+      if (auth.usuario.perfil === "associado") {
+        query = query.eq("socio_id", auth.usuario.socio_id);
+      }
+
+      return query;
+    };
+
+    let { data: dependentesDb, error: dependentesError } = await consultarDependentes(colunasDependente);
+    if (
+      dependentesError &&
+      /migrado_para_socio_id/i.test(`${dependentesError.message || ""} ${dependentesError.details || ""}`)
+    ) {
+      console.warn(
+        "A coluna dependentes.migrado_para_socio_id ainda não existe; carregando em modo compatível até aplicar a migração SQL."
+      );
+      const colunasCompatibilidade = colunasDependente.filter((coluna) => coluna !== "migrado_para_socio_id");
+      ({ data: dependentesDb, error: dependentesError } = await consultarDependentes(colunasCompatibilidade));
     }
-
-    // Associado comum vê somente sua família. Administradores e funcionários
-    // podem consultar todos os dependentes.
-    if (auth.usuario.perfil === "associado") {
-      dependentesQuery = dependentesQuery.eq("socio_id", auth.usuario.socio_id);
-    }
-
-    const { data: dependentesDb, error: dependentesError } = await dependentesQuery;
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
