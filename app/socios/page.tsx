@@ -1672,18 +1672,18 @@ function Socios({
 
         <table>
           <colgroup>
-            <col style={{ width: "10%" }} /><col style={{ width: "24%" }} /><col style={{ width: "14%" }} />
-            <col style={{ width: "14%" }} /><col style={{ width: "20%" }} /><col style={{ width: "11%" }} /><col style={{ width: "7%" }} />
+            <col style={{ width: "5%" }} /><col style={{ width: "9%" }} /><col style={{ width: "21%" }} /><col style={{ width: "13%" }} />
+            <col style={{ width: "14%" }} /><col style={{ width: "19%" }} /><col style={{ width: "12%" }} /><col style={{ width: "7%" }} />
           </colgroup>
           <thead>
             <tr>
-              <th>Matrícula</th><th>Nome</th><th>CPF</th><th>Telefone / WhatsApp</th><th>Tipo de associado</th><th>Responsável</th><th>Situação</th>
+              <th>Nº</th><th>Matrícula</th><th>Nome</th><th>CPF</th><th>Telefone / WhatsApp</th><th>Tipo de associado</th><th>Responsável</th><th>Situação</th>
             </tr>
           </thead>
           <tbody>
-            {socios.map((socio) => (
+            {socios.map((socio, index) => (
               <tr key={socio.id}>
-                <td>{socio.matricula || "—"}</td>
+                <td>{index + 1}</td><td>{socio.matricula || "—"}</td>
                 <td><strong>{socio.nome || "Não informado"}</strong>{socioEhRemido(socio) ? " · Remido" : ""}</td>
                 <td>{socio.cpf || "—"}</td>
                 <td>{socio.whatsapp || socio.telefone || "—"}</td>
@@ -1692,7 +1692,7 @@ function Socios({
                 <td className="print-socios-status">{(socio.situacao || "ativo").toLowerCase() === "ativo" ? "Ativo" : (socio.situacao || "Inativo").toLowerCase() === "suspenso" ? "Suspenso" : "Inativo"}</td>
               </tr>
             ))}
-            {socios.length === 0 && <tr><td colSpan={7}>Nenhum sócio corresponde aos filtros selecionados.</td></tr>}
+            {socios.length === 0 && <tr><td colSpan={8}>Nenhum sócio corresponde aos filtros selecionados.</td></tr>}
           </tbody>
         </table>
 
