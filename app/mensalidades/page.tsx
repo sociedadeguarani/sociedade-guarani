@@ -197,7 +197,13 @@ export default function Page() {
   const hoje = new Date();
 
   const [ano, setAno] = useState(hoje.getFullYear());
+  // A tela permite consultar uma ou várias competências do mesmo ano.
   const [mes, setMes] = useState(hoje.getMonth() + 1);
+  const [mesesSelecionados, setMesesSelecionados] = useState<number[]>([hoje.getMonth() + 1]);
+  const nomesMeses = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+  ];
   const [busca, setBusca] = useState("");
   const [filtroTipoSocio, setFiltroTipoSocio] = useState("todos");
   const [filtroSituacaoMensalidade, setFiltroSituacaoMensalidade] = useState("todas");
@@ -262,7 +268,7 @@ export default function Page() {
     };
   }
 
-  async function carregarHistoricoSocio(item: M | null, anoConsulta = anoHistoricoSocio) {
+  async function carregarHistoricoSocio(item: M | null, anoConsulta = anoHistoricoSocio, mesInicial = mes) {
     if (!item?.socio_id) {
       setHistoricoSocio([]);
       setMesHistoricoSelecionado(null);
@@ -282,11 +288,11 @@ export default function Page() {
       if (!r.ok) throw Error(d.error || "Não foi possível carregar o histórico.");
 
       setHistoricoSocio(Array.isArray(d.mensalidades) ? d.mensalidades : []);
-      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mesInicial : 1);
     } catch (e) {
       console.error(e);
       setHistoricoSocio([]);
-      setMesHistoricoSelecionado(anoConsulta === ano ? mes : 1);
+      setMesHistoricoSelecionado(anoConsulta === ano ? mesInicial : 1);
     } finally {
       setCarregandoHistoricoSocio(false);
     }
@@ -296,7 +302,8 @@ export default function Page() {
     setSocioSelecionado(item);
     setAnoHistoricoSocio(ano);
     setTipoBaixaSelecionada("pago");
-    await carregarHistoricoSocio(item, ano);
+    const mesDaLinha = Number(String(item.competencia || "").slice(5, 7)) || mes;
+    await carregarHistoricoSocio(item, ano, mesDaLinha);
   }
 
   async function trocarAnoHistoricoSocio(novoAno: number) {
@@ -376,20 +383,31 @@ export default function Page() {
   async function carregar() {
     try {
       setErro("");
+      const mesesConsulta: number[] = [...new Set<number>(mesesSelecionados)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
+      if (mesesConsulta.length === 0) return;
 
-      const r = await fetch(
-        `/api/mensalidades/admin?ano=${ano}&mes=${mes}`,
-        {
-          headers: await h(),
-          cache: "no-store",
-        }
-      );
+      // Faz uma consulta por competência para não atingir o limite de linhas
+      // da API quando vários meses são selecionados.
+      const headers = await h();
+      const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
+        const r = await fetch(
+          `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
+          { headers, cache: "no-store" }
+        );
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Erro ao carregar mensalidades de ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
+        return d;
+      }));
 
-      const d = await r.json();
+      const d = respostas[0] || {};
+      const mensalidadesUnicas = new Map<string, M>();
+      respostas.forEach((resposta) => {
+        (Array.isArray(resposta.mensalidades) ? resposta.mensalidades : []).forEach((item: M) => {
+          mensalidadesUnicas.set(String(item.id), item);
+        });
+      });
 
-      if (!r.ok) throw Error(d.error || "Erro ao carregar mensalidades.");
-
-      setLista(d.mensalidades || []);
+      setLista([...mensalidadesUnicas.values()]);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
@@ -408,7 +426,34 @@ export default function Page() {
 
   useEffect(() => {
     void carregar();
-  }, [ano, mes]);
+  }, [ano, mesesSelecionados]);
+
+  function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
+    const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
+    if (ordenados.length === 0) return; // Sempre manter pelo menos uma competência selecionada.
+    setMesesSelecionados(ordenados);
+    setMes(mesAtivo && ordenados.includes(mesAtivo) ? mesAtivo : ordenados[0]);
+    setSel([]);
+    setSelGeracao([]);
+  }
+
+  function alternarMesSelecionado(mesAlvo: number) {
+    const selecionados = mesesSelecionados.includes(mesAlvo)
+      ? mesesSelecionados.filter((m) => m !== mesAlvo)
+      : [...mesesSelecionados, mesAlvo];
+    if (selecionados.length === 0) return;
+    atualizarMesesSelecionados(selecionados, mesesSelecionados.includes(mesAlvo) ? selecionados[0] : mesAlvo);
+  }
+
+  function competenciaPodeSerGerada(mesAlvo: number, anoAlvo = ano) {
+    const agora = new Date();
+    return new Date(anoAlvo, mesAlvo - 1, 1) <= new Date(agora.getFullYear(), agora.getMonth(), 1);
+  }
+
+  function chaveGeracao(item: M) {
+    const mesItem = Number(String(item.competencia || "").slice(5, 7));
+    return `${mesItem}:${item.socio_id}`;
+  }
 
   // A tela usa exatamente a mesma regra da API de geração. Isso impede
   // que dependentes com categoria "Dependente"/"Titular" e um indicador
@@ -554,39 +599,48 @@ export default function Page() {
 
   const linhasExibicao = useMemo<M[]>(() => {
     const existentes = new Map<string, M>();
-    mensalidadesElegiveisParaExibicao.forEach((m) => existentes.set(String(m.socio_id), m));
+    mensalidadesElegiveisParaExibicao.forEach((item) => {
+      const mesItem = Number(String(item.competencia || "").slice(5, 7));
+      existentes.set(`${mesItem}:${String(item.socio_id)}`, item);
+    });
 
-    // Quando a competência ainda não foi gerada, mostramos os associados
-    // elegíveis como linhas "Não gerada". Assim o administrador consegue
-    // conferir os associados que realmente podem ter cobrança própria.
-    const virtuais: M[] = sociosElegiveis
-      .filter((s) => !existentes.has(String(s.id)))
-      .map((s) => ({
-        id: `virtual-${s.id}-${ano}-${mes}`,
-        socio_id: String(s.id),
-        competencia: `${ano}-${String(mes).padStart(2, "0")}-01`,
-        valor: 0,
-        valor_base: null,
-        tarifa_pagamento: null,
-        multa: 0,
-        juros: 0,
-        desconto: 0,
-        total_cobrado: null,
-        data_vencimento: null,
-        situacao: "nao_gerada",
-        data_pagamento: null,
-        tipo_pagamento: s.tipo_pagamento || null,
-        observacoes: null,
-        motivo: "Mensalidade ainda não gerada",
-        conta_pagadora_id: s.conta_bancaria_id || null,
-        socio: s,
-      }));
+    // Gera uma linha por associado e competência selecionada. A chave inclui
+    // o mês para que o mesmo associado apareça corretamente em vários meses.
+    const linhas: M[] = [];
+    const mesesOrdenados = [...mesesSelecionados].sort((a, b) => a - b);
+    for (const mesItem of mesesOrdenados) {
+      for (const socio of sociosElegiveis) {
+        const chave = `${mesItem}:${String(socio.id)}`;
+        const existente = existentes.get(chave);
+        if (existente) {
+          linhas.push(existente);
+          continue;
+        }
+        linhas.push({
+          id: `virtual-${ano}-${String(mesItem).padStart(2, "0")}-${socio.id}`,
+          socio_id: String(socio.id),
+          competencia: `${ano}-${String(mesItem).padStart(2, "0")}-01`,
+          valor: 0,
+          valor_base: null,
+          tarifa_pagamento: null,
+          multa: 0,
+          juros: 0,
+          desconto: 0,
+          total_cobrado: null,
+          data_vencimento: null,
+          situacao: "nao_gerada",
+          data_pagamento: null,
+          tipo_pagamento: socio.tipo_pagamento || null,
+          observacoes: null,
+          motivo: "Mensalidade ainda não gerada",
+          conta_pagadora_id: socio.conta_bancaria_id || null,
+          socio,
+        });
+      }
+    }
 
-    return [...mensalidadesElegiveisParaExibicao, ...virtuais].map((item) => ({
-      ...item,
-      situacao: situacaoVisual(item),
-    }));
-  }, [mensalidadesElegiveisParaExibicao, sociosElegiveis, ano, mes]);
+    return linhas.map((item) => ({ ...item, situacao: situacaoVisual(item) }));
+  }, [mensalidadesElegiveisParaExibicao, sociosElegiveis, ano, mesesSelecionados]);
 
   const tiposSocioDisponiveis = useMemo<string[]>(() => {
     const tipos = sociosElegiveis
@@ -794,24 +848,24 @@ const selecionadasBaixa = useMemo(
     }
   }
 
-  function alternarGeracaoSocio(id: string) {
+  function alternarGeracaoSocio(chave: string) {
     setSelGeracao((atual) =>
-      atual.includes(id)
-        ? atual.filter((x) => x !== id)
-        : [...atual, id]
+      atual.includes(chave)
+        ? atual.filter((x) => x !== chave)
+        : [...atual, chave]
     );
   }
 
   function selecionarTodosParaGeracao() {
-    const ids = filtrada
-      .filter((x) => x.situacao === "nao_gerada")
-      .map((x) => String(x.socio_id));
-    setSelGeracao(ids);
+    const chaves = filtrada
+      .filter((item) => item.situacao === "nao_gerada")
+      .map(chaveGeracao);
+    setSelGeracao(chaves);
   }
 
   async function gerarSelecionados() {
     if (selGeracao.length === 0) {
-      setErro("Selecione ao menos um associado sem mensalidade gerada.");
+      setErro("Selecione ao menos uma mensalidade ainda não gerada.");
       return;
     }
 
@@ -819,32 +873,46 @@ const selecionadasBaixa = useMemo(
     setMsg("");
 
     try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({
-          acao: "gerar",
-          ano,
-          mes,
-          socio_ids: selGeracao,
-        }),
+      const porMes = new Map<number, Set<string>>();
+      selGeracao.forEach((chave) => {
+        const separador = chave.indexOf(":");
+        const mesItem = Number(chave.slice(0, separador));
+        const socioId = chave.slice(separador + 1);
+        if (!Number.isInteger(mesItem) || mesItem < 1 || mesItem > 12 || !socioId) return;
+        if (!competenciaPodeSerGerada(mesItem)) return;
+        if (!porMes.has(mesItem)) porMes.set(mesItem, new Set<string>());
+        porMes.get(mesItem)!.add(socioId);
       });
 
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Não foi possível gerar as mensalidades selecionadas.");
+      if (porMes.size === 0) {
+        throw Error("As competências futuras não podem ser geradas. Selecione meses até a competência atual.");
+      }
 
+      const headers = await h();
+      const resultados: string[] = [];
+      let totalCriadas = 0;
+      for (const [mesItem, sociosDoMes] of [...porMes.entries()].sort((a, b) => a[0] - b[0])) {
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ acao: "gerar", ano, mes: mesItem, socio_ids: [...sociosDoMes] }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar ${String(mesItem).padStart(2, "0")}/${ano}.`);
+        const criadas = Number(d.criadas || 0);
+        totalCriadas += criadas;
+        resultados.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${criadas} gerada(s)`);
+      }
+
+      const mesesFuturosIgnorados = selGeracao.some((chave) => {
+        const mesItem = Number(chave.slice(0, chave.indexOf(":")));
+        return Number.isInteger(mesItem) && !competenciaPodeSerGerada(mesItem);
+      });
       setSelGeracao([]);
-      setMsg(
-        d.message ||
-          `${Number(d.criadas || selGeracao.length)} mensalidade(s) gerada(s) para os associados selecionados.`
-      );
+      setMsg(`Geração concluída: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}${mesesFuturosIgnorados ? " • Competências futuras foram ignoradas." : ""}`);
       await carregar();
     } catch (e) {
-      setErro(
-        e instanceof Error
-          ? e.message
-          : "Não foi possível gerar as mensalidades selecionadas."
-      );
+      setErro(e instanceof Error ? e.message : "Não foi possível gerar as mensalidades selecionadas.");
     }
   }
 
@@ -855,22 +923,26 @@ const selecionadasBaixa = useMemo(
     setPrevias([]);
 
     try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({
-          acao: "previsualizar",
-          ano,
-          mes,
-        }),
-      });
-
-      const d = await r.json();
-      if (!r.ok) {
-        throw Error(d.error || `Não foi possível gerar a prévia de ${String(mes).padStart(2, "0")}/${ano}.`);
+      const mesesGeraveis = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => competenciaPodeSerGerada(mesItem));
+      if (mesesGeraveis.length === 0) {
+        throw Error("Não é permitido gerar mensalidades de competências futuras. Selecione pelo menos um mês até a competência atual.");
       }
 
-      setPrevias([d]);
+      const headers = await h();
+      const respostas = await Promise.all(mesesGeraveis.map(async (mesItem) => {
+        const r = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ acao: "previsualizar", ano, mes: mesItem }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesItem).padStart(2, "0")}/${ano}.`);
+        return d as PreviaGeracao;
+      }));
+
+      setPrevias(respostas.sort((a, b) => a.competencia.localeCompare(b.competencia)));
+      const mesesFuturos = mesesSelecionados.filter((mesItem) => !competenciaPodeSerGerada(mesItem));
+      if (mesesFuturos.length > 0) setMsg(`Prévia pronta. Meses futuros (${mesesFuturos.map((m) => nomesMeses[m - 1]).join(", ")}) podem ser visualizados, mas não serão gerados.`);
     } catch (e) {
       setAbrindoPrevia(false);
       setPrevias([]);
@@ -1038,7 +1110,7 @@ const selecionadasBaixa = useMemo(
                 onClick={() => void previsualizarGeracao()}
                 className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
-                ⚡ Gerar {String(mes).padStart(2, "0")}/{ano}
+                ⚡ Gerar {mesesSelecionados.length === 1 ? `${String(mesesSelecionados[0]).padStart(2, "0")}/${ano}` : `${mesesSelecionados.length} meses selecionados`}
               </button>
 
               <button
@@ -1078,7 +1150,11 @@ const selecionadasBaixa = useMemo(
                 <span className="text-sm font-bold text-gray-600">Ano</span>
                 <select
                   value={ano}
-                  onChange={(e) => setAno(Number(e.target.value))}
+                  onChange={(e) => {
+                    setAno(Number(e.target.value));
+                    setSel([]);
+                    setSelGeracao([]);
+                  }}
                   className="mt-2 w-full rounded-xl border p-3 font-bold"
                 >
                   {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
@@ -1089,28 +1165,36 @@ const selecionadasBaixa = useMemo(
                 </select>
               </label>
 
-              <label className="min-w-[260px] flex-1">
-                <span className="text-sm font-bold text-gray-600">Mês da competência exibida</span>
-                <select
-                  value={mes}
-                  onChange={(e) => setMes(Number(e.target.value))}
-                  className="mt-2 w-full rounded-xl border p-3 font-bold"
-                >
-                  {[
-                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-                  ].map((nomeMes, i) => (
-                    <option key={nomeMes} value={i + 1}>
-                      {String(i + 1).padStart(2, "0")} — {nomeMes}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="min-w-[280px] flex-[1.6]">
+                <span className="text-sm font-bold text-gray-600">Meses da competência (selecione um ou vários)</span>
+                <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {nomesMeses.map((nomeMes, i) => {
+                    const numeroMes = i + 1;
+                    const ativo = mesesSelecionados.includes(numeroMes);
+                    return (
+                      <button
+                        key={nomeMes}
+                        type="button"
+                        aria-pressed={ativo}
+                        onClick={() => alternarMesSelecionado(numeroMes)}
+                        className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${ativo ? "border-[#005a3c] bg-[#005a3c] text-white shadow-sm" : "border-[#d5e0da] bg-white text-[#315447] hover:bg-[#eef7f2]"}`}
+                      >
+                        {String(numeroMes).padStart(2, "0")} — {nomeMes}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => atualizarMesesSelecionados(Array.from({ length: 12 }, (_, i) => i + 1), mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Selecionar todos</button>
+                  <button type="button" onClick={() => atualizarMesesSelecionados([mes], mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Manter somente {nomesMeses[mes - 1]}</button>
+                </div>
+              </div>
 
-              <div className="rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
+              <div className="min-w-[210px] rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
                 <span className="text-gray-500">Visualizando:</span>{" "}
-                <b className="text-[#005a3c]">{String(mes).padStart(2, "0")}/{ano}</b>
-                <span className="ml-2 text-gray-500">(carrega automaticamente)</span>
+                <b className="text-[#005a3c]">{mesesSelecionados.length === 1 ? `${String(mesesSelecionados[0]).padStart(2, "0")}/${ano}` : `${mesesSelecionados.length} meses de ${ano}`}</b>
+                <p className="mt-1 text-xs text-gray-600">{mesesSelecionados.map((mesItem) => nomesMeses[mesItem - 1]).join(" • ")}</p>
+                <span className="text-xs text-gray-500">A lista carrega automaticamente.</span>
               </div>
             </div>
           </section>
@@ -1304,7 +1388,7 @@ const selecionadasBaixa = useMemo(
                   const acrescimos = Number(x.multa || 0) + Number(x.juros || 0);
                   const total = x.total_cobrado ?? Number(x.valor_base ?? x.valor) + Number(x.tarifa_pagamento || 0) + Number(x.multa || 0) + Number(x.juros || 0) - Number(x.desconto || 0);
                   const marcado = x.situacao === "nao_gerada"
-                    ? selGeracao.includes(String(x.socio_id))
+                    ? selGeracao.includes(chaveGeracao(x))
                     : x.situacao !== "pago" && sel.includes(x.id);
                   return (
                     <article key={`mobile-${x.id}`} className="min-w-0 rounded-xl border border-[#d8e7df] bg-white p-3 shadow-sm">
@@ -1317,7 +1401,7 @@ const selecionadasBaixa = useMemo(
                           aria-label={`Selecionar mensalidade de ${x.socio?.nome || "associado"}`}
                           onChange={() => {
                             if (x.situacao === "nao_gerada") {
-                              alternarGeracaoSocio(String(x.socio_id));
+                              alternarGeracaoSocio(chaveGeracao(x));
                               return;
                             }
                             if (x.situacao === "pago") return;
@@ -1329,6 +1413,7 @@ const selecionadasBaixa = useMemo(
                             {x.socio?.nome || "Associado sem identificação"}
                           </button>
                           <p className="mt-1 break-words text-xs text-gray-500">Matrícula: {x.socio?.matricula || "—"}</p>
+                          <p className="mt-1 break-words text-xs font-bold text-[#005a3c]">Competência: {String(x.competencia || "").slice(5, 7)}/{String(x.competencia || "").slice(0, 4)}</p>
                           <p className="mt-1 break-words text-sm text-gray-700">{nomes[x.socio?.tipo_socio] || x.socio?.tipo_socio || "Tipo não informado"}</p>
                         </div>
                         <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${st[1]}`}>{st[0]}</span>
@@ -1353,6 +1438,7 @@ const selecionadasBaixa = useMemo(
                 <thead className="bg-[#e8f3ee]">
                   <tr>
                     <th className="p-3">✓</th>
+                    <th className="p-3 text-left">Competência</th>
                     <th className="p-3 text-left">Associado</th>
                     <th className="p-3 text-left">Matrícula</th>
                     <th className="p-3 text-left">Tipo</th>
@@ -1370,7 +1456,7 @@ const selecionadasBaixa = useMemo(
                 <tbody className="divide-y">
                   {filtrada.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="p-6 text-center text-gray-500">
+                      <td colSpan={13} className="p-6 text-center text-gray-500">
                         Nenhum associado encontrado com os filtros atuais.
                       </td>
                     </tr>
@@ -1388,14 +1474,14 @@ const selecionadasBaixa = useMemo(
                             disabled={x.situacao === "pago"}
                             checked={
                               x.situacao === "nao_gerada"
-                                ? selGeracao.includes(String(x.socio_id))
+                                ? selGeracao.includes(chaveGeracao(x))
                                 : x.situacao === "pago"
                                   ? false
                                   : sel.includes(x.id)
                             }
                             onChange={() => {
                               if (x.situacao === "nao_gerada") {
-                                alternarGeracaoSocio(String(x.socio_id));
+                                alternarGeracaoSocio(chaveGeracao(x));
                                 return;
                               }
 
@@ -1408,6 +1494,10 @@ const selecionadasBaixa = useMemo(
                               );
                             }}
                           />
+                        </td>
+
+                        <td className="whitespace-nowrap p-3 font-bold text-[#005a3c]">
+                          {String(x.competencia || "").slice(5, 7)}/{String(x.competencia || "").slice(0, 4)}
                         </td>
 
                         <td className="p-3 font-bold">
