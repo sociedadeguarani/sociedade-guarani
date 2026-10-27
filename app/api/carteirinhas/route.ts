@@ -244,6 +244,7 @@ export async function GET(request: Request) {
     const colunasDependente = [
       "id", "socio_id", "matricula", "nome", "cpf", "data_nascimento", "parentesco",
       "telefone", "whatsapp", "email", "ativo", "created_at", "updated_at", "foto_url", "observacoes",
+      "migrado_para_socio_id",
     ];
     if (podeVerFinanceiro) colunasDependente.push(
       "possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento",
@@ -285,6 +286,7 @@ export async function GET(request: Request) {
       return {
         id: String(d.id),
         socio_id: titularId,
+        migrado_para_socio_id: d.migrado_para_socio_id || null,
         matricula: d.matricula || null,
         nome: d.nome,
         cpf: d.cpf || null,
