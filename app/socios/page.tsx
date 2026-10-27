@@ -1633,7 +1633,7 @@ function Socios({
       <style jsx global>{`
         .relatorio-socios-print { display: none; }
         @media print {
-          @page { size: A4 landscape; margin: 9mm; }
+          @page { size: A4 portrait; margin: 9mm; }
           html, body { background: #fff !important; }
           body * { visibility: hidden !important; }
           .relatorio-socios-print, .relatorio-socios-print * { visibility: visible !important; }
@@ -1641,7 +1641,7 @@ function Socios({
             display: block !important; position: absolute !important; left: 0 !important; top: 0 !important;
             width: 100% !important; margin: 0 !important; padding: 0 !important;
             color: #17211d !important; background: #fff !important;
-            font-family: Arial, Helvetica, sans-serif !important; font-size: 9pt !important; line-height: 1.25 !important;
+            font-family: Arial, Helvetica, sans-serif !important; font-size: 8.3pt !important; line-height: 1.22 !important;
           }
           .relatorio-socios-print .print-socios-titulo { color: #064b36 !important; font-size: 18pt !important; font-weight: 800 !important; margin: 0 0 2mm !important; }
           .relatorio-socios-print .print-socios-subtitulo { color: #4b5b54 !important; font-size: 9pt !important; margin: 0 0 1mm !important; }
@@ -1649,8 +1649,8 @@ function Socios({
           .relatorio-socios-print table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; }
           .relatorio-socios-print thead { display: table-header-group !important; }
           .relatorio-socios-print tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          .relatorio-socios-print th { color: #103d2c !important; background: #e8f3ee !important; font-size: 8pt !important; font-weight: 700 !important; text-align: left !important; }
-          .relatorio-socios-print th, .relatorio-socios-print td { border: 1px solid #cbd8d1 !important; padding: 1.7mm 1.8mm !important; vertical-align: top !important; overflow-wrap: anywhere !important; }
+          .relatorio-socios-print th { color: #103d2c !important; background: #e8f3ee !important; font-size: 7.2pt !important; font-weight: 700 !important; text-align: left !important; }
+          .relatorio-socios-print th, .relatorio-socios-print td { border: 1px solid #cbd8d1 !important; padding: 1.25mm 1.3mm !important; vertical-align: top !important; overflow-wrap: anywhere !important; word-break: normal !important; }
           .relatorio-socios-print .print-socios-rodape { border-top: 1px solid #cbd8d1 !important; margin-top: 3mm !important; padding-top: 2mm !important; color: #5c6a63 !important; font-size: 8pt !important; }
           .relatorio-socios-print .print-socios-status { font-weight: 700 !important; white-space: nowrap !important; }
         }
