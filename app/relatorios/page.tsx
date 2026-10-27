@@ -453,7 +453,7 @@ export default function RelatoriosPage() {
       <style jsx global>{`
         @media print {
           @page {
-            size: A4 landscape;
+            size: A4 portrait;
             margin: 10mm;
             @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #64748b; }
           }
@@ -470,25 +470,25 @@ export default function RelatoriosPage() {
           .relatorio-tabela { overflow: visible !important; width: 100% !important; }
           .relatorio-linha { break-inside: avoid !important; }
           .print-apenas { display: block !important; }
-          .print-resumo-grade { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-resumo-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
           .print-resumo-grade > div { min-width: 0 !important; padding: 8px !important; }
           .print-resumo-grade > div p:first-child { font-size: 7.5pt !important; line-height: 1.2 !important; }
-          .print-resumo-grade > div p:nth-child(2) { font-size: 13pt !important; line-height: 1.2 !important; overflow-wrap: anywhere !important; }
+          .print-resumo-grade > div p:nth-child(2) { font-size: 14pt !important; line-height: 1.2 !important; overflow-wrap: anywhere !important; }
           .print-resumo-grade > div p:last-child { font-size: 6.5pt !important; line-height: 1.2 !important; }
-          .print-categorias-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+          .print-categorias-grade { grid-template-columns: minmax(0, 1fr) !important; gap: 8px !important; }
           .print-categorias-grade > section { min-width: 0 !important; padding: 10px !important; }
           .print-categorias-grade .print-lista-categoria { margin-top: 7px !important; }
           .print-categorias-grade .print-lista-categoria > div { padding: 5px 7px !important; }
           .print-categorias-grade .print-lista-categoria > div + div { margin-top: 4px !important; }
-          .print-formas-grade { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-formas-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
           .print-formas-grade > div { min-width: 0 !important; padding: 8px !important; }
           .print-formas-grade > div p:nth-child(2) { font-size: 12pt !important; }
-          .print-bancos-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-bancos-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
           .print-bancos-grade > div { min-width: 0 !important; padding: 8px !important; }
           .print-bancos-grade h3 { font-size: 10pt !important; line-height: 1.2 !important; }
           .print-bancos-grade .print-saldo-banco { margin-top: 7px !important; font-size: 14pt !important; line-height: 1.15 !important; }
           .print-bancos-grade .print-detalhe-banco { margin-top: 7px !important; padding-top: 6px !important; }
-          .print-resumo-final-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
+          .print-resumo-final-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
           .print-resumo-final-grade > div { padding: 8px !important; }
           .relatorio-impressao section { margin-bottom: 9px !important; }
           .relatorio-impressao .p-5 { padding: 10px !important; }
@@ -528,6 +528,8 @@ export default function RelatoriosPage() {
           .relatorio-impressao { margin: 0 !important; max-width: none !important; padding: 0 !important; }
           .sombra-impressao { box-shadow: none !important; border-color: #cbd5d1 !important; }
           .relatorio-impressao section { break-inside: auto !important; page-break-inside: auto !important; }
+          .print-resumo-grade > div, .print-formas-grade > div, .print-bancos-grade > div { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .print-categorias-grade > section { break-inside: avoid-page !important; page-break-inside: avoid !important; }
           .relatorio-impressao .rounded-2xl { border-radius: 4px !important; }
           .relatorio-impressao .overflow-x-auto { overflow: visible !important; }
 
