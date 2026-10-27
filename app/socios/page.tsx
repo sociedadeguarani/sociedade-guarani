@@ -1615,8 +1615,89 @@ function Socios({
   somenteConsulta: boolean;
   camposVisiveis: { financeiro: boolean; exameMedico: boolean };
 }) {
+  const filtrosRelatorio = [
+    busca.trim() ? `Busca: ${busca.trim()}` : null,
+    filtroTipoSocio.length
+      ? `Tipos: ${filtroTipoSocio.map((tipo) => TIPOS_SOCIO.find((item) => item.value === tipo)?.label || tipo).join(", ")}`
+      : null,
+    filtroRemissao === "remidos" ? "Remissão: somente remidos" : filtroRemissao === "nao_remidos" ? "Remissão: não remidos" : null,
+    filtroSituacaoSocio !== "todas" ? `Situação: ${filtroSituacaoSocio}` : null,
+    mostrarSomenteDependentes ? "Visualização: dependentes" : null,
+  ].filter(Boolean).join(" · ") || "Todos os registros que atendem aos critérios padrão da lista.";
+
+  const totalAtivosRelatorio = socios.filter((s) => (s.situacao || "ativo").toLowerCase() === "ativo").length;
+  const dataEmissaoRelatorio = new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
   return (
     <div>
+      <style jsx global>{`
+        .relatorio-socios-print { display: none; }
+        @media print {
+          @page { size: A4 landscape; margin: 9mm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          .relatorio-socios-print, .relatorio-socios-print * { visibility: visible !important; }
+          .relatorio-socios-print {
+            display: block !important; position: absolute !important; left: 0 !important; top: 0 !important;
+            width: 100% !important; margin: 0 !important; padding: 0 !important;
+            color: #17211d !important; background: #fff !important;
+            font-family: Arial, Helvetica, sans-serif !important; font-size: 9pt !important; line-height: 1.25 !important;
+          }
+          .relatorio-socios-print .print-socios-titulo { color: #064b36 !important; font-size: 18pt !important; font-weight: 800 !important; margin: 0 0 2mm !important; }
+          .relatorio-socios-print .print-socios-subtitulo { color: #4b5b54 !important; font-size: 9pt !important; margin: 0 0 1mm !important; }
+          .relatorio-socios-print .print-socios-resumo { display: flex !important; justify-content: space-between !important; gap: 5mm !important; border: 1px solid #cbd8d1 !important; border-radius: 2mm !important; padding: 2.5mm !important; margin: 3mm 0 !important; }
+          .relatorio-socios-print table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; }
+          .relatorio-socios-print thead { display: table-header-group !important; }
+          .relatorio-socios-print tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .relatorio-socios-print th { color: #103d2c !important; background: #e8f3ee !important; font-size: 8pt !important; font-weight: 700 !important; text-align: left !important; }
+          .relatorio-socios-print th, .relatorio-socios-print td { border: 1px solid #cbd8d1 !important; padding: 1.7mm 1.8mm !important; vertical-align: top !important; overflow-wrap: anywhere !important; }
+          .relatorio-socios-print .print-socios-rodape { border-top: 1px solid #cbd8d1 !important; margin-top: 3mm !important; padding-top: 2mm !important; color: #5c6a63 !important; font-size: 8pt !important; }
+          .relatorio-socios-print .print-socios-status { font-weight: 700 !important; white-space: nowrap !important; }
+        }
+      `}</style>
+
+      <section className="relatorio-socios-print" aria-label="Relatório de sócios para impressão">
+        <header style={{ borderBottom: "2px solid #07563d", paddingBottom: "3mm" }}>
+          <p style={{ margin: 0, fontSize: "9pt", fontWeight: 700, letterSpacing: ".06em", color: "#07563d" }}>SOCIEDADE RECREATIVA GUARANI — S.R.G.</p>
+          <h1 className="print-socios-titulo">Relatório de Sócios</h1>
+          <p className="print-socios-subtitulo">Lista de associados · Emitido em {dataEmissaoRelatorio}</p>
+          <p className="print-socios-subtitulo">Filtros aplicados: {filtrosRelatorio}</p>
+        </header>
+
+        <div className="print-socios-resumo">
+          <span><strong>Registros listados:</strong> {socios.length}</span>
+          <span><strong>Ativos:</strong> {totalAtivosRelatorio}</span>
+          <span><strong>Inativos/suspensos:</strong> {socios.length - totalAtivosRelatorio}</span>
+        </div>
+
+        <table>
+          <colgroup>
+            <col style={{ width: "10%" }} /><col style={{ width: "24%" }} /><col style={{ width: "14%" }} />
+            <col style={{ width: "14%" }} /><col style={{ width: "20%" }} /><col style={{ width: "11%" }} /><col style={{ width: "7%" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Matrícula</th><th>Nome</th><th>CPF</th><th>Telefone / WhatsApp</th><th>Tipo de associado</th><th>Responsável</th><th>Situação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {socios.map((socio) => (
+              <tr key={socio.id}>
+                <td>{socio.matricula || "—"}</td>
+                <td><strong>{socio.nome || "Não informado"}</strong>{socioEhRemido(socio) ? " · Remido" : ""}</td>
+                <td>{socio.cpf || "—"}</td>
+                <td>{socio.whatsapp || socio.telefone || "—"}</td>
+                <td>{tipoSocioLabel(socio.tipo_socio)}</td>
+                <td>{socio.responsavel_id ? sociosCompletos.find((p) => p.id === socio.responsavel_id)?.nome || "Responsável não localizado" : "—"}</td>
+                <td className="print-socios-status">{(socio.situacao || "ativo").toLowerCase() === "ativo" ? "Ativo" : (socio.situacao || "Inativo").toLowerCase() === "suspenso" ? "Suspenso" : "Inativo"}</td>
+              </tr>
+            ))}
+            {socios.length === 0 && <tr><td colSpan={7}>Nenhum sócio corresponde aos filtros selecionados.</td></tr>}
+          </tbody>
+        </table>
+
+        <footer className="print-socios-rodape">Relatório interno da Sociedade Recreativa Guarani · Documento gerado a partir dos filtros exibidos na lista de sócios.</footer>
+      </section>
 
       <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-6 sm:flex-row sm:items-center">
 
@@ -1634,14 +1715,23 @@ function Socios({
           </p>
         </div>
 
-        {!somenteConsulta && (
+        <div className="flex flex-col gap-2 sm:flex-row">
           <button
-            onClick={novoSocio}
-            className="w-full rounded-xl bg-[#063b28] px-4 py-3 text-sm font-bold text-white shadow transition hover:bg-[#003d2b] sm:w-auto sm:px-5"
+            type="button"
+            onClick={() => window.print()}
+            className="w-full rounded-xl border border-[#c9d9d1] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm transition hover:bg-[#f0f7f3] sm:w-auto"
           >
-            + Novo Sócio
+            🖨️ Imprimir relatório
           </button>
-        )}
+          {!somenteConsulta && (
+            <button
+              onClick={novoSocio}
+              className="w-full rounded-xl bg-[#063b28] px-4 py-3 text-sm font-bold text-white shadow transition hover:bg-[#003d2b] sm:w-auto sm:px-5"
+            >
+              + Novo Sócio
+            </button>
+          )}
+        </div>
 
       </div>
 
