@@ -58,19 +58,19 @@ export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
   // O tipo estruturado diferencia dependentes cobrados dos sem mensalidade.
   // Ele prevalece sobre categorias antigas/genéricas de dependente.
   if (TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo)) return true;
-
-  // "Sócio Dependente" é uma categoria própria de associado pagante, não
-  // um dependente familiar isento. Exigimos também a flag financeira ativa
-  // para não transformar cadastros inconsistentes em cobranças automáticas.
-  if (categoria === "socio dependente") {
-    return socio.possui_mensalidade === true || String(socio.possui_mensalidade).toLowerCase() === "true";
-  }
-
   if (tipo.startsWith("dependente_")) return false;
 
   // Compatibilidade com registros antigos que ainda não têm tipo estruturado:
   // só aceitamos cobrança quando a categoria declarar isso expressamente.
   return Boolean(categoria) && categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
+}
+
+
+/** Indica que o cadastro antigo de dependente foi promovido para a tabela socios.
+ * O registro legado é mantido apenas para preservar referências históricas.
+ */
+export function dependenteFoiPromovidoParaSocio(registro: { migrado_para_socio_id?: unknown }): boolean {
+  return String(registro.migrado_para_socio_id ?? "").trim().length > 0;
 }
 
 /** Aplica a mesma regra na tela, na prévia e na API de geração. */
