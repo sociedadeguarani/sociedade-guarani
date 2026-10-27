@@ -483,13 +483,16 @@ export default function RelatoriosPage() {
           .print-formas-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
           .print-formas-grade > div { min-width: 0 !important; padding: 8px !important; }
           .print-formas-grade > div p:nth-child(2) { font-size: 12pt !important; }
-          .print-bancos-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+          .print-bancos-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
           .print-bancos-grade > div { min-width: 0 !important; padding: 8px !important; }
           .print-bancos-grade h3 { font-size: 10pt !important; line-height: 1.2 !important; }
           .print-bancos-grade .print-saldo-banco { margin-top: 7px !important; font-size: 14pt !important; line-height: 1.15 !important; }
           .print-bancos-grade .print-detalhe-banco { margin-top: 7px !important; padding-top: 6px !important; }
-          .print-resumo-final-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
-          .print-resumo-final-grade > div { padding: 8px !important; }
+          .print-resumo-final-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px !important; margin-top: 8px !important; }
+          .print-resumo-final-grade > div { min-width: 0 !important; padding: 7px !important; break-inside: avoid !important; page-break-inside: avoid !important; }
+          .print-resumo-final-grade > div p:first-child { font-size: 7pt !important; line-height: 1.2 !important; }
+          .print-resumo-final-grade > div p:nth-child(2) { font-size: 12pt !important; line-height: 1.2 !important; overflow-wrap: anywhere !important; }
+          .print-bancos-cabecalho { break-inside: avoid !important; page-break-inside: avoid !important; break-after: avoid-page !important; page-break-after: avoid !important; }
           .relatorio-impressao section { margin-bottom: 9px !important; }
           .relatorio-impressao .p-5 { padding: 10px !important; }
           .relatorio-impressao .mb-6 { margin-bottom: 8px !important; }
@@ -809,7 +812,7 @@ export default function RelatoriosPage() {
             </section>
 
             <section className="mb-6 sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-              <div className="mb-5">
+              <div className="print-bancos-cabecalho mb-5">
                 <h2 className="text-lg font-extrabold text-[#003d2b]">
                   Saldos por banco
                 </h2>
