@@ -456,7 +456,17 @@ export async function POST(request: Request) {
 
       if (erroSocios) throw erroSocios;
 
-      const cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
+      let cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
+
+      // A prévia pode ser global ou restrita aos associados marcados na tela.
+      // A mesma lista de IDs é aplicada na confirmação para evitar gerar outros.
+      const socioIdsSelecionados = Array.isArray(body.socio_ids)
+        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+      if (socioIdsSelecionados.length > 0) {
+        const permitidos = new Set(socioIdsSelecionados);
+        cobraveis = cobraveis.filter((s: any) => permitidos.has(String(s.id)));
+      }
 
       const { data: configuracoes, error: erroConfiguracoes } =
         await db
