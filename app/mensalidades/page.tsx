@@ -176,6 +176,23 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
+const PREFIXO_HISTORICO_IMPORTADO = "MIGRACAO_HISTORICO_58_PAGINAS";
+
+function ehObservacaoHistoricoImportado(texto?: string | null) {
+  return String(texto || "").startsWith(PREFIXO_HISTORICO_IMPORTADO);
+}
+
+function resumoObservacaoMensalidade(texto?: string | null) {
+  const valor = String(texto || "").trim();
+  if (!valor) return "";
+  if (!ehObservacaoHistoricoImportado(valor)) return valor;
+
+  const formaOriginal = valor.match(/Forma original:\s*([^|]+)/i)?.[1]?.trim();
+  return formaOriginal
+    ? `Histórico importado · ${formaOriginal}`
+    : "Histórico importado";
+}
+
 function statusMensalidade(item: M, semSaldoPermitido = false) {
   if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
   return status(item.situacao);
@@ -1424,7 +1441,23 @@ const selecionadasBaixa = useMemo(
                         <div><p className="text-xs text-gray-500">Base</p><p>{moeda(x.valor_base ?? x.valor)}</p></div>
                         <div><p className="text-xs text-gray-500">Tarifa + acréscimos</p><p>{moeda(Number(x.tarifa_pagamento || 0) + acrescimos)}</p></div>
                       </div>
-                      {(x.motivo || x.observacoes) && <p className="mt-2 break-words text-xs text-gray-500">Motivo: {x.motivo || x.observacoes}</p>}
+                      {(x.motivo || x.observacoes) && (
+                        ehObservacaoHistoricoImportado(x.motivo || x.observacoes) ? (
+                          <details className="mt-2 min-w-0 text-xs text-gray-500">
+                            <summary
+                              className="cursor-pointer font-semibold text-gray-600"
+                              title={x.motivo || x.observacoes || ""}
+                            >
+                              {resumoObservacaoMensalidade(x.motivo || x.observacoes)}
+                            </summary>
+                            <p className="mt-1 break-words">{x.motivo || x.observacoes}</p>
+                          </details>
+                        ) : (
+                          <p className="mt-2 break-words text-xs text-gray-500">
+                            Motivo: {x.motivo || x.observacoes}
+                          </p>
+                        )
+                      )}
                       {x.situacao === "pago" && <button type="button" onClick={() => void estornarBaixa(x)} className="mt-3 w-full rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-700">↩️ Estornar baixa</button>}
                       {x.situacao === "nao_gerada" && <p className="mt-3 text-xs text-gray-400">Gere a competência primeiro.</p>}
                     </article>
@@ -1553,8 +1586,22 @@ const selecionadasBaixa = useMemo(
                           </span>
                         </td>
 
-                        <td className="p-3">
-                          {x.motivo || x.observacoes || "—"}
+                        <td className="max-w-[240px] p-3 align-top">
+                          {ehObservacaoHistoricoImportado(x.motivo || x.observacoes) ? (
+                            <details className="max-w-[220px] text-xs text-gray-500">
+                              <summary
+                                className="cursor-pointer font-semibold text-gray-600"
+                                title={x.motivo || x.observacoes || ""}
+                              >
+                                {resumoObservacaoMensalidade(x.motivo || x.observacoes)}
+                              </summary>
+                              <p className="mt-1 max-w-[320px] whitespace-normal break-words">
+                                {x.motivo || x.observacoes}
+                              </p>
+                            </details>
+                          ) : (
+                            x.motivo || x.observacoes || "—"
+                          )}
                         </td>
 
                         <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
