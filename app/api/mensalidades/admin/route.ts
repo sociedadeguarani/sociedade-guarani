@@ -26,6 +26,39 @@ function normalizarTexto(valor: unknown) {
     .trim();
 }
 
+/**
+ * O cadastro pode guardar o banco (Banrisul/Sicredi/BB) ou a descrição
+ * completa da forma de pagamento, mas mensalidades.tipo_pagamento aceita
+ * apenas: boleto, cartao, debito_em_conta, dinheiro, outro, pix, transferencia.
+ * Mantemos o valor original para calcular a tarifa e persistimos um código válido.
+ */
+function tipoPagamentoPersistivel(valor: unknown): string | null {
+  const bruto = normalizarTexto(valor);
+  if (!bruto) return null;
+
+  const tipo = bruto.replace(/[\s-]+/g, "_");
+  if (tipo.includes("cheque")) return "outro";
+  if (
+    tipo === "banrisul" ||
+    tipo === "bergs" ||
+    tipo === "sicredi" ||
+    tipo === "bb" ||
+    tipo.includes("banco_do_brasil") ||
+    tipo.startsWith("debito")
+  ) {
+    return "debito_em_conta";
+  }
+  if (tipo === "pix") return "pix";
+  if (tipo.startsWith("boleto")) return "boleto";
+  if (tipo.startsWith("cartao")) return "cartao";
+  if (tipo.startsWith("dinheiro")) return "dinheiro";
+  if (tipo.startsWith("transferencia")) return "transferencia";
+  if (tipo === "outro" || tipo === "outra") return "outro";
+
+  // Fallback compatível com a restrição SQL sem interromper a geração de um mês inteiro.
+  return "outro";
+}
+
 const primeiroDia = (ano: number, mes: number) =>
   `${ano}-${String(mes).padStart(2, "0")}-01`;
 
@@ -709,11 +742,14 @@ export async function POST(request: Request) {
             ? Number(config.dia_vencimento)
             : Number(s.dia_vencimento || 10);
 
-          const tipoPagamento = s.tipo_pagamento || null;
+          const tipoPagamentoOriginal = s.tipo_pagamento || null;
+          const tipoPagamento = tipoPagamentoPersistivel(tipoPagamentoOriginal);
 
           const vencimento = dataVencimento(competencia, dia);
           const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          const tarifa = valorTarifa(tarifas || [], tipoPagamento, contaBancaria);
+          // A tarifa precisa do valor cadastral original (ex.: Banrisul/Sicredi);
+          // o campo mensalidades.tipo_pagamento recebe o código aceito pelo banco.
+          const tarifa = valorTarifa(tarifas || [], tipoPagamentoOriginal, contaBancaria);
           const calculado = calcularCobranca(
             valor,
             vencimento,
