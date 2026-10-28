@@ -88,6 +88,9 @@ type Cobranca = {
 
 type PreviaGeracao = {
   competencia: string;
+  // Quando houver associados marcados na grade, a prévia e a confirmação
+  // ficam restritas a esses IDs. Ausente significa geração global.
+  socio_ids?: string[];
   total_cobraveis: number;
   ja_existentes: number;
   quantidade_nova: number;
@@ -467,10 +470,24 @@ export default function Page() {
   function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
     const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
     if (ordenados.length === 0) return; // Sempre manter pelo menos uma competência selecionada.
+
+    // A seleção de um associado deve sobreviver à alteração dos meses.
+    // Assim, marcar Alana e depois escolher janeiro até o mês atual mantém
+    // Alana como alvo e expande a seleção para cada competência escolhida.
+    const sociosJaSelecionados = [...new Set(
+      selGeracao
+        .map((chave) => chave.slice(chave.indexOf(":") + 1))
+        .filter(Boolean)
+    )];
+
     setMesesSelecionados(ordenados);
     setMes(mesAtivo && ordenados.includes(mesAtivo) ? mesAtivo : ordenados[0]);
     setSel([]);
-    setSelGeracao([]);
+    setSelGeracao(
+      sociosJaSelecionados.flatMap((socioId) =>
+        ordenados.map((mesItem) => `${mesItem}:${socioId}`)
+      )
+    );
   }
 
   function alternarMesSelecionado(mesAlvo: number) {
@@ -888,11 +905,37 @@ const selecionadasBaixa = useMemo(
   }
 
   function alternarGeracaoSocio(chave: string) {
-    setSelGeracao((atual) =>
-      atual.includes(chave)
-        ? atual.filter((x) => x !== chave)
-        : [...atual, chave]
-    );
+    const separador = chave.indexOf(":");
+    const socioId = chave.slice(separador + 1);
+    if (separador < 0 || !socioId) return;
+
+    // O checkbox da linha seleciona o associado para todos os meses
+    // escolhidos no painel superior, não só para o mês daquela linha.
+    setSelGeracao((atual) => {
+      const jaSelecionado = atual.some(
+        (item) => item.slice(item.indexOf(":") + 1) === socioId
+      );
+      if (jaSelecionado) {
+        return atual.filter(
+          (item) => item.slice(item.indexOf(":") + 1) !== socioId
+        );
+      }
+      const outrasSelecoes = atual.filter(
+        (item) => item.slice(item.indexOf(":") + 1) !== socioId
+      );
+      return [
+        ...outrasSelecoes,
+        ...mesesSelecionados.map((mesItem) => `${mesItem}:${socioId}`),
+      ];
+    });
+  }
+
+  function idsSociosSelecionadosParaGeracao() {
+    return [...new Set(
+      selGeracao
+        .map((chave) => chave.slice(chave.indexOf(":") + 1))
+        .filter(Boolean)
+    )];
   }
 
   function selecionarTodosParaGeracao() {
@@ -982,15 +1025,24 @@ const selecionadasBaixa = useMemo(
       }
 
       const headers = await h();
+      const socioIdsAlvo = idsSociosSelecionadosParaGeracao();
       const respostas = await Promise.all(mesesGeraveis.map(async (mesItem) => {
         const r = await fetch("/api/mensalidades/admin", {
           method: "POST",
           headers,
-          body: JSON.stringify({ acao: "previsualizar", ano, mes: mesItem }),
+          body: JSON.stringify({
+            acao: "previsualizar",
+            ano,
+            mes: mesItem,
+            ...(socioIdsAlvo.length > 0 ? { socio_ids: socioIdsAlvo } : {}),
+          }),
         });
         const d = await r.json();
         if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesItem).padStart(2, "0")}/${ano}.`);
-        return d as PreviaGeracao;
+        return {
+          ...(d as PreviaGeracao),
+          ...(socioIdsAlvo.length > 0 ? { socio_ids: socioIdsAlvo } : {}),
+        } as PreviaGeracao;
       }));
 
       setPrevias(respostas.sort((a, b) => a.competencia.localeCompare(b.competencia)));
@@ -1033,6 +1085,9 @@ const selecionadasBaixa = useMemo(
               acao: "gerar",
               ano: anoGeracao,
               mes: mesGeracao,
+              ...(item.socio_ids && item.socio_ids.length > 0
+                ? { socio_ids: item.socio_ids }
+                : {}),
             }),
           });
 
@@ -1154,6 +1209,14 @@ const selecionadasBaixa = useMemo(
     });
   }
 
+  const sociosAlvoGeracao = idsSociosSelecionadosParaGeracao();
+  const mesesAteAtual = ano < hoje.getFullYear()
+    ? Array.from({ length: 12 }, (_, i) => i + 1)
+    : ano === hoje.getFullYear()
+      ? Array.from({ length: hoje.getMonth() + 1 }, (_, i) => i + 1)
+      : [];
+  const mesesGeraveisSelecionados = mesesSelecionados.filter((mesItem) => competenciaPodeSerGerada(mesItem));
+
   return (
     <div className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#17382c]">
       <CabecalhoPadrao />
@@ -1177,7 +1240,9 @@ const selecionadasBaixa = useMemo(
                 onClick={() => void previsualizarGeracao()}
                 className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
               >
-                ⚡ Gerar {mesesSelecionados.length === 1 ? `${String(mesesSelecionados[0]).padStart(2, "0")}/${ano}` : `${mesesSelecionados.length} meses selecionados`}
+                {sociosAlvoGeracao.length > 0
+                  ? `⚡ Gerar para ${sociosAlvoGeracao.length} ${sociosAlvoGeracao.length === 1 ? "associado" : "associados"} · ${mesesGeraveisSelecionados.length} ${mesesGeraveisSelecionados.length === 1 ? "mês" : "meses"}`
+                  : `⚡ Gerar ${mesesSelecionados.length === 1 ? `${String(mesesSelecionados[0]).padStart(2, "0")}/${ano}` : `${mesesSelecionados.length} meses selecionados`}`}
               </button>
 
               <button
@@ -1252,9 +1317,22 @@ const selecionadasBaixa = useMemo(
                   })}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={mesesAteAtual.length === 0}
+                    onClick={() => atualizarMesesSelecionados(mesesAteAtual, mesesAteAtual[mesesAteAtual.length - 1])}
+                    className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Janeiro até {mesesAteAtual.length > 0 ? nomesMeses[mesesAteAtual[mesesAteAtual.length - 1] - 1] : "mês atual"}
+                  </button>
                   <button type="button" onClick={() => atualizarMesesSelecionados(Array.from({ length: 12 }, (_, i) => i + 1), mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Selecionar todos</button>
                   <button type="button" onClick={() => atualizarMesesSelecionados([mes], mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Manter somente {nomesMeses[mes - 1]}</button>
                 </div>
+                {selGeracao.length > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-[#005a3c]">
+                    {sociosAlvoGeracao.length} associado(s) selecionado(s). Ao alterar os meses, a seleção é mantida para todas as competências escolhidas. O botão verde gera a prévia somente para esses associados.
+                  </p>
+                )}
               </div>
 
               <div className="min-w-[210px] rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
@@ -2053,7 +2131,15 @@ const selecionadasBaixa = useMemo(
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-[#005a3c]">Prévia da geração — {previas.length} competência(s)</h2>
-                <p className="mt-1 text-sm text-gray-500">Confira todos os meses antes de gravar. Nenhum lançamento foi criado ainda.</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {previas.some((p) => p.socio_ids && p.socio_ids.length > 0)
+                    ? (() => {
+                        const quantidade = previas.find((p) => p.socio_ids && p.socio_ids.length > 0)?.socio_ids?.length || 0;
+                        return `Prévia restrita a ${quantidade} ${quantidade === 1 ? "associado selecionado" : "associados selecionados"}. Confira todos os meses antes de gravar.`;
+                      })()
+                    : "Confira todos os meses antes de gravar. A prévia considera todos os associados elegíveis."}
+                  {" "}Nenhum lançamento foi criado ainda.
+                </p>
               </div>
               <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"><X /></button>
             </div>
