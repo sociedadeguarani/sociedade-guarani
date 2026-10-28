@@ -25,6 +25,7 @@ type Socio = {
   ativo?: boolean | null;
   tipo_pagamento?: string | null;
   conta_bancaria_id?: string | null;
+  dia_vencimento?: number | null;
 };
 
 type M = {
@@ -193,8 +194,25 @@ function resumoObservacaoMensalidade(texto?: string | null) {
     : "Histórico importado";
 }
 
+function competenciaNaoGeradaAtrasada(item: Pick<M, "situacao" | "competencia" | "socio">) {
+  if (item.situacao !== "nao_gerada") return false;
+
+  const competencia = String(item.competencia || "").slice(0, 7);
+  const [anoCompetencia, mesCompetencia] = competencia.split("-").map(Number);
+  if (!Number.isInteger(anoCompetencia) || mesCompetencia < 1 || mesCompetencia > 12) return false;
+
+  // Segue a mesma regra do gerador: dia configurado, limitado a 28; padrão dia 10.
+  const diaConfigurado = Number(item.socio?.dia_vencimento || 10);
+  const diaVencimento = Math.min(Math.max(diaConfigurado, 1), 28);
+  const vencimento = new Date(anoCompetencia, mesCompetencia - 1, diaVencimento, 23, 59, 59, 999);
+  return vencimento.getTime() < Date.now();
+}
+
 function statusMensalidade(item: M, semSaldoPermitido = false) {
   if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
+  if (competenciaNaoGeradaAtrasada(item)) {
+    return ["Atrasada · não gerada", "bg-red-100 text-red-700"];
+  }
   return status(item.situacao);
 }
 
@@ -255,6 +273,7 @@ export default function Page() {
   const [previas, setPrevias] = useState<PreviaGeracao[]>([]);
   const [abrindoPrevia, setAbrindoPrevia] = useState(false);
   const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
+  const [gerandoSelecionados, setGerandoSelecionados] = useState(false);
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
   const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
   const [contaRecebimentoSelecionada, setContaRecebimentoSelecionada] = useState("");
@@ -700,7 +719,10 @@ export default function Page() {
         filtroSituacaoMensalidade === "todas" ||
         (filtroSituacaoMensalidade === "sem_saldo"
           ? semSaldo
-          : !semSaldo && String(x.situacao || "") === filtroSituacaoMensalidade);
+          : !semSaldo && (
+              String(x.situacao || "") === filtroSituacaoMensalidade ||
+              (filtroSituacaoMensalidade === "em_atraso" && competenciaNaoGeradaAtrasada(x))
+            ));
 
       return bateBusca && bateCobranca && bateTipoSocio && bateSituacao;
     });
@@ -888,6 +910,7 @@ const selecionadasBaixa = useMemo(
 
     setErro("");
     setMsg("");
+    setGerandoSelecionados(true);
 
     try {
       const porMes = new Map<number, Set<string>>();
@@ -907,18 +930,24 @@ const selecionadasBaixa = useMemo(
 
       const headers = await h();
       const resultados: string[] = [];
+      const falhas: string[] = [];
       let totalCriadas = 0;
       for (const [mesItem, sociosDoMes] of [...porMes.entries()].sort((a, b) => a[0] - b[0])) {
-        const r = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ acao: "gerar", ano, mes: mesItem, socio_ids: [...sociosDoMes] }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Não foi possível gerar ${String(mesItem).padStart(2, "0")}/${ano}.`);
-        const criadas = Number(d.criadas || 0);
-        totalCriadas += criadas;
-        resultados.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${criadas} gerada(s)`);
+        try {
+          const r = await fetch("/api/mensalidades/admin", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem, socio_ids: [...sociosDoMes] }),
+          });
+          const d = await r.json();
+          if (!r.ok) throw Error(d.error || "Erro desconhecido ao gerar esta competência.");
+
+          const criadas = Number(d.criadas || 0);
+          totalCriadas += criadas;
+          resultados.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${criadas} gerada(s)`);
+        } catch (e) {
+          falhas.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${e instanceof Error ? e.message : "falha ao gerar"}`);
+        }
       }
 
       const mesesFuturosIgnorados = selGeracao.some((chave) => {
@@ -926,10 +955,17 @@ const selecionadasBaixa = useMemo(
         return Number.isInteger(mesItem) && !competenciaPodeSerGerada(mesItem);
       });
       setSelGeracao([]);
-      setMsg(`Geração concluída: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}${mesesFuturosIgnorados ? " • Competências futuras foram ignoradas." : ""}`);
       await carregar();
+      setMsg(
+        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}${mesesFuturosIgnorados ? " • Competências futuras foram ignoradas." : ""}`
+      );
+      if (falhas.length > 0) {
+        setErro(`Não foi possível gerar todas as competências: ${falhas.join(" • ")}`);
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não foi possível gerar as mensalidades selecionadas.");
+    } finally {
+      setGerandoSelecionados(false);
     }
   }
 
@@ -977,7 +1013,11 @@ const selecionadasBaixa = useMemo(
     try {
       let criadasTotal = 0;
       const resultados: string[] = [];
+      const falhas: string[] = [];
+      const headers = await h();
 
+      // Cada mês é processado isoladamente. Se uma competência falhar,
+      // continuamos as demais e informamos exatamente quais precisam de nova tentativa.
       for (const item of previas) {
         if (item.quantidade_nova <= 0) {
           resultados.push(`${item.competencia.slice(0, 7)}: nenhuma nova`);
@@ -985,29 +1025,39 @@ const selecionadasBaixa = useMemo(
         }
 
         const [anoGeracao, mesGeracao] = item.competencia.slice(0, 7).split("-").map(Number);
-        const r = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers: await h(),
-          body: JSON.stringify({
-            acao: "gerar",
-            ano: anoGeracao,
-            mes: mesGeracao,
-          }),
-        });
+        try {
+          const r = await fetch("/api/mensalidades/admin", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              acao: "gerar",
+              ano: anoGeracao,
+              mes: mesGeracao,
+            }),
+          });
 
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Não foi possível gerar ${mesGeracao}/${anoGeracao}.`);
-        const criadas = Number(d.criadas || item.quantidade_nova || 0);
-        criadasTotal += criadas;
-        resultados.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${criadas} gerada(s)`);
+          const d = await r.json();
+          if (!r.ok) throw Error(d.error || "Erro desconhecido ao gerar esta competência.");
+
+          const criadas = Number(d.criadas || 0);
+          criadasTotal += criadas;
+          resultados.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${criadas} gerada(s)`);
+        } catch (e) {
+          falhas.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${e instanceof Error ? e.message : "falha ao gerar"}`);
+        }
       }
 
       setAbrindoPrevia(false);
       setPrevias([]);
-      setMsg(`Geração concluída: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`);
       setSel([]);
       setSelGeracao([]);
       await carregar();
+      setMsg(
+        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`
+      );
+      if (falhas.length > 0) {
+        setErro(`Algumas competências não foram geradas: ${falhas.join(" • ")}`);
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao gerar competências.");
     } finally {
@@ -1350,11 +1400,11 @@ const selecionadasBaixa = useMemo(
 
                 <button
                   type="button"
-                  disabled={!selGeracao.length}
+                  disabled={!selGeracao.length || gerandoSelecionados}
                   onClick={() => void gerarSelecionados()}
                   className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
                 >
-                  ⚡ Gerar selecionadas ({selGeracao.length})
+                  ⚡ {gerandoSelecionados ? "Gerando..." : `Gerar selecionadas (${selGeracao.length})`}
                 </button>
 
                 <button
@@ -1459,7 +1509,11 @@ const selecionadasBaixa = useMemo(
                         )
                       )}
                       {x.situacao === "pago" && <button type="button" onClick={() => void estornarBaixa(x)} className="mt-3 w-full rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-700">↩️ Estornar baixa</button>}
-                      {x.situacao === "nao_gerada" && <p className="mt-3 text-xs text-gray-400">Gere a competência primeiro.</p>}
+                      {x.situacao === "nao_gerada" && (
+                        <p className={`mt-3 text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
+                          {competenciaNaoGeradaAtrasada(x) ? "Competência vencida: gere para registrar a mensalidade em atraso." : "Gere a competência primeiro."}
+                        </p>
+                      )}
                     </article>
                   );
                 })
@@ -1606,7 +1660,9 @@ const selecionadasBaixa = useMemo(
 
                         <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
                           {x.situacao === "nao_gerada" ? (
-                            <span className="text-xs font-semibold text-gray-400">Gere a competência primeiro</span>
+                            <span className={`text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
+                              {competenciaNaoGeradaAtrasada(x) ? "Vencida: gere para registrar o atraso" : "Gere a competência primeiro"}
+                            </span>
                           ) : x.situacao === "pago" ? (
                             <button
                               type="button"
