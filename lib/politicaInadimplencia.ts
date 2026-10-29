@@ -47,6 +47,23 @@ export function classificarMesesAtraso(
   return "verde";
 }
 
+/**
+ * Status exibido na carteirinha. Qualquer competência vencida e não quitada
+ * impede o rótulo "EM DIA"; a política de bloqueio continua determinando
+ * quando o status sobe para vermelho/bloqueio. Esta regra é visual e não
+ * altera a política usada para autorizar acessos.
+ */
+export function classificarStatusFinanceiroCarteirinha(
+  mesesAtraso: number,
+  politica?: Partial<PoliticaInadimplencia> | null
+): "em_dia" | "atrasado" | "muito_atrasado" {
+  const meses = Number.isFinite(Number(mesesAtraso)) ? Math.max(0, Math.trunc(Number(mesesAtraso))) : 0;
+  const configuracao = normalizarPoliticaInadimplencia(politica);
+  if (meses === 0) return "em_dia";
+  if (meses >= configuracao.meses_bloqueio) return "muito_atrasado";
+  return "atrasado";
+}
+
 export function dataHojeBrasil() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
