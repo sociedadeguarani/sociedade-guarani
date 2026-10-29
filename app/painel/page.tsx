@@ -109,7 +109,10 @@ export default function PainelPage() {
           // Manter a mesma regra da tela /dependentes: matrículas terminadas em A
           // identificam titulares e não devem entrar na contagem de dependentes.
           const dependentesCadastrados = (Array.isArray(json.dependentes) ? json.dependentes : [])
-            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"));
+            // Mesmos critérios da tela /dependentes: titulares e registros já
+            // promovidos para Sócios não entram na contagem de dependentes.
+            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"))
+            .filter((dependente: any) => !dependente.migrado_para_socio_id && !dependente.promovido_para_socio_id);
           const normalizarTextoDependente = (valor: unknown) => String(valor || "")
             .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
           const ehDependenteFamiliarSocio = (socio: any) => {
@@ -185,24 +188,23 @@ export default function PainelPage() {
       });
     };
 
-    // Atualiza os totais ao abrir/retornar ao painel e periodicamente. Isso evita
-    // manter contagens antigas depois de cadastrar, editar ou excluir sócios e dependentes.
     atualizarResumo();
-    const intervaloResumo = window.setInterval(atualizarResumo, 15_000);
-    const aoVoltarAoPainel = () => {
+    // Mantém os indicadores alinhados com os cadastros recentes sem exigir
+    // que o administrador saia e entre novamente no painel.
+    const intervaloResumo = window.setInterval(atualizarResumo, 15000);
+    const aoFocarJanela = () => atualizarResumo();
+    const aoRetornarVisibilidade = () => {
       if (document.visibilityState === "visible") atualizarResumo();
     };
-    window.addEventListener("focus", aoVoltarAoPainel);
-    document.addEventListener("visibilitychange", aoVoltarAoPainel);
-    window.addEventListener("guarani:cadastro-atualizado", atualizarResumo);
+    window.addEventListener("focus", aoFocarJanela);
+    document.addEventListener("visibilitychange", aoRetornarVisibilidade);
 
     return () => {
       ativo = false;
       window.clearTimeout(temporizadorUsuario);
       window.clearInterval(intervaloResumo);
-      window.removeEventListener("focus", aoVoltarAoPainel);
-      document.removeEventListener("visibilitychange", aoVoltarAoPainel);
-      window.removeEventListener("guarani:cadastro-atualizado", atualizarResumo);
+      window.removeEventListener("focus", aoFocarJanela);
+      document.removeEventListener("visibilitychange", aoRetornarVisibilidade);
     };
   }, []);
 
