@@ -42,3 +42,15 @@ test('o indicador financeiro não assume em dia se o histórico contém competê
   assert.match(carteirinhasApi, /statusPorMensalidades\(mensalidades, hoje\)/);
   assert.match(carteirinhasApi, /competenciaInformada < hoje\.slice\(0, 7\)/);
 });
+
+test('cadastro sem nenhuma mensalidade não é apresentado como em dia', () => {
+  assert.match(sociosApi, /sociosComHistorico\.has\(alvo\)[\s\S]{0,150}: "sem_lancamentos"/);
+  assert.match(carteirinhasApi, /temHistorico[\s\S]{0,120}: "sem_lancamentos"/);
+  assert.match(sociosPage, /Sem mensalidades lançadas/);
+  assert.match(dependentesPage, /Sem mensalidades lançadas/);
+});
+
+test('lotes de mensalidades são consultados em paralelo para reduzir a lentidão', () => {
+  assert.match(sociosApi, /Promise\.all\(lotes\.map\(async \(lote\)/);
+  assert.match(carteirinhasApi, /Promise\.all\(lotes\.map\(async \(lote\)/);
+});
