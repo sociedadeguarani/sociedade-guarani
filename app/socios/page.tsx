@@ -2060,7 +2060,7 @@ function Socios({
                       {(() => {
                         const status = socio.financeiro_status || "restrito";
                         const meses = Number(socio.meses_atraso || 0);
-                        const label = status === "muito_atrasado" ? `🔴 ${meses || "Vários"} meses — bloqueio` : status === "atrasado" ? `🟡 ${meses} meses — atenção` : status === "em_dia" ? "🟢 0 meses — em dia" : "⚪ Conferir financeiro";
+                        const label = status === "muito_atrasado" ? `🔴 ${meses || "Vários"} meses — bloqueio` : status === "atrasado" ? `🟡 ${meses} meses — atenção` : status === "em_dia" ? "🟢 0 meses — em dia" : status === "sem_lancamentos" ? "⚪ Sem mensalidades lançadas" : "⚪ Conferir financeiro";
                         const classe = status === "muito_atrasado" ? "bg-red-100 text-red-700" : status === "atrasado" ? "bg-amber-100 text-amber-700" : status === "em_dia" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600";
                         return <span title={meses ? `${meses} competências vencidas` : undefined} className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${classe}`}>{label}</span>;
                       })()}
