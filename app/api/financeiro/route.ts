@@ -10,28 +10,46 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const competencia = searchParams.get("competencia");
 
-    let movimentos = supabase
-      .from("movimentacoes_financeiras")
-      .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at,created_by")
-      .order("data_movimentacao", { ascending: false })
-      .order("created_at", { ascending: false });
-
     const filtro = String(competencia || "").trim();
+    let inicioCompetencia: string | null = null;
+    let inicioProximaCompetencia: string | null = null;
     if (/^\d{4}-\d{2}$/.test(filtro)) {
       const [ano, mes] = filtro.split("-").map(Number);
       const proximoAno = mes === 12 ? ano + 1 : ano;
       const proximoMes = mes === 12 ? 1 : mes + 1;
-      const inicioProximoMes = `${proximoAno}-${String(proximoMes).padStart(2, "0")}-01`;
-      movimentos = movimentos.gte("data_movimentacao", `${filtro}-01`).lt("data_movimentacao", inicioProximoMes);
+      inicioCompetencia = `${filtro}-01`;
+      inicioProximaCompetencia = `${proximoAno}-${String(proximoMes).padStart(2, "0")}-01`;
     }
 
-    const [{ data: contas, error: contasError }, { data: movimentosData, error: movimentosError }] = await Promise.all([
+    const carregarTodosMovimentos = async () => {
+      const tamanhoLote = 1000;
+      const todos: any[] = [];
+      for (let inicio = 0; ; inicio += tamanhoLote) {
+        let consulta = supabase
+          .from("movimentacoes_financeiras")
+          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at,created_by")
+          .order("data_movimentacao", { ascending: false })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(inicio, inicio + tamanhoLote - 1);
+        if (inicioCompetencia && inicioProximaCompetencia) {
+          consulta = consulta.gte("data_movimentacao", inicioCompetencia).lt("data_movimentacao", inicioProximaCompetencia);
+        }
+        const { data, error } = await consulta;
+        if (error) throw error;
+        const lote = data || [];
+        todos.push(...lote);
+        if (lote.length < tamanhoLote) break;
+      }
+      return todos;
+    };
+
+    const [{ data: contas, error: contasError }, movimentosData] = await Promise.all([
       supabase.from("contas_bancarias").select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").eq("ativo", true).order("nome", { ascending: true }),
-      movimentos,
+      carregarTodosMovimentos(),
     ]);
 
     if (contasError) throw contasError;
-    if (movimentosError) throw movimentosError;
 
     // Resolve o responsável no servidor com service role. A consulta feita
     // pelo navegador pode ser filtrada por RLS e deixar o nome em branco.
