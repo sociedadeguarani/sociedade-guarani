@@ -147,7 +147,6 @@ export default function DependentesPage() {
   const [filtroStatus, setFiltroStatus] = useState("todos");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [migrando, setMigrando] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [modalAberto, setModalAberto] = useState(false);
@@ -222,14 +221,14 @@ export default function DependentesPage() {
     let inativos = 0;
 
     for (const dependente of dependentes) {
-      const titular = socioPorId[String(dependente.socio_id)];
+      const titular = socios.find((socio) => String(socio.id) === String(dependente.socio_id));
       const titularInativo = normalizarTexto(titular?.situacao || "") === "inativo";
       if (dependente.ativo === true && !titularInativo) ativos += 1;
       else inativos += 1;
     }
 
     return { totalAtivos: ativos, totalInativos: inativos };
-  }, [dependentes, socioPorId]);
+  }, [dependentes, socios]);
 
   const carregarDados = useCallback(async () => {
     setCarregando(true);
@@ -416,47 +415,6 @@ export default function DependentesPage() {
     setModalAberto(true);
   }
 
-  async function migrarDependentesAntigos() {
-    if (somenteConsulta || migrando) return;
-    if (!window.confirm("Migrar para Dependentes todos os cadastros antigos que estão em Sócios sem mensalidade?")) return;
-
-    setMigrando(true);
-    setErro("");
-    setSucesso("");
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const resposta = await fetch("/api/dependentes/migrar", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      });
-
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) throw new Error(dados?.error || "Não foi possível migrar os dependentes.");
-
-      const migrados = Array.isArray(dados?.migrados) ? dados.migrados : [];
-      const ignorados = Array.isArray(dados?.ignorados) ? dados.ignorados : [];
-      const detalhes = migrados.map((item: any) => `${item.nome} → ${item.matricula}`).join("\n");
-      const pendencias = ignorados.map((item: any) => `${item.nome}: ${item.motivo}`).join("\n");
-
-      setSucesso(`${dados?.mensagem || "Migração concluída."}${detalhes ? `\n\n${detalhes}` : ""}`);
-      if (pendencias) setErro(`Não foi possível concluir alguns cadastros:\n${pendencias}`);
-      await carregarDados();
-    } catch (error) {
-      setErro(error instanceof Error ? error.message : "Erro ao migrar dependentes antigos.");
-    } finally {
-      setMigrando(false);
-    }
-  }
 
   function fecharModal() {
     if (salvando) return;
@@ -619,7 +577,6 @@ export default function DependentesPage() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {!somenteConsulta && (
-                  <button onClick={migrarDependentesAntigos} disabled={migrando} className="w-full rounded-xl border border-[#9fcdb9] bg-white px-4 py-3 text-sm font-extrabold text-[#005A3C] shadow-sm hover:bg-[#E8F3EE] disabled:opacity-60 sm:w-auto sm:px-5">{migrando ? "Migrando..." : "↻ Corrigir antigos"}</button>
                 )}
                 <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
               </div>
