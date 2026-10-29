@@ -228,12 +228,23 @@ export async function GET(request: Request) {
     }
 
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
-    const resultado = socios.map((s) => {
+    // A matrícula familiar é uma segunda forma de vínculo: A = titular, B = cônjuge.
+    // Alguns cadastros antigos não têm responsavel_id ou mantêm possui_mensalidade=true
+    // por legado; o cônjuge familiar deve mesmo assim herdar o financeiro do titular.
+    const socioPorMatricula = new Map(
+      socios.map((s: any) => [String(s.matricula || "").trim().toUpperCase(), s])
+    );
+    const resultado = socios.map((s: any) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito" };
+      const matricula = String(s.matricula || "").trim().toUpperCase();
+      const ehConjugeFamiliar = matricula.endsWith("B");
+      const matriculaTitular = ehConjugeFamiliar ? `${matricula.slice(0, -1)}A` : "";
+      const titularPorMatricula: any = ehConjugeFamiliar ? socioPorMatricula.get(matriculaTitular) : null;
+      const responsavelId = s.responsavel_id || titularPorMatricula?.id || null;
       // Sócios dependentes com mensalidade própria pagam por conta própria;
-      // dependentes sem cobrança própria herdam o atraso do responsável.
-      const herdaAtrasoResponsavel = Boolean(s.responsavel_id) && s.possui_mensalidade !== true;
-      const alvoId = String(herdaAtrasoResponsavel ? s.responsavel_id : s.id);
+      // cônjuges familiares e dependentes sem cobrança própria herdam do responsável.
+      const herdaAtrasoResponsavel = ehConjugeFamiliar || (Boolean(responsavelId) && s.possui_mensalidade !== true);
+      const alvoId = String(herdaAtrasoResponsavel ? responsavelId : s.id);
       const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
         ...s,
