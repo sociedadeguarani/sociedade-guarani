@@ -67,6 +67,7 @@ export default function PainelPage() {
 
   useEffect(() => {
     let ativo = true;
+    let tarefasEmAndamento = false;
     // Adia a leitura do armazenamento para evitar atualização síncrona de estado
     // durante o efeito e o aviso do ESLint react-hooks/set-state-in-effect.
     const temporizadorUsuario = window.setTimeout(() => {
@@ -87,6 +88,10 @@ export default function PainelPage() {
 
       const headers = { Authorization: `Bearer ${session.access_token}` };
 
+      // Evita criar novas consultas enquanto o ciclo anterior ainda está ativo.
+      if (tarefasEmAndamento) return;
+      tarefasEmAndamento = true;
+
       // Cada card é atualizado assim que sua própria consulta termina.
       // Uma API lenta não segura os resultados das outras consultas.
       const tarefas = [
@@ -102,45 +107,13 @@ export default function PainelPage() {
           if (Number.isFinite(inativos)) setSociosInativos(inativos);
         })(),
         (async () => {
-          const response = await fetch("/api/carteirinhas?modo=dependentes", { headers, cache: "no-store" });
+          // Endpoint de contagem dedicado: não carregar mensalidades, fotos,
+          // carteirinhas e dados financeiros completos só para atualizar um card.
+          const response = await fetch("/api/dependentes/resumo", { headers, cache: "no-store" });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
-          const sociosParaDependentes = Array.isArray(json.socios) ? json.socios : [];
-          // Manter a mesma regra da tela /dependentes: matrículas terminadas em A
-          // identificam titulares e não devem entrar na contagem de dependentes.
-          const dependentesCadastrados = (Array.isArray(json.dependentes) ? json.dependentes : [])
-            // Mesmos critérios da tela /dependentes: titulares e registros já
-            // promovidos para Sócios não entram na contagem de dependentes.
-            .filter((dependente: any) => !String(dependente.matricula || "").trim().toUpperCase().endsWith("A"))
-            .filter((dependente: any) => !dependente.migrado_para_socio_id && !dependente.promovido_para_socio_id);
-          const normalizarTextoDependente = (valor: unknown) => String(valor || "")
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-          const ehDependenteFamiliarSocio = (socio: any) => {
-            if (!socio?.responsavel_id) return false;
-            const tipo = normalizarTextoDependente(socio.tipo_socio);
-            const categoria = normalizarTextoDependente(socio.categoria);
-            return tipo === "dependente_patrimonial_familiar" ||
-              tipo === "dependente_patrimonial_familiar_mensalidade" ||
-              tipo === "dependente_contribuinte_familiar" ||
-              tipo === "dependente_contribuinte_familiar_mensalidade" ||
-              categoria.includes("dependente patrimonial familiar") ||
-              categoria.includes("dependente contribuinte familiar");
-          };
-          const chavesExistentes = new Set(
-            dependentesCadastrados.flatMap((dependente: any) => [
-              normalizarTextoDependente(dependente.nome),
-              normalizarTextoDependente(dependente.matricula),
-            ]).filter(Boolean)
-          );
-          const dependentesLegados = sociosParaDependentes
-            .filter(ehDependenteFamiliarSocio)
-            // Igual à tela de Dependentes: titulares com matrícula A ficam em Sócios.
-            .filter((socio: any) => !String(socio.matricula || "").trim().toUpperCase().endsWith("A"))
-            .filter((socio: any) =>
-              !chavesExistentes.has(normalizarTextoDependente(socio.nome)) &&
-              !chavesExistentes.has(normalizarTextoDependente(socio.matricula))
-            );
-          setTotalDependentes(dependentesCadastrados.length + dependentesLegados.length);
+          const total = Number(json.total);
+          if (Number.isFinite(total)) setTotalDependentes(total);
         })(),
         (async () => {
           const response = await fetch("/api/reservas?resumo=pendentes", { headers, cache: "no-store" });
@@ -150,24 +123,13 @@ export default function PainelPage() {
           if (Number.isFinite(total)) setReservasPendentes(total);
         })(),
         (async () => {
-          // O contador de PIX deve consultar as reservas reais, não os avisos.
-          // Avisos podem estar lidos, duplicados ou sem os campos do pagamento.
-          const response = await fetch("/api/reservas?status=pendente", {
-            headers,
-            cache: "no-store",
-          });
+          // Contagem no banco evita carregar reservas e assinar comprovantes
+          // apenas para descobrir o número do card do painel.
+          const response = await fetch("/api/reservas?resumo=pix-pendentes", { headers, cache: "no-store" });
           const json = await response.json().catch(() => ({}));
           if (!ativo || !response.ok) return;
-
-          const lista = Array.isArray(json.reservas) ? json.reservas : [];
-          const pendentesPix = lista.filter((reserva: any) => {
-            const forma = String(
-              reserva.tipo_pagamento || reserva.pagamento || ""
-            ).trim().toLowerCase();
-            return reserva.status === "pendente" && forma === "pix";
-          });
-
-          setPixPendentes(pendentesPix.length);
+          const total = Number(json.total);
+          if (Number.isFinite(total)) setPixPendentes(total);
         })(),
         (async () => {
           const response = await fetch("/api/temporadas?resumo=1", { headers, cache: "no-store" });
@@ -179,7 +141,11 @@ export default function PainelPage() {
       ];
 
       // Cada tarefa trata seu próprio erro para que uma falha não impeça os outros cards.
-      await Promise.allSettled(tarefas);
+      try {
+        await Promise.allSettled(tarefas);
+      } finally {
+        tarefasEmAndamento = false;
+      }
     }
 
     const atualizarResumo = () => {
@@ -191,7 +157,7 @@ export default function PainelPage() {
     atualizarResumo();
     // Mantém os indicadores alinhados com os cadastros recentes sem exigir
     // que o administrador saia e entre novamente no painel.
-    const intervaloResumo = window.setInterval(atualizarResumo, 15000);
+    const intervaloResumo = window.setInterval(atualizarResumo, 60000);
     const aoFocarJanela = () => atualizarResumo();
     const aoRetornarVisibilidade = () => {
       if (document.visibilityState === "visible") atualizarResumo();
