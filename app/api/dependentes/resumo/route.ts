@@ -70,7 +70,10 @@ export async function GET(request: Request) {
     if (dependentesResult.error && /migrado_para_socio_id/i.test(dependentesResult.error.message || "")) {
       let fallback = db.from("dependentes").select("id,nome,matricula,socio_id");
       if (auth.usuario.perfil === "associado") fallback = fallback.eq("socio_id", auth.usuario.socio_id);
-      dependentesResult = await fallback;
+      // A consulta alternativa não inclui migrado_para_socio_id; fazemos a
+      // conversão explícita para o formato da consulta principal. Nesse caminho
+      // de compatibilidade, o campo ausente fica undefined e é tratado como tal.
+      dependentesResult = (await fallback) as unknown as typeof dependentesResult;
     }
     const dependentes = dependentesResult.data || [];
     const socios = sociosResult.data || [];
