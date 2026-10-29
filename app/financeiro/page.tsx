@@ -170,6 +170,8 @@ export default function FinanceiroPage() {
   const [busca, setBusca] = useState("");
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
+  const [paginaMovimentos, setPaginaMovimentos] = useState(1);
+  const movimentosPorPagina = 50;
   const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
   const [usuariosMovimentos, setUsuariosMovimentos] = useState<Map<string, { nome: string; email: string | null }>>(new Map());
   const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
@@ -555,6 +557,20 @@ export default function FinanceiroPage() {
       return true;
     });
   }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
+
+  const totalPaginasMovimentos = Math.max(1, Math.ceil(movimentosFluxo.length / movimentosPorPagina));
+  const movimentosVisiveis = useMemo(() => {
+    const inicio = (paginaMovimentos - 1) * movimentosPorPagina;
+    return movimentosFluxo.slice(inicio, inicio + movimentosPorPagina);
+  }, [movimentosFluxo, paginaMovimentos]);
+
+  useEffect(() => {
+    setPaginaMovimentos(1);
+  }, [fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
+
+  useEffect(() => {
+    if (paginaMovimentos > totalPaginasMovimentos) setPaginaMovimentos(totalPaginasMovimentos);
+  }, [paginaMovimentos, totalPaginasMovimentos]);
 
   const entradasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "entrada")
@@ -1253,7 +1269,7 @@ export default function FinanceiroPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {movimentosFluxo.map((m) => (
+                        {movimentosVisiveis.map((m) => (
                           <tr key={m.id} className="hover:bg-[#fafcfb]">
                             <td className="px-4 py-3 text-sm">
                               <div className="font-semibold">{formatarData(m.data_movimentacao)}</div>
@@ -1358,6 +1374,18 @@ export default function FinanceiroPage() {
                       </tbody>
                     </table>
                   </div>
+                  {movimentosFluxo.length > movimentosPorPagina && (
+                    <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-gray-600">
+                        Exibindo {((paginaMovimentos - 1) * movimentosPorPagina) + 1}–{Math.min(paginaMovimentos * movimentosPorPagina, movimentosFluxo.length)} de {movimentosFluxo.length} lançamentos filtrados. Os totais e saldos continuam calculados sobre todos os lançamentos.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setPaginaMovimentos((pagina) => Math.max(1, pagina - 1))} disabled={paginaMovimentos <= 1} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
+                        <span className="text-sm font-semibold text-gray-700">Página {paginaMovimentos} de {totalPaginasMovimentos}</span>
+                        <button type="button" onClick={() => setPaginaMovimentos((pagina) => Math.min(totalPaginasMovimentos, pagina + 1))} disabled={paginaMovimentos >= totalPaginasMovimentos} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40">Próxima</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
