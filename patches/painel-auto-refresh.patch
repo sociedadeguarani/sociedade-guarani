@@ -1,1 +1,154 @@
+diff --git a/app/painel/page.tsx b/app/painel/page.tsx
+--- a/app/painel/page.tsx
++++ b/app/painel/page.tsx
+@@ -328,11 +328,149 @@
+     return () => {
+       ativo = false;
+       window.clearTimeout(agendamentoPerfil);
+       window.removeEventListener("guarani:perfil-change", sincronizarPerfilLocal);
+       window.removeEventListener("guarani:permissions-change", sincronizarPerfilLocal);
+     };
+   }, []);
++
++  // Mantém os contadores de sócios e dependentes atualizados após alterações
++  // feitas em outra página ou aba. Realtime acelera a atualização; o polling
++  // e o foco da janela servem de fallback quando Realtime não estiver ativo.
++  useEffect(() => {
++    let ativo = true;
++    let carregando = false;
++    let debounceTimer: number | null = null;
++
++    const atualizarContagens = async () => {
++      if (!ativo || carregando || document.visibilityState === "hidden") return;
++      carregando = true;
++      try {
++        const sessaoAtual = await supabase.auth.getSession();
++        let session = sessaoAtual.data.session;
++        if (!session) {
++          session = (await supabase.auth.refreshSession()).data.session;
++        }
++        if (!ativo || !session?.access_token) return;
++
++        const perfilArmazenado = String(
++          window.localStorage.getItem("guarani_usuario_perfil") || ""
++        )
++          .trim()
++          .toLowerCase()
++          .normalize("NFD")
++          .replace(/[\u0300-\u036f]/g, "");
++        if (![
++          "administrador",
++          "admin",
++          "administrador_master",
++          "master",
++        ].includes(perfilArmazenado)) return;
++
++        const headers = { Authorization: `Bearer ${session.access_token}` };
++        const [sociosResponse, dependentesResponse] = await Promise.all([
++          fetch("/api/socios", { headers, cache: "no-store" }),
++          fetch("/api/dependentes/migrar", { headers, cache: "no-store" }),
++        ]);
++        const [sociosJson, dependentesJson] = await Promise.all([
++          sociosResponse.json().catch(() => ({})),
++          dependentesResponse.json().catch(() => ({})),
++        ]);
++        if (!ativo || !sociosResponse.ok) return;
++
++        const todosSocios: SocioPainel[] = Array.isArray(sociosJson.socios)
++          ? (sociosJson.socios as SocioPainel[])
++          : [];
++        const sociosOficiais = todosSocios.filter(
++          (socio) =>
++            socio.possui_mensalidade === true ||
++            (socioEhRemidoPainel(socio) && !socio.responsavel_id)
++        );
++        setTotalSocios(sociosOficiais.length);
++        setSociosAtivos(
++          sociosOficiais.filter(
++            (socio) => String(socio.situacao || "").trim().toLowerCase() === "ativo"
++          ).length
++        );
++        setSociosInativos(
++          sociosOficiais.filter(
++            (socio) => String(socio.situacao || "").trim().toLowerCase() === "inativo"
++          ).length
++        );
++
++        if (dependentesResponse.ok) {
++          const dependentesAntigos = todosSocios
++            .filter(
++              (socio) => Boolean(socio.responsavel_id) && socio.possui_mensalidade !== true
++            )
++            .map((socio) => ({
++              socio_id: String(socio.responsavel_id),
++              nome: String(socio.nome || ""),
++              cpf: String(socio.cpf || ""),
++            }));
++          const dependentesMigrados = Array.isArray(dependentesJson.dependentes)
++            ? dependentesJson.dependentes
++            : [];
++          const chaveDependente = (dependente: any) => {
++            const responsavel = String(dependente?.socio_id || "");
++            const cpf = String(dependente?.cpf || "").replace(/\D/g, "");
++            const nome = String(dependente?.nome || "")
++              .trim()
++              .toLowerCase()
++              .replace(/\s+/g, " ");
++            return `${responsavel}|${cpf}|${nome}`;
++          };
++          const unicos = new Set<string>();
++          for (const dependente of [...dependentesMigrados, ...dependentesAntigos]) {
++            unicos.add(chaveDependente(dependente));
++          }
++          setTotalDependentes(unicos.size);
++        }
++      } catch {
++        // Mantém os últimos números válidos quando uma consulta falhar.
++      } finally {
++        carregando = false;
++      }
++    };
++
++    const agendarAtualizacao = () => {
++      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
++      debounceTimer = window.setTimeout(() => {
++        debounceTimer = null;
++        void atualizarContagens();
++      }, 250);
++    };
++    const atualizarAoVoltar = () => {
++      if (document.visibilityState === "visible") void atualizarContagens();
++    };
++
++    const intervalo = window.setInterval(() => void atualizarContagens(), 15000);
++    window.addEventListener("focus", atualizarAoVoltar);
++    document.addEventListener("visibilitychange", atualizarAoVoltar);
++
++    const canal = supabase
++      .channel("painel-contadores-socios-dependentes")
++      .on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: "socios" },
++        () => agendarAtualizacao()
++      )
++      .on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: "dependentes" },
++        () => agendarAtualizacao()
++      )
++      .subscribe();
++
++    return () => {
++      ativo = false;
++      window.clearInterval(intervalo);
++      window.removeEventListener("focus", atualizarAoVoltar);
++      document.removeEventListener("visibilitychange", atualizarAoVoltar);
++      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
++      void supabase.removeChannel(canal).catch(() => {});
++    };
++  }, []);
+ 
+   /* =========================
+      PERFIL
+   ========================= */
 
