@@ -15,7 +15,7 @@ function isPago(situacao: unknown) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  return ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status);
+  return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada", "isento", "isenta", "cancelado", "cancelada"].includes(status);
 }
 
 async function carregarPolitica(supabase: ReturnType<typeof getServiceClient>): Promise<PoliticaInadimplencia> {
@@ -41,7 +41,9 @@ function statusPorMensalidades(mensalidades: any[], hoje: string) {
 
   for (const m of mensalidades) {
     const id = String(m.socio_id || "");
-    const vencimento = String(m.data_vencimento || "").slice(0, 10);
+    const competenciaInformada = String(m.competencia || "").slice(0, 7);
+    const vencimentoInformado = String(m.data_vencimento || "").slice(0, 10);
+    const vencimento = vencimentoInformado || (/^\d{4}-\d{2}$/.test(competenciaInformada) && competenciaInformada < hoje.slice(0, 7) ? `${competenciaInformada}-01` : "");
     if (!id || !vencimento || vencimento >= hoje || isPago(m.situacao)) continue;
 
     const referencia = String(m.competencia || vencimento).slice(0, 7);
@@ -202,28 +204,25 @@ export async function GET(request: Request) {
 
     const mensalidades: any[] = [];
 
-    // Histórico financeiro só é consultado quando a permissão de exibição foi concedida.
-    // Executa pequenos grupos em paralelo para evitar dezenas de consultas sequenciais,
-    // sem enviar todos os IDs em uma única consulta nem sobrecarregar o Supabase.
+    // Busca todo o histórico por lotes e páginas. O limite padrão de 1.000
+    // linhas do PostgREST truncava mensalidades antigas e fazia inadimplentes
+    // aparecerem incorretamente como "0 meses — em dia".
     if (podeVerFinanceiro) {
       const lotes = emLotes(ids, 100);
-      const concorrencia = 6;
-
-      for (let i = 0; i < lotes.length; i += concorrencia) {
-        const grupo = lotes.slice(i, i + concorrencia);
-        const resultados = await Promise.all(
-          grupo.map(async (lote) => {
-            const { data, error } = await supabase
-              .from("mensalidades")
-              .select("socio_id,data_vencimento,competencia,situacao,valor")
-              .in("socio_id", lote)
-              .lt("data_vencimento", hoje);
-
-            if (error) throw error;
-            return data || [];
-          })
-        );
-        for (const resultado of resultados) mensalidades.push(...resultado);
+      for (const lote of lotes) {
+        for (let offset = 0; ; offset += 1000) {
+          const { data, error } = await supabase
+            .from("mensalidades")
+            .select("id,socio_id,data_vencimento,competencia,situacao,valor")
+            .in("socio_id", lote)
+            .order("data_vencimento", { ascending: true })
+            .order("id", { ascending: true })
+            .range(offset, offset + 999);
+          if (error) throw error;
+          const pagina = data || [];
+          mensalidades.push(...pagina);
+          if (pagina.length < 1000) break;
+        }
       }
     }
 
@@ -340,7 +339,9 @@ export async function GET(request: Request) {
           financeiro_status: "restrito",
         }),
         observacoes: d.observacoes || null,
-        ativo: d.ativo !== false,
+        // Situação efetiva: um dependente familiar não pode aparecer ativo
+        // quando o titular está inativo, mesmo que a flag própria seja true.
+        ativo: d.ativo !== false && String(titular?.situacao || "").trim().toLowerCase() !== "inativo",
         foto_url: d.foto_url || null,
         titular_nome: titular?.nome || null,
         titular_matricula: titular?.matricula || null,
