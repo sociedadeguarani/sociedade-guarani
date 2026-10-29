@@ -47,6 +47,8 @@ type Socio = {
   fim_temporada: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  financeiro_status?: string | null;
+  meses_atraso?: number | null;
   /** Condição de remissão por tempo de associação; não é um tipo de sócio. */
   remido?: boolean | null;
 };
@@ -1919,6 +1921,8 @@ function Socios({
 
                 {camposVisiveis.financeiro && <th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th>}
 
+                {camposVisiveis.financeiro && <th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th>}
+
                 <th className="px-3 py-3 sm:px-5 sm:py-4">
                   Situação
                 </th>
@@ -1936,7 +1940,7 @@ function Socios({
               {carregando && (
                 <tr>
                   <td
-                    colSpan={camposVisiveis.financeiro ? 10 : 9}
+                    colSpan={camposVisiveis.financeiro ? 11 : 9}
                     className="px-3 py-10 text-center text-gray-500 sm:px-5 sm:py-12"
                   >
                     Carregando sócios...
@@ -1947,7 +1951,7 @@ function Socios({
               {!carregando && socios.length === 0 && (
                 <tr>
                   <td
-                    colSpan={camposVisiveis.financeiro ? 10 : 9}
+                    colSpan={camposVisiveis.financeiro ? 11 : 9}
                     className="px-3 py-10 text-center sm:px-5 sm:py-12"
                   >
                     <div className="text-4xl">
@@ -2050,6 +2054,16 @@ function Socios({
                       {socio.possui_mensalidade
                         ? `R$ ${Number(socio.valor_mensalidade || 0).toFixed(2).replace(".", ",")}`
                         : "Sem mensalidade"}
+                    </td>}
+
+                    {camposVisiveis.financeiro && <td className="px-3 py-3 sm:px-5 sm:py-4">
+                      {(() => {
+                        const status = socio.financeiro_status || "restrito";
+                        const meses = Number(socio.meses_atraso || 0);
+                        const label = status === "muito_atrasado" ? `🔴 ${meses || "Vários"} meses — bloqueio` : status === "atrasado" ? `🟡 ${meses} meses — atenção` : status === "em_dia" ? "🟢 0 meses — em dia" : "⚪ Conferir financeiro";
+                        const classe = status === "muito_atrasado" ? "bg-red-100 text-red-700" : status === "atrasado" ? "bg-amber-100 text-amber-700" : status === "em_dia" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600";
+                        return <span title={meses ? `${meses} competências vencidas` : undefined} className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${classe}`}>{label}</span>;
+                      })()}
                     </td>}
 
                     <td className="px-3 py-3 sm:px-5 sm:py-4">
