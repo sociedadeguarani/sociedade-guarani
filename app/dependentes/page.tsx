@@ -667,13 +667,20 @@ export default function DependentesPage() {
                     <tbody>
                       {dependentesFiltrados.map((d) => {
                         const socio = socioPorId[d.socio_id];
-                        const statusResponsavel = statusResponsaveis[d.socio_id] || "em_dia";
+                        // A situação financeira e cadastral do dependente familiar
+                        // acompanha o titular. Nunca presumir "em dia" quando o titular
+                        // não foi localizado ou o status não veio da API.
+                        const statusResponsavel = statusResponsaveis[d.socio_id] || "restrito";
+                        const titularInativo = !socio || normalizarTexto(socio.situacao || "") === "inativo";
                         const statusLabel = statusResponsavel === "muito_atrasado"
                           ? `🔴 ${politicaInadimplencia.meses_bloqueio}+ meses — bloqueio`
                           : statusResponsavel === "atrasado"
                             ? `🟡 ${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses — atenção`
-                            : `🟢 Até ${politicaInadimplencia.meses_atencao - 1} meses — em dia`;
-                        const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700";
+                            : statusResponsavel === "em_dia"
+                              ? `🟢 Até ${politicaInadimplencia.meses_atencao - 1} meses — em dia`
+                              : "⚪ Situação não identificada — conferir titular";
+                        const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : statusResponsavel === "em_dia" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700";
+                        const dependenteAtivoEfetivo = d.ativo !== false && !titularInativo;
                         return (
                           <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td>
@@ -696,7 +703,7 @@ export default function DependentesPage() {
                             <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
                             <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
                             <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusLabel}</span></td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} className={`rounded-full px-3 py-1 text-xs font-black ${d.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{d.ativo ? "Ativo" : "Inativo"}</button></td>
+                            <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => alternarStatus(d)} disabled={titularInativo} title={titularInativo ? "O titular está inativo; o dependente também aparece como inativo." : undefined} className={`rounded-full px-3 py-1 text-xs font-black ${dependenteAtivoEfetivo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"} ${titularInativo ? "cursor-not-allowed opacity-80" : ""}`}>{dependenteAtivoEfetivo ? "Ativo" : "Inativo"}</button></td>
                             <td className="px-3 py-3 sm:px-4 sm:py-4">
                               {!somenteConsulta && (
                                 <div className="flex items-center justify-center gap-2">
