@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
-import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
+import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 // The selected column list is built dynamically according to permissions. The
 // generated Supabase type cannot infer that runtime string, so narrow only the
@@ -71,11 +71,10 @@ function statusPorMensalidades(mensalidades: any[], hoje: string) {
 }
 
 function statusFinanceiro(quantidade: number, dias: number, politica: PoliticaInadimplencia) {
-  const financeiro_status = quantidade >= politica.meses_bloqueio
-    ? "muito_atrasado"
-    : quantidade >= politica.meses_atencao
-      ? "atrasado"
-      : "em_dia";
+  // A carteirinha não deve dizer EM DIA quando existe qualquer competência
+  // vencida e ainda não quitada. O limite configurado de bloqueio continua
+  // controlando quando o indicador passa para vermelho/BLOQUEIO.
+  const financeiro_status = classificarStatusFinanceiroCarteirinha(quantidade, politica);
 
   return {
     financeiro_status,
@@ -231,7 +230,10 @@ export async function GET(request: Request) {
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
     const resultado = socios.map((s) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito" };
-      const alvoId = String(s.responsavel_id || s.id);
+      // Sócios dependentes com mensalidade própria pagam por conta própria;
+      // dependentes sem cobrança própria herdam o atraso do responsável.
+      const herdaAtrasoResponsavel = Boolean(s.responsavel_id) && s.possui_mensalidade !== true;
+      const alvoId = String(herdaAtrasoResponsavel ? s.responsavel_id : s.id);
       const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
         ...s,
