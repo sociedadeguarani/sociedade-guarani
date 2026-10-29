@@ -179,13 +179,30 @@ export default function PainelPage() {
       await Promise.allSettled(tarefas);
     }
 
-    void carregarResumo().catch(() => {
-      // O painel continua utilizável mesmo se a sessão ou uma consulta falhar.
-    });
+    const atualizarResumo = () => {
+      void carregarResumo().catch(() => {
+        // O painel continua utilizável mesmo se a sessão ou uma consulta falhar.
+      });
+    };
+
+    // Atualiza os totais ao abrir/retornar ao painel e periodicamente. Isso evita
+    // manter contagens antigas depois de cadastrar, editar ou excluir sócios e dependentes.
+    atualizarResumo();
+    const intervaloResumo = window.setInterval(atualizarResumo, 15_000);
+    const aoVoltarAoPainel = () => {
+      if (document.visibilityState === "visible") atualizarResumo();
+    };
+    window.addEventListener("focus", aoVoltarAoPainel);
+    document.addEventListener("visibilitychange", aoVoltarAoPainel);
+    window.addEventListener("guarani:cadastro-atualizado", atualizarResumo);
 
     return () => {
       ativo = false;
       window.clearTimeout(temporizadorUsuario);
+      window.clearInterval(intervaloResumo);
+      window.removeEventListener("focus", aoVoltarAoPainel);
+      document.removeEventListener("visibilitychange", aoVoltarAoPainel);
+      window.removeEventListener("guarani:cadastro-atualizado", atualizarResumo);
     };
   }, []);
 
