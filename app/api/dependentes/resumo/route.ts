@@ -64,18 +64,44 @@ export async function GET(request: Request) {
       );
     }
 
-    let [dependentesResult, sociosResult] = await Promise.all([dependentesQuery, sociosQuery]);
-    // Compatibilidade temporária com bancos que ainda não receberam a coluna
-    // de rastreamento da promoção para Sócio.
-    if (dependentesResult.error && /migrado_para_socio_id/i.test(dependentesResult.error.message || "")) {
-      let fallback = db.from("dependentes").select("id,nome,matricula,socio_id");
-      if (auth.usuario.perfil === "associado") fallback = fallback.eq("socio_id", auth.usuario.socio_id);
-      dependentesResult = await fallback;
+    const [dependentesResult, sociosResult] = await Promise.all([
+      dependentesQuery,
+      sociosQuery,
+    ]);
+
+    // Mantemos os resultados de cada consulta separados para não misturar os
+    // tipos inferidos pelo Supabase quando a coluna opcional ainda não existe.
+    // Isso também permite compatibilidade com bancos que ainda não receberam
+    // a migração de migrado_para_socio_id, sem mascarar erros de outras colunas.
+    type DependenteResumo = {
+      id: unknown;
+      nome: unknown;
+      matricula: unknown;
+      socio_id: unknown;
+      migrado_para_socio_id?: unknown;
+    };
+
+    let dependentes: DependenteResumo[] = [];
+    if (
+      dependentesResult.error &&
+      /migrado_para_socio_id/i.test(dependentesResult.error.message || "")
+    ) {
+      let fallbackQuery = db
+        .from("dependentes")
+        .select("id,nome,matricula,socio_id");
+      if (auth.usuario.perfil === "associado") {
+        fallbackQuery = fallbackQuery.eq("socio_id", auth.usuario.socio_id);
+      }
+      const fallbackResult = await fallbackQuery;
+      if (fallbackResult.error) throw fallbackResult.error;
+      dependentes = (fallbackResult.data || []) as DependenteResumo[];
+    } else {
+      if (dependentesResult.error) throw dependentesResult.error;
+      dependentes = (dependentesResult.data || []) as DependenteResumo[];
     }
-    const dependentes = dependentesResult.data || [];
-    const socios = sociosResult.data || [];
-    if (dependentesResult.error) throw dependentesResult.error;
+
     if (sociosResult.error) throw sociosResult.error;
+    const socios = sociosResult.data || [];
 
     const dependentesCadastrados = dependentes.filter(
       (dependente: { matricula?: unknown; migrado_para_socio_id?: unknown }) =>
