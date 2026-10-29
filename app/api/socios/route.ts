@@ -37,14 +37,19 @@ function normalizarClassificacao(valor: unknown): string {
 
 function mensalidadePaga(situacao: unknown) {
   const status = String(situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status);
+  return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada", "isento", "isenta", "cancelado", "cancelada"].includes(status);
 }
 
 function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string) {
   const mapa = new Map<string, Set<string>>();
   for (const m of mensalidades) {
     const id = String(m.socio_id || "");
-    const vencimento = String(m.data_vencimento || "").slice(0, 10);
+    const competenciaInformada = String(m.competencia || "").slice(0, 7);
+    const vencimentoInformado = String(m.data_vencimento || "").slice(0, 10);
+    // Em registros antigos sem data_vencimento, competência de mês anterior
+    // ainda identifica uma cobrança vencida. A competência do mês corrente
+    // não é marcada como atraso sem uma data de vencimento confirmada.
+    const vencimento = vencimentoInformado || (/^\d{4}-\d{2}$/.test(competenciaInformada) && competenciaInformada < hoje.slice(0, 7) ? `${competenciaInformada}-01` : "");
     if (!id || !vencimento || vencimento >= hoje || mensalidadePaga(m.situacao)) continue;
     const competencia = String(m.competencia || vencimento).slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(competencia)) continue;
@@ -56,6 +61,12 @@ function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: stri
 }
 
 function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
+  const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+  // A matrícula-base A representa o titular e sempre aparece em Sócios;
+  // B representa cônjuge familiar e pertence à listagem de Dependentes.
+  if (matricula.endsWith("A")) return true;
+  if (matricula.endsWith("B")) return false;
+
   const tipo = normalizarClassificacao(socio.tipo_socio);
   const categoria = normalizarClassificacao(socio.categoria);
   const ehDependente = Boolean(socio.responsavel_id) || tipo.startsWith("dependente_") || categoria.includes("dependente");
@@ -89,14 +100,22 @@ export async function GET(request: Request) {
     const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
     if (url.searchParams.get("resumo") === "1") {
-      const [total, ativos, inativos] = await Promise.all([
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)"),
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "ativo"),
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "inativo"),
-      ]);
-      const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
+      // O resumo precisa refletir a mesma lista visível em /socios, não apenas
+      // quem possui_mensalidade=true. O filtro antigo subcontava titulares
+      // remidos e cadastros válidos sem cobrança própria.
+      const { data: resumoRaw, error: erroResumo } = await db
+        .from("socios")
+        .select("id,matricula,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,remido,situacao")
+        .order("matricula", { ascending: true });
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
-      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0, camposVisiveis });
+
+      const registrosResumo = (resumoRaw || []) as unknown as Array<Record<string, unknown>>;
+      const exibidos = registrosResumo.filter(deveExibirNaListaSocios);
+      const ativos = exibidos.filter((socio) => normalizarClassificacao(socio.situacao) === "ativo").length;
+      const inativos = exibidos.filter((socio) => ["inativo", "suspenso"].includes(normalizarClassificacao(socio.situacao))).length;
+      return NextResponse.json({ total: exibidos.length, ativos, inativos, camposVisiveis }, {
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      });
     }
     // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
     // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
@@ -124,25 +143,43 @@ export async function GET(request: Request) {
       const mensalidades: Array<Record<string, unknown>> = [];
       for (let i = 0; i < ids.length; i += 100) {
         const lote = ids.slice(i, i + 100);
-        const { data, error } = await db.from("mensalidades").select("socio_id,data_vencimento,competencia,situacao").in("socio_id", lote).lt("data_vencimento", hoje);
-        if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
-        mensalidades.push(...((data || []) as unknown as Array<Record<string, unknown>>));
+        // Pagina os resultados: o limite padrão do PostgREST pode truncar o
+        // histórico e deixar associados inadimplentes aparecendo como em dia.
+        for (let offset = 0; ; offset += 1000) {
+          const { data, error } = await db
+            .from("mensalidades")
+            .select("id,socio_id,data_vencimento,competencia,situacao")
+            .in("socio_id", lote)
+            .order("data_vencimento", { ascending: true })
+            .order("id", { ascending: true })
+            .range(offset, offset + 999);
+          if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
+          const pagina = (data || []) as unknown as Array<Record<string, unknown>>;
+          mensalidades.push(...pagina);
+          if (pagina.length < 1000) break;
+        }
       }
       atrasos = agruparAtrasos(mensalidades, hoje);
     }
 
+    const socioPorMatricula = new Map(
+      registros.map((socio) => [String(socio.matricula || "").trim().toUpperCase(), socio])
+    );
     const socios = registros.map((socio) => {
       const resultado: Record<string, unknown> = {
         ...socio,
         exibir_na_lista_socios: deveExibirNaListaSocios(socio),
       };
       if (podeVerFinanceiro) {
-        // Dependente com cobrança própria calcula o próprio atraso; dependente familiar
-        // sem mensalidade própria herda o status do titular.
+        // B herda do titular A pela matrícula mesmo quando o vínculo legado
+        // responsavel_id está vazio. Dependentes familiares também herdam pelo ID.
         const matricula = String(socio.matricula || "").trim().toUpperCase();
-        const terminaB = matricula.endsWith("B");
-        const herdaTitular = Boolean(socio.responsavel_id) && (terminaB || socio.possui_mensalidade !== true);
-        const alvo = String(herdaTitular ? socio.responsavel_id : socio.id);
+        const ehConjugeFamiliar = matricula.endsWith("B");
+        const matriculaTitular = ehConjugeFamiliar ? `${matricula.slice(0, -1)}A` : "";
+        const titularPorMatricula = ehConjugeFamiliar ? socioPorMatricula.get(matriculaTitular) : null;
+        const responsavelId = socio.responsavel_id || titularPorMatricula?.id || null;
+        const herdaTitular = ehConjugeFamiliar || (Boolean(responsavelId) && socio.possui_mensalidade !== true);
+        const alvo = String(herdaTitular ? responsavelId : socio.id);
         const meses = atrasos.get(alvo)?.size || 0;
         resultado.financeiro_status = classificarStatusFinanceiroCarteirinha(meses, politica);
         resultado.meses_atraso = meses;
