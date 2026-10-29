@@ -73,6 +73,17 @@ export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
   return Boolean(categoria) && categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
 }
 
+/**
+ * Indica que um cadastro antigo da tabela de dependentes foi promovido
+ * para a tabela de sócios. O registro legado permanece para preservar o
+ * histórico, mas não deve continuar aparecendo como dependente.
+ */
+export function dependenteFoiPromovidoParaSocio(
+  registro: { migrado_para_socio_id?: unknown } | null | undefined,
+): boolean {
+  return String(registro?.migrado_para_socio_id ?? "").trim().length > 0;
+}
+
 /** Aplica a mesma regra na tela, na prévia e na API de geração. */
 export function socioElegivelParaMensalidade(socio: CadastroMensalidade): boolean {
   if (
