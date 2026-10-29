@@ -577,8 +577,8 @@ export default function DependentesPage() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {!somenteConsulta && (
+                  <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
                 )}
-                <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
               </div>
             </div>
 
