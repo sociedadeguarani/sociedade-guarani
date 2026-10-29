@@ -687,7 +687,9 @@ export default function DependentesPage() {
                             ? `🟡 ${mesesAtraso || politicaInadimplencia.meses_atencao} meses — atenção`
                             : statusResponsavel === "em_dia"
                               ? "🟢 0 meses — em dia"
-                              : "⚪ Situação não identificada — conferir titular";
+                              : statusResponsavel === "sem_lancamentos"
+                                ? "⚪ Sem mensalidades lançadas"
+                                : "⚪ Situação não identificada — conferir titular";
                         const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : statusResponsavel === "em_dia" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700";
                         const titularInativo = normalizarTexto(socio?.situacao || "") === "inativo";
                         const dependenteAtivoEfetivo = d.ativo !== false && !titularInativo;
