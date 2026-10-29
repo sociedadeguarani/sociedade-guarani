@@ -34,7 +34,7 @@ test('cônjuge familiar herda situação financeira do titular pela matrícula A
 test('dependentes de titular inativo são considerados inativos e excluídos da contagem de ativos', () => {
   assert.match(carteirinhasApi, /ativo: d\.ativo !== false && String\(titular\?\.situacao \|\| ""\)\.trim\(\)\.toLowerCase\(\) !== "inativo"/);
   assert.match(dependentesPage, /dependente\.ativo === true && !titularInativo/);
-  assert.match(dependentesPage, /\[dependentes, socios\]/);
+  assert.match(dependentesPage, /\[dependentes, socioPorId\]/);
 });
 
 test('o indicador financeiro não assume em dia se o histórico contém competências vencidas', () => {
