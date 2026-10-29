@@ -230,14 +230,9 @@ export async function GET(request: Request) {
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
     const resultado = socios.map((s) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito" };
-      // Dependentes familiares sem cobrança própria herdam o atraso do responsável.
-      // A matrícula B identifica o cônjuge familiar: ele acompanha a situação do titular
-      // mesmo se um cadastro legado tiver possui_mensalidade marcado incorretamente.
-      // Dependentes com mensalidade própria (ex.: dependente individual adulto)
-      // continuam com a própria situação financeira.
-      const matricula = String(s.matricula || "").trim().toUpperCase();
-      const ehConjugeFamiliar = matricula.endsWith("B");
-      const herdaAtrasoResponsavel = Boolean(s.responsavel_id) && (s.possui_mensalidade !== true || ehConjugeFamiliar);
+      // Sócios dependentes com mensalidade própria pagam por conta própria;
+      // dependentes sem cobrança própria herdam o atraso do responsável.
+      const herdaAtrasoResponsavel = Boolean(s.responsavel_id) && s.possui_mensalidade !== true;
       const alvoId = String(herdaAtrasoResponsavel ? s.responsavel_id : s.id);
       const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
@@ -305,8 +300,6 @@ export async function GET(request: Request) {
               meses_atencao: titular.meses_atencao || politicaInadimplencia.meses_atencao,
               meses_bloqueio: titular.meses_bloqueio || politicaInadimplencia.meses_bloqueio,
             }
-          // Não afirmar que está em dia se o responsável não foi encontrado;
-          // isso pode mascarar um vínculo quebrado no cadastro.
           : { financeiro_status: "restrito", dias_atraso: 0 };
 
       return {
