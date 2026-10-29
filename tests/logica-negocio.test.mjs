@@ -5,6 +5,7 @@ import {
   POLITICA_INADIMPLENCIA_PADRAO,
   normalizarPoliticaInadimplencia,
   classificarMesesAtraso,
+  classificarStatusFinanceiroCarteirinha,
 } from '../lib/politicaInadimplencia.ts';
 import {
   dependenteTemMensalidade,
@@ -62,6 +63,15 @@ test('classificação de atraso respeita os limites configurados', () => {
   assert.equal(classificarMesesAtraso(3, { meses_atencao: 2, meses_bloqueio: 5 }), 'amarelo');
   assert.equal(classificarMesesAtraso(4), 'vermelho');
   assert.equal(classificarMesesAtraso(5, { meses_atencao: 2, meses_bloqueio: 5 }), 'vermelho');
+});
+
+test('carteirinha nunca mostra EM DIA se existe competência vencida sem quitar', () => {
+  assert.equal(classificarStatusFinanceiroCarteirinha(0), 'em_dia');
+  assert.equal(classificarStatusFinanceiroCarteirinha(1), 'atrasado');
+  assert.equal(classificarStatusFinanceiroCarteirinha(2), 'atrasado');
+  assert.equal(classificarStatusFinanceiroCarteirinha(3), 'atrasado');
+  assert.equal(classificarStatusFinanceiroCarteirinha(4), 'muito_atrasado');
+  assert.equal(classificarStatusFinanceiroCarteirinha(3, { meses_atencao: 1, meses_bloqueio: 3 }), 'muito_atrasado');
 });
 
 test('chave PIX Banrisul é centralizada e reconhece formatos de celular', () => {
