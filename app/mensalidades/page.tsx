@@ -283,6 +283,8 @@ export default function Page() {
   const [historicoSocio, setHistoricoSocio] = useState<M[]>([]);
   const [carregandoHistoricoSocio, setCarregandoHistoricoSocio] = useState(false);
   const [mesHistoricoSelecionado, setMesHistoricoSelecionado] = useState<number | null>(null);
+  const [mesesHistoricoSelecionadosBaixa, setMesesHistoricoSelecionadosBaixa] = useState<number[]>([]);
+  const [processandoBaixaHistorico, setProcessandoBaixaHistorico] = useState(false);
   const [anoHistoricoSocio, setAnoHistoricoSocio] = useState(hoje.getFullYear());
   const [tipoBaixaSelecionada, setTipoBaixaSelecionada] = useState<"pago" | "sem_saldo">("pago");
   const [processandoBaixa, setProcessandoBaixa] = useState(false);
@@ -339,6 +341,7 @@ export default function Page() {
 
   async function abrirDetalhesSocio(item: M) {
     setSocioSelecionado(item);
+    setMesesHistoricoSelecionadosBaixa([]);
     setAnoHistoricoSocio(ano);
     setTipoBaixaSelecionada("pago");
     const mesDaLinha = Number(String(item.competencia || "").slice(5, 7)) || mes;
@@ -347,8 +350,92 @@ export default function Page() {
 
   async function trocarAnoHistoricoSocio(novoAno: number) {
     setAnoHistoricoSocio(novoAno);
+    setMesesHistoricoSelecionadosBaixa([]);
     if (socioSelecionado) {
       await carregarHistoricoSocio(socioSelecionado, novoAno);
+    }
+  }
+
+  function alternarMesHistoricoParaBaixa(numeroMes: number) {
+    const registro = historicoPorMes.get(numeroMes);
+    if (!registro || registro.situacao === "pago" || registro.situacao === "isento" || String(registro.id).startsWith("virtual-")) {
+      return;
+    }
+    setMesesHistoricoSelecionadosBaixa((atuais) =>
+      atuais.includes(numeroMes)
+        ? atuais.filter((m) => m !== numeroMes)
+        : [...atuais, numeroMes].sort((a, b) => a - b)
+    );
+  }
+
+  async function gerarCompetenciaAtualDoHistorico() {
+    if (!socioSelecionado || processandoBaixaHistorico) return;
+    const anoAtual = hoje.getFullYear();
+    const mesAtual = hoje.getMonth() + 1;
+    if (anoHistoricoSocio !== anoAtual || mesHistoricoSelecionado !== mesAtual || historicoPorMes.has(mesAtual)) return;
+
+    setProcessandoBaixaHistorico(true);
+    setErro("");
+    setMsg("");
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "gerar",
+          ano: anoAtual,
+          mes: mesAtual,
+          socio_ids: [String(socioSelecionado.socio_id)],
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível gerar a mensalidade do mês vigente.");
+      await carregar();
+      await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio, mesAtual);
+      setMsg(d.message || `Mensalidade de ${String(mesAtual).padStart(2, "0")}/${anoAtual} gerada. Agora você pode registrar o pagamento.`);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível gerar a mensalidade do mês vigente.");
+    } finally {
+      setProcessandoBaixaHistorico(false);
+    }
+  }
+
+  async function baixarMesesDoHistorico() {
+    if (!socioSelecionado || processandoBaixaHistorico) return;
+    const registros = mesesHistoricoSelecionadosBaixa
+      .map((numeroMes) => historicoPorMes.get(numeroMes))
+      .filter((item): item is M => Boolean(item && item.situacao !== "pago" && item.situacao !== "isento" && !String(item.id).startsWith("virtual-")));
+    if (!registros.length) {
+      setErro("Selecione pelo menos uma mensalidade gerada e ainda não paga.");
+      return;
+    }
+    const competencias = registros.map((item) => String(item.competencia || "").slice(5, 7) + "/" + String(item.competencia || "").slice(0, 4));
+    if (!window.confirm(`Confirmar o pagamento de ${registros.length} mensalidade(s) de ${socioSelecionado.socio?.nome || "este associado"}?\n\nCompetências: ${competencias.join(", ")}\n\nA baixa será registrada no Financeiro.`)) return;
+
+    setProcessandoBaixaHistorico(true);
+    setErro("");
+    setMsg("");
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "baixar",
+          ids: registros.map((item) => item.id),
+          data_pagamento: new Date().toISOString().slice(0, 10),
+          ...(contaRecebimentoSelecionada ? { conta_recebimento_id: contaRecebimentoSelecionada } : {}),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível registrar a baixa das mensalidades selecionadas.");
+      setMesesHistoricoSelecionadosBaixa([]);
+      setMsg(d.message || `${registros.length} mensalidade(s) baixada(s) com sucesso.`);
+      await carregar();
+      await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio, mesHistoricoSelecionado || hoje.getMonth() + 1);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível registrar a baixa das mensalidades selecionadas.");
+    } finally {
+      setProcessandoBaixaHistorico(false);
     }
   }
 
@@ -1843,6 +1930,7 @@ const selecionadasBaixa = useMemo(
                 type="button"
                 onClick={() => {
                   setSocioSelecionado(null);
+                  setMesesHistoricoSelecionadosBaixa([]);
                   setHistoricoSocio([]);
                   setMesHistoricoSelecionado(null);
                   setAnoHistoricoSocio(ano);
@@ -1974,6 +2062,42 @@ const selecionadasBaixa = useMemo(
                   </div>
                 </div>
 
+                <div className="mt-3 rounded-xl border border-[#d8e9df] bg-white p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-black text-[#005a3c]">Baixa antecipada / múltiplos meses</p>
+                    <span className="text-xs text-gray-500">Selecione as competências em aberto</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-12">
+                    {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
+                      const registro = historicoPorMes.get(numeroMes);
+                      const elegivel = Boolean(registro && registro.situacao !== "pago" && registro.situacao !== "isento" && !String(registro.id).startsWith("virtual-"));
+                      const marcado = mesesHistoricoSelecionadosBaixa.includes(numeroMes);
+                      return (
+                        <label key={`baixa-${numeroMes}`} className={`flex items-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold ${elegivel ? "cursor-pointer border-gray-200" : "cursor-not-allowed border-gray-100 text-gray-300"} ${marcado ? "border-[#00704a] bg-[#eaf4ee] text-[#005a3c]" : "bg-white"}`}>
+                          <input type="checkbox" checked={marcado} disabled={!elegivel || processandoBaixaHistorico} onChange={() => alternarMesHistoricoParaBaixa(numeroMes)} />
+                          {String(numeroMes).padStart(2, "0")}/{String(anoHistoricoSocio).slice(-2)}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {mesesHistoricoSelecionadosBaixa.length > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-gray-600">{mesesHistoricoSelecionadosBaixa.length} mês(es) selecionado(s). A baixa usa a data de pagamento de hoje.</p>
+                      <button type="button" disabled={processandoBaixaHistorico} onClick={() => void baixarMesesDoHistorico()} className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                        {processandoBaixaHistorico ? "Processando..." : `💰 Dar baixa em ${mesesHistoricoSelecionadosBaixa.length} mês(es)`}
+                      </button>
+                    </div>
+                  )}
+                  {!historicoPorMes.has(hoje.getMonth() + 1) && anoHistoricoSocio === hoje.getFullYear() && mesHistoricoSelecionado === hoje.getMonth() + 1 && (
+                    <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                      A mensalidade do mês vigente ainda não foi gerada. Gere somente a competência deste associado para depois registrar o pagamento.
+                      <button type="button" disabled={processandoBaixaHistorico} onClick={() => void gerarCompetenciaAtualDoHistorico()} className="ml-2 mt-2 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+                        {processandoBaixaHistorico ? "Processando..." : "Gerar mensalidade do mês vigente"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                   <span className="rounded-full bg-green-100 px-3 py-1 text-green-700">X Pago</span>
                   <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">SS Sem saldo</span>
@@ -2091,6 +2215,7 @@ const selecionadasBaixa = useMemo(
                 type="button"
                 onClick={() => {
                   setSocioSelecionado(null);
+                  setMesesHistoricoSelecionadosBaixa([]);
                   setHistoricoSocio([]);
                   setMesHistoricoSelecionado(null);
                   setAnoHistoricoSocio(ano);
