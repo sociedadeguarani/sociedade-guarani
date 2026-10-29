@@ -47,6 +47,7 @@ function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
   return dependenteTemMensalidade({
     categoria: typeof socio.categoria === "string" ? socio.categoria : null,
     tipo_socio: typeof socio.tipo_socio === "string" ? socio.tipo_socio : null,
+    possui_mensalidade: socio.possui_mensalidade,
   });
 }
 
@@ -129,7 +130,11 @@ export async function POST(request: Request) {
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
     const ehDependente = Boolean(responsavelId);
     const possuiMensalidade = ehDependente
-      ? dependenteTemMensalidade({ categoria: body.categoria, tipo_socio: body.tipo_socio })
+      ? dependenteTemMensalidade({
+          categoria: body.categoria,
+          tipo_socio: body.tipo_socio,
+          possui_mensalidade: body.possui_mensalidade,
+        })
       : possuiMensalidadeTitular;
     const dadosNormalizados = {
       ...body,
@@ -174,7 +179,11 @@ export async function PUT(request: Request) {
     const categoriaFinal = body.categoria !== undefined ? body.categoria : atual?.categoria;
     const tipoFinal = body.tipo_socio !== undefined ? body.tipo_socio : atual?.tipo_socio;
     const possuiMensalidade = ehDependente
-      ? dependenteTemMensalidade({ categoria: categoriaFinal, tipo_socio: tipoFinal })
+      ? dependenteTemMensalidade({
+          categoria: categoriaFinal,
+          tipo_socio: tipoFinal,
+          possui_mensalidade: possuiMensalidadeInformada,
+        })
       : possuiMensalidadeInformada;
     const dadosNormalizados = {
       ...body,
