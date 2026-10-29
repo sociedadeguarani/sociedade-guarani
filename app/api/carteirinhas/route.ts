@@ -72,11 +72,11 @@ function statusPorMensalidades(mensalidades: any[], hoje: string) {
   }]));
 }
 
-function statusFinanceiro(quantidade: number, dias: number, politica: PoliticaInadimplencia) {
-  // A carteirinha não deve dizer EM DIA quando existe qualquer competência
-  // vencida e ainda não quitada. O limite configurado de bloqueio continua
-  // controlando quando o indicador passa para vermelho/BLOQUEIO.
-  const financeiro_status = classificarStatusFinanceiroCarteirinha(quantidade, politica);
+function statusFinanceiro(quantidade: number, dias: number, politica: PoliticaInadimplencia, temHistorico = true) {
+  // Sem cobranças geradas não é possível concluir que a pessoa está em dia.
+  const financeiro_status = temHistorico
+    ? classificarStatusFinanceiroCarteirinha(quantidade, politica)
+    : "sem_lancamentos";
 
   return {
     financeiro_status,
@@ -203,13 +203,14 @@ export async function GET(request: Request) {
       .map(String);
 
     const mensalidades: any[] = [];
+    const sociosComHistorico = new Set<string>();
 
-    // Busca todo o histórico por lotes e páginas. O limite padrão de 1.000
-    // linhas do PostgREST truncava mensalidades antigas e fazia inadimplentes
-    // aparecerem incorretamente como "0 meses — em dia".
+    // Busca em lotes paralelos para reduzir a espera da tela. Mantém paginação
+    // por lote para não perder históricos acima do limite do PostgREST.
     if (podeVerFinanceiro) {
-      const lotes = emLotes(ids, 100);
-      for (const lote of lotes) {
+      const lotes = emLotes(ids, 200);
+      const resultados = await Promise.all(lotes.map(async (lote) => {
+        const registrosLote: any[] = [];
         for (let offset = 0; ; offset += 1000) {
           const { data, error } = await supabase
             .from("mensalidades")
@@ -220,8 +221,16 @@ export async function GET(request: Request) {
             .range(offset, offset + 999);
           if (error) throw error;
           const pagina = data || [];
-          mensalidades.push(...pagina);
+          registrosLote.push(...pagina);
           if (pagina.length < 1000) break;
+        }
+        return registrosLote;
+      }));
+      for (const lote of resultados) {
+        mensalidades.push(...lote);
+        for (const mensalidade of lote) {
+          const idSocio = String(mensalidade.socio_id || "");
+          if (idSocio) sociosComHistorico.add(idSocio);
         }
       }
     }
@@ -247,7 +256,7 @@ export async function GET(request: Request) {
       const atraso = atrasosPorSocio.get(alvoId) || { quantidade: 0, dias: 0, valor: 0 };
       return {
         ...s,
-        ...statusFinanceiro(atraso.quantidade, atraso.dias, politicaInadimplencia),
+        ...statusFinanceiro(atraso.quantidade, atraso.dias, politicaInadimplencia, sociosComHistorico.has(alvoId)),
       };
     });
 
