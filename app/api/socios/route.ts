@@ -67,14 +67,21 @@ export async function GET(request: Request) {
     const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
     if (url.searchParams.get("resumo") === "1") {
-      const [total, ativos, inativos] = await Promise.all([
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)"),
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "ativo"),
-        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "inativo"),
-      ]);
-      const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
+      // O resumo usa os mesmos critérios da listagem /socios. O filtro antigo
+      // por mensalidade/remido escondia cadastros novos que a tela exibe.
+      const { data: resumoRaw, error: erroResumo } = await db
+        .from("socios")
+        .select("id,matricula,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,remido,situacao")
+        .order("matricula", { ascending: true });
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
-      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0, camposVisiveis });
+
+      const registrosResumo = (resumoRaw || []) as unknown as Array<Record<string, unknown>>;
+      const exibidos = registrosResumo.filter(deveExibirNaListaSocios);
+      const ativos = exibidos.filter((socio) => normalizarClassificacao(socio.situacao) === "ativo").length;
+      const inativos = exibidos.filter((socio) => normalizarClassificacao(socio.situacao) === "inativo").length;
+      return NextResponse.json({ total: exibidos.length, ativos, inativos, camposVisiveis }, {
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      });
     }
     // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
     // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
