@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dependenteTemMensalidade } from "@/lib/regrasMensalidade";
 import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO } from "@/lib/politicaInadimplencia";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,27 @@ function normalizarClassificacao(valor: unknown): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+
+function mensalidadePaga(situacao: unknown) {
+  const status = String(situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status);
+}
+
+function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string) {
+  const mapa = new Map<string, Set<string>>();
+  for (const m of mensalidades) {
+    const id = String(m.socio_id || "");
+    const vencimento = String(m.data_vencimento || "").slice(0, 10);
+    if (!id || !vencimento || vencimento >= hoje || mensalidadePaga(m.situacao)) continue;
+    const competencia = String(m.competencia || vencimento).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(competencia)) continue;
+    const lista = mapa.get(id) || new Set<string>();
+    lista.add(competencia);
+    mapa.set(id, lista);
+  }
+  return mapa;
 }
 
 function deveExibirNaListaSocios(socio: Record<string, unknown>): boolean {
@@ -67,21 +89,14 @@ export async function GET(request: Request) {
     const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
     if (url.searchParams.get("resumo") === "1") {
-      // O resumo usa os mesmos critérios da listagem /socios. O filtro antigo
-      // por mensalidade/remido escondia cadastros novos que a tela exibe.
-      const { data: resumoRaw, error: erroResumo } = await db
-        .from("socios")
-        .select("id,matricula,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,remido,situacao")
-        .order("matricula", { ascending: true });
+      const [total, ativos, inativos] = await Promise.all([
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)"),
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "ativo"),
+        db.from("socios").select("id", { count: "exact", head: true }).or("possui_mensalidade.eq.true,and(remido.eq.true,responsavel_id.is.null)").ilike("situacao", "inativo"),
+      ]);
+      const erroResumo = [total, ativos, inativos].find((r) => r.error)?.error;
       if (erroResumo) return NextResponse.json({ error: erroBanco(erroResumo) }, { status: 500 });
-
-      const registrosResumo = (resumoRaw || []) as unknown as Array<Record<string, unknown>>;
-      const exibidos = registrosResumo.filter(deveExibirNaListaSocios);
-      const ativos = exibidos.filter((socio) => normalizarClassificacao(socio.situacao) === "ativo").length;
-      const inativos = exibidos.filter((socio) => normalizarClassificacao(socio.situacao) === "inativo").length;
-      return NextResponse.json({ total: exibidos.length, ativos, inativos, camposVisiveis }, {
-        headers: { "Cache-Control": "no-store, max-age=0" },
-      });
+      return NextResponse.json({ total: total.count || 0, ativos: ativos.count || 0, inativos: inativos.count || 0, camposVisiveis });
     }
     // Carregamos possui_mensalidade internamente para calcular a visibilidade da lista.
     // Para perfis sem permissão financeira, retornamos apenas o indicador de exibição,
@@ -99,16 +114,47 @@ export async function GET(request: Request) {
     // estático, embora a resposta bem-sucedida seja uma lista de registros.
     // A conversão passa por unknown para manter a fronteira explícita.
     const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
+    let atrasos = new Map<string, Set<string>>();
+    let politica = POLITICA_INADIMPLENCIA_PADRAO;
+    if (podeVerFinanceiro) {
+      const hoje = dataHojeBrasil();
+      const config = await db.from("configuracoes_acessos").select("meses_atencao,meses_bloqueio").eq("id", 1).maybeSingle();
+      if (!config.error && config.data) politica = normalizarPoliticaInadimplencia(config.data);
+      const ids = registros.map((s) => String(s.id || "")).filter(Boolean);
+      const mensalidades: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const lote = ids.slice(i, i + 100);
+        const { data, error } = await db.from("mensalidades").select("socio_id,data_vencimento,competencia,situacao").in("socio_id", lote).lt("data_vencimento", hoje);
+        if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
+        mensalidades.push(...((data || []) as unknown as Array<Record<string, unknown>>));
+      }
+      atrasos = agruparAtrasos(mensalidades, hoje);
+    }
+
     const socios = registros.map((socio) => {
       const resultado: Record<string, unknown> = {
         ...socio,
         exibir_na_lista_socios: deveExibirNaListaSocios(socio),
       };
-      if (!podeVerFinanceiro) delete resultado.possui_mensalidade;
+      if (podeVerFinanceiro) {
+        // Dependente com cobrança própria calcula o próprio atraso; dependente familiar
+        // sem mensalidade própria herda o status do titular.
+        const matricula = String(socio.matricula || "").trim().toUpperCase();
+        const terminaB = matricula.endsWith("B");
+        const herdaTitular = Boolean(socio.responsavel_id) && (terminaB || socio.possui_mensalidade !== true);
+        const alvo = String(herdaTitular ? socio.responsavel_id : socio.id);
+        const meses = atrasos.get(alvo)?.size || 0;
+        resultado.financeiro_status = classificarStatusFinanceiroCarteirinha(meses, politica);
+        resultado.meses_atraso = meses;
+        resultado.meses_atencao = politica.meses_atencao;
+        resultado.meses_bloqueio = politica.meses_bloqueio;
+      } else {
+        delete resultado.possui_mensalidade;
+      }
       return resultado;
     });
 
-    return NextResponse.json({ socios, camposVisiveis });
+    return NextResponse.json({ socios, camposVisiveis }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar sócios." }, { status: 500 });
   }
