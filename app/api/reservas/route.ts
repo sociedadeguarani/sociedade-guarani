@@ -384,6 +384,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ total: count ?? 0 });
     }
 
+    if (url.searchParams.get("resumo") === "pix-pendentes") {
+      const { count, error } = await db
+        .from("reservas")
+        .select("id", { count: "exact", head: true })
+        .in("situacao", ["solicitada", "aguardando_pagamento"])
+        .ilike("tipo_pagamento", "pix");
+
+      if (error) throw error;
+      return NextResponse.json({ total: count ?? 0 });
+    }
+
     // A chamada inicial da tela precisa apenas dos espaços e contas; buscar
     // todas as reservas e assinar seus anexos aqui era trabalho duplicado.
     if (dados === "base") {
