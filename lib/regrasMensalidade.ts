@@ -50,27 +50,27 @@ function ehDependente(socio: CadastroMensalidade): boolean {
 export function dependenteTemMensalidade(socio: CadastroMensalidade): boolean {
   const tipo = normalizarTipo(socio.tipo_socio);
   const categoria = normalizarCategoria(socio.categoria);
+  const possuiMensalidade =
+    socio.possui_mensalidade === true ||
+    String(socio.possui_mensalidade ?? "").trim().toLowerCase() === "true";
 
   // Uma categoria legada de titular nunca pode liberar cobrança de dependente.
   // Isso protege cadastros inconsistentes com responsavel_id preenchido.
   if (categoria === "titular") return false;
 
-  // O tipo estruturado diferencia dependentes cobrados dos sem mensalidade.
-  // Ele prevalece sobre categorias antigas/genéricas de dependente.
+  // Tipos estruturados são autoritativos: o sufixo mensalidade permite cobrar,
+  // enquanto um tipo dependente explícito sem sufixo não permite cobrança.
   if (TIPOS_DEPENDENTE_COM_MENSALIDADE.has(tipo)) return true;
   if (tipo.startsWith("dependente_")) return false;
+
+  // Sócio Dependente é um associado com cobrança própria, não um dependente
+  // financeiro do titular. Cadastros antigos podem manter tipo_socio genérico;
+  // a categoria explícita e a flag de cobrança própria resolvem essa exceção.
+  if (categoria.startsWith("socio dependente") && possuiMensalidade) return true;
 
   // Compatibilidade com registros antigos que ainda não têm tipo estruturado:
   // só aceitamos cobrança quando a categoria declarar isso expressamente.
   return Boolean(categoria) && categoria.includes("dependente") && /(?:c\s*\/\s*mensalidade|com\s+mensalidade)/.test(categoria);
-}
-
-
-/** Indica que o cadastro antigo de dependente foi promovido para a tabela socios.
- * O registro legado é mantido apenas para preservar referências históricas.
- */
-export function dependenteFoiPromovidoParaSocio(registro: { migrado_para_socio_id?: unknown }): boolean {
-  return String(registro.migrado_para_socio_id ?? "").trim().length > 0;
 }
 
 /** Aplica a mesma regra na tela, na prévia e na API de geração. */
