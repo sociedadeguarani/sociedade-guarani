@@ -134,7 +134,7 @@ export async function GET(request: Request) {
     // A conversão passa por unknown para manter a fronteira explícita.
     const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
     let atrasos = new Map<string, Set<string>>();
-    let sociosComHistorico = new Set<string>();
+    const sociosComHistorico = new Set<string>();
     let politica = POLITICA_INADIMPLENCIA_PADRAO;
     if (podeVerFinanceiro) {
       const hoje = dataHojeBrasil();
