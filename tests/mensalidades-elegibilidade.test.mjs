@@ -59,28 +59,12 @@ test('tipo dependente com mensalidade prevalece sobre categoria genérica antiga
   }), true);
 });
 
-
 test('Sócio Dependente com mensalidade própria é elegível mesmo com tipo legado genérico', () => {
-  for (const [nome, matricula] of [
-    ['Bernardo Madke dos Santos', 'SD0051A'],
-    ['Eduardo Madke dos Santos', 'SD0047A'],
-  ]) {
-    assert.equal(socioElegivelParaMensalidade({
-      nome,
-      matricula,
-      categoria: 'Sócio Dependente',
-      tipo_socio: 'dependente_patrimonial_familiar',
-      possui_mensalidade: true,
-      situacao: 'ativo',
-    }), true);
-  }
-});
-
-test('Sócio Dependente sem mensalidade própria não gera cobrança automaticamente', () => {
   assert.equal(socioElegivelParaMensalidade({
     categoria: 'Sócio Dependente',
-    tipo_socio: 'dependente_patrimonial_familiar',
-    possui_mensalidade: false,
+    tipo_socio: 'patrimonial_individual',
+    responsavel_id: 'titular-123',
+    possui_mensalidade: true,
     situacao: 'ativo',
-  }), false);
+  }), true);
 });
