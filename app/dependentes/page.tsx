@@ -222,14 +222,14 @@ export default function DependentesPage() {
     let inativos = 0;
 
     for (const dependente of dependentes) {
-      const titular = socios.find((socio) => String(socio.id) === String(dependente.socio_id));
+      const titular = socioPorId[String(dependente.socio_id)];
       const titularInativo = normalizarTexto(titular?.situacao || "") === "inativo";
       if (dependente.ativo === true && !titularInativo) ativos += 1;
       else inativos += 1;
     }
 
     return { totalAtivos: ativos, totalInativos: inativos };
-  }, [dependentes, socios]);
+  }, [dependentes, socioPorId]);
 
   const carregarDados = useCallback(async () => {
     setCarregando(true);
