@@ -134,6 +134,7 @@ export async function GET(request: Request) {
     // A conversão passa por unknown para manter a fronteira explícita.
     const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
     let atrasos = new Map<string, Set<string>>();
+    let sociosComHistorico = new Set<string>();
     let politica = POLITICA_INADIMPLENCIA_PADRAO;
     if (podeVerFinanceiro) {
       const hoje = dataHojeBrasil();
@@ -141,10 +142,11 @@ export async function GET(request: Request) {
       if (!config.error && config.data) politica = normalizarPoliticaInadimplencia(config.data);
       const ids = registros.map((s) => String(s.id || "")).filter(Boolean);
       const mensalidades: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < ids.length; i += 100) {
-        const lote = ids.slice(i, i + 100);
-        // Pagina os resultados: o limite padrão do PostgREST pode truncar o
-        // histórico e deixar associados inadimplentes aparecendo como em dia.
+      // Executa os lotes em paralelo: antes eram consultados um após o outro,
+      // aumentando muito o tempo de abertura quando há centenas de associados.
+      const lotes = Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => ids.slice(i * 100, (i + 1) * 100));
+      const resultadosLotes = await Promise.all(lotes.map(async (lote) => {
+        const registrosLote: Array<Record<string, unknown>> = [];
         for (let offset = 0; ; offset += 1000) {
           const { data, error } = await db
             .from("mensalidades")
@@ -153,10 +155,18 @@ export async function GET(request: Request) {
             .order("data_vencimento", { ascending: true })
             .order("id", { ascending: true })
             .range(offset, offset + 999);
-          if (error) return NextResponse.json({ error: erroBanco(error) }, { status: 500 });
+          if (error) throw new Error(erroBanco(error));
           const pagina = (data || []) as unknown as Array<Record<string, unknown>>;
-          mensalidades.push(...pagina);
+          registrosLote.push(...pagina);
           if (pagina.length < 1000) break;
+        }
+        return registrosLote;
+      }));
+      for (const lote of resultadosLotes) {
+        mensalidades.push(...lote);
+        for (const mensalidade of lote) {
+          const idSocio = String(mensalidade.socio_id || "");
+          if (idSocio) sociosComHistorico.add(idSocio);
         }
       }
       atrasos = agruparAtrasos(mensalidades, hoje);
@@ -181,7 +191,9 @@ export async function GET(request: Request) {
         const herdaTitular = ehConjugeFamiliar || (Boolean(responsavelId) && socio.possui_mensalidade !== true);
         const alvo = String(herdaTitular ? responsavelId : socio.id);
         const meses = atrasos.get(alvo)?.size || 0;
-        resultado.financeiro_status = classificarStatusFinanceiroCarteirinha(meses, politica);
+        resultado.financeiro_status = sociosComHistorico.has(alvo)
+          ? classificarStatusFinanceiroCarteirinha(meses, politica)
+          : "sem_lancamentos";
         resultado.meses_atraso = meses;
         resultado.meses_atencao = politica.meses_atencao;
         resultado.meses_bloqueio = politica.meses_bloqueio;
