@@ -49,9 +49,10 @@ export async function GET(request: Request) {
   try {
     const db = getServiceClient();
 
+    const colunasDependentes = "id,nome,matricula,socio_id,migrado_para_socio_id";
     let dependentesQuery = db
       .from("dependentes")
-      .select("nome,matricula,socio_id");
+      .select(colunasDependentes);
     let sociosQuery = db
       .from("socios")
       .select("nome,matricula,responsavel_id,tipo_socio,categoria,id");
@@ -63,16 +64,22 @@ export async function GET(request: Request) {
       );
     }
 
-    const [
-      { data: dependentes, error: dependentesError },
-      { data: socios, error: sociosError },
-    ] = await Promise.all([dependentesQuery, sociosQuery]);
+    let [dependentesResult, sociosResult] = await Promise.all([dependentesQuery, sociosQuery]);
+    // Compatibilidade temporária com bancos que ainda não receberam a coluna
+    // de rastreamento da promoção para Sócio.
+    if (dependentesResult.error && /migrado_para_socio_id/i.test(dependentesResult.error.message || "")) {
+      let fallback = db.from("dependentes").select("id,nome,matricula,socio_id");
+      if (auth.usuario.perfil === "associado") fallback = fallback.eq("socio_id", auth.usuario.socio_id);
+      dependentesResult = await fallback;
+    }
+    const dependentes = dependentesResult.data || [];
+    const socios = sociosResult.data || [];
+    if (dependentesResult.error) throw dependentesResult.error;
+    if (sociosResult.error) throw sociosResult.error;
 
-    if (dependentesError) throw dependentesError;
-    if (sociosError) throw sociosError;
-
-    const dependentesCadastrados = (dependentes ?? []).filter(
-      (dependente: { matricula?: unknown }) => !ehTitular(dependente.matricula)
+    const dependentesCadastrados = dependentes.filter(
+      (dependente: { matricula?: unknown; migrado_para_socio_id?: unknown }) =>
+        !ehTitular(dependente.matricula) && !dependente.migrado_para_socio_id
     );
 
     const chavesExistentes = new Set(
