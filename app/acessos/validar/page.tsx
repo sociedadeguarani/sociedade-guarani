@@ -11,6 +11,7 @@ type ResultadoValidacao = {
   dependente?: { nome?: string; parentesco?: string | null } | null;
   liberado?: boolean;
   perfil_operador?: string;
+  alerta_diretoria_enviado?: boolean;
   temporada?: { id?: string; codigo?: string | null } | null;
   status_temporada?: string | null;
   mensalidade?: { texto?: string; cor?: string } | null;
