@@ -11,8 +11,8 @@ test('histórico anual permite selecionar múltiplas competências em aberto par
   assert.match(page, /Dar baixa em \$\{mesesHistoricoSelecionadosBaixa\.length\} mês\(es\)/);
 });
 
-test('histórico permite gerar apenas a mensalidade vigente ausente para o associado selecionado', () => {
-  assert.match(page, /Gerar mensalidade do mês vigente/);
-  assert.match(page, /socio_ids: \[String\(socioSelecionado\.socio_id\)\]/);
-  assert.match(page, /historicoPorMes\.has\(mesAtual\)/);
+test('histórico não exige geração manual para registrar pagamento da competência vigente', () => {
+  assert.doesNotMatch(page, /Gerar mensalidade do mês vigente/);
+  assert.doesNotMatch(page, /A mensalidade do mês vigente ainda não foi gerada/);
+  assert.match(page, /Preparando cobrança automaticamente/);
 });
