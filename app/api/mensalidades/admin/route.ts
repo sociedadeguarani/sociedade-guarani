@@ -429,24 +429,6 @@ export async function POST(request: Request) {
       }
 
       const competencia = primeiroDia(ano, mes);
-      const agora = new Date();
-      const inicioMesAtual = new Date(
-        agora.getFullYear(),
-        agora.getMonth(),
-        1
-      );
-      const inicioMesAlvo = new Date(ano, mes - 1, 1);
-
-      if (inicioMesAlvo > inicioMesAtual) {
-        return NextResponse.json(
-          {
-            error:
-              "Não é permitido gerar mensalidades de meses futuros.",
-          },
-          { status: 400 }
-        );
-      }
-
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
