@@ -1063,6 +1063,16 @@ export default function Home() {
           .eq("id", socioEditando.id);
 
         if (resultado.error) throw resultado.error;
+
+        // Sincroniza o valor nas mensalidades ainda não pagas do associado.
+        // Registros pagos são preservados para manter o histórico financeiro.
+        const atualizacaoMensalidades = await supabase
+          .from("mensalidades")
+          .update({ valor: Number(form.valor_mensalidade || 0) })
+          .eq("socio_id", socioEditando.id)
+          .in("situacao", ["em_aberto", "em_atraso"]);
+
+        if (atualizacaoMensalidades.error) throw atualizacaoMensalidades.error;
       } else {
         const resultado = await supabase
           .from("socios")
