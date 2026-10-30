@@ -1,697 +1,992 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { CalendarDays, Download, Printer, RefreshCw } from "lucide-react";
-import MenuLateralPadrao from "../../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../../components/CabecalhoPadrao";
-
-type Status = "confirmada" | "pendente" | "cancelada";
-type Reserva = {
-  id: string;
-  espaco_id: string | null;
-  espaco_nome: string;
-  categoria: string | null;
-  responsavel_nome: string;
-  motivo_locacao: string | null;
-  matricula: string | null;
-  data_reserva: string;
-  hora_inicio: string;
-  hora_fim: string;
-  valor: number;
-  status: Status;
-  tipo_pagamento: string;
-  tipo_pessoa: "socio" | "nao_socio";
-  data_pagamento: string | null;
-  comprovante_status: string | null;
-  reservado_por_nome: string | null;
-  reservado_por_perfil: string | null;
-  lista_presenca_nome: string | null;
-  quantidade_convidados: number | null;
-  lista_presenca_url: string | null;
-};
-type EspacoFiltro = { id: string | null; nome: string; categoria: string | null };
+import { Clock3, Settings, UserRound, UserRoundCheck, Users } from "lucide-react";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import ConfirmacaoReserva from "./components/ConfirmacaoReserva";
+import ConfirmarPixReserva from "./components/ConfirmarPixReserva";
+import ConfiguracaoEspacos from "./components/ConfiguracaoEspacos";
+import ReservasTabela from "./components/ReservasTabela";
+import type {
+  ContaBancaria,
+  DependenteReserva,
+  Espaco,
+  FormaPagamentoReserva,
+  PixConfig,
+  Recibo,
+  Reserva,
+  ReservaStatus,
+  SocioReserva,
+  TipoPessoa,
+} from "./types";
+import { dataBR, HORARIOS, moeda, normalizarEspaco } from "./utils";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-function moeda(valor: number) {
-  return Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+type Aba = "reservar" | "reservas" | "admin";
+type Perfil = "funcionario" | "administrador" | "administrador_master" | "funcionario_inventario" | "associado" | "";
 
-function dataBR(valor: string) {
-  if (!valor) return "—";
-  const [ano, mes, dia] = valor.slice(0, 10).split("-");
-  return `${dia}/${mes}/${ano}`;
-}
-
-function pagamentoBR(valor: string) {
-  const mapa: Record<string, string> = {
-    pix: "PIX",
-    dinheiro: "Dinheiro",
-    transferencia: "Transferência",
-    debito_em_conta: "Débito em conta",
-    boleto: "Boleto",
-    cartao: "Cartão",
-    outro: "Outro",
-    sem_pagamento: "Sem pagamento",
+function recorteReserva(row: Record<string, unknown>): Reserva {
+  return {
+    id: String(row.id ?? ""),
+    espacoId: String(row.espaco_id ?? ""),
+    data: String(row.data ?? row.data_reserva ?? ""),
+    horario: String(row.horario ?? `${String(row.hora_inicio ?? "").slice(0, 5)} - ${String(row.hora_fim ?? "").slice(0, 5)}`),
+    nome: String(row.nome ?? row.responsavel_nome ?? ""),
+    motivoLocacao: row.motivo_locacao == null ? null : String(row.motivo_locacao),
+    socioId: row.socio_id ? String(row.socio_id) : undefined,
+    dependenteId: row.dependente_id ? String(row.dependente_id) : undefined,
+    matricula: row.matricula == null ? null : String(row.matricula),
+    tipoPessoa: row.tipo_pessoa === "nao_socio" ? "nao_socio" : "socio",
+    valor: Number(row.valor || 0),
+    status: row.status === "cancelada" ? "cancelada" : row.status === "confirmada" ? "confirmada" : "pendente",
+    pagamento: row.pagamento === "pix" || row.pagamento === "dinheiro" || row.pagamento === "transferencia" ? row.pagamento : "pendente",
+    comprovante_url: row.comprovante_url ? String(row.comprovante_url) : null,
+    comprovante_nome: row.comprovante_nome ? String(row.comprovante_nome) : null,
+    comprovante_status: row.comprovante_status ? String(row.comprovante_status) : null,
+    dataPagamento: row.data_pagamento ? String(row.data_pagamento) : null,
+    reservadoPorNome: row.reservado_por_nome == null ? null : String(row.reservado_por_nome),
+    reservadoPorPerfil: row.reservado_por_perfil == null ? null : String(row.reservado_por_perfil),
+    listaPresencaUrl: row.lista_presenca_url == null ? null : String(row.lista_presenca_url),
+    listaPresencaNome: row.lista_presenca_nome == null ? null : String(row.lista_presenca_nome),
+    quantidadeConvidados: row.quantidade_convidados == null ? null : Number(row.quantidade_convidados),
   };
-  return mapa[valor] || valor.replaceAll("_", " ");
 }
 
-function statusBR(valor: Status) {
-  return valor === "confirmada" ? "Confirmada" : valor === "cancelada" ? "Cancelada" : "Pendente";
+function periodoReserva(cobranca: Espaco["cobranca"] | undefined, horario: string) {
+  return cobranca === "diaria" ? "Diária (dia inteiro)" : horario;
 }
 
-function escapeCsv(valor: string) {
-  return `"${valor.replaceAll('"', '""')}"`;
-}
+function nomeOperadorParaExibir(nome: unknown, email: unknown): string {
+  const nomeSistema = String(nome ?? "").trim();
+  const nomeNormalizado = nomeSistema.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const nomesGenericos = new Set(["administrador", "administrador master", "administrator", "administrator master", "admin", "master", "funcionario", "funcionario da portaria", "usuario autenticado"]);
+  if (nomeSistema && !nomesGenericos.has(nomeNormalizado)) return nomeSistema;
 
-function textoNormalizado(valor: string) {
-  return valor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function prioridadeEspaco(nome: string) {
-  const n = textoNormalizado(nome);
-  // Ordem solicitada pela Sociedade: salões sociais, campo/quadras, CTG,
-  // demais espaços, quiosques e Cancha 48 sempre por último.
-  if (n.includes("salao social grande")) return 0;
-  if (n.includes("salao social pequeno")) return 1;
-  if (n.includes("cancha 48")) return 99;
-  if (n.includes("campo") || n.includes("quadra") || n.includes("futebol") || n.includes("volei") || n.includes("bocha")) return 2;
-  if (n.includes("ctg")) return 3;
-  if (n.includes("quiosque")) return 5;
-  return 4;
-}
-
-function ordenarEspacos<T extends { nome: string }>(itens: T[]): T[] {
-  return [...itens].sort((a, b) => prioridadeEspaco(a.nome) - prioridadeEspaco(b.nome) || a.nome.localeCompare(b.nome, "pt-BR"));
-}
-
-function corCabecalhoEspaco(nome: string) {
-  const n = textoNormalizado(nome);
-  if (n.includes("salao social grande")) return "#c6e0b4";
-  if (n.includes("salao social pequeno")) return "#fce4d6";
-  if (n.includes("ctg")) return "#ffe699";
-  if (n.includes("futebol") || n.includes("campo")) return "#f4b183";
-  if (n.includes("volei")) return "#a9d18e";
-  if (n.includes("quiosque a")) return "#d9eaf7";
-  if (n.includes("quiosque b")) return "#d9ead3";
-  if (n.includes("quiosque c")) return "#d9d2e9";
-  if (n.includes("cancha 48")) return "#c9daf8";
-  if (n.includes("quiosque")) return "#d9eaf7";
-  return "#ddebf7";
-}
-
-function escapeHtml(valor: unknown) {
-  return String(valor ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-}
-
-type PeriodoRapido = "ano" | "restante" | "mes" | "personalizado";
-type Visualizacao = "administrativo" | "limpeza";
-
-const MESES = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
-
-function dataLocalISO(data = new Date()) {
-  const ano = data.getFullYear();
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  const dia = String(data.getDate()).padStart(2, "0");
-  return `${ano}-${mes}-${dia}`;
-}
-
-function datasDoPeriodo(periodo: PeriodoRapido, ano: string, mes: string, hoje: string) {
-  const anoNumero = Number(ano);
-  const mesNumero = Math.min(12, Math.max(1, Number(mes) || 1));
-  if (periodo === "restante") {
-    const inicio = ano === hoje.slice(0, 4) ? hoje : `${ano}-01-01`;
-    return { inicio, fim: `${ano}-12-31` };
+  const parteLocal = String(email ?? "").split("@")[0] || "";
+  const primeiroNome = parteLocal.split(/[._-]+/).filter(Boolean)[0] || "";
+  if (/^[a-zA-ZÀ-ÿ]{3,}$/u.test(primeiroNome)) {
+    return primeiroNome.charAt(0).toLocaleUpperCase("pt-BR") + primeiroNome.slice(1);
   }
-  if (periodo === "mes") {
-    const mm = String(mesNumero).padStart(2, "0");
-    const ultimoDia = new Date(anoNumero, mesNumero, 0).getDate();
-    return { inicio: `${ano}-${mm}-01`, fim: `${ano}-${mm}-${String(ultimoDia).padStart(2, "0")}` };
-  }
-  if (periodo === "personalizado") return null;
-  return { inicio: `${ano}-01-01`, fim: `${ano}-12-31` };
+  return nomeSistema || "Usuário autenticado";
 }
 
-function diaSemanaBR(valor: string) {
-  if (!valor) return "";
-  return new Date(`${valor.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "long" });
+function normalizarSocio(row: Record<string, unknown>): SocioReserva {
+  return {
+    id: String(row.id ?? ""),
+    matricula: row.matricula == null ? null : String(row.matricula),
+    nome: String(row.nome ?? ""),
+    cpf: row.cpf == null ? null : String(row.cpf),
+    responsavel_id: row.responsavel_id ? String(row.responsavel_id) : null,
+    parentesco: row.parentesco == null ? null : String(row.parentesco),
+    situacao: row.situacao == null ? null : String(row.situacao),
+  };
 }
 
-function tituloMes(valor: string) {
-  const [ano, mes] = valor.slice(0, 7).split("-").map(Number);
-  return new Date(ano, (mes || 1) - 1, 15).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-}
-
-function horarioExibicao(r: Pick<Reserva, "espaco_nome" | "hora_inicio" | "hora_fim">) {
-  const nome = r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (nome.includes("quiosque") || nome.includes("salao") || nome.includes("pavilhao")) return "Diária (dia todo)";
-  return `${r.hora_inicio} - ${r.hora_fim}`;
-}
-
-export default function RelatorioReservasPage() {
-  const gradeScrollBarRef = useRef<HTMLDivElement>(null);
-  const gradeScrollContentRef = useRef<HTMLDivElement>(null);
-  const gradeTableScrollRef = useRef<HTMLDivElement>(null);
-  const gradeTableRef = useRef<HTMLTableElement>(null);
-  const hoje = dataLocalISO();
-  const anoAtual = Number(hoje.slice(0, 4));
-  const [anoSelecionado, setAnoSelecionado] = useState(String(anoAtual));
-  const [periodoRapido, setPeriodoRapido] = useState<PeriodoRapido>("mes");
-  const [mesSelecionado, setMesSelecionado] = useState(String(new Date().getMonth() + 1));
-  const periodoInicial = datasDoPeriodo("mes", String(anoAtual), String(new Date().getMonth() + 1), hoje)!;
-  const [dataInicial, setDataInicial] = useState(periodoInicial.inicio);
-  const [dataFinal, setDataFinal] = useState(periodoInicial.fim);
-  const [visualizacao, setVisualizacao] = useState<Visualizacao>("administrativo");
-  const [status, setStatus] = useState<"todos" | Status>("todos");
-  const [espacoId, setEspacoId] = useState("todos");
-  const [pagamento, setPagamento] = useState("todos");
-  const [tipoPessoa, setTipoPessoa] = useState("todos");
-  const [reservas, setReservas] = useState<Reserva[]>([]);
-  const [espacos, setEspacos] = useState<EspacoFiltro[]>([]);
+export default function ReservasPage() {
+  const [publico, setPublico] = useState(false);
+  const [perfil, setPerfil] = useState<Perfil>("");
+  const [aba, setAba] = useState<Aba>("reservar");
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+  const [espacos, setEspacos] = useState<Espaco[]>([]);
+  const [reservas, setReservas] = useState<Reserva[]>([]);
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
+  const [espacoId, setEspacoId] = useState("");
+  const [data, setData] = useState("");
+  const [horario, setHorario] = useState(HORARIOS[0]);
+  const [nome, setNome] = useState("");
+  const [motivoLocacao, setMotivoLocacao] = useState("");
+  const [socioId, setSocioId] = useState("");
+  const [matriculaResponsavel, setMatriculaResponsavel] = useState<number | string | null>(null);
+  const [dependenteId, setDependenteId] = useState("");
+  const [socios, setSocios] = useState<SocioReserva[]>([]);
+  const [dependentes, setDependentes] = useState<DependenteReserva[]>([]);
+  const [buscaSocio, setBuscaSocio] = useState("");
+  const [tipoPessoa, setTipoPessoa] = useState<TipoPessoa>("socio");
+  const [etapa, setEtapa] = useState<"selecao" | "confirmacao">("selecao");
+  const [busca, setBusca] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | ReservaStatus>("todos");
+  const [filtroData, setFiltroData] = useState("");
+  const [copiado, setCopiado] = useState(false);
+  const [pix, setPix] = useState<PixConfig | null>(null);
+  const [arquivoComprovante, setArquivoComprovante] = useState<File | null>(null);
+  const [enviandoComprovante, setEnviandoComprovante] = useState(false);
+  const [recibo, setRecibo] = useState<Recibo | null>(null);
+  const [formaPagamentoReserva, setFormaPagamentoReserva] = useState<FormaPagamentoReserva>("pix");
+  const [contaBancariaId, setContaBancariaId] = useState("");
+  const [editandoReservaId, setEditandoReservaId] = useState<string | null>(null);
+  const [salvandoEspacoId, setSalvandoEspacoId] = useState<string | null>(null);
+  const [reservaPixConfirmacao, setReservaPixConfirmacao] = useState<Reserva | null>(null);
+  const [contaPixConfirmacao, setContaPixConfirmacao] = useState("");
+  const [confirmandoPix, setConfirmandoPix] = useState(false);
+  const [arquivoConfirmacaoPix, setArquivoConfirmacaoPix] = useState<File | null>(null);
+  const [carregandoReservas, setCarregandoReservas] = useState(false);
+  const [carregandoPessoas, setCarregandoPessoas] = useState(false);
+  const [pessoasCarregadas, setPessoasCarregadas] = useState(false);
+  const [reservaListaPresenca, setReservaListaPresenca] = useState<Reserva | null>(null);
+  const [arquivoListaPresenca, setArquivoListaPresenca] = useState<File | null>(null);
+  const [quantidadeConvidados, setQuantidadeConvidados] = useState("");
+  const [salvandoListaPresenca, setSalvandoListaPresenca] = useState(false);
+  const [erroListaPresenca, setErroListaPresenca] = useState("");
+
+  const podeConfigurar = perfil === "administrador" || perfil === "administrador_master";
 
   async function tokenAtual() {
     const { data: sessao } = await supabase.auth.getSession();
     return sessao.session?.access_token || "";
   }
 
-  async function carregar(opcoes: { status?: "todos" | Status; pagamento?: string; tipoPessoa?: string; dataInicial?: string; dataFinal?: string } = {}) {
-    const inicioConsulta = opcoes.dataInicial ?? dataInicial;
-    const fimConsulta = opcoes.dataFinal ?? dataFinal;
-    const statusConsulta = opcoes.status ?? status;
-    const pagamentoConsulta = opcoes.pagamento ?? pagamento;
-    const tipoPessoaConsulta = opcoes.tipoPessoa ?? tipoPessoa;
+  async function recarregarDados(modoPublico = publico) {
     setCarregando(true);
     setErro("");
     try {
-      const params = new URLSearchParams({
-        data_inicial: inicioConsulta,
-        data_final: fimConsulta,
-        status: statusConsulta,
-        espaco_id: espacoId,
-        pagamento: pagamentoConsulta,
-        tipo_pessoa: tipoPessoaConsulta,
-      });
       const token = await tokenAtual();
-      const resposta = await fetch(`/api/relatorios/reservas?${params.toString()}`, {
+      const params = modoPublico ? "?publico=1&dados=base" : "?dados=base";
+      const resposta = await fetch(`/api/reservas${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         cache: "no-store",
       });
-      const payload = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) throw new Error(payload?.error || "Não foi possível carregar o relatório.");
-      setReservas(Array.isArray(payload?.reservas) ? payload.reservas as Reserva[] : []);
-      setEspacos(Array.isArray(payload?.espacos) ? payload.espacos as EspacoFiltro[] : []);
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar os espaços.");
+
+      const espacosDb = Array.isArray(resultado?.espacos) ? resultado.espacos : [];
+      const contasDb = Array.isArray(resultado?.contas_bancarias) ? resultado.contas_bancarias : [];
+      const espacosNormalizados: Espaco[] = espacosDb
+        .map((item: Record<string, unknown>) => normalizarEspaco(item))
+        .filter((item: Espaco) => Boolean(item.id && item.nome));
+
+      setEspacos(espacosNormalizados);
+      setContasBancarias(contasDb.map((item: Record<string, unknown>) => ({
+        id: String(item.id ?? ""),
+        nome: String(item.nome ?? ""),
+        banco: item.banco == null ? null : String(item.banco),
+        ativo: item.ativo !== false,
+      })));
+
+      if (espacosNormalizados.length) {
+        setEspacoId((atual) => espacosNormalizados.some((e: Espaco) => e.id === atual) ? atual : espacosNormalizados[0].id);
+      }
+
+      if (!modoPublico) {
+        const perfilResponse = await fetch("/api/login/perfil", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        const perfilPayload = await perfilResponse.json().catch(() => ({}));
+        if (perfilResponse.ok) setPerfil((perfilPayload?.usuario?.perfil || "") as Perfil);
+        setReservas([]);
+      } else {
+        setPerfil("");
+        setSocios([]);
+        setDependentes([]);
+        setReservas([]);
+      }
     } catch (error) {
-      setErro(error instanceof Error ? error.message : "Não foi possível carregar o relatório.");
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar as reservas.");
     } finally {
       setCarregando(false);
     }
   }
 
-  // Recarrega automaticamente quando o período ou qualquer filtro mudar.
-  // O pequeno debounce evita várias consultas enquanto o usuário ajusta os filtros.
-  useEffect(() => {
-    let cancelado = false;
-    const agendamento = window.setTimeout(() => {
-      if (!cancelado) {
-        void carregar(visualizacao === "limpeza"
-          ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" }
-          : {});
+  async function carregarReservas(opcoes?: { data?: string; espacoId?: string; todas?: boolean }) {
+    if (publico) return;
+    setCarregandoReservas(true);
+    try {
+      const token = await tokenAtual();
+      const params = new URLSearchParams({ dados: "reservas" });
+      if (!opcoes?.todas) {
+        if (opcoes?.data) params.set("data", opcoes.data);
+        if (opcoes?.espacoId) params.set("espaco_id", opcoes.espacoId);
       }
-    }, 180);
-    return () => {
-      cancelado = true;
-      window.clearTimeout(agendamento);
-    };
-  }, [dataInicial, dataFinal, status, espacoId, pagamento, tipoPessoa, visualizacao]);
-
-  // Mantém uma barra de rolagem horizontal sempre visível acima da grade,
-  // sincronizada com a tabela para facilitar a navegação entre todos os espaços.
-  useEffect(() => {
-    const barra = gradeScrollBarRef.current;
-    const conteudoBarra = gradeScrollContentRef.current;
-    const viewport = gradeTableScrollRef.current;
-    const tabela = gradeTableRef.current;
-    if (!barra || !conteudoBarra || !viewport || !tabela) return;
-
-    const atualizarLargura = () => {
-      const largura = Math.max(tabela.scrollWidth, viewport.clientWidth);
-      conteudoBarra.style.width = `${largura}px`;
-      if (barra.scrollLeft !== viewport.scrollLeft) barra.scrollLeft = viewport.scrollLeft;
-    };
-    const aoRolarBarra = () => {
-      if (viewport.scrollLeft !== barra.scrollLeft) viewport.scrollLeft = barra.scrollLeft;
-    };
-    const aoRolarTabela = () => {
-      if (barra.scrollLeft !== viewport.scrollLeft) barra.scrollLeft = viewport.scrollLeft;
-    };
-
-    atualizarLargura();
-    barra.addEventListener("scroll", aoRolarBarra, { passive: true });
-    viewport.addEventListener("scroll", aoRolarTabela, { passive: true });
-    window.addEventListener("resize", atualizarLargura);
-    const observador = typeof ResizeObserver !== "undefined" ? new ResizeObserver(atualizarLargura) : null;
-    observador?.observe(tabela);
-    observador?.observe(viewport);
-    return () => {
-      barra.removeEventListener("scroll", aoRolarBarra);
-      viewport.removeEventListener("scroll", aoRolarTabela);
-      window.removeEventListener("resize", atualizarLargura);
-      observador?.disconnect();
-    };
-  }, [espacos.length, dataInicial, dataFinal, carregando, visualizacao, reservas.length]);
-
-  const resumo = useMemo(() => {
-    const confirmadas = reservas.filter((r) => r.status === "confirmada");
-    const pendentes = reservas.filter((r) => r.status === "pendente");
-    const canceladas = reservas.filter((r) => r.status === "cancelada");
-    const naoCanceladas = reservas.filter((r) => r.status !== "cancelada");
-    const pagas = naoCanceladas.filter((r) => Boolean(r.data_pagamento));
-    const emAberto = naoCanceladas.filter((r) => !r.data_pagamento && r.tipo_pagamento !== "sem_pagamento");
-    const semCobranca = naoCanceladas.filter((r) => r.tipo_pagamento === "sem_pagamento");
-    return {
-      total: reservas.length,
-      confirmadas: confirmadas.length,
-      pendentes: pendentes.length,
-      canceladas: canceladas.length,
-      valorConfirmado: confirmadas.reduce((s, r) => s + r.valor, 0),
-      valorPendente: emAberto.reduce((s, r) => s + r.valor, 0),
-      valorPrevisto: naoCanceladas.reduce((s, r) => s + r.valor, 0),
-      valorRecebido: pagas.reduce((s, r) => s + r.valor, 0),
-      valorEmAberto: emAberto.reduce((s, r) => s + r.valor, 0),
-      valorSemCobranca: semCobranca.reduce((s, r) => s + r.valor, 0),
-    };
-  }, [reservas]);
-
-  const porEspaco = useMemo(() => {
-    const mapa = new Map<string, { nome: string; quantidade: number; confirmadas: number; pendentes: number; canceladas: number; valor: number; recebido: number; emAberto: number }>();
-    for (const r of reservas) {
-      const chave = r.espaco_id || r.espaco_nome;
-      const item = mapa.get(chave) || { nome: r.espaco_nome, quantidade: 0, confirmadas: 0, pendentes: 0, canceladas: 0, valor: 0, recebido: 0, emAberto: 0 };
-      item.quantidade += 1;
-      if (r.status === "confirmada") item.confirmadas += 1;
-      if (r.status === "pendente") item.pendentes += 1;
-      if (r.status === "cancelada") item.canceladas += 1;
-      if (r.status !== "cancelada") {
-        item.valor += r.valor;
-        if (r.data_pagamento) item.recebido += r.valor;
-        else if (r.tipo_pagamento !== "sem_pagamento") item.emAberto += r.valor;
-      }
-      mapa.set(chave, item);
+      const resposta = await fetch(`/api/reservas?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível carregar as reservas.");
+      const lista = Array.isArray(resultado?.reservas) ? resultado.reservas : [];
+      setReservas(lista.map((item: Record<string, unknown>) => recorteReserva(item)).filter((item: Reserva) => item.id));
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar as reservas.");
+    } finally {
+      setCarregandoReservas(false);
     }
-    return Array.from(mapa.values()).sort((a, b) => b.valor - a.valor || b.quantidade - a.quantidade);
-  }, [reservas]);
-
-  const porPagamento = useMemo(() => {
-    const mapa = new Map<string, { quantidade: number; valorPrevisto: number; recebido: number; emAberto: number }>();
-    for (const r of reservas) {
-      const item = mapa.get(r.tipo_pagamento) || { quantidade: 0, valorPrevisto: 0, recebido: 0, emAberto: 0 };
-      item.quantidade += 1;
-      if (r.status !== "cancelada") {
-        item.valorPrevisto += r.valor;
-        if (r.data_pagamento) item.recebido += r.valor;
-        else if (r.tipo_pagamento !== "sem_pagamento") item.emAberto += r.valor;
-      }
-      mapa.set(r.tipo_pagamento, item);
-    }
-    return Array.from(mapa.entries())
-      .map(([forma, item]) => ({ forma, ...item }))
-      .sort((a, b) => b.valorPrevisto - a.valorPrevisto || b.quantidade - a.quantidade);
-  }, [reservas]);
-
-  function imprimir() {
-    window.print();
   }
 
-  const reservasLimpeza = useMemo(
-    () => reservas.filter((r) => r.status !== "cancelada").slice().sort((a, b) =>
-      a.data_reserva.localeCompare(b.data_reserva) ||
-      a.hora_inicio.localeCompare(b.hora_inicio) ||
-      a.espaco_nome.localeCompare(b.espaco_nome, "pt-BR")
-    ),
-    [reservas],
+  async function carregarPessoas() {
+    if (publico || pessoasCarregadas || carregandoPessoas) return;
+    setCarregandoPessoas(true);
+    try {
+      const token = await tokenAtual();
+      const [sociosResponse, carteirinhasResponse] = await Promise.all([
+        fetch("/api/socios", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+        fetch("/api/carteirinhas", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+      ]);
+      const sociosPayload = await sociosResponse.json().catch(() => ({}));
+      if (!sociosResponse.ok) throw new Error(sociosPayload?.error || "Não foi possível carregar os sócios.");
+      const sociosDb = Array.isArray(sociosPayload?.socios) ? sociosPayload.socios : [];
+      setSocios(
+        sociosDb
+          .filter((row: Record<string, unknown>) => {
+            const matricula = String(row.matricula ?? "").trim().toUpperCase();
+            return !row.responsavel_id || /^SD\d+A$/.test(matricula);
+          })
+          .map((row: Record<string, unknown>) => normalizarSocio(row)),
+      );
+
+      const carteirinhasPayload = await carteirinhasResponse.json().catch(() => ({}));
+      const dependentesLegados = Array.isArray(carteirinhasPayload?.dependentes) ? carteirinhasPayload.dependentes : [];
+      const porId = new Map<string, DependenteReserva>();
+      for (const row of sociosDb as Record<string, unknown>[]) {
+        const matricula = String(row.matricula ?? "").trim().toUpperCase();
+        if (!row.responsavel_id || /^SD\d+A$/.test(matricula)) continue;
+        if (String(row.situacao || "").toLowerCase() === "inativo") continue;
+        porId.set(String(row.id), {
+          id: String(row.id), socio_id: String(row.responsavel_id), matricula: row.matricula == null ? null : String(row.matricula),
+          nome: String(row.nome || ""), parentesco: row.parentesco == null ? null : String(row.parentesco), ativo: true,
+        });
+      }
+      for (const row of dependentesLegados as Record<string, unknown>[]) {
+        const matricula = String(row.matricula ?? "").trim().toUpperCase();
+        if (/^SD\d+A$/.test(matricula) || row.ativo === false) continue;
+        porId.set(String(row.id), {
+          id: String(row.id), socio_id: String(row.socio_id), matricula: row.matricula == null ? null : String(row.matricula),
+          nome: String(row.nome || ""), parentesco: row.parentesco == null ? null : String(row.parentesco), ativo: true,
+        });
+      }
+      setDependentes(Array.from(porId.values()));
+      setPessoasCarregadas(true);
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Não foi possível carregar os sócios.");
+    } finally {
+      setCarregandoPessoas(false);
+    }
+  }
+
+
+  useEffect(() => {
+    const agendamento = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const modoPublico = params.get("publico") === "1";
+      setPublico(modoPublico);
+      if (modoPublico) setTipoPessoa("nao_socio");
+      void recarregarDados(modoPublico);
+    }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, []);
+
+  useEffect(() => {
+    if (publico || aba !== "reservas") return;
+    const agendamento = window.setTimeout(() => { void carregarReservas({ todas: true }); }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, [aba, publico]);
+
+  useEffect(() => {
+    if (publico || aba !== "reservar" || !data || !espacoId) return;
+    const agendamento = window.setTimeout(() => { void carregarReservas({ data, espacoId }); }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, [aba, publico, data, espacoId]);
+
+  useEffect(() => {
+    if (espacos.length === 0 || espacos.some((item) => item.id === espacoId)) return;
+    let ativo = true;
+    queueMicrotask(() => {
+      if (ativo) setEspacoId(espacos[0]?.id || "");
+    });
+    return () => { ativo = false; };
+  }, [espacos, espacoId]);
+
+  const espacosDisponiveis = useMemo(
+    () => (tipoPessoa === "nao_socio" ? espacos.filter((e) => e.permiteNaoSocio && e.precoNaoSocio > 0) : espacos),
+    [espacos, tipoPessoa],
   );
 
-  const gruposLimpeza = useMemo(() => {
-    const mapa = new Map<string, Reserva[]>();
-    for (const reserva of reservasLimpeza) {
-      const mes = reserva.data_reserva.slice(0, 7);
-      if (!mapa.has(mes)) mapa.set(mes, []);
-      mapa.get(mes)!.push(reserva);
-    }
-    return Array.from(mapa.entries()).map(([mes, itens]) => ({ mes, titulo: tituloMes(`${mes}-15`), reservas: itens }));
-  }, [reservasLimpeza]);
+  const espaco = espacos.find((e) => e.id === espacoId);
+  const bloqueadoNaoSocio = !!espaco && (espaco.precoNaoSocio <= 0 || !espaco.permiteNaoSocio);
+  const valor = espaco ? (tipoPessoa === "socio" ? espaco.precoSocio : espaco.precoNaoSocio) : 0;
 
-  function aplicarPeriodo(periodo: PeriodoRapido, ano = anoSelecionado, mes = mesSelecionado) {
-    setPeriodoRapido(periodo);
-    const datas = datasDoPeriodo(periodo, ano, mes, hoje);
-    if (datas) {
-      setDataInicial(datas.inicio);
-      setDataFinal(datas.fim);
-    }
-  }
-
-  function mudarAno(ano: string) {
-    setAnoSelecionado(ano);
-    if (periodoRapido !== "personalizado") {
-      const datas = datasDoPeriodo(periodoRapido, ano, mesSelecionado, hoje);
-      if (datas) {
-        setDataInicial(datas.inicio);
-        setDataFinal(datas.fim);
-      }
-    }
-  }
-
-  function mudarMes(mes: string) {
-    setMesSelecionado(mes);
-    if (periodoRapido === "mes") {
-      const datas = datasDoPeriodo("mes", anoSelecionado, mes, hoje);
-      if (datas) {
-        setDataInicial(datas.inicio);
-        setDataFinal(datas.fim);
-      }
-    }
-  }
-
-  function abrirAgendaLimpeza() {
-    // A mudança de visualização dispara a atualização automática pelo efeito.
-    setVisualizacao("limpeza");
-  }
-
-  function abrirRelatorioAdministrativo() {
-    setVisualizacao("administrativo");
-  }
-
-  function obterEspacosGrade(): EspacoFiltro[] {
-    const base = espacos.length
-      ? espacos
-      : Array.from(new Map(reservas.map((r) => [r.espaco_id || r.espaco_nome, {
-          id: r.espaco_id,
-          nome: r.espaco_nome,
-          categoria: r.categoria,
-        }])).values());
-    return ordenarEspacos(base);
-  }
-
-  function exportarExcelGrade() {
-    if (!(visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7))) return;
-    const [anoGrade, mesGrade] = dataInicial.slice(0, 7).split("-").map(Number);
-    const dias = new Date(anoGrade, mesGrade, 0).getDate();
-    const espacosGrade = obterEspacosGrade();
-    const ativos = reservas.filter((r) => r.status !== "cancelada");
-    const cabecalhoEspacos = espacosGrade.map((e) => `<th colspan="3" style="background:${corCabecalhoEspaco(e.nome)};border:1px solid #64748b;text-align:center;padding:8px;font-weight:bold">${escapeHtml(e.nome)}</th>`).join("");
-    const subCabecalho = espacosGrade.map((e) => {
-      const cor = corCabecalhoEspaco(e.nome);
-      return ["Nome", "Motivo", "Pagamento"].map((sub) => `<th style="background:${cor};border:1px solid #94a3b8;text-align:left;padding:5px;font-size:10pt">${sub}</th>`).join("");
-    }).join("");
-    const linhas = Array.from({ length: dias }, (_, i) => {
-      const dia = i + 1;
-      const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
-      const reservasDia = ativos.filter((r) => r.data_reserva === data);
-      const celulas = espacosGrade.map((espaco) => {
-        const itens = reservasDia.filter((r) => r.espaco_id && espaco.id ? r.espaco_id === espaco.id : r.espaco_nome === espaco.nome);
-        if (!itens.length) return [0, 1, 2].map((coluna) => `<td style="vertical-align:top;background:#ffffff;border:1px solid #cbd5e1;padding:6px;color:#94a3b8;min-width:${coluna === 0 ? 145 : coluna === 1 ? 130 : 120}px">${coluna === 0 ? "Livre" : ""}</td>`).join("");
-        const nomes = itens.map((r) => `<div style="padding:2px 0"><b>${escapeHtml(r.responsavel_nome || "Responsável não informado")}</b><br/><span style="color:#64748b;font-size:9pt">${escapeHtml(horarioExibicao(r))} · ${escapeHtml(statusBR(r.status))}</span></div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
-        const motivos = itens.map((r) => `<div style="padding:2px 0">${escapeHtml(r.motivo_locacao || "Não informado")}</div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
-        const pagamentos = itens.map((r) => {
-          const quitado = Boolean(r.data_pagamento);
-          const situacao = quitado ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE";
-          return `<div style="padding:2px 0;color:${quitado ? "#166534" : "#92400e"}"><b>${situacao}</b><br/>${escapeHtml(moeda(r.valor))}</div>`;
-        }).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
-        const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "#f0fdf4" : "#fffbeb";
-        return `<td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:145px">${nomes}</td><td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:130px">${motivos}</td><td style="vertical-align:top;background:${fundo};border:1px solid #cbd5e1;padding:6px;min-width:120px">${pagamentos}</td>`;
-      }).join("");
-      return `<tr><td style="vertical-align:top;background:#f8fafc;border:1px solid #cbd5e1;padding:6px;white-space:nowrap"><b>${String(dia).padStart(2, "0")}</b><br/><span style="font-size:9pt">${escapeHtml(diaSemanaBR(data))}</span></td>${celulas}</tr>`;
-    }).join("\r\n");
-
-    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><meta name="ProgId" content="Excel.Sheet"><meta name="ExcelWorkbook"><style>body{font-family:Arial,sans-serif;color:#1f2937}table{border-collapse:collapse;font-size:10pt}th,td{mso-number-format:"\@"} .titulo{font-size:16pt;font-weight:bold;color:#005a3c;padding:10px}.subtitulo{padding:5px;color:#64748b}</style></head><body><div class="titulo">SOCIEDADE RECREATIVA GUARANI — GRADE MENSAL</div><div class="subtitulo">${escapeHtml(tituloMes(`${dataInicial.slice(0, 7)}-15`))} · Reservas e pagamentos</div><table><thead><tr><th rowspan="2" style="background:#e7f3ec;border:1px solid #64748b;padding:8px">DIA</th>${cabecalhoEspacos}</tr><tr>${subCabecalho}</tr></thead><tbody>${linhas}</tbody></table></body></html>`;
-    const blob = new Blob([`\ufeff${html}`], { type: "application/vnd.ms-excel;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `grade-mensal-reservas-${dataInicial.slice(0, 7)}.xls`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function exportarCsv() {
-    // A grade CSV usa duas linhas de cabeçalho para agrupar Nome, Motivo e Pagamento por espaço.
-    if (visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7)) {
-      const [anoGrade, mesGrade] = dataInicial.slice(0, 7).split("-").map(Number);
-      const dias = new Date(anoGrade, mesGrade, 0).getDate();
-      const espacosGrade = obterEspacosGrade();
-      const ativos = reservas.filter((r) => r.status !== "cancelada");
-      const cabecalhoPrincipal = ["DIA", ...espacosGrade.flatMap((e) => [e.nome, "", ""])];
-      const subCabecalho = ["", ...espacosGrade.flatMap(() => ["Nome", "Motivo", "Pagamento"])];
-      const linhas = Array.from({ length: dias }, (_, i) => {
-        const dia = i + 1;
-        const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
-        const rotuloDia = `${String(dia).padStart(2, "0")} - ${diaSemanaBR(data)}`;
-        const reservasDia = ativos.filter((r) => r.data_reserva === data);
-        const celulas = espacosGrade.flatMap((espaco) => {
-          const itens = reservasDia.filter((r) => r.espaco_id && espaco.id ? r.espaco_id === espaco.id : r.espaco_nome === espaco.nome);
-          if (!itens.length) return ["Livre", "", ""];
-          const nomes = itens.map((r) => `${r.responsavel_nome || "Responsável não informado"}\n${horarioExibicao(r)} · ${statusBR(r.status)}`).join("\n\n");
-          const motivos = itens.map((r) => r.motivo_locacao || "Não informado").join("\n\n");
-          const pagamentos = itens.map((r) => `${r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"} · ${moeda(r.valor)}`).join("\n\n");
-          return [nomes, motivos, pagamentos];
-        });
-        return [rotuloDia, ...celulas];
+  useEffect(() => {
+    let ativo = true;
+    if (valor <= 0) {
+      queueMicrotask(() => {
+        if (ativo) setPix(null);
       });
-      const csv = [cabecalhoPrincipal, subCabecalho, ...linhas]
-        .map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";"))
-        .join("\r\n");
-      const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `grade-mensal-reservas-${dataInicial.slice(0, 7)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      return () => {
+        ativo = false;
+      };
+    }
+    void (async () => {
+      try {
+        const resposta = await fetch(`/api/configuracao-pix?valor=${encodeURIComponent(valor.toFixed(2))}`, { cache: "no-store" });
+        const resultado = await resposta.json().catch(() => ({}));
+        if (!ativo) return;
+        setPix(resposta.ok && resultado?.config ? resultado.config : null);
+      } catch {
+        if (ativo) setPix(null);
+      }
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, [valor]);
+
+  const ocupados = useMemo(
+    () => reservas.filter((r) => r.status !== "cancelada" && r.espacoId === espacoId && r.data === data).map((r) => r.horario),
+    [reservas, espacoId, data],
+  );
+
+  const filtradas = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    return reservas.filter((r) => {
+      const nomeEspaco = espacos.find((e) => e.id === r.espacoId)?.nome || "";
+      const texto = `${r.nome} ${nomeEspaco} ${r.matricula ?? ""}`.toLowerCase();
+      return (!termo || texto.includes(termo)) &&
+        (filtroStatus === "todos" || r.status === filtroStatus) &&
+        (!filtroData || r.data === filtroData);
+    });
+  }, [reservas, espacos, busca, filtroStatus, filtroData]);
+
+  const estatisticas = useMemo(() => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    return reservas.reduce(
+      (acc, r) => {
+        if (r.status === "confirmada") acc.confirmadas += 1;
+        else if (r.status === "pendente") acc.pendentes += 1;
+        else acc.canceladas += 1;
+        if (r.data === hoje && r.status !== "cancelada") acc.hoje += 1;
+        return acc;
+      },
+      { hoje: 0, confirmadas: 0, pendentes: 0, canceladas: 0 },
+    );
+  }, [reservas]);
+
+  function mudarTipo(tipo: TipoPessoa) {
+    setTipoPessoa(tipo);
+    setEtapa("selecao");
+    if (tipo === "nao_socio") {
+      setSocioId("");
+      setDependenteId("");
+      setMatriculaResponsavel(null);
+      setBuscaSocio("");
+      setNome("");
+    }
+  }
+
+  function continuar() {
+    if (!espaco) return alert("Selecione um espaço disponível.");
+    if (tipoPessoa === "nao_socio" && bloqueadoNaoSocio) return alert("Este espaço não pode ser alugado por não sócios.");
+    if (!data) return alert("Selecione a data da reserva.");
+    if (!nome.trim()) return alert("Informe o nome do responsável pela reserva.");
+    if (!motivoLocacao.trim()) return alert("Informe o motivo da locação, por exemplo aniversário, jantar, baile ou reunião.");
+    if (!editandoReservaId && ocupados.length > 0 && espaco.cobranca === "diaria") {
+      return alert("Este espaço é reservado por diária e já possui uma reserva ativa nesta data. Escolha outro dia.");
+    }
+    if (!editandoReservaId && espaco.cobranca === "hora") {
+      const [inicioNovo, fimNovo] = horario.split("-").map((v) => v.trim());
+      const minutos = (v: string) => {
+        const [h, m] = v.split(":").map(Number);
+        return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+      };
+      const iNovo = minutos(inicioNovo);
+      const fNovo = minutos(fimNovo);
+      const sobreposicao = reservas.some((r) => {
+        if (r.status === "cancelada" || r.espacoId !== espacoId || r.data !== data) return false;
+        const [i, f] = r.horario.split("-").map((v) => v.trim());
+        const iExistente = minutos(i);
+        const fExistente = minutos(f);
+        return iNovo !== null && fNovo !== null && iExistente !== null && fExistente !== null && iNovo < fExistente && iExistente < fNovo;
+      });
+      if (sobreposicao) return alert("Este espaço já possui uma reserva que se sobrepõe ao horário escolhido.");
+    }
+    if (data < new Date().toISOString().slice(0, 10)) return alert("A data da reserva não pode ser anterior a hoje.");
+    setEtapa("confirmacao");
+  }
+
+  async function operadorAtual() {
+    try {
+      const token = await tokenAtual();
+      if (token) {
+        const resposta = await fetch("/api/login/perfil", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const resultado = await resposta.json().catch(() => ({}));
+        const nomeExibicao = nomeOperadorParaExibir(resultado?.usuario?.nome_exibicao, resultado?.usuario?.email);
+        if (resposta.ok && nomeExibicao) return nomeExibicao;
+      }
+      const { data: sessao } = await supabase.auth.getSession();
+      return nomeOperadorParaExibir(
+        sessao.session?.user?.user_metadata?.nome_exibicao || sessao.session?.user?.user_metadata?.name,
+        sessao.session?.user?.email,
+      );
+    } catch {
+      return "Usuário autenticado";
+    }
+  }
+
+  function textoRecibo(item: Recibo) {
+    return `SOCIEDADE RECREATIVA GUARANI — S.R.G.\nRECIBO Nº ${item.numero}\n\nTipo: ${item.tipo}\nResponsável: ${item.nome}${item.matricula ? ` — Matrícula ${item.matricula}` : ""}\n${item.detalhe}\nData/Horário: ${item.periodo}\nValor: ${moeda(item.valor)}\nPagamento: ${item.pagamento}\nStatus: ${item.status}\nAtendido por: ${item.operador}\nData/hora: ${item.dataHora}\n\nDocumento gerado pelo Sistema Guarani.`;
+  }
+
+  function imprimirRecibo(item: Recibo) {
+    const w = window.open("", "_blank", "width=720,height=900");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><title>${item.numero} - Recibo</title><style>body{font-family:Arial,sans-serif;padding:40px;color:#173d2e}h1{color:#005a3c;margin-bottom:4px}h2{font-size:18px;color:#005a3c}.box{border:1px solid #cfe3d8;border-radius:14px;padding:20px;margin-top:20px}p{margin:8px 0}.total{font-size:22px;font-weight:800;color:#005a3c}.rodape{margin-top:32px;font-size:12px;color:#667}@media print{body{padding:20px}}</style></head><body><h1>SOCIEDADE RECREATIVA GUARANI</h1><div>S.R.G.</div><h2>RECIBO Nº ${item.numero}</h2><div class="box"><p><b>Tipo:</b> ${item.tipo}</p><p><b>Responsável:</b> ${item.nome}${item.matricula ? ` — Matrícula ${item.matricula}` : ""}</p><p><b>${item.detalhe.split(":")[0]}:</b> ${item.detalhe.split(":").slice(1).join(":").trim()}</p><p><b>Data/Horário:</b> ${item.periodo}</p><p class="total">Valor: ${moeda(item.valor)}</p><p><b>Pagamento:</b> ${item.pagamento}</p><p><b>Status:</b> ${item.status}</p><p><b>Atendido por:</b> ${item.operador}</p><p><b>Data/hora:</b> ${item.dataHora}</p></div><div class="rodape">Documento gerado pelo Sistema Guarani.</div><script>window.onload=()=>window.print()</script></body></html>`);
+    w.document.close();
+  }
+
+  async function enviarRecibo(item: Recibo) {
+    const texto = textoRecibo(item);
+    try {
+      if (navigator.share) await navigator.share({ title: `Recibo ${item.numero} - Sociedade Guarani`, text: texto });
+      else {
+        await navigator.clipboard.writeText(texto);
+        alert("Recibo copiado. Cole no WhatsApp, e-mail ou outro aplicativo para enviar.");
+      }
+    } catch {
+      // Fechamento/cancelamento do compartilhamento pelo usuário.
+    }
+  }
+
+  async function registrarAvisoAdministrativo(titulo: string, mensagem: string) {
+    try {
+      const token = await tokenAtual();
+      if (!token) return;
+      const resposta = await fetch("/api/avisos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ titulo, mensagem, interno: true }),
+      });
+      if (!resposta.ok) console.warn("Aviso administrativo não registrado.");
+    } catch (error) {
+      console.warn("Não foi possível registrar aviso administrativo:", error);
+    }
+  }
+
+  function editarReserva(reserva: Reserva) {
+    setEditandoReservaId(reserva.id);
+    setEspacoId(reserva.espacoId);
+    setData(reserva.data);
+    setHorario(reserva.horario);
+    setNome(reserva.nome);
+    setMotivoLocacao(reserva.motivoLocacao || "");
+    setSocioId(reserva.socioId || "");
+    setDependenteId(reserva.dependenteId || "");
+    setMatriculaResponsavel(reserva.matricula ?? null);
+    setTipoPessoa(reserva.tipoPessoa);
+    setFormaPagamentoReserva(reserva.pagamento === "dinheiro" ? "dinheiro" : "pix");
+    setEtapa("selecao");
+    setAba("reservar");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function confirmar() {
+    if (!espaco) return;
+    if (tipoPessoa === "nao_socio" && bloqueadoNaoSocio) return alert("Este espaço não está liberado para não sócios.");
+    if (!data || !nome.trim()) return alert("Preencha data e responsável antes de continuar.");
+
+    if (formaPagamentoReserva === "dinheiro" && valor > 0 && !contaBancariaId) {
+      return alert("Selecione a conta/caixa que recebeu o dinheiro.");
+    }
+    if (formaPagamentoReserva === "pix" && valor > 0 && !pix?.copia_e_cola) {
+      return alert("O PIX da Sociedade ainda não está configurado para este valor.");
+    }
+
+    if (arquivoComprovante) {
+      const permitido = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+      if (!permitido.includes(arquivoComprovante.type)) return alert("Envie o comprovante em JPG, PNG, WEBP ou PDF.");
+      if (arquivoComprovante.size > 8 * 1024 * 1024) return alert("O comprovante deve ter no máximo 8 MB.");
+    }
+
+    if (publico) return alert("A reserva pública é somente para consulta nesta etapa. Faça a reserva pelo acesso da Sociedade.");
+
+    setEnviandoComprovante(true);
+    try {
+      const token = await tokenAtual();
+      if (!token) throw new Error("Sua sessão expirou. Entre novamente no sistema.");
+
+      const pagamento = valor > 0 ? formaPagamentoReserva : "pendente";
+      const payload = {
+        id: editandoReservaId || undefined,
+        acao: editandoReservaId ? "editar" : undefined,
+        espaco_id: espacoId,
+        espaco_nome: espaco.nome,
+        data,
+        horario,
+        nome: nome.trim(),
+        motivo_locacao: motivoLocacao.trim().slice(0, 200),
+        socio_id: socioId || null,
+        dependente_id: dependenteId || null,
+        matricula: matriculaResponsavel ?? null,
+        tipo_pessoa: tipoPessoa,
+        valor,
+        pagamento,
+        conta_bancaria_id: pagamento === "dinheiro" ? contaBancariaId : null,
+      };
+
+      const resposta = await fetch("/api/reservas", {
+        method: editandoReservaId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível gravar a reserva no banco.");
+
+      let reservaSalva = recorteReserva(resultado.reserva || {});
+
+      if (arquivoComprovante && reservaSalva.id && formaPagamentoReserva === "pix") {
+        const form = new FormData();
+        form.append("origem_tipo", "reserva");
+        form.append("origem_id", reservaSalva.id);
+        form.append("arquivo", arquivoComprovante);
+        const envio = await fetch("/api/reservas/comprovante", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        const resultadoComprovante = await envio.json().catch(() => ({}));
+        if (!envio.ok) throw new Error(resultadoComprovante?.error || "A reserva foi gravada, mas o comprovante não pôde ser enviado.");
+        reservaSalva = { ...reservaSalva, comprovante_url: resultadoComprovante.url || null, status: "pendente", pagamento: "pix" };
+      }
+
+      await carregarReservas({ todas: true });
+      const nomeOperador = await operadorAtual();
+      setRecibo({
+        id: reservaSalva.id,
+        numero: `RS-${String(reservaSalva.id || "RESERVA").slice(0, 6).toUpperCase()}`,
+        tipo: "Reserva de espaço",
+        nome: reservaSalva.nome || nome,
+        matricula: matriculaResponsavel,
+        detalhe: `Espaço: ${espaco.nome} — Motivo: ${motivoLocacao.trim()}`,
+        periodo: `${dataBR(data)} — ${periodoReserva(espaco.cobranca, horario)}`,
+        valor,
+        pagamento: pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança",
+        operador: nomeOperador,
+        status: pagamento === "pix" ? "Aguardando conferência" : "Pago",
+        dataHora: new Date().toLocaleString("pt-BR"),
+      });
+
+      const perfilOperador = String(perfil || reservaSalva.reservadoPorPerfil || "").trim().toLowerCase();
+      const foiFeitaNaPortaria = perfilOperador === "funcionario" || perfilOperador.includes("funcionario");
+      const tituloAviso = foiFeitaNaPortaria
+        ? (editandoReservaId ? "✏️ Reserva alterada na portaria" : "📅 Reserva realizada na portaria")
+        : `${editandoReservaId ? "✏️ Reserva alterada por" : "📅 Reserva feita por"} ${nomeOperador}`;
+      const periodoAviso = periodoReserva(espaco.cobranca, horario);
+      await registrarAvisoAdministrativo(
+        tituloAviso,
+        `${reservaSalva.nome || nome}${matriculaResponsavel ? ` (matrícula ${matriculaResponsavel})` : ""} — ${espaco.nome} — Motivo: ${motivoLocacao.trim()} — ${dataBR(data)} — ${espaco.cobranca === "diaria" ? "Período: " : "Horário: "}${periodoAviso} — ${moeda(valor)} — ${pagamento === "pix" ? "PIX" : pagamento === "dinheiro" ? "Dinheiro" : "Sem cobrança"}. ${foiFeitaNaPortaria ? "Registrada na portaria." : `Registrada por ${nomeOperador}.`}`,
+      );
+
+      setEtapa("selecao");
+      setAba("reservas");
+      setNome("");
+      setMotivoLocacao("");
+      setSocioId("");
+      setDependenteId("");
+      setMatriculaResponsavel(null);
+      setBuscaSocio("");
+      setData("");
+      setArquivoComprovante(null);
+      setContaBancariaId("");
+      setFormaPagamentoReserva("pix");
+      setEditandoReservaId(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível concluir a reserva.");
+    } finally {
+      setEnviandoComprovante(false);
+    }
+  }
+
+  async function cancelarReserva(id: string) {
+    if (!confirm("Deseja realmente cancelar esta reserva?")) return;
+    try {
+      const token = await tokenAtual();
+      const resposta = await fetch("/api/reservas", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, acao: "cancelar" }),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível cancelar a reserva.");
+      await carregarReservas({ todas: true });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível cancelar a reserva.");
+    }
+  }
+
+  function abrirListaPresenca(reserva: Reserva) {
+    setReservaListaPresenca(reserva);
+    setQuantidadeConvidados(reserva.quantidadeConvidados ? String(reserva.quantidadeConvidados) : "");
+    setArquivoListaPresenca(null);
+    setErroListaPresenca("");
+  }
+
+  async function salvarListaPresenca() {
+    if (!reservaListaPresenca) return;
+    const quantidade = Number(quantidadeConvidados);
+    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 16) {
+      setErroListaPresenca("Informe de 1 a 16 convidados.");
+      return;
+    }
+    if (!arquivoListaPresenca) {
+      setErroListaPresenca("Selecione a lista de presença.");
+      return;
+    }
+    const extensao = arquivoListaPresenca.name.split(".").pop()?.toLowerCase() || "";
+    if (!["pdf", "csv", "xlsx", "xls", "jpg", "jpeg", "png"].includes(extensao)) {
+      setErroListaPresenca("Use PDF, CSV, Excel (.xlsx/.xls), JPG ou PNG.");
+      return;
+    }
+    if (arquivoListaPresenca.size <= 0 || arquivoListaPresenca.size > 10 * 1024 * 1024) {
+      setErroListaPresenca("O arquivo deve ter conteúdo e até 10 MB.");
       return;
     }
 
-    if (visualizacao === "limpeza") {
-      const cabecalho = ["Data", "Dia da semana", "Espaço", "Horário", "Responsável / associado", "Situação", "Lista de presença", "Quantidade de convidados"];
-      const linhas = reservasLimpeza.map((r) => [
-        dataBR(r.data_reserva),
-        diaSemanaBR(r.data_reserva),
-        r.espaco_nome,
-        horarioExibicao(r),
-        r.responsavel_nome || "Não informado",
-        statusBR(r.status),
-        r.lista_presenca_nome ? "Lista anexada" : (r.espaco_nome.toLowerCase().includes("quiosque") ? "Lista não anexada" : "Não se aplica"),
-        r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
-      ]);
-      const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\r\n");
-      const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `agenda-limpeza-${dataInicial}-${dataFinal}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+    setSalvandoListaPresenca(true);
+    setErroListaPresenca("");
+    try {
+      const token = await tokenAtual();
+      if (!token) throw new Error("Sua sessão expirou. Entre novamente no sistema.");
+      const form = new FormData();
+      form.append("reserva_id", reservaListaPresenca.id);
+      form.append("quantidade_convidados", String(quantidade));
+      form.append("arquivo", arquivoListaPresenca);
+      const resposta = await fetch("/api/reservas/lista-presenca", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a lista de presença.");
+
+      setReservas((atuais) => atuais.map((r) => r.id === reservaListaPresenca.id ? {
+        ...r,
+        listaPresencaUrl: resultado.lista_presenca_url || r.listaPresencaUrl || null,
+        listaPresencaNome: resultado.lista_presenca_nome || arquivoListaPresenca.name,
+        quantidadeConvidados: Number(resultado.quantidade_convidados ?? quantidade),
+      } : r));
+      setReservaListaPresenca(null);
+      setArquivoListaPresenca(null);
+      setQuantidadeConvidados("");
+      if (!resultado.lista_presenca_url) await carregarReservas({ todas: true });
+      alert("Lista de presença salva. A portaria poderá abrir o arquivo pela reserva.");
+    } catch (error) {
+      setErroListaPresenca(error instanceof Error ? error.message : "Não foi possível salvar a lista de presença.");
+    } finally {
+      setSalvandoListaPresenca(false);
+    }
+  }
+
+  async function confirmarPixAdmin() {
+    if (!reservaPixConfirmacao) return;
+    if (!contaPixConfirmacao) return alert("Selecione a conta bancária que recebeu o PIX.");
+    if (!reservaPixConfirmacao.comprovante_url && !arquivoConfirmacaoPix) return alert("Anexe o comprovante antes de confirmar o PIX.");
+    setConfirmandoPix(true);
+    try {
+      const token = await tokenAtual();
+      if (!token) throw new Error("Sessão expirada.");
+
+      if (!reservaPixConfirmacao.comprovante_url && arquivoConfirmacaoPix) {
+        const permitido = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+        if (!permitido.includes(arquivoConfirmacaoPix.type)) throw new Error("Envie JPG, PNG, WEBP ou PDF.");
+        if (arquivoConfirmacaoPix.size > 8 * 1024 * 1024) throw new Error("O comprovante deve ter no máximo 8 MB.");
+        const form = new FormData();
+        form.append("origem_tipo", "reserva");
+        form.append("origem_id", reservaPixConfirmacao.id);
+        form.append("arquivo", arquivoConfirmacaoPix);
+        const envio = await fetch("/api/reservas/comprovante", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+        const dadosEnvio = await envio.json().catch(() => ({}));
+        if (!envio.ok) throw new Error(dadosEnvio?.error || "Não foi possível anexar o comprovante.");
+        setReservaPixConfirmacao((atual) => atual ? { ...atual, comprovante_url: dadosEnvio.url || atual.comprovante_url } : atual);
+      }
+
+      const resposta = await fetch("/api/reservas", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: reservaPixConfirmacao.id, acao: "confirmar_pix", conta_bancaria_id: contaPixConfirmacao }),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível confirmar o PIX.");
+      setReservaPixConfirmacao(null);
+      setContaPixConfirmacao("");
+      setArquivoConfirmacaoPix(null);
+      await carregarReservas({ todas: true });
+      alert("PIX confirmado. A entrada foi registrada no Financeiro.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível confirmar o PIX.");
+    } finally {
+      setConfirmandoPix(false);
+    }
+  }
+
+  async function abrirComprovante(path: string) {
+    if (!path) return;
+    if (/^https?:\/\//i.test(path)) {
+      window.open(path, "_blank", "noopener,noreferrer");
       return;
     }
+    const { data: signed, error: signedError } = await supabase.storage.from("comprovantes-financeiro").createSignedUrl(path, 10 * 60);
+    if (signedError || !signed?.signedUrl) return alert("Não foi possível abrir o comprovante.");
+    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
+  }
 
-    const cabecalho = ["Data", "Horário", "Espaço", "Motivo da locação", "Responsável", "Matrícula", "Reservado por", "Perfil de quem reservou", "Tipo", "Pagamento", "Status", "Valor", "Data pagamento", "Lista de presença", "Qtd. convidados", "Comprovante"];
-    const linhas = reservas.map((r) => [
-      dataBR(r.data_reserva),
-      horarioExibicao(r),
-      r.espaco_nome,
-      r.motivo_locacao || "",
-      r.responsavel_nome,
-      r.matricula || "",
-      r.reservado_por_nome || "Não registrado (histórico anterior)",
-      r.reservado_por_perfil || "",
-      r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio",
-      pagamentoBR(r.tipo_pagamento),
-      statusBR(r.status),
-      r.valor.toFixed(2).replace(".", ","),
-      r.data_pagamento ? dataBR(r.data_pagamento) : "",
-      r.lista_presenca_nome || "",
-      r.quantidade_convidados == null ? "" : String(r.quantidade_convidados),
-      r.comprovante_status || "",
-    ]);
-    const csv = [cabecalho, ...linhas].map((linha) => linha.map((valor) => escapeCsv(String(valor))).join(";")).join("\r\n");
-    const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `relatorio-reservas-${dataInicial}-${dataFinal}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  function copiarResumo() {
+    const periodo = periodoReserva(espaco?.cobranca, horario);
+    const rotuloPeriodo = espaco?.cobranca === "diaria" ? "Período" : "Horário";
+    const texto = `Sociedade Guarani\nEspaço: ${espaco?.nome || "—"}\nData: ${dataBR(data)}\n${rotuloPeriodo}: ${periodo}\nMotivo: ${motivoLocacao.trim() || "—"}\nResponsável: ${nome}\nTipo: ${tipoPessoa === "socio" ? "Sócio" : "Não sócio"}\nValor: ${moeda(valor)}`;
+    void navigator.clipboard.writeText(texto);
+    setCopiado(true);
+    window.setTimeout(() => setCopiado(false), 1500);
+  }
+
+  function copiarPix() {
+    if (!pix?.copia_e_cola) return;
+    void navigator.clipboard.writeText(pix.copia_e_cola);
+    setCopiado(true);
+    window.setTimeout(() => setCopiado(false), 1500);
+  }
+
+  const sociosFiltrados = useMemo(() => {
+    const termo = buscaSocio.trim().toLowerCase();
+    const relacionados = new Map<string, SocioReserva>();
+    for (const socio of socios) {
+      const textoTitular = `${socio.nome} ${socio.matricula ?? ""} ${socio.cpf ?? ""}`.toLowerCase();
+      if (!termo || textoTitular.includes(termo)) {
+        relacionados.set(socio.id, socio);
+        continue;
+      }
+      const matriculaTitular = String(socio.matricula ?? "").trim().toUpperCase();
+      const baseFamiliar = matriculaTitular.endsWith("A") ? matriculaTitular.slice(0, -1) : matriculaTitular;
+      const achouDependente = dependentes.some((d) => {
+        const texto = `${d.nome} ${d.matricula ?? ""} ${d.parentesco ?? ""}`.toLowerCase();
+        const matricula = String(d.matricula ?? "").trim().toUpperCase();
+        const pertence = String(d.socio_id) === socio.id || (!!baseFamiliar && matricula.startsWith(baseFamiliar) && matricula !== matriculaTitular);
+        return pertence && texto.includes(termo) && !/^SD\d+A$/.test(matricula);
+      });
+      if (achouDependente) relacionados.set(socio.id, socio);
+    }
+    return Array.from(relacionados.values()).slice(0, 20);
+  }, [socios, dependentes, buscaSocio]);
+
+  const dependentesDoSocio = useMemo(() => {
+    if (!socioId) return [];
+    const titular = socios.find((s) => s.id === socioId);
+    const matriculaTitular = String(titular?.matricula ?? "").trim().toUpperCase();
+    const baseFamiliar = matriculaTitular.endsWith("A") ? matriculaTitular.slice(0, -1) : matriculaTitular;
+    const unicos = new Map<string, DependenteReserva>();
+    for (const d of dependentes) {
+      const matricula = String(d.matricula ?? "").trim().toUpperCase();
+      if (/^SD\d+A$/.test(matricula)) continue;
+      const direto = d.socio_id === socioId;
+      const porMatricula = !!baseFamiliar && matricula.startsWith(baseFamiliar) && matricula !== matriculaTitular && /[A-Z]$/.test(matricula);
+      if (direto || porMatricula) unicos.set(d.id, d);
+    }
+    return Array.from(unicos.values()).sort((a, b) => String(a.matricula ?? a.nome).localeCompare(String(b.matricula ?? b.nome), "pt-BR", { numeric: true }));
+  }, [dependentes, socios, socioId]);
+
+  function selecionarDependente(id: string, socioResponsavelId = socioId) {
+    const dependente = dependentesDoSocio.find((d) => d.id === id);
+    const titular = socios.find((s) => s.id === socioResponsavelId);
+    setDependenteId(id);
+    if (dependente) {
+      setNome(dependente.nome);
+      setMatriculaResponsavel(dependente.matricula || null);
+      setBuscaSocio(`${dependente.nome}${dependente.matricula ? ` — Matrícula ${dependente.matricula}` : ""}`);
+    } else if (titular) {
+      setNome(titular.nome);
+      setMatriculaResponsavel(titular.matricula ?? null);
+    }
+  }
+
+  async function salvarEspaco(id: string, precoSocio: number, precoNaoSocio: number, permiteNaoSocio: boolean) {
+    setSalvandoEspacoId(id);
+    try {
+      const token = await tokenAtual();
+      const resposta = await fetch("/api/reservas", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ acao: "editar_espaco", id, preco_socio: precoSocio, preco_nao_socio: precoNaoSocio, permite_nao_socio: permiteNaoSocio }),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar o espaço.");
+      setEspacos((atual) => atual.map((item) => item.id === id ? normalizarEspaco(resultado.espaco as Record<string, unknown>) : item));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível salvar o espaço.");
+    } finally {
+      setSalvandoEspacoId(null);
+    }
   }
 
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
-      <CabecalhoPadrao />
-      <MenuLateralPadrao />
-      <style jsx global>{`
-        @page {
-          size: A4 landscape;
-          margin: 9mm;
-          @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #64748b; }
-        }
-        @media print {
-          body { background: white !important; font-size: 9pt !important; }
-          header, aside { display: none !important; }
-          .nao-imprimir { display: none !important; }
-          .relatorio-reservas-print { margin: 0 !important; max-width: none !important; padding: 0 !important; }
-          .sombra-impressao { box-shadow: none !important; border: 1px solid #cbd5d1 !important; }
-          .agenda-limpeza-print { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
-          .limpeza-mes { break-inside: auto; page-break-inside: auto; }
-          .limpeza-mes tr { break-inside: avoid; page-break-inside: avoid; }
-          .limpeza-mes h3 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-          .relatorio-reservas-print .overflow-x-auto { overflow: visible !important; }
-          .relatorio-reservas-print table { width: 100% !important; min-width: 0 !important; table-layout: auto; border-collapse: collapse !important; }
-          .relatorio-reservas-print thead { display: table-header-group !important; }
-          .relatorio-reservas-print tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          .relatorio-reservas-print th, .relatorio-reservas-print td { padding: 4px 5px !important; font-size: 8pt !important; }
-          .relatorio-reservas-print section { break-inside: auto; page-break-inside: auto; }
-          .agenda-grade-impressao { display: none !important; }
-          .print-apenas { display: block !important; }
-        }
-      `}</style>
+      {!publico && <><CabecalhoPadrao /><MenuLateralPadrao /></>}
 
-      <main className="relatorio-reservas-print mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <Link href="/reservas" className="nao-imprimir mb-3 inline-block text-sm font-semibold text-[#005a3c]">← Voltar às reservas</Link>
-            <p className="text-sm font-bold uppercase tracking-wide text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
-            <p className="mt-1 text-xs font-medium text-gray-500">Administração · Relatórios de reservas</p>
-            <h1 className="mt-1 flex items-center gap-2 text-3xl font-extrabold text-[#005a3c]"><><CalendarDays className="nao-imprimir h-8 w-8" /> Agenda e relatório de reservas</></h1>
-            <p className="mt-1 text-gray-500">Reservas por período, espaços utilizados, valores previstos, recebidos e pendentes.</p>
-            <p className="print-apenas mt-2 hidden text-xs text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Emitido em {dataBR(hoje)}. A grade visual foi substituída no PDF pelo detalhamento para manter a leitura das colunas.</p>
-          </div>
-          <div className="nao-imprimir flex flex-wrap gap-2">
-            {carregando && <span role="status" className="inline-flex items-center px-3 text-sm font-semibold text-[#64748b]">Atualizando relatório…</span>}
-            {visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7) && <button onClick={exportarExcelGrade} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-[#e8f3ee] px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Excel colorido</button>}<button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
-            <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
-          </div>
-        </div>
+      <main className={`min-h-screen px-4 py-6 lg:px-7 lg:py-8 ${publico ? "" : "lg:ml-[220px]"}`}>
+        <div className="mx-auto max-w-[1400px] space-y-6">
+          {publico && (
+            <div className="flex items-center justify-between rounded-2xl border bg-white px-5 py-4 shadow-sm">
+              <div className="flex items-center gap-3"><img src="/logo-guarani.png" className="h-12 w-12 object-contain" alt="Sociedade Guarani" /><div><b className="text-[#005a3c]">SOCIEDADE GUARANI</b><div className="text-xs text-gray-500">Reserva de espaços</div></div></div>
+              <button onClick={() => (window.location.href = "/login")} className="rounded-xl border px-4 py-2 text-sm font-bold">Voltar ao login</button>
+            </div>
+          )}
 
-        <section className="nao-imprimir mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-          <div className="mb-4"><h2 className="font-extrabold text-[#003d2b]">Período e filtros</h2><p className="mt-1 text-sm text-gray-500">Escolha um ano inteiro, os meses restantes até dezembro, um mês específico ou um período personalizado.</p></div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="text-sm font-semibold text-gray-600">Ano<select value={anoSelecionado} onChange={(e) => mudarAno(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{Array.from({ length: anoAtual - 2000 + 11 }, (_, i) => 2000 + i).map((ano) => <option key={ano} value={String(ano)}>{ano}</option>)}</select></label>
-            <label className="text-sm font-semibold text-gray-600">Período<select value={periodoRapido} onChange={(e) => aplicarPeriodo(e.target.value as PeriodoRapido)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="mes">Mês inteiro</option><option value="ano">Ano inteiro</option><option value="restante">Meses restantes até dezembro</option><option value="personalizado">Período personalizado</option></select></label>
-            {periodoRapido === "mes" && <label className="text-sm font-semibold text-gray-600">Mês<select value={mesSelecionado} onChange={(e) => mudarMes(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]">{MESES.map((mes, i) => <option key={mes} value={String(i + 1)}>{mes}</option>)}</select></label>}
-            <label className="text-sm font-semibold text-gray-600">Data inicial<input type="date" value={dataInicial} onChange={(e) => { setDataInicial(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            <label className="text-sm font-semibold text-gray-600">Data final<input type="date" value={dataFinal} onChange={(e) => { setDataFinal(e.target.value); setPeriodoRapido("personalizado"); }} className="mt-2 w-full rounded-xl border border-[#d5e0da] px-3 py-3 outline-none focus:border-[#005a3c]" /></label>
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Status<select value={status} onChange={(e) => setStatus(e.target.value as "todos" | Status)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="confirmada">Confirmadas</option><option value="pendente">Pendentes</option><option value="cancelada">Canceladas</option></select></label>}
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Pagamento<select value={pagamento} onChange={(e) => setPagamento(e.target.value)} className="mt-2 w-full rounded-xl border border-[#d5e0da] bg-white px-3 py-3 outline-none focus:border-[#005a3c]"><option value="todos">Todos</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="debito_em_conta">Débito em conta</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option><option value="outro">Outro</option><option value="sem_pagamento">Sem pagamento</option></select></label>}
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {visualizacao === "administrativo" && <label className="text-sm font-semibold text-gray-600">Tipo de pessoa<select value={tipoPessoa} onChange={(e) => setTipoPessoa(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos</option><option value="socio">Sócio</option><option value="nao_socio">Não sócio</option></select></label>}
-            <label className="text-sm font-semibold text-gray-600">Espaço<select value={espacoId} onChange={(e) => setEspacoId(e.target.value)} className="ml-2 rounded-xl border border-[#d5e0da] bg-white px-3 py-2"><option value="todos">Todos os espaços</option>{espacos.map((e) => <option key={e.id || e.nome} value={e.id || "todos"}>{e.nome}</option>)}</select></label>
-            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} className="rounded-xl bg-[#005a3c] px-5 py-2.5 text-sm font-bold text-white">Gerar {visualizacao === "limpeza" ? "agenda" : "relatório"}</button>
-          </div>
-        </section>
-
-        {erro && <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{erro}</div>}
-
-        {carregando ? (
-          <div className="rounded-2xl border bg-white p-12 text-center text-gray-500 shadow-sm">Carregando relatório de reservas...</div>
-        ) : (
-          <>
-            {periodoRapido === "mes" && dataInicial.slice(0,7) === dataFinal.slice(0,7) && (() => {
-              const [anoGrade, mesGrade] = dataInicial.slice(0,7).split("-").map(Number);
-              const dias = new Date(anoGrade, mesGrade, 0).getDate();
-              const espacosGrade = obterEspacosGrade();
-              const ativos = reservas.filter(r => r.status !== "cancelada");
-              return <section className="agenda-grade-impressao mb-6 overflow-hidden rounded-2xl border border-[#cbd9d2] bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-[#e7f3ec] p-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani</p><h2 className="text-xl font-extrabold capitalize text-[#005a3c]">{tituloMes(`${dataInicial.slice(0,7)}-15`)}</h2><p className="text-sm text-gray-600">Grade mensal · reservas e pagamentos</p></div><div className="flex flex-wrap gap-3 text-xs font-bold"><span className="rounded-full bg-green-100 px-3 py-2 text-green-800">● Pago</span><span className="rounded-full bg-amber-100 px-3 py-2 text-amber-800">● Pendente</span><span className="rounded-full bg-gray-100 px-3 py-2 text-gray-700">— Livre</span></div></div>
-                <div className="border-b border-[#dfe7e2] bg-[#f8faf9] px-3 py-2">
-                  <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-                    <span>Use a barra para navegar por todos os espaços →</span>
-                    <span>Para preservar as cores ao exportar, use “Excel colorido”.</span>
-                  </div>
-                  <div ref={gradeScrollBarRef} aria-label="Barra de rolagem horizontal da grade mensal" title="Role para a direita para ver os demais espaços" className="h-4 w-full cursor-ew-resize overflow-x-scroll overflow-y-hidden rounded border border-[#cbd5e1] bg-[#e2e8f0]">
-                    <div ref={gradeScrollContentRef} className="h-2" style={{ width: "1200px" }} />
-                  </div>
-                </div>
-                <div ref={gradeTableScrollRef} className="overflow-x-auto"><table ref={gradeTableRef} className="w-max min-w-full border-collapse text-sm"><thead><tr className="text-left text-xs uppercase text-gray-700"><th rowSpan={2} className="sticky left-0 z-20 border-b border-r bg-[#e7f3ec] p-3">Dia</th>{espacosGrade.map((e) => <th key={e.id || e.nome} colSpan={3} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="min-w-[390px] border-b border-r p-3 text-center">{e.nome}</th>)}</tr><tr className="text-left text-[10px] font-bold uppercase text-gray-700">{espacosGrade.map((e) => ["Nome", "Motivo", "Pagamento"].map((sub) => <th key={`${e.id || e.nome}-${sub}`} style={{ backgroundColor: corCabecalhoEspaco(e.nome) }} className="border-b border-r px-2 py-2">{sub}</th>))}</tr></thead><tbody>{Array.from({ length: dias }, (_, i) => { const dia = i + 1; const data = `${anoGrade}-${String(mesGrade).padStart(2, "0")}-${String(dia).padStart(2, "0")}`; const reservasDia = ativos.filter((r) => r.data_reserva === data); return <tr key={data} className="align-top odd:bg-white even:bg-[#fbfcfb]"><td className="sticky left-0 z-10 border-b border-r bg-[#f7faf8] p-3"><b>{String(dia).padStart(2, "0")}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(data)}</div></td>{espacosGrade.map((e) => { const itens = reservasDia.filter((r) => r.espaco_id && e.id ? r.espaco_id === e.id : r.espaco_nome === e.nome); if (!itens.length) return <td key={e.id || e.nome} colSpan={3} className="border-b border-r p-2 text-xs text-gray-300">Livre</td>; const fundo = itens.every((r) => Boolean(r.data_pagamento)) ? "bg-green-50" : "bg-amber-50"; return <Fragment key={e.id || e.nome}><td className={`min-w-[145px] border-b border-r p-2 ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><div className="font-bold text-[#17382c]">{r.responsavel_nome || "Responsável não informado"}</div><div className="text-xs text-gray-600">{horarioExibicao(r)} · {statusBR(r.status)}</div>{r.reservado_por_nome && <div className="mt-1 text-[10px] text-gray-500">Por: {r.reservado_por_nome}</div>}</div>)}</td><td className={`min-w-[125px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0">{r.motivo_locacao || <span className="text-gray-400">Não informado</span>}</div>)}</td><td className={`min-w-[120px] border-b border-r p-2 text-xs ${fundo}`}>{itens.map((r) => <div key={r.id} className="mb-2 border-b border-white/80 pb-2 last:mb-0 last:border-0 last:pb-0"><b className={r.data_pagamento ? "text-green-700" : "text-amber-800"}>{r.data_pagamento ? "PAGO" : r.tipo_pagamento === "sem_pagamento" ? "SEM PAGAMENTO" : "PENDENTE"}</b><div className="font-bold">{moeda(r.valor)}</div></div>)}</td></Fragment>; })}</tr>; })}</tbody></table></div>
-                <div className="border-t bg-[#f7faf8] p-3 text-xs text-gray-500">{ativos.length} reserva(s) ativa(s) no período · Valores e pagamento conforme os dados registrados na reserva. Confirme no Financeiro em caso de dúvida.</div>
-              </section>;
-            })()}
-            {visualizacao === "limpeza" ? (
-              <section className="agenda-limpeza-print rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-                <div className="mb-5 border-b border-[#dfe7e2] pb-4">
-                  <p className="text-xs font-extrabold uppercase tracking-widest text-[#005a3c]">Sociedade Recreativa Guarani — S.R.G.</p>
-                  <h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Agenda mensal de reservas</h2>
-                  <p className="mt-1 text-sm text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Reservas confirmadas e pendentes; canceladas não aparecem.</p>
-                  <p className="mt-1 text-xs text-gray-500">Visão mensal dos espaços reservados, responsável, valor e situação do pagamento.</p>
-                </div>
-                {reservasLimpeza.some((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome) && (
-                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-                    Atenção: {reservasLimpeza.filter((r) => r.espaco_nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes("quiosque") && !r.lista_presenca_nome).length} reserva(s) de quiosque sem lista de presença anexada. Verifique a lista antes do evento.
-                  </div>
-                )}
-                {gruposLimpeza.map((grupo) => (
-                  <section key={grupo.mes} className="limpeza-mes mb-7 last:mb-0">
-                    <h3 className="mb-2 rounded-lg bg-[#e7f3ec] px-3 py-2 text-lg font-extrabold capitalize text-[#005a3c]">{grupo.titulo}</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[760px] text-sm">
-                        <thead><tr className="border-b bg-[#f8faf9] text-left text-xs font-extrabold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Horário / período</th><th>Reservado para</th><th>Situação</th><th>Lista / convidados</th></tr></thead>
-                        <tbody>{grupo.reservas.map((r) => {
-                          const ehQuiosque = r.espaco_nome.toLowerCase().includes("quiosque");
-                          const lista = r.lista_presenca_nome ? `Lista anexada${r.quantidade_convidados != null ? ` · ${r.quantidade_convidados} convidados` : ""}` : (ehQuiosque ? "Lista não anexada" : "—");
-                          return <tr key={r.id} className="border-b last:border-b-0 align-top"><td className="whitespace-nowrap px-3 py-3"><b>{dataBR(r.data_reserva)}</b><div className="text-xs capitalize text-gray-500">{diaSemanaBR(r.data_reserva)}</div></td><td className="py-3 font-bold">{r.espaco_nome}</td><td className="py-3">{horarioExibicao(r)}</td><td className="py-3">{r.responsavel_nome || "Não informado"}</td><td className="py-3"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}>{r.status === "confirmada" ? "Confirmada" : "Pendente de confirmação"}</span></td><td className={`py-3 ${ehQuiosque && !r.lista_presenca_nome ? "font-bold text-amber-700" : "text-gray-600"}`}>{lista}</td></tr>;
-                        })}</tbody>
-                      </table>
-                    </div>
-                  </section>
-                ))}
-                {!reservasLimpeza.length && <p className="py-12 text-center text-gray-500">Nenhuma reserva confirmada ou pendente neste período.</p>}
-                <p className="mt-6 border-t border-[#dfe7e2] pt-3 text-xs text-gray-500">Gerado em {dataBR(hoje)} · Para alterações na agenda, consulte o módulo Reservas.</p>
-              </section>
-            ) : (
-              <>
-            <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {[
-                ["Reservas no período", resumo.total],
-                ["Confirmadas", resumo.confirmadas],
-                ["Pendentes de confirmação", resumo.pendentes],
-                ["Canceladas", resumo.canceladas],
-                ["Total previsto", moeda(resumo.valorPrevisto)],
-                ["Total recebido", moeda(resumo.valorRecebido)],
-                ["Em aberto para cobrança", moeda(resumo.valorEmAberto)],
-                ["Sem pagamento previsto", moeda(resumo.valorSemCobranca)],
-              ].map(([titulo, valor]) => <div key={String(titulo)} className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-4 shadow-sm"><div className="text-xs font-bold uppercase tracking-wide text-gray-500">{titulo}</div><div className="mt-2 text-2xl font-extrabold text-[#005a3c]">{valor}</div></div>)}
-            </section>
-
-            <section className="mb-6 grid gap-6 xl:grid-cols-2">
-              <div className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-                <h2 className="mb-4 text-lg font-extrabold text-[#005a3c]">Resumo por espaço</h2>
-                <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs font-bold uppercase tracking-wide text-gray-500"><th className="px-2 py-3">Espaço</th><th>Qtd.</th><th>Conf.</th><th>Pend.</th><th>Canc.</th><th className="text-right">Previsto</th><th className="text-right">Recebido</th><th className="text-right">Em aberto</th></tr></thead><tbody>{porEspaco.map((item) => <tr key={item.nome} className="border-b last:border-b-0"><td className="px-2 py-3 font-bold">{item.nome}</td><td>{item.quantidade}</td><td>{item.confirmadas}</td><td>{item.pendentes}</td><td>{item.canceladas}</td><td className="text-right font-bold">{moeda(item.valor)}</td><td className="text-right font-bold text-green-700">{moeda(item.recebido)}</td><td className="text-right font-bold text-amber-700">{moeda(item.emAberto)}</td></tr>)}</tbody></table>{!porEspaco.length && <p className="py-8 text-center text-gray-500">Nenhuma reserva encontrada.</p>}</div>
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div><p className="text-sm text-gray-500">{publico ? "Reserva online" : "Administração"}</p><h1 className="text-3xl font-extrabold text-[#005a3c]">Reservas</h1><p className="mt-1 text-sm text-gray-500">Agendamento de quadras, quiosques e salões.</p></div>
+            {!publico && (
+              <div className="flex flex-wrap gap-2">
+                {(perfil === "administrador" || perfil === "administrador_master") && <a href="/relatorios/reservas" className="rounded-xl border border-[#cbd9d2] bg-white px-4 py-2.5 font-bold text-[#005a3c] shadow-sm">Relatórios de reservas</a>}
+                <button onClick={() => setAba("reservar")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservar" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Nova reserva</button>
+                <button onClick={() => setAba("reservas")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "reservas" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}>Reservas</button>
+                {podeConfigurar && <button onClick={() => setAba("admin")} className={`rounded-xl px-4 py-2.5 font-bold ${aba === "admin" ? "bg-[#005a3c] text-white" : "bg-white shadow-sm"}`}><Settings className="mr-2 inline h-4 w-4" />Configurar espaços</button>}
               </div>
-              <div className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-                <h2 className="mb-4 text-lg font-extrabold text-[#005a3c]">Resumo por pagamento</h2>
-                <div className="space-y-3">{porPagamento.map((item) => <div key={item.forma} className="rounded-xl bg-[#f8faf9] px-4 py-3"><div className="flex items-start justify-between gap-3"><div><div className="font-bold">{pagamentoBR(item.forma)}</div><div className="text-xs text-gray-500">{item.quantidade} reserva(s) · previsto {moeda(item.valorPrevisto)}</div></div><div className="text-right"><div className="font-extrabold text-green-700">Recebido {moeda(item.recebido)}</div><div className="text-xs font-bold text-amber-700">Em aberto {moeda(item.emAberto)}</div></div></div></div>)}{!porPagamento.length && <p className="py-8 text-center text-gray-500">Nenhuma reserva no período.</p>}</div>
-              </div>
-            </section>
-
-            <section className="sombra-impressao rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><h2 className="text-lg font-extrabold text-[#005a3c]">Detalhamento das reservas</h2><p className="text-sm text-gray-500">{reservas.length} registro(s) no filtro atual. O recebimento é identificado pela data de pagamento registrada na reserva.</p></div><div className="text-sm text-gray-500">Período: <b>{dataBR(dataInicial)} a {dataBR(dataFinal)}</b></div></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b bg-[#eef6f1] text-left text-xs font-bold uppercase tracking-wide text-gray-600"><th className="px-3 py-3">Data</th><th>Espaço</th><th>Motivo da locação</th><th>Responsável</th><th>Reservado por</th><th>Tipo</th><th>Pagamento</th><th>Status</th><th>Lista de presença</th><th className="text-right">Valor</th></tr></thead><tbody>{reservas.map((r) => <tr key={r.id} className="border-b last:border-b-0"><td className="px-3 py-3 whitespace-nowrap"><b>{dataBR(r.data_reserva)}</b><div className="text-xs text-gray-500">{horarioExibicao(r)}</div></td><td className="font-semibold">{r.espaco_nome}</td><td>{r.motivo_locacao || "—"}</td><td><b>{r.responsavel_nome || "—"}</b><div className="text-xs text-gray-500">{r.matricula || "—"}</div></td><td><b>{r.reservado_por_nome || "Não registrado"}</b><div className="text-xs text-gray-500">{r.reservado_por_perfil || "Registro anterior à auditoria"}</div></td><td>{r.tipo_pessoa === "nao_socio" ? "Não sócio" : "Sócio"}</td><td><div>{pagamentoBR(r.tipo_pagamento)}</div><div className={`mt-1 text-xs font-bold ${r.data_pagamento ? "text-green-700" : r.tipo_pagamento === "sem_pagamento" ? "text-gray-500" : "text-amber-700"}`}>{r.data_pagamento ? `Pago em ${dataBR(r.data_pagamento)}` : r.tipo_pagamento === "sem_pagamento" ? "Sem pagamento previsto" : "Em aberto"}</div></td><td><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${r.status === "confirmada" ? "bg-green-100 text-green-700" : r.status === "pendente" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{statusBR(r.status)}</span></td><td>{r.lista_presenca_url ? <a href={r.lista_presenca_url} target="_blank" rel="noreferrer" className="font-semibold text-[#005a3c] underline">{r.lista_presenca_nome || "Abrir lista"}{r.quantidade_convidados != null ? ` (${r.quantidade_convidados}/16)` : ""}</a> : r.lista_presenca_nome || "—"}</td><td className="text-right font-extrabold text-[#005a3c]">{moeda(r.valor)}</td></tr>)}</tbody></table>{!reservas.length && <p className="py-10 text-center text-gray-500">Nenhuma reserva encontrada para os filtros selecionados.</p>}</div>
-            </section>
-              </>
             )}
-          </>
-        )}
+          </div>
+
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{erro}<button className="ml-3 font-bold underline" onClick={() => void recarregarDados()}>Tentar novamente</button></div>}
+
+          {carregando ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {[1, 2, 3, 4].map((item) => <div key={item} className="h-40 animate-pulse rounded-2xl border bg-white" />)}
+            </div>
+          ) : (
+            <>
+              {(publico || aba === "reservar") && (
+                <section className="grid gap-6 lg:grid-cols-[1fr_380px]">
+                  <div className="space-y-4">
+                    <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                      <h2 className="text-xl font-extrabold text-[#005a3c]">1. Quem está fazendo a reserva?</h2>
+                      <p className="mt-1 text-sm text-gray-500">O sistema aplica automaticamente a tarifa e as regras de acesso.</p>
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <button onClick={() => mudarTipo("socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa === "socio" ? "border-[#005a3c] bg-[#e8f3ee]" : "border-[#dfe7e2]"}`}>
+                          <UserRoundCheck className="h-8 w-8 text-[#005a3c]" /><b className="mt-3 block text-lg">Sou sócio</b><span className="text-sm text-gray-500">Acesso aos espaços liberados para associados.</span>
+                        </button>
+                        <button onClick={() => mudarTipo("nao_socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa === "nao_socio" ? "border-[#f4b400] bg-[#fff8df]" : "border-[#dfe7e2]"}`}>
+                          <UserRound className="h-8 w-8 text-[#8a6700]" /><b className="mt-3 block text-lg">Não sou sócio</b><span className="text-sm text-gray-500">Somente espaços liberados pela administração.</span>
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                      <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-extrabold text-[#005a3c]">2. Escolha o espaço</h2><p className="mt-1 text-sm text-gray-500">Os espaços abaixo vêm diretamente do banco.</p></div><span className="rounded-full bg-[#e8f3ee] px-3 py-1 text-xs font-bold text-[#005a3c]">{espacosDisponiveis.length} disponíveis</span></div>
+                      {carregando && !espacos.length ? (
+                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-28 animate-pulse rounded-2xl border border-[#dfe7e2] bg-gray-50" />)}
+                        </div>
+                      ) : !espacosDisponiveis.length ? (
+                        <div className="mt-5 rounded-xl border border-yellow-200 bg-yellow-50 p-5 text-center text-sm font-semibold text-yellow-800">Nenhum espaço liberado está cadastrado no banco.</div>
+                      ) : (
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          {espacosDisponiveis.map((e) => <button key={e.id} onClick={() => setEspacoId(e.id)} className={`rounded-2xl border p-4 text-left ${e.id === espacoId ? "border-[#005a3c] bg-[#e8f3ee]" : "border-[#dfe7e2]"}`}><span className="text-[10px] font-extrabold uppercase text-[#005a3c]">{e.categoria}</span><h3 className="mt-2 font-extrabold">{e.nome}</h3><div className="mt-3 flex justify-between border-t pt-3 text-sm"><span>{e.cobranca === "hora" ? "Por hora" : "Por diária"}</span><b className="text-[#005a3c]">{moeda(tipoPessoa === "socio" ? e.precoSocio : e.precoNaoSocio)}</b></div></button>)}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                      <h2 className="text-xl font-extrabold text-[#005a3c]">3. Responsável</h2>
+                      {tipoPessoa === "socio" && !publico ? (
+                        <div className="relative mt-4">
+                          <div className="flex items-center gap-2 rounded-xl border px-3 py-3 focus-within:border-[#005a3c]"><Users className="h-5 w-5 text-gray-400" /><input value={buscaSocio} onFocus={() => void carregarPessoas()} onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setDependenteId(""); setMatriculaResponsavel(null); setNome(""); }} placeholder={carregandoPessoas ? "Carregando sócios..." : "Buscar sócio por nome ou matrícula..."} className="w-full outline-none" /></div>
+                          {buscaSocio && !socioId && <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">{sociosFiltrados.length ? sociosFiltrados.map((s) => {
+                            const titularMatricula = String(s.matricula ?? "").trim().toUpperCase();
+                            const baseFamiliar = titularMatricula.endsWith("A") ? titularMatricula.slice(0, -1) : titularMatricula;
+                            const familia = dependentes.filter((d) => { const m = String(d.matricula ?? "").trim().toUpperCase(); const pertence = String(d.socio_id) === String(s.id) || (!!baseFamiliar && m.startsWith(baseFamiliar) && m !== titularMatricula && /[A-Z]$/.test(m)); return pertence && !/^SD\d+A$/.test(m); });
+                            return <div key={s.id} className="border-b last:border-b-0"><button type="button" onClick={() => { setSocioId(s.id); setDependenteId(""); setNome(s.nome); setMatriculaResponsavel(s.matricula); setBuscaSocio(`${s.nome}${s.matricula ? ` — Matrícula ${s.matricula}` : ""}`); }} className="block w-full px-4 py-3 text-left hover:bg-[#e8f3ee]"><div className="flex items-center justify-between gap-3"><div><b>{s.nome}</b><span className="ml-2 text-xs text-gray-500">Matrícula: {s.matricula ?? "—"}</span></div><span className="text-xs font-extrabold text-[#005a3c]">Titular</span></div></button>{familia.length > 0 && <div className="bg-[#f8faf9] px-3 pb-3"><div className="px-2 pb-2 pt-1 text-[10px] font-extrabold uppercase tracking-wide text-[#78968a]">Dependentes da família</div><div className="space-y-1.5">{familia.map((d) => <button key={d.id} type="button" onClick={() => { setSocioId(s.id); selecionarDependente(d.id, s.id); }} className="flex w-full items-center justify-between rounded-lg border border-[#d9e9e2] bg-white px-3 py-2 text-left hover:border-[#005a3c] hover:bg-[#e8f3ee]"><span><b className="text-sm">{d.nome}</b><span className="ml-2 text-xs text-gray-500">{d.matricula || "Sem matrícula"}{d.parentesco ? ` · ${d.parentesco}` : ""}</span></span><span className="text-[10px] font-extrabold text-[#005a3c]">Dependente</span></button>)}</div></div>}</div>;
+                          }) : <div className="p-4 text-sm text-gray-500">Nenhum sócio encontrado.</div>}</div>}
+                          {socioId && <div className="mt-3 flex items-center justify-between rounded-xl bg-[#e8f3ee] p-3 text-sm"><span><b>{nome}</b> · Matrícula {matriculaResponsavel ?? "—"}{dependenteId ? " · Dependente" : " · Titular"}</span><button type="button" onClick={() => { setSocioId(""); setDependenteId(""); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className="font-bold text-[#005a3c]">Trocar</button></div>}
+                        </div>
+                      ) : <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo do responsável" className="mt-4 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" />}
+                    </section>
+                  </div>
+
+                  <aside className="h-fit rounded-2xl border bg-white p-5 shadow-sm lg:sticky lg:top-6">
+                    <h2 className="text-xl font-extrabold text-[#005a3c]">4. Data e horário</h2>
+                    {tipoPessoa === "nao_socio" && bloqueadoNaoSocio && <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">🔒 Este espaço está bloqueado para não sócios.</div>}
+                    <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Data</span><input type="date" value={data} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" /></label>
+                    {espaco?.cobranca === "hora" && <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Horário</span><select value={horario} onChange={(e) => setHorario(e.target.value)} className="mt-1 w-full rounded-xl border bg-white px-3 py-3">{HORARIOS.map((h) => <option key={h} value={h} disabled={ocupados.includes(h) && !editandoReservaId}>{h}{ocupados.includes(h) && !editandoReservaId ? " — ocupado" : ""}</option>)}</select></label>}
+                    <label className="mt-4 block"><span className="text-xs font-bold uppercase text-gray-500">Motivo da locação / evento *</span><input value={motivoLocacao} onChange={(e) => setMotivoLocacao(e.target.value)} maxLength={200} required placeholder="Ex.: festa de aniversário, jantar, baile, reunião" className="mt-1 w-full rounded-xl border px-3 py-3 outline-none focus:border-[#005a3c]" /><span className="mt-1 block text-xs text-gray-500">Informe a finalidade do aluguel para aparecer nos relatórios.</span></label>
+                    <div className={`mt-4 rounded-xl p-4 ${tipoPessoa === "socio" ? "bg-[#e8f3ee]" : "bg-[#fff8df]"}`}><div className="text-xs text-gray-500">Tipo</div><b>{tipoPessoa === "socio" ? "Sócio" : "Não sócio"}</b>{tipoPessoa === "socio" && matriculaResponsavel && <div className="mt-2 text-sm"><span className="text-gray-500">Matrícula:</span> <b>{matriculaResponsavel}</b></div>}<div className="mt-3 flex justify-between text-sm"><span>Espaço</span><b>{espaco?.nome || "—"}</b></div><div className="flex justify-between text-sm"><span>Data</span><b>{dataBR(data)}</b></div><div className="flex justify-between text-sm"><span>{espaco?.cobranca === "diaria" ? "Período" : "Horário"}</span><b>{periodoReserva(espaco?.cobranca, horario)}</b></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>Motivo</span><b className="max-w-[65%] text-right">{motivoLocacao || "—"}</b></div><div className="mt-3 flex justify-between border-t pt-3 text-lg"><span>Total</span><b className="text-[#005a3c]">{moeda(valor)}</b></div></div>
+                    <button disabled={!espaco || (tipoPessoa === "nao_socio" && bloqueadoNaoSocio)} onClick={continuar} className="mt-4 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">Continuar</button>
+                  </aside>
+                </section>
+              )}
+
+              {!publico && aba === "reservas" ? (
+                <div className="relative">
+                  {carregandoReservas && <div className="mb-3 rounded-xl bg-[#e8f3ee] px-4 py-2 text-sm font-semibold text-[#005a3c]">Atualizando reservas...</div>}
+                  <ReservasTabela
+                    filtradas={filtradas}
+                    espacos={espacos}
+                    reservasHoje={estatisticas.hoje}
+                    confirmadas={estatisticas.confirmadas}
+                    pendentes={estatisticas.pendentes}
+                    canceladas={estatisticas.canceladas}
+                    busca={busca}
+                    filtroStatus={filtroStatus}
+                    filtroData={filtroData}
+                    onBusca={setBusca}
+                    onFiltroStatus={setFiltroStatus}
+                    onFiltroData={setFiltroData}
+                    onLimparFiltros={() => { setBusca(""); setFiltroStatus("todos"); setFiltroData(""); }}
+                    onComprovante={(path) => void abrirComprovante(path)}
+                    onEditar={editarReserva}
+                    onCancelar={cancelarReserva}
+                    onRecibo={setRecibo}
+                    onListaPresenca={abrirListaPresenca}
+                    onConfirmarPix={(reserva) => { setReservaPixConfirmacao(reserva); setContaPixConfirmacao(contasBancarias[0]?.id || ""); }}
+                    podeConfirmarPix={podeConfigurar}
+                    operadorAtual={operadorAtual}
+                  />
+                </div>
+              ) : null}
+
+              {!publico && aba === "admin" && podeConfigurar && <ConfiguracaoEspacos espacos={espacos} salvandoId={salvandoEspacoId} onSalvar={salvarEspaco} />}
+
+              {etapa === "confirmacao" && (publico || aba === "reservar") && (
+                <ConfirmacaoReserva tipoPessoa={tipoPessoa} espacoNome={espaco?.nome || ""} cobranca={espaco?.cobranca || "hora"} data={data} horario={horario} nome={nome} motivoLocacao={motivoLocacao.trim()} matricula={matriculaResponsavel} valor={valor} publico={publico} formaPagamento={formaPagamentoReserva} pix={pix} copiado={copiado} arquivo={arquivoComprovante} contasBancarias={contasBancarias} contaBancariaId={contaBancariaId} enviando={enviandoComprovante} onVoltar={() => setEtapa("selecao")} onFormaPagamento={setFormaPagamentoReserva} onContaBancaria={setContaBancariaId} onArquivo={setArquivoComprovante} onCopiarPix={copiarPix} onCopiarResumo={copiarResumo} onConfirmar={() => void confirmar()} />
+              )}
+
+              {reservaPixConfirmacao && <ConfirmarPixReserva reserva={reservaPixConfirmacao} espacoNome={espacos.find((e) => e.id === reservaPixConfirmacao.espacoId)?.nome || "—"} contasBancarias={contasBancarias} contaBancariaId={contaPixConfirmacao} salvando={confirmandoPix} arquivo={arquivoConfirmacaoPix} onArquivo={setArquivoConfirmacaoPix} onContaBancaria={setContaPixConfirmacao} onConfirmar={() => void confirmarPixAdmin()} onFechar={() => { if (!confirmandoPix) { setReservaPixConfirmacao(null); setContaPixConfirmacao(""); setArquivoConfirmacaoPix(null); } }} />}
+
+              {reservaListaPresenca && (
+                <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#001f16]/60 p-4">
+                  <div role="dialog" aria-modal="true" aria-labelledby="lista-presenca-titulo" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h2 id="lista-presenca-titulo" className="text-xl font-extrabold text-[#005a3c]">Lista de presença do quiosque</h2>
+                        <p className="mt-1 text-sm text-gray-500">{espacos.find((e) => e.id === reservaListaPresenca.espacoId)?.nome || "Quiosque"} · {dataBR(reservaListaPresenca.data)} · {reservaListaPresenca.nome}</p>
+                      </div>
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => setReservaListaPresenca(null)} className="rounded-lg border px-3 py-1.5 font-bold disabled:opacity-50">✕</button>
+                    </div>
+                    <p className="mt-4 rounded-xl bg-[#f0f7f3] p-3 text-sm text-[#315849]">Informe quantas pessoas estão na lista e anexe o documento que a portaria usará na conferência. Limite: 16 convidados por quiosque.</p>
+                    <label className="mt-4 block text-sm font-bold">Quantidade de convidados (máximo 16)
+                      <input type="number" inputMode="numeric" min={1} max={16} step={1} value={quantidadeConvidados} onChange={(e) => setQuantidadeConvidados(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3" />
+                    </label>
+                    <label className="mt-4 block rounded-xl border-2 border-dashed border-[#9cc8b1] p-4 text-sm">
+                      <span className="block font-bold text-[#005a3c]">Anexar lista de presença</span>
+                      <span className="mt-1 block text-xs text-gray-500">PDF, CSV, Excel (.xlsx/.xls), JPG ou PNG — até 10 MB</span>
+                      <input type="file" accept=".pdf,.csv,.xlsx,.xls,.jpg,.jpeg,.png,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/png" onChange={(e) => { setArquivoListaPresenca(e.target.files?.[0] || null); setErroListaPresenca(""); }} className="mt-3 block w-full text-sm" />
+                      {arquivoListaPresenca && <span className="mt-2 block font-semibold text-[#005a3c]">{arquivoListaPresenca.name}</span>}
+                    </label>
+                    {reservaListaPresenca.listaPresencaNome && <p className="mt-2 text-xs text-gray-500">Lista atual: {reservaListaPresenca.listaPresencaNome} ({reservaListaPresenca.quantidadeConvidados ?? "?"}/16 convidados)</p>}
+                    {erroListaPresenca && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{erroListaPresenca}</p>}
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => setReservaListaPresenca(null)} className="rounded-xl border px-4 py-2.5 font-bold">Cancelar</button>
+                      <button type="button" disabled={salvandoListaPresenca} onClick={() => void salvarListaPresenca()} className="rounded-xl bg-[#005a3c] px-4 py-2.5 font-extrabold text-white disabled:opacity-60">{salvandoListaPresenca ? "Enviando..." : "Salvar lista"}</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {recibo && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/60 p-4"><div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-sm font-semibold text-gray-500">Sociedade Recreativa Guarani</p><h2 className="mt-1 text-2xl font-extrabold text-[#005a3c]">Recibo {recibo.numero}</h2></div><button onClick={() => setRecibo(null)} className="rounded-full bg-gray-100 px-3 py-2">✕</button></div><div className="mt-5 rounded-2xl border border-[#cfe3d8] bg-[#f8faf9] p-5 text-sm"><p><b>Tipo:</b> {recibo.tipo}</p><p className="mt-2"><b>Responsável:</b> {recibo.nome}{recibo.matricula ? ` — Matrícula ${recibo.matricula}` : ""}</p><p className="mt-2"><b>{recibo.detalhe.split(":")[0]}:</b> {recibo.detalhe.split(":").slice(1).join(":").trim()}</p><p className="mt-2"><b>Data/Horário:</b> {recibo.periodo}</p><p className="mt-3 text-2xl font-extrabold text-[#005a3c]">{moeda(recibo.valor)}</p><p className="mt-2"><b>Pagamento:</b> {recibo.pagamento}</p><p className="mt-2"><b>Status:</b> {recibo.status}</p><p className="mt-2"><b>Atendido por:</b> {recibo.operador}</p><p className="mt-2 text-xs text-gray-500">{recibo.dataHora}</p></div><div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3"><button onClick={() => imprimirRecibo(recibo)} className="rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white">🖨 Imprimir / PDF</button><button onClick={() => void enviarRecibo(recibo)} className="rounded-xl border border-[#005a3c] px-4 py-3 font-bold text-[#005a3c]">📤 Enviar</button><button onClick={() => void navigator.clipboard?.writeText(textoRecibo(recibo))} className="rounded-xl border px-4 py-3 font-bold">📋 Copiar</button></div><p className="mt-3 text-center text-xs text-gray-500">Em Imprimir, escolha “Salvar como PDF” para guardar o recibo.</p></div></div>}
+
+              {!publico && <div className="rounded-2xl bg-[#003d2b] p-5 text-white"><b><Clock3 className="mr-2 inline h-4 w-4" />Controle de disponibilidade</b><div className="mt-1 text-sm text-white/75">Os espaços, preços e permissões são lidos do banco. R$ 0,00 para não sócio significa bloqueado.</div></div>}
+            </>
+          )}
+        </div>
       </main>
     </div>
   );
 }
-
