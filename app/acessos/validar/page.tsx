@@ -1,10 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { CheckCircle2, Clock3, ShieldAlert, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
-function corExame(cor: string) {
+type ResultadoValidacao = {
+  socio?: { id?: string; nome?: string; matricula?: string | number | null; situacao?: string | null; categoria?: string | null; foto_url?: string | null } | null;
+  dependente?: { nome?: string; parentesco?: string | null } | null;
+  liberado?: boolean;
+  perfil_operador?: string;
+  temporada?: { id?: string; codigo?: string | null } | null;
+  status_temporada?: string | null;
+  mensalidade?: { texto?: string; cor?: string } | null;
+  inadimplencia?: { atrasado?: boolean; quantidade?: number; valorTotal?: number; bloqueiaEntrada?: boolean; precisaAlerta?: boolean } | null;
+  motivo_bloqueio?: string | null;
+  exame?: { status?: { texto?: string; cor?: string }; validade?: string | null; verificado?: boolean } | null;
+  uso_agua?: { permitido?: boolean; texto?: string; validade?: string | null; observacao?: string } | null;
+  acesso?: { data_hora_entrada?: string | null; motivo_negacao?: string | null } | null;
+};
+
+function corExame(cor: string | undefined) {
   if (cor === "verde") return "bg-green-50 border-green-200 text-green-800";
   if (cor === "amarelo") return "bg-yellow-50 border-yellow-200 text-yellow-900";
   if (cor === "vermelho") return "bg-red-50 border-red-200 text-red-800";
@@ -12,9 +29,10 @@ function corExame(cor: string) {
 }
 
 export default function ValidarCarteiraPage() {
+  const router = useRouter();
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
-  const [resultado, setResultado] = useState<any>(null);
+  const [resultado, setResultado] = useState<ResultadoValidacao | null>(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -27,7 +45,7 @@ export default function ValidarCarteiraPage() {
         if (!id && !dependenteId) throw new Error("QR Code sem identificação do associado.");
         if (!session) {
           const destino = `/acessos/validar?${id ? `id=${encodeURIComponent(id)}` : ""}${id && dependenteId ? "&" : ""}${dependenteId ? `dependente_id=${encodeURIComponent(dependenteId)}` : ""}`;
-          window.location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
+          router.replace(`/login?redirect=${encodeURIComponent(destino)}`);
           return;
         }
 
@@ -37,7 +55,7 @@ export default function ValidarCarteiraPage() {
           body: JSON.stringify({ socio_id: id || undefined, dependente_id: dependenteId || undefined }),
           cache: "no-store",
         });
-        const d = await r.json();
+        const d = await r.json() as ResultadoValidacao & { error?: string };
         if (!r.ok) throw new Error(d.error || "Não foi possível validar a carteirinha.");
         if (!cancelado) setResultado(d);
       } catch (e) {
@@ -47,7 +65,7 @@ export default function ValidarCarteiraPage() {
       }
     })();
     return () => { cancelado = true; };
-  }, []);
+  }, [router]);
 
   const exame = resultado?.exame;
   const liberado = Boolean(resultado?.liberado);
@@ -65,7 +83,7 @@ export default function ValidarCarteiraPage() {
         <div className="overflow-hidden rounded-[28px] bg-white shadow-xl ring-1 ring-black/5">
           <div className="bg-[#005a3c] px-6 py-5 text-white">
             <div className="flex items-center gap-3">
-              <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+              <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
               <div>
                 <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
                 <h1 className="text-xl font-black">Validação de acesso</h1>
@@ -95,7 +113,7 @@ export default function ValidarCarteiraPage() {
                 <div className="rounded-2xl border bg-white p-4">
                   <div className="flex gap-4">
                     <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                      {resultado.socio?.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
+                      {resultado.socio?.foto_url ? <Image src={resultado.socio.foto_url} alt={resultado.socio.nome || "Foto do associado"} width={80} height={96} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
                     </div>
                     <div className="min-w-0">
                       <h2 className="text-xl font-black leading-tight">{resultado.dependente?.nome || resultado.socio?.nome}</h2>
