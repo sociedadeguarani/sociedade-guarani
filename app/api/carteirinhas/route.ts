@@ -273,7 +273,7 @@ export async function GET(request: Request) {
 
       if (error) throw error;
 
-      socios = data || [];
+      socios = (data || []) as unknown as SocioCarteirinha[];
     }
 
     const ids = socios
@@ -385,7 +385,7 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
-    const dependentes = (dependentesDb || []).map((d) => {
+    const dependentes = ((dependentesDb || []) as unknown as DependenteCarteirinha[]).map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
       const status: { financeiro_status: string; dias_atraso?: number; meses_atraso?: number; meses_atencao?: number; meses_bloqueio?: number } = !podeVerFinanceiro
@@ -459,7 +459,8 @@ export async function GET(request: Request) {
 
       if (temporadasError) throw temporadasError;
 
-      const idsTemporadas = (temporadasDb || []).map((t) => String(t.id));
+      const temporadasRegistros = (temporadasDb || []) as unknown as TemporadaCarteirinha[];
+      const idsTemporadas = temporadasRegistros.map((t) => String(t.id));
 
       const participantesDb: ParticipanteTemporadaCarteirinha[] = [];
       for (const lote of emLotes(idsTemporadas, 100)) {
@@ -475,7 +476,7 @@ export async function GET(request: Request) {
           .order("nome", { ascending: true });
 
         if (error) throw error;
-        participantesDb.push(...(data || []));
+        participantesDb.push(...((data || []) as unknown as ParticipanteTemporadaCarteirinha[]));
       }
 
       const participantesPorTemporada = new Map<string, ParticipanteTemporadaCarteirinha[]>();
@@ -487,7 +488,7 @@ export async function GET(request: Request) {
         participantesPorTemporada.set(key, lista);
       }
 
-      temporadas = (temporadasDb || [])
+      temporadas = temporadasRegistros
         .filter(temporadaValida)
         .map((t) => ({
           id: String(t.id),
