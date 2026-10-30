@@ -515,6 +515,19 @@ export default function Page() {
       // Faz uma consulta por competência para não atingir o limite de linhas
       // da API quando vários meses são selecionados.
       const headers = await h();
+      // As competências selecionadas são preparadas automaticamente. A API
+      // só cria cobranças que ainda não existem, preservando pagamentos e histórico.
+      for (const mesConsulta of mesesConsulta) {
+        const geracao = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ acao: "gerar", ano, mes: mesConsulta }),
+        });
+        const resultadoGeracao = await geracao.json();
+        if (!geracao.ok) {
+          throw Error(resultadoGeracao.error || `Não foi possível preparar ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
+        }
+      }
       const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
         const r = await fetch(
           `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
@@ -585,10 +598,9 @@ export default function Page() {
     atualizarMesesSelecionados(selecionados, mesesSelecionados.includes(mesAlvo) ? selecionados[0] : mesAlvo);
   }
 
-  // Permite registrar mensalidades futuras para associados que desejam antecipar.
-  // O vencimento e os acréscimos continuam calculados por competência.
   function competenciaPodeSerGerada(mesAlvo: number, anoAlvo = ano) {
-    return Number.isInteger(anoAlvo) && anoAlvo >= 1900 && Number.isInteger(mesAlvo) && mesAlvo >= 1 && mesAlvo <= 12;
+    const agora = new Date();
+    return new Date(anoAlvo, mesAlvo - 1, 1) <= new Date(agora.getFullYear(), agora.getMonth(), 1);
   }
 
   function chaveGeracao(item: M) {
@@ -1056,7 +1068,7 @@ const selecionadasBaixa = useMemo(
       });
 
       if (porMes.size === 0) {
-        throw Error("Selecione ao menos uma competência válida para gerar a mensalidade.");
+        throw Error("As competências futuras não podem ser geradas. Selecione meses até a competência atual.");
       }
 
       const headers = await h();
@@ -1081,10 +1093,14 @@ const selecionadasBaixa = useMemo(
         }
       }
 
+      const mesesFuturosIgnorados = selGeracao.some((chave) => {
+        const mesItem = Number(chave.slice(0, chave.indexOf(":")));
+        return Number.isInteger(mesItem) && !competenciaPodeSerGerada(mesItem);
+      });
       setSelGeracao([]);
       await carregar();
       setMsg(
-        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}`
+        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}${mesesFuturosIgnorados ? " • Competências futuras foram ignoradas." : ""}`
       );
       if (falhas.length > 0) {
         setErro(`Não foi possível gerar todas as competências: ${falhas.join(" • ")}`);
@@ -1105,7 +1121,7 @@ const selecionadasBaixa = useMemo(
     try {
       const mesesGeraveis = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => competenciaPodeSerGerada(mesItem));
       if (mesesGeraveis.length === 0) {
-        throw Error("Selecione ao menos uma competência válida para gerar a mensalidade.");
+        throw Error("Não é permitido gerar mensalidades de competências futuras. Selecione pelo menos um mês até a competência atual.");
       }
 
       const headers = await h();
@@ -1130,7 +1146,8 @@ const selecionadasBaixa = useMemo(
       }));
 
       setPrevias(respostas.sort((a, b) => a.competencia.localeCompare(b.competencia)));
-      setMsg("Prévia pronta. Você pode gerar competências passadas, atuais ou futuras para permitir a baixa de mensalidades antecipadas.");
+      const mesesFuturos = mesesSelecionados.filter((mesItem) => !competenciaPodeSerGerada(mesItem));
+      if (mesesFuturos.length > 0) setMsg(`Prévia pronta. Meses futuros (${mesesFuturos.map((m) => nomesMeses[m - 1]).join(", ")}) podem ser visualizados, mas não serão gerados.`);
     } catch (e) {
       setAbrindoPrevia(false);
       setPrevias([]);
@@ -1293,8 +1310,12 @@ const selecionadasBaixa = useMemo(
   }
 
   const sociosAlvoGeracao = idsSociosSelecionadosParaGeracao();
-  const todosMeses = Array.from({ length: 12 }, (_, i) => i + 1);
-  const mesesGeraveisSelecionados = mesesSelecionados;
+  const mesesAteAtual = ano < hoje.getFullYear()
+    ? Array.from({ length: 12 }, (_, i) => i + 1)
+    : ano === hoje.getFullYear()
+      ? Array.from({ length: hoje.getMonth() + 1 }, (_, i) => i + 1)
+      : [];
+  const mesesGeraveisSelecionados = mesesSelecionados.filter((mesItem) => competenciaPodeSerGerada(mesItem));
 
   return (
     <div className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#17382c]">
@@ -1315,15 +1336,6 @@ const selecionadasBaixa = useMemo(
             </div>
 
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-              <button
-                onClick={() => void previsualizarGeracao()}
-                className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-center font-bold text-white sm:w-auto"
-              >
-                {sociosAlvoGeracao.length > 0
-                  ? `⚡ Gerar para ${sociosAlvoGeracao.length} ${sociosAlvoGeracao.length === 1 ? "associado" : "associados"} · ${mesesGeraveisSelecionados.length} ${mesesGeraveisSelecionados.length === 1 ? "mês" : "meses"}`
-                  : `⚡ Gerar ${mesesSelecionados.length === 1 ? `${String(mesesSelecionados[0]).padStart(2, "0")}/${ano}` : `${mesesSelecionados.length} meses selecionados`}`}
-              </button>
-
               <button
                 onClick={abrirConfiguracao}
                 className="w-full rounded-xl border bg-white px-4 py-3 text-center font-bold sm:w-auto"
@@ -1398,10 +1410,11 @@ const selecionadasBaixa = useMemo(
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => atualizarMesesSelecionados(todosMeses, todosMeses[todosMeses.length - 1])}
-                    className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]"
+                    disabled={mesesAteAtual.length === 0}
+                    onClick={() => atualizarMesesSelecionados(mesesAteAtual, mesesAteAtual[mesesAteAtual.length - 1])}
+                    className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2] disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Janeiro até Dezembro
+                    Janeiro até {mesesAteAtual.length > 0 ? nomesMeses[mesesAteAtual[mesesAteAtual.length - 1] - 1] : "mês atual"}
                   </button>
                   <button type="button" onClick={() => atualizarMesesSelecionados(Array.from({ length: 12 }, (_, i) => i + 1), mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Selecionar todos</button>
                   <button type="button" onClick={() => atualizarMesesSelecionados([mes], mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Manter somente {nomesMeses[mes - 1]}</button>
@@ -1547,24 +1560,6 @@ const selecionadasBaixa = useMemo(
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
                 <button
                   type="button"
-                  onClick={selecionarTodosParaGeracao}
-                  disabled={!filtrada.some((x) => x.situacao === "nao_gerada")}
-                  className="w-full rounded-xl border border-[#9fc8b5] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-40 sm:w-auto"
-                >
-                  Selecionar pendentes
-                </button>
-
-                <button
-                  type="button"
-                  disabled={!selGeracao.length || gerandoSelecionados}
-                  onClick={() => void gerarSelecionados()}
-                  className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
-                >
-                  ⚡ {gerandoSelecionados ? "Gerando..." : `Gerar selecionadas (${selGeracao.length})`}
-                </button>
-
-                <button
-                  type="button"
                   disabled={!selecionadasBaixa.length}
                   onClick={() => {
                     setTipoBaixaSelecionada("pago");
@@ -1578,11 +1573,8 @@ const selecionadasBaixa = useMemo(
               </div>
             </div>
 
-            {(selGeracao.length > 0 || sel.length > 0) && (
+            {sel.length > 0 && (
               <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[#eef7f2] p-3 text-sm font-bold text-[#005a3c]">
-                {selGeracao.length > 0 && (
-                  <span>⚡ {selGeracao.length} para gerar</span>
-                )}
                 {selecionadasBaixa.length > 0 && (
                   <span>💰 {selecionadasBaixa.length} para baixar</span>
                 )}
@@ -1667,7 +1659,7 @@ const selecionadasBaixa = useMemo(
                       {x.situacao === "pago" && <button type="button" onClick={() => void estornarBaixa(x)} className="mt-3 w-full rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-700">↩️ Estornar baixa</button>}
                       {x.situacao === "nao_gerada" && (
                         <p className={`mt-3 text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
-                          {competenciaNaoGeradaAtrasada(x) ? "Mensalidade vencida ainda sem lançamento. Gere para registrar a cobrança e permitir a baixa." : "Mensalidade sem lançamento. Gere para registrar a cobrança e permitir a baixa antecipada."}
+                          {competenciaNaoGeradaAtrasada(x) ? "Competência vencida: cobrança em atraso." : "Preparando cobrança automaticamente."}
                         </p>
                       )}
                     </article>
@@ -1817,7 +1809,7 @@ const selecionadasBaixa = useMemo(
                         <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
                           {x.situacao === "nao_gerada" ? (
                             <span className={`text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
-                              {competenciaNaoGeradaAtrasada(x) ? "Vencida: registre a cobrança para dar baixa" : "Registre a cobrança para dar baixa antecipada"}
+                              {competenciaNaoGeradaAtrasada(x) ? "Vencida: cobrança em atraso" : "Preparando cobrança automaticamente"}
                             </span>
                           ) : x.situacao === "pago" ? (
                             <button
@@ -2076,14 +2068,6 @@ const selecionadasBaixa = useMemo(
                       <p className="text-xs text-gray-600">{mesesHistoricoSelecionadosBaixa.length} mês(es) selecionado(s). A baixa usa a data de pagamento de hoje.</p>
                       <button type="button" disabled={processandoBaixaHistorico} onClick={() => void baixarMesesDoHistorico()} className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white disabled:opacity-50">
                         {processandoBaixaHistorico ? "Processando..." : `💰 Dar baixa em ${mesesHistoricoSelecionadosBaixa.length} mês(es)`}
-                      </button>
-                    </div>
-                  )}
-                  {!historicoPorMes.has(hoje.getMonth() + 1) && anoHistoricoSocio === hoje.getFullYear() && mesHistoricoSelecionado === hoje.getMonth() + 1 && (
-                    <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                      A mensalidade do mês vigente ainda não foi gerada. Gere somente a competência deste associado para depois registrar o pagamento.
-                      <button type="button" disabled={processandoBaixaHistorico} onClick={() => void gerarCompetenciaAtualDoHistorico()} className="ml-2 mt-2 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white disabled:opacity-50">
-                        {processandoBaixaHistorico ? "Processando..." : "Gerar mensalidade do mês vigente"}
                       </button>
                     </div>
                   )}
