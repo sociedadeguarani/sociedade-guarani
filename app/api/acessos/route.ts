@@ -82,8 +82,8 @@ export async function GET(request: Request) {
     const mapaSocios = new Map((sociosResult.data || []).map((s: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null }) => [s.id, s]));
     const mapaDependentes = new Map((dependentesResult.data || []).map((d: { id: string; nome?: string }) => [d.id, d]));
     const mapaUsuarios = new Map((usuariosResult.data || []).map((u: { id: string; nome_exibicao?: string | null }) => [u.id, u]));
-    const mapaTemporadas = new Map((temporadasResult.data || []).map((t: { id: string; codigo?: string | null; matricula?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null }) => [t.id, t]));
-    const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: { id: string; nome?: string; matricula?: string | null; foto_url?: string | null; papel?: string | null; parentesco?: string | null }) => [p.id, p]));
+    const mapaTemporadas = new Map((temporadasResult.data || []).map((t: { id: string; codigo?: string | null; matricula?: string | number | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null }) => [t.id, t]));
+    const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; papel?: string | null; parentesco?: string | null }) => [p.id, p]));
 
     const resultado = lista.map((a) => ({
       ...a,
