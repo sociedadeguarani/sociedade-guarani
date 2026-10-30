@@ -634,8 +634,12 @@ export async function PATCH(request: Request) {
       if (String(reserva.tipo_pagamento) !== "pix") {
         return NextResponse.json({ error: "Esta reserva não é PIX." }, { status: 400 });
       }
-      if (!reserva.comprovante_url) {
-        return NextResponse.json({ error: "A reserva não possui comprovante." }, { status: 400 });
+      const semComprovante = !reserva.comprovante_url;
+      if (semComprovante && body.confirmado_sem_comprovante !== true) {
+        return NextResponse.json(
+          { error: "Sem comprovante: confirme explicitamente que verificou o crédito na conta bancária." },
+          { status: 400 }
+        );
       }
 
       const contaBancariaId = String(body.conta_bancaria_id || "").trim();
@@ -651,7 +655,7 @@ export async function PATCH(request: Request) {
           situacao: "confirmada",
           tipo_pagamento: "pix",
           data_pagamento: agora.slice(0, 10),
-          comprovante_status: "aprovado",
+          comprovante_status: semComprovante ? "confirmado_sem_comprovante" : "aprovado",
           comprovante_aprovado_por: auth.usuario.id,
           comprovante_aprovado_em: agora,
           motivo_recusa: null,
@@ -680,7 +684,12 @@ export async function PATCH(request: Request) {
 
       try {
         await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "pix");
-        return NextResponse.json({ reserva: normalizarReserva(atualizada), message: "PIX confirmado e lançamento criado no Financeiro." });
+        return NextResponse.json({
+          reserva: normalizarReserva(atualizada),
+          message: semComprovante
+            ? "PIX confirmado sem comprovante após declaração de conferência bancária; lançamento criado no Financeiro."
+            : "PIX confirmado e lançamento criado no Financeiro.",
+        });
       } catch (financeError) {
         // Se o lançamento financeiro falhar, devolvemos a reserva ao estado
         // anterior para não deixar confirmação sem entrada correspondente.
