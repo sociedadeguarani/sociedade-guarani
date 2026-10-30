@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -86,21 +86,6 @@ type Cobranca = {
   ativo: boolean;
 };
 
-type PreviaGeracao = {
-  competencia: string;
-  // Quando houver associados marcados na grade, a prévia e a confirmação
-  // ficam restritas a esses IDs. Ausente significa geração global.
-  socio_ids?: string[];
-  total_cobraveis: number;
-  ja_existentes: number;
-  quantidade_nova: number;
-  valor_base: number;
-  tarifa_pagamento: number;
-  multa: number;
-  juros: number;
-  desconto: number;
-  total_cobrado: number;
-};
 
 const nomes: Record<string, string> = {
   patrimonial_familiar: "Patrimonial Familiar",
@@ -254,7 +239,6 @@ export default function Page() {
   const [cobranca, setCobranca] = useState<Cobranca>(cobrancaInicial);
 
   const [sel, setSel] = useState<string[]>([]);
-  const [selGeracao, setSelGeracao] = useState<string[]>([]);
   const [erro, setErro] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -273,10 +257,7 @@ export default function Page() {
 
   const [salvandoConfig, setSalvandoConfig] = useState(false);
 
-  const [previas, setPrevias] = useState<PreviaGeracao[]>([]);
-  const [abrindoPrevia, setAbrindoPrevia] = useState(false);
-  const [confirmandoGeracao, setConfirmandoGeracao] = useState(false);
-  const [gerandoSelecionados, setGerandoSelecionados] = useState(false);
+  const competenciasEmCriacaoRef = useRef<Set<string>>(new Set());
   const [socioSelecionado, setSocioSelecionado] = useState<M | null>(null);
   const [abrirConfirmacaoBaixa, setAbrirConfirmacaoBaixa] = useState(false);
   const [contaRecebimentoSelecionada, setContaRecebimentoSelecionada] = useState("");
@@ -515,19 +496,6 @@ export default function Page() {
       // Faz uma consulta por competência para não atingir o limite de linhas
       // da API quando vários meses são selecionados.
       const headers = await h();
-      // As competências selecionadas são preparadas automaticamente. A API
-      // só cria cobranças que ainda não existem, preservando pagamentos e histórico.
-      for (const mesConsulta of mesesConsulta) {
-        const geracao = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ acao: "gerar", ano, mes: mesConsulta }),
-        });
-        const resultadoGeracao = await geracao.json();
-        if (!geracao.ok) {
-          throw Error(resultadoGeracao.error || `Não foi possível preparar ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
-        }
-      }
       const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
         const r = await fetch(
           `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
@@ -567,27 +535,55 @@ export default function Page() {
     void carregar();
   }, [ano, mesesSelecionados]);
 
+  // As mensalidades são criadas automaticamente para todas as competências
+  // selecionadas, inclusive futuras. O administrador não precisa executar
+  // uma ação de geração para registrar um pagamento antecipado.
+  useEffect(() => {
+    if (!socios.length || !mesesSelecionados.length) return;
+
+    const elegiveis = socios.filter(socioElegivelParaMensalidade);
+    if (!elegiveis.length) return;
+
+    const existentes = new Set(
+      lista.map((item) => `${String(item.competencia || "").slice(5, 7)}:${String(item.socio_id)}`)
+    );
+    const faltantes = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => {
+      const chaveCompetencia = `${ano}-${String(mesItem).padStart(2, "0")}`;
+      const jaCompleta = elegiveis.every((socio) => existentes.has(`${String(mesItem).padStart(2, "0")}:${String(socio.id)}`));
+      return !jaCompleta && !competenciasEmCriacaoRef.current.has(chaveCompetencia);
+    });
+    if (!faltantes.length) return;
+
+    faltantes.forEach((mesItem) => competenciasEmCriacaoRef.current.add(`${ano}-${String(mesItem).padStart(2, "0")}`));
+
+    void (async () => {
+      let houveCriacao = false;
+      try {
+        for (const mesItem of faltantes) {
+          const resposta = await fetch("/api/mensalidades/admin", {
+            method: "POST",
+            headers: await h(),
+            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem }),
+          });
+          const dados = await resposta.json();
+          if (!resposta.ok) throw new Error(dados.error || `Não foi possível preparar ${String(mesItem).padStart(2, "0")}/${ano}.`);
+          houveCriacao = true;
+        }
+        if (houveCriacao) await carregar();
+      } catch (erro) {
+        setErro(erro instanceof Error ? erro.message : "Não foi possível preparar as mensalidades automaticamente.");
+      } finally {
+        faltantes.forEach((mesItem) => competenciasEmCriacaoRef.current.delete(`${ano}-${String(mesItem).padStart(2, "0")}`));
+      }
+    })();
+  }, [ano, mesesSelecionados, lista, socios]);
+
   function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
     const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
     if (ordenados.length === 0) return; // Sempre manter pelo menos uma competência selecionada.
-
-    // A seleção de um associado deve sobreviver à alteração dos meses.
-    // Assim, marcar Alana e depois escolher janeiro até o mês atual mantém
-    // Alana como alvo e expande a seleção para cada competência escolhida.
-    const sociosJaSelecionados = [...new Set(
-      selGeracao
-        .map((chave) => chave.slice(chave.indexOf(":") + 1))
-        .filter(Boolean)
-    )];
-
     setMesesSelecionados(ordenados);
     setMes(mesAtivo && ordenados.includes(mesAtivo) ? mesAtivo : ordenados[0]);
     setSel([]);
-    setSelGeracao(
-      sociosJaSelecionados.flatMap((socioId) =>
-        ordenados.map((mesItem) => `${mesItem}:${socioId}`)
-      )
-    );
   }
 
   function alternarMesSelecionado(mesAlvo: number) {
@@ -596,16 +592,6 @@ export default function Page() {
       : [...mesesSelecionados, mesAlvo];
     if (selecionados.length === 0) return;
     atualizarMesesSelecionados(selecionados, mesesSelecionados.includes(mesAlvo) ? selecionados[0] : mesAlvo);
-  }
-
-  function competenciaPodeSerGerada(mesAlvo: number, anoAlvo = ano) {
-    const agora = new Date();
-    return new Date(anoAlvo, mesAlvo - 1, 1) <= new Date(agora.getFullYear(), agora.getMonth(), 1);
-  }
-
-  function chaveGeracao(item: M) {
-    const mesItem = Number(String(item.competencia || "").slice(5, 7));
-    return `${mesItem}:${item.socio_id}`;
   }
 
   // A tela usa exatamente a mesma regra da API de geração. Isso impede
@@ -963,7 +949,6 @@ const selecionadasBaixa = useMemo(
 
       setMsg(d.message || "Concluído.");
       setSel([]);
-      setSelGeracao([]);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
@@ -1002,228 +987,6 @@ const selecionadasBaixa = useMemo(
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Não foi possível estornar a baixa.");
     }
-  }
-
-  function alternarGeracaoSocio(chave: string) {
-    const separador = chave.indexOf(":");
-    const socioId = chave.slice(separador + 1);
-    if (separador < 0 || !socioId) return;
-
-    // O checkbox da linha seleciona o associado para todos os meses
-    // escolhidos no painel superior, não só para o mês daquela linha.
-    setSelGeracao((atual) => {
-      const jaSelecionado = atual.some(
-        (item) => item.slice(item.indexOf(":") + 1) === socioId
-      );
-      if (jaSelecionado) {
-        return atual.filter(
-          (item) => item.slice(item.indexOf(":") + 1) !== socioId
-        );
-      }
-      const outrasSelecoes = atual.filter(
-        (item) => item.slice(item.indexOf(":") + 1) !== socioId
-      );
-      return [
-        ...outrasSelecoes,
-        ...mesesSelecionados.map((mesItem) => `${mesItem}:${socioId}`),
-      ];
-    });
-  }
-
-  function idsSociosSelecionadosParaGeracao() {
-    return [...new Set(
-      selGeracao
-        .map((chave) => chave.slice(chave.indexOf(":") + 1))
-        .filter(Boolean)
-    )];
-  }
-
-  function selecionarTodosParaGeracao() {
-    const chaves = filtrada
-      .filter((item) => item.situacao === "nao_gerada")
-      .map(chaveGeracao);
-    setSelGeracao(chaves);
-  }
-
-  async function gerarSelecionados() {
-    if (selGeracao.length === 0) {
-      setErro("Selecione ao menos uma mensalidade ainda não gerada.");
-      return;
-    }
-
-    setErro("");
-    setMsg("");
-    setGerandoSelecionados(true);
-
-    try {
-      const porMes = new Map<number, Set<string>>();
-      selGeracao.forEach((chave) => {
-        const separador = chave.indexOf(":");
-        const mesItem = Number(chave.slice(0, separador));
-        const socioId = chave.slice(separador + 1);
-        if (!Number.isInteger(mesItem) || mesItem < 1 || mesItem > 12 || !socioId) return;
-        if (!competenciaPodeSerGerada(mesItem)) return;
-        if (!porMes.has(mesItem)) porMes.set(mesItem, new Set<string>());
-        porMes.get(mesItem)!.add(socioId);
-      });
-
-      if (porMes.size === 0) {
-        throw Error("As competências futuras não podem ser geradas. Selecione meses até a competência atual.");
-      }
-
-      const headers = await h();
-      const resultados: string[] = [];
-      const falhas: string[] = [];
-      let totalCriadas = 0;
-      for (const [mesItem, sociosDoMes] of [...porMes.entries()].sort((a, b) => a[0] - b[0])) {
-        try {
-          const r = await fetch("/api/mensalidades/admin", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem, socio_ids: [...sociosDoMes] }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw Error(d.error || "Erro desconhecido ao gerar esta competência.");
-
-          const criadas = Number(d.criadas || 0);
-          totalCriadas += criadas;
-          resultados.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${criadas} gerada(s)`);
-        } catch (e) {
-          falhas.push(`${String(mesItem).padStart(2, "0")}/${ano}: ${e instanceof Error ? e.message : "falha ao gerar"}`);
-        }
-      }
-
-      const mesesFuturosIgnorados = selGeracao.some((chave) => {
-        const mesItem = Number(chave.slice(0, chave.indexOf(":")));
-        return Number.isInteger(mesItem) && !competenciaPodeSerGerada(mesItem);
-      });
-      setSelGeracao([]);
-      await carregar();
-      setMsg(
-        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${totalCriadas} mensalidade(s). ${resultados.join(" • ")}${mesesFuturosIgnorados ? " • Competências futuras foram ignoradas." : ""}`
-      );
-      if (falhas.length > 0) {
-        setErro(`Não foi possível gerar todas as competências: ${falhas.join(" • ")}`);
-      }
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Não foi possível gerar as mensalidades selecionadas.");
-    } finally {
-      setGerandoSelecionados(false);
-    }
-  }
-
-  async function previsualizarGeracao() {
-    setErro("");
-    setMsg("");
-    setAbrindoPrevia(true);
-    setPrevias([]);
-
-    try {
-      const mesesGeraveis = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => competenciaPodeSerGerada(mesItem));
-      if (mesesGeraveis.length === 0) {
-        throw Error("Não é permitido gerar mensalidades de competências futuras. Selecione pelo menos um mês até a competência atual.");
-      }
-
-      const headers = await h();
-      const socioIdsAlvo = idsSociosSelecionadosParaGeracao();
-      const respostas = await Promise.all(mesesGeraveis.map(async (mesItem) => {
-        const r = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            acao: "previsualizar",
-            ano,
-            mes: mesItem,
-            ...(socioIdsAlvo.length > 0 ? { socio_ids: socioIdsAlvo } : {}),
-          }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Não foi possível gerar a prévia de ${String(mesItem).padStart(2, "0")}/${ano}.`);
-        return {
-          ...(d as PreviaGeracao),
-          ...(socioIdsAlvo.length > 0 ? { socio_ids: socioIdsAlvo } : {}),
-        } as PreviaGeracao;
-      }));
-
-      setPrevias(respostas.sort((a, b) => a.competencia.localeCompare(b.competencia)));
-      const mesesFuturos = mesesSelecionados.filter((mesItem) => !competenciaPodeSerGerada(mesItem));
-      if (mesesFuturos.length > 0) setMsg(`Prévia pronta. Meses futuros (${mesesFuturos.map((m) => nomesMeses[m - 1]).join(", ")}) podem ser visualizados, mas não serão gerados.`);
-    } catch (e) {
-      setAbrindoPrevia(false);
-      setPrevias([]);
-      setErro(e instanceof Error ? e.message : "Erro ao gerar prévia.");
-    }
-  }
-
-  async function confirmarGeracao() {
-    if (previas.length === 0) return;
-
-    setConfirmandoGeracao(true);
-    setErro("");
-    setMsg("");
-
-    try {
-      let criadasTotal = 0;
-      const resultados: string[] = [];
-      const falhas: string[] = [];
-      const headers = await h();
-
-      // Cada mês é processado isoladamente. Se uma competência falhar,
-      // continuamos as demais e informamos exatamente quais precisam de nova tentativa.
-      for (const item of previas) {
-        if (item.quantidade_nova <= 0) {
-          resultados.push(`${item.competencia.slice(0, 7)}: nenhuma nova`);
-          continue;
-        }
-
-        const [anoGeracao, mesGeracao] = item.competencia.slice(0, 7).split("-").map(Number);
-        try {
-          const r = await fetch("/api/mensalidades/admin", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              acao: "gerar",
-              ano: anoGeracao,
-              mes: mesGeracao,
-              ...(item.socio_ids && item.socio_ids.length > 0
-                ? { socio_ids: item.socio_ids }
-                : {}),
-            }),
-          });
-
-          const d = await r.json();
-          if (!r.ok) throw Error(d.error || "Erro desconhecido ao gerar esta competência.");
-
-          const criadas = Number(d.criadas || 0);
-          criadasTotal += criadas;
-          resultados.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${criadas} gerada(s)`);
-        } catch (e) {
-          falhas.push(`${String(mesGeracao).padStart(2, "0")}/${anoGeracao}: ${e instanceof Error ? e.message : "falha ao gerar"}`);
-        }
-      }
-
-      setAbrindoPrevia(false);
-      setPrevias([]);
-      setSel([]);
-      setSelGeracao([]);
-      await carregar();
-      setMsg(
-        `${falhas.length ? "Geração parcialmente concluída" : "Geração concluída"}: ${criadasTotal} mensalidade(s). ${resultados.join(" • ")}`
-      );
-      if (falhas.length > 0) {
-        setErro(`Algumas competências não foram geradas: ${falhas.join(" • ")}`);
-      }
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao gerar competências.");
-    } finally {
-      setConfirmandoGeracao(false);
-    }
-  }
-
-  function fecharPrevia() {
-    if (confirmandoGeracao) return;
-    setAbrindoPrevia(false);
-    setPrevias([]);
   }
 
   // Uma única fonte de verdade para o histórico anual.
@@ -1309,13 +1072,11 @@ const selecionadasBaixa = useMemo(
     });
   }
 
-  const sociosAlvoGeracao = idsSociosSelecionadosParaGeracao();
   const mesesAteAtual = ano < hoje.getFullYear()
     ? Array.from({ length: 12 }, (_, i) => i + 1)
     : ano === hoje.getFullYear()
       ? Array.from({ length: hoje.getMonth() + 1 }, (_, i) => i + 1)
       : [];
-  const mesesGeraveisSelecionados = mesesSelecionados.filter((mesItem) => competenciaPodeSerGerada(mesItem));
 
   return (
     <div className="min-h-screen w-full min-w-0 overflow-x-hidden bg-[#f8faf9] text-[#17382c]">
@@ -1376,8 +1137,7 @@ const selecionadasBaixa = useMemo(
                   onChange={(e) => {
                     setAno(Number(e.target.value));
                     setSel([]);
-                    setSelGeracao([]);
-                  }}
+                                }}
                   className="mt-2 w-full rounded-xl border p-3 font-bold"
                 >
                   {Array.from({ length: 7 }, (_, i) => hoje.getFullYear() - 2 + i).map((a) => (
@@ -1419,11 +1179,6 @@ const selecionadasBaixa = useMemo(
                   <button type="button" onClick={() => atualizarMesesSelecionados(Array.from({ length: 12 }, (_, i) => i + 1), mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Selecionar todos</button>
                   <button type="button" onClick={() => atualizarMesesSelecionados([mes], mes)} className="rounded-lg px-2 py-1 text-xs font-bold text-[#005a3c] hover:bg-[#eef7f2]">Manter somente {nomesMeses[mes - 1]}</button>
                 </div>
-                {selGeracao.length > 0 && (
-                  <p className="mt-2 text-xs font-semibold text-[#005a3c]">
-                    {sociosAlvoGeracao.length} associado(s) selecionado(s). Ao alterar os meses, a seleção é mantida para todas as competências escolhidas. O botão verde gera a prévia somente para esses associados.
-                  </p>
-                )}
               </div>
 
               <div className="min-w-[210px] rounded-xl bg-[#eef7f2] px-4 py-3 text-sm">
@@ -1582,8 +1337,7 @@ const selecionadasBaixa = useMemo(
                   type="button"
                   onClick={() => {
                     setSel([]);
-                    setSelGeracao([]);
-                    setAbrirConfirmacaoBaixa(false);
+                                  setAbrirConfirmacaoBaixa(false);
                   }}
                   className="ml-auto text-xs font-bold underline"
                 >
@@ -1602,23 +1356,17 @@ const selecionadasBaixa = useMemo(
                   const st = statusMensalidade(x, podeMarcarSemSaldo(x));
                   const acrescimos = Number(x.multa || 0) + Number(x.juros || 0);
                   const total = x.total_cobrado ?? Number(x.valor_base ?? x.valor) + Number(x.tarifa_pagamento || 0) + Number(x.multa || 0) + Number(x.juros || 0) - Number(x.desconto || 0);
-                  const marcado = x.situacao === "nao_gerada"
-                    ? selGeracao.includes(chaveGeracao(x))
-                    : x.situacao !== "pago" && sel.includes(x.id);
+                  const marcado = x.situacao !== "pago" && x.situacao !== "nao_gerada" && sel.includes(x.id);
                   return (
                     <article key={`mobile-${x.id}`} className="min-w-0 rounded-xl border border-[#d8e7df] bg-white p-3 shadow-sm">
                       <div className="flex min-w-0 items-start gap-3">
                         <input
                           type="checkbox"
                           className="mt-1 h-5 w-5 shrink-0 accent-[#005a3c]"
-                          disabled={x.situacao === "pago"}
+                          disabled={x.situacao === "pago" || x.situacao === "nao_gerada"}
                           checked={marcado}
                           aria-label={`Selecionar mensalidade de ${x.socio?.nome || "associado"}`}
                           onChange={() => {
-                            if (x.situacao === "nao_gerada") {
-                              alternarGeracaoSocio(chaveGeracao(x));
-                              return;
-                            }
                             if (x.situacao === "pago") return;
                             setSel((atual) => atual.includes(x.id) ? atual.filter((id) => id !== x.id) : [...atual, x.id]);
                           }}
@@ -1659,7 +1407,7 @@ const selecionadasBaixa = useMemo(
                       {x.situacao === "pago" && <button type="button" onClick={() => void estornarBaixa(x)} className="mt-3 w-full rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-700">↩️ Estornar baixa</button>}
                       {x.situacao === "nao_gerada" && (
                         <p className={`mt-3 text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
-                          {competenciaNaoGeradaAtrasada(x) ? "Competência vencida: cobrança em atraso." : "Preparando cobrança automaticamente."}
+                          {competenciaNaoGeradaAtrasada(x) ? "Preparando cobrança vencida automaticamente…" : "Preparando cobrança automaticamente…"}
                         </p>
                       )}
                     </article>
@@ -1706,19 +1454,9 @@ const selecionadasBaixa = useMemo(
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            disabled={x.situacao === "pago"}
-                            checked={
-                              x.situacao === "nao_gerada"
-                                ? selGeracao.includes(chaveGeracao(x))
-                                : x.situacao === "pago"
-                                  ? false
-                                  : sel.includes(x.id)
-                            }
+                            disabled={x.situacao === "pago" || x.situacao === "nao_gerada"}
+                            checked={x.situacao !== "pago" && x.situacao !== "nao_gerada" && sel.includes(x.id)}
                             onChange={() => {
-                              if (x.situacao === "nao_gerada") {
-                                alternarGeracaoSocio(chaveGeracao(x));
-                                return;
-                              }
 
                               if (x.situacao === "pago") return;
 
@@ -1809,7 +1547,7 @@ const selecionadasBaixa = useMemo(
                         <td className="sticky right-0 z-10 bg-white p-3 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">
                           {x.situacao === "nao_gerada" ? (
                             <span className={`text-xs font-semibold ${competenciaNaoGeradaAtrasada(x) ? "text-red-600" : "text-gray-400"}`}>
-                              {competenciaNaoGeradaAtrasada(x) ? "Vencida: cobrança em atraso" : "Preparando cobrança automaticamente"}
+                              {competenciaNaoGeradaAtrasada(x) ? "Preparando cobrança vencida…" : "Preparando cobrança…"}
                             </span>
                           ) : x.situacao === "pago" ? (
                             <button
@@ -2223,56 +1961,6 @@ const selecionadasBaixa = useMemo(
             }
           }}
         />
-      )}
-
-      {abrindoPrevia && previas.length > 0 && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-black text-[#005a3c]">Prévia da geração — {previas.length} competência(s)</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  {previas.some((p) => p.socio_ids && p.socio_ids.length > 0)
-                    ? (() => {
-                        const quantidade = previas.find((p) => p.socio_ids && p.socio_ids.length > 0)?.socio_ids?.length || 0;
-                        return `Prévia restrita a ${quantidade} ${quantidade === 1 ? "associado selecionado" : "associados selecionados"}. Confira todos os meses antes de gravar.`;
-                      })()
-                    : "Confira todos os meses antes de gravar. A prévia considera todos os associados elegíveis."}
-                  {" "}Nenhum lançamento foi criado ainda.
-                </p>
-              </div>
-              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-full p-2 hover:bg-gray-100 disabled:opacity-40"><X /></button>
-            </div>
-
-            <div className="mt-5 overflow-x-auto rounded-xl border">
-              <table className="w-full text-sm">
-                <thead className="bg-[#eef7f2]"><tr><th className="p-3 text-left">Competência</th><th className="p-3 text-right">Pagadores</th><th className="p-3 text-right">Novos</th><th className="p-3 text-right">Existentes</th><th className="p-3 text-right">Base</th><th className="p-3 text-right">Total cobrado</th></tr></thead>
-                <tbody className="divide-y">
-                  {previas.map((p) => (
-                    <tr key={p.competencia}>
-                      <td className="p-3 font-bold text-[#005a3c]">{p.competencia.slice(5, 7)}/{p.competencia.slice(0, 4)}</td>
-                      <td className="p-3 text-right">{p.total_cobraveis}</td>
-                      <td className="p-3 text-right font-black text-[#005a3c]">{p.quantidade_nova}</td>
-                      <td className="p-3 text-right">{p.ja_existentes}</td>
-                      <td className="p-3 text-right">{moeda(p.valor_base)}</td>
-                      <td className="p-3 text-right font-black">{moeda(p.total_cobrado)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50">
-                  <tr><td className="p-3 font-black">TOTAL</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.total_cobraveis,0)}</td><td className="p-3 text-right font-black text-[#005a3c]">{previas.reduce((s,p) => s+p.quantidade_nova,0)}</td><td className="p-3 text-right font-black">{previas.reduce((s,p) => s+p.ja_existentes,0)}</td><td className="p-3 text-right font-black">{moeda(previas.reduce((s,p) => s+p.valor_base,0))}</td><td className="p-3 text-right font-black text-[#005a3c]">{moeda(previas.reduce((s,p) => s+p.total_cobrado,0))}</td></tr>
-                </tfoot>
-              </table>
-            </div>
-
-            <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">Atenção: a geração será feita mês a mês. Se uma competência já tiver registros, eles não serão duplicados.</div>
-
-            <div className="mt-5 flex justify-end gap-3">
-              <button type="button" onClick={fecharPrevia} disabled={confirmandoGeracao} className="rounded-xl border px-5 py-3 font-bold disabled:opacity-40">Cancelar</button>
-              <button type="button" onClick={() => void confirmarGeracao()} disabled={confirmandoGeracao || previas.every((p) => p.quantidade_nova === 0)} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{confirmandoGeracao ? "Gerando..." : "✓ Confirmar geração dos meses"}</button>
-            </div>
-          </div>
-        </div>
       )}
 
       {abrirConfirmacaoBaixa && (
