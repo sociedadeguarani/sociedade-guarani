@@ -10,6 +10,85 @@ type SocioGrupoFamiliar = {
   responsavel_id: string | null;
 };
 
+type MensalidadeCarteirinha = {
+  socio_id: string | null;
+  competencia: string | null;
+  data_vencimento: string | null;
+  situacao: string | null;
+  valor: number | string | null;
+};
+
+type SocioCarteirinha = {
+  [campo: string]: unknown;
+  id: string;
+  matricula?: string | null;
+  nome?: string | null;
+  situacao?: string | null;
+  responsavel_id?: string | null;
+  possui_mensalidade?: boolean | null;
+  financeiro_status?: string;
+  dias_atraso?: number;
+  meses_atraso?: number;
+  meses_atencao?: number;
+  meses_bloqueio?: number;
+};
+
+type DependenteCarteirinha = {
+  [campo: string]: unknown;
+  id: string;
+  socio_id: string;
+  matricula?: string | null;
+  nome?: string | null;
+  cpf?: string | null;
+  data_nascimento?: string | null;
+  parentesco?: string | null;
+  telefone?: string | null;
+  whatsapp?: string | null;
+  email?: string | null;
+  ativo?: boolean | null;
+  foto_url?: string | null;
+  observacoes?: string | null;
+  migrado_para_socio_id?: string | null;
+  valor_mensalidade?: number | string | null;
+  dia_vencimento?: number | string | null;
+  tipo_pagamento?: string | null;
+  situacao_financeira?: string | null;
+  data_ultimo_pagamento?: string | null;
+  possui_mensalidade?: boolean | null;
+};
+
+type TemporadaCarteirinha = {
+  [campo: string]: unknown;
+  id: string;
+  tipo?: string | null;
+  modalidade?: string | null;
+  codigo?: string | null;
+  matricula?: string | null;
+  inicio?: string | null;
+  fim?: string | null;
+  situacao?: string | null;
+  responsavel_nome?: string | null;
+  responsavel_cpf?: string | null;
+  responsavel_telefone?: string | null;
+  responsavel_email?: string | null;
+  valor_total?: number | string | null;
+};
+
+type ParticipanteTemporadaCarteirinha = {
+  [campo: string]: unknown;
+  id: string;
+  temporada_id: string;
+  socio_id?: string | null;
+  papel?: string | null;
+  matricula?: string | null;
+  nome?: string | null;
+  cpf?: string | null;
+  telefone?: string | null;
+  parentesco?: string | null;
+  foto_url?: string | null;
+  exame_medico_validade?: string | null;
+};
+
 function isPago(situacao: unknown) {
   const status = String(situacao || "")
     .toLowerCase()
@@ -36,7 +115,7 @@ async function carregarPolitica(supabase: ReturnType<typeof getServiceClient>): 
   }
 }
 
-function statusPorMensalidades(mensalidades: any[], hoje: string) {
+function statusPorMensalidades(mensalidades: MensalidadeCarteirinha[], hoje: string) {
   const mapa = new Map<string, { competencias: Set<string>; dias: number; valor: number }>();
 
   for (const m of mensalidades) {
@@ -101,7 +180,7 @@ function dataHoje() {
   return dataHojeBrasil();
 }
 
-function temporadaValida(temporada: any) {
+function temporadaValida(temporada: TemporadaCarteirinha) {
   const hoje = dataHoje();
   const situacao = String(temporada?.situacao || "").toLowerCase();
   const inicio = String(temporada?.inicio || "").slice(0, 10);
@@ -141,7 +220,7 @@ export async function GET(request: Request) {
     if (podeVerFinanceiro) colunasBase.push("possui_mensalidade", "valor_mensalidade");
     const base = colunasBase.join(",");
 
-    let socios: any[] = [];
+    let socios: SocioCarteirinha[] = [];
 
     if (auth.usuario.perfil === "associado") {
       const { data: proprioRaw, error: proprioError } = await supabase
@@ -202,7 +281,7 @@ export async function GET(request: Request) {
       .filter(Boolean)
       .map(String);
 
-    const mensalidades: any[] = [];
+    const mensalidades: MensalidadeCarteirinha[] = [];
     const sociosComHistorico = new Set<string>();
 
     // Busca em lotes paralelos para reduzir a espera da tela. Mantém paginação
@@ -210,7 +289,7 @@ export async function GET(request: Request) {
     if (podeVerFinanceiro) {
       const lotes = emLotes(ids, 200);
       const resultados = await Promise.all(lotes.map(async (lote) => {
-        const registrosLote: any[] = [];
+        const registrosLote: MensalidadeCarteirinha[] = [];
         for (let offset = 0; ; offset += 1000) {
           const { data, error } = await supabase
             .from("mensalidades")
@@ -240,14 +319,14 @@ export async function GET(request: Request) {
     // Alguns cadastros antigos não têm responsavel_id ou mantêm possui_mensalidade=true
     // por legado; o cônjuge familiar deve mesmo assim herdar o financeiro do titular.
     const socioPorMatricula = new Map(
-      socios.map((s: any) => [String(s.matricula || "").trim().toUpperCase(), s])
+      socios.map((s) => [String(s.matricula || "").trim().toUpperCase(), s])
     );
-    const resultado = socios.map((s: any) => {
+    const resultado = socios.map((s) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito" };
       const matricula = String(s.matricula || "").trim().toUpperCase();
       const ehConjugeFamiliar = matricula.endsWith("B");
       const matriculaTitular = ehConjugeFamiliar ? `${matricula.slice(0, -1)}A` : "";
-      const titularPorMatricula: any = ehConjugeFamiliar ? socioPorMatricula.get(matriculaTitular) : null;
+      const titularPorMatricula = ehConjugeFamiliar ? socioPorMatricula.get(matriculaTitular) : null;
       const responsavelId = s.responsavel_id || titularPorMatricula?.id || null;
       // Sócios dependentes com mensalidade própria pagam por conta própria;
       // cônjuges familiares e dependentes sem cobrança própria herdam do responsável.
@@ -306,7 +385,7 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
-    const dependentes = (dependentesDb || []).map((d: any) => {
+    const dependentes = (dependentesDb || []).map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
       const status: { financeiro_status: string; dias_atraso?: number; meses_atraso?: number; meses_atencao?: number; meses_bloqueio?: number } = !podeVerFinanceiro
@@ -367,7 +446,7 @@ export async function GET(request: Request) {
     // Temporadas são independentes de `socios`: o responsável pode comprar
     // uma temporada sem possuir cadastro de sócio. A carteirinha da temporada
     // usa a matrícula TE e não cria/duplica registro em `socios`.
-    let temporadas: any[] = [];
+    let temporadas: Array<Record<string, unknown>> = [];
 
     if (auth.usuario.perfil !== "associado" && !modoDependentes) {
       const colunasTemporada = ["id", "tipo", "modalidade", "codigo", "matricula", "inicio", "fim", "situacao", "responsavel_nome", "responsavel_cpf", "responsavel_telefone", "responsavel_email"];
@@ -380,9 +459,9 @@ export async function GET(request: Request) {
 
       if (temporadasError) throw temporadasError;
 
-      const idsTemporadas = (temporadasDb || []).map((t: any) => String(t.id));
+      const idsTemporadas = (temporadasDb || []).map((t) => String(t.id));
 
-      const participantesDb: any[] = [];
+      const participantesDb: ParticipanteTemporadaCarteirinha[] = [];
       for (const lote of emLotes(idsTemporadas, 100)) {
         if (!lote.length) continue;
 
@@ -399,7 +478,7 @@ export async function GET(request: Request) {
         participantesDb.push(...(data || []));
       }
 
-      const participantesPorTemporada = new Map<string, any[]>();
+      const participantesPorTemporada = new Map<string, ParticipanteTemporadaCarteirinha[]>();
 
       for (const participante of participantesDb) {
         const key = String(participante.temporada_id);
@@ -410,7 +489,7 @@ export async function GET(request: Request) {
 
       temporadas = (temporadasDb || [])
         .filter(temporadaValida)
-        .map((t: any) => ({
+        .map((t) => ({
           id: String(t.id),
           tipo: t.tipo,
           modalidade: t.modalidade,
@@ -433,7 +512,7 @@ export async function GET(request: Request) {
       dependentes,
       temporadas,
       politicaInadimplencia,
-      statusResponsaveis: Object.fromEntries(resultado.map((s: any) => [String(s.id), s.financeiro_status || "restrito"])),
+      statusResponsaveis: Object.fromEntries(resultado.map((s) => [String(s.id), s.financeiro_status || "restrito"])),
       camposVisiveis: { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico },
     });
   } catch (error) {
