@@ -204,11 +204,14 @@ export default function AvisosPage(){
   async function confirmarReservaPix(reserva:ReservaPendente){
     const conta=contas.find(c=>String(c.id)===String(contaPagamento)) || contas.find(c=>`${c.nome} ${c.banco||""}`.toLowerCase().includes("sicredi")) || contas[0];
     if(!conta){ setErro("Cadastre uma conta bancária ativa antes de confirmar o PIX."); return; }
-    if(!reserva.comprovante_url){ setErro("Esta reserva não possui comprovante para conferência."); return; }
-    if(!confirm(`Confirma que o PIX de ${reserva.nome} foi realmente creditado na conta ${conta.nome}?\n\nO lançamento será criado no Financeiro.`)) return;
+    const semComprovante = !reserva.comprovante_url;
+    const mensagemConfirmacao = semComprovante
+      ? `A reserva de ${reserva.nome} não possui comprovante anexado.\n\nVocê conferiu diretamente o extrato e confirmou que o PIX foi creditado na conta ${conta.nome}?\n\nSomente confirme se o dinheiro realmente entrou. O sistema registrará que a confirmação foi feita sem comprovante e criará o lançamento no Financeiro.`
+      : `Confirma que o PIX de ${reserva.nome} foi realmente creditado na conta ${conta.nome}?\n\nConfira o crédito no banco antes de confirmar. O lançamento será criado no Financeiro.`;
+    if(!confirm(mensagemConfirmacao)) return;
     setProcessandoReserva(reserva.id); setErro("");
     try{
-      const r=await api("/api/reservas",{method:"PATCH",body:JSON.stringify({id:reserva.id,acao:"confirmar_pix",conta_bancaria_id:conta.id})});
+      const r=await api("/api/reservas",{method:"PATCH",body:JSON.stringify({id:reserva.id,acao:"confirmar_pix",conta_bancaria_id:conta.id,confirmado_sem_comprovante:semComprovante})});
       const j=await r.json().catch(()=>({}));
       if(!r.ok){setErro(j.error||"Não foi possível confirmar a reserva.");return;}
       setReservaSelecionada(null);
@@ -371,14 +374,14 @@ export default function AvisosPage(){
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Valor</p><p className="font-black text-[#005a3c]">R$ {Number(reservaSelecionada.valor||0).toFixed(2).replace(".",",")}</p></div>
             <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Pagamento</p><p className="font-black">PIX — pendente</p></div>
-            <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Comprovante</p><p className="font-black">{reservaSelecionada.comprovante_nome||"Anexado"}</p></div>
+            <div className="rounded-xl bg-[#f7faf8] p-3"><p className="text-xs text-gray-500">Comprovante</p><p className="font-black">{reservaSelecionada.comprovante_url?(reservaSelecionada.comprovante_nome||"Anexado"):"Não anexado"}</p></div>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             {reservaSelecionada.comprovante_url&&<a href={reservaSelecionada.comprovante_url} target="_blank" rel="noreferrer" className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-black text-[#005a3c]">Abrir comprovante</a>}
             <button disabled={processandoReserva===reservaSelecionada.id} onClick={()=>confirmarReservaPix(reservaSelecionada)} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white disabled:opacity-60">{processandoReserva===reservaSelecionada.id?"Processando...":"Confirmar PIX e lançar no Financeiro"}</button>
             <button disabled={processandoReserva===reservaSelecionada.id} onClick={()=>cancelarReservaPix(reservaSelecionada)} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white disabled:opacity-60">Cancelar reserva</button>
           </div>
-          <p className="mt-4 text-xs font-bold text-amber-700">Confira o crédito no banco antes de confirmar. O comprovante sozinho não cria lançamento financeiro.</p>
+          <p className="mt-4 text-xs font-bold text-amber-700">Confira o crédito diretamente no banco antes de confirmar. Se não houver comprovante, você poderá confirmar mesmo assim, declarando que verificou a entrada do PIX. O comprovante sozinho não cria lançamento financeiro.</p>
         </div>
       </div>}
 
