@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
+type LinhaMensalidadeAcesso = { id: string; valor: number | string | null; data_vencimento: string | null; competencia: string | null; situacao: string | null };
+type LinhaParcelaTemporada = { id: string; numero: number | null; descricao: string | null; valor: number | string | null; data_vencimento: string | null; situacao: string | null };
+type ParticipanteTemporadaAcesso = { id: string; temporada_id: string; papel: string | null; matricula: string | null; nome: string; cpf: string | null; telefone: string | null; parentesco: string | null; foto_url: string | null; exame_medico_validade: string | null };
+
 function mensagemErro(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   if (error && typeof error === "object" && "message" in error) {
@@ -52,22 +56,22 @@ export async function GET(request: Request) {
     const [sociosResult, dependentesResult, usuariosResult, temporadasResult, temporadaParticipantesResult] = await Promise.all([
       socioIds.length
         ? supabase.from("socios").select("id,nome,matricula,foto_url").in("id", socioIds)
-        : Promise.resolve({ data: [] as any[], error: null }),
+        : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       dependenteIds.length
         ? supabase.from("dependentes").select("id,nome").in("id", dependenteIds)
-        : Promise.resolve({ data: [] as any[], error: null }),
+        : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       usuarioIds.length
         ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds)
-        : Promise.resolve({ data: [] as any[], error: null }),
+        : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       temporadaIds.length
         ? supabase
             .from("temporadas")
             .select("id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome")
             .in("id", temporadaIds)
-        : Promise.resolve({ data: [] as any[], error: null }),
+        : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       temporadaParticipanteIds.length
         ? supabase.from("temporadas_participantes").select("id,nome,matricula,foto_url,papel,parentesco").in("id", temporadaParticipanteIds)
-        : Promise.resolve({ data: [] as any[], error: null }),
+        : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
     ]);
     if (sociosResult.error) throw sociosResult.error;
     if (dependentesResult.error) throw dependentesResult.error;
@@ -75,11 +79,11 @@ export async function GET(request: Request) {
     if (temporadasResult.error) throw temporadasResult.error;
     if (temporadaParticipantesResult.error) throw temporadaParticipantesResult.error;
 
-    const mapaSocios = new Map((sociosResult.data || []).map((s: any) => [s.id, s]));
-    const mapaDependentes = new Map((dependentesResult.data || []).map((d: any) => [d.id, d]));
-    const mapaUsuarios = new Map((usuariosResult.data || []).map((u: any) => [u.id, u]));
-    const mapaTemporadas = new Map((temporadasResult.data || []).map((t: any) => [t.id, t]));
-    const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: any) => [p.id, p]));
+    const mapaSocios = new Map((sociosResult.data || []).map((s: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null }) => [s.id, s]));
+    const mapaDependentes = new Map((dependentesResult.data || []).map((d: { id: string; nome?: string }) => [d.id, d]));
+    const mapaUsuarios = new Map((usuariosResult.data || []).map((u: { id: string; nome_exibicao?: string | null }) => [u.id, u]));
+    const mapaTemporadas = new Map((temporadasResult.data || []).map((t: { id: string; codigo?: string | null; matricula?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null }) => [t.id, t]));
+    const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: { id: string; nome?: string; matricula?: string | null; foto_url?: string | null; papel?: string | null; parentesco?: string | null }) => [p.id, p]));
 
     const resultado = lista.map((a) => ({
       ...a,
@@ -154,7 +158,7 @@ async function verificarMensalidadesAtrasadas(
 
   if (error) throw error;
 
-  const itens = (data || []).filter((m: any) =>
+  const itens = (data || []).filter((m: LinhaMensalidadeAcesso) =>
     !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
       String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     )
@@ -310,7 +314,7 @@ async function verificarParcelasTemporadaAtrasadas(
 
   if (error) throw error;
 
-  const pendentes = (data || []).filter((p: any) =>
+  const pendentes = (data || []).filter((p: LinhaParcelaTemporada) =>
     !["pago", "paid", "quitado", "recebido", "cancelado", "cancelada", "isento", "isenta"].includes(
       String(p.situacao || "").toLowerCase()
     )
@@ -319,7 +323,7 @@ async function verificarParcelasTemporadaAtrasadas(
   return {
     atrasado: pendentes.length > 0,
     quantidade: pendentes.length,
-    valorTotal: pendentes.reduce((total: number, p: any) => total + Number(p.valor || 0), 0),
+    valorTotal: pendentes.reduce((total: number, p: LinhaParcelaTemporada) => total + Number(p.valor || 0), 0),
     parcelas: pendentes,
   };
 }
@@ -471,7 +475,7 @@ export async function POST(request: Request) {
 
       // Descobre o participante. Se não existir participante cadastrado,
       // usamos o responsável da própria temporada como titular TE0001A.
-      let participante: any = null;
+      let participante: ParticipanteTemporadaAcesso | null = null;
 
       if (temporadaParticipanteId) {
         const { data, error } = await supabase
@@ -483,7 +487,7 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         if (error) throw error;
-        participante = data || null;
+        participante = (data as ParticipanteTemporadaAcesso | null) || null;
       }
 
       if (!participante && matricula) {
@@ -498,7 +502,7 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         if (error) throw error;
-        participante = data || null;
+        participante = (data as ParticipanteTemporadaAcesso | null) || null;
       }
 
       // Se o responsável ainda não recebeu matrícula na tabela de participantes,
@@ -516,7 +520,7 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         if (error) throw error;
-        participante = data || null;
+        participante = (data as ParticipanteTemporadaAcesso | null) || null;
       }
 
       const codigoTemporada = String(temporadaNormalizada.codigo || "").trim().toUpperCase();
