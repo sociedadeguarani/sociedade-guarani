@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Image from "next/image";
 import { Camera, CheckCircle2, Clock3, Search, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -110,7 +111,7 @@ export default function AcessosPage() {
 
       // BarcodeDetector é suportado nos navegadores modernos. O QR retorna a URL
       // /acessos/validar?id=... e a API também aceita diretamente essa URL.
-      const Detector = (window as any).BarcodeDetector;
+      const Detector = (window as unknown as { BarcodeDetector: new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
       const detector = new Detector({ formats: ["qr_code"] });
       const ler = async () => {
         if (!videoRef.current || !streamRef.current) return;
@@ -194,7 +195,7 @@ export default function AcessosPage() {
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div className="h-20 w-16 overflow-hidden rounded-xl bg-white">
-                    {resultado.socio.foto_url ? <img src={resultado.socio.foto_url} alt={resultado.socio.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
+                    {resultado.socio.foto_url ? <Image src={resultado.socio.foto_url} alt={resultado.socio.nome} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
                   </div>
                   <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.socio.situacao || "Não informada"}</b></p></div>
                 </div>
