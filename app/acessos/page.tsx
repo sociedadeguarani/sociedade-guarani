@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Camera, CheckCircle2, Clock3, Search, ShieldCheck, UserRound, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
@@ -12,6 +13,9 @@ const subscribeSemMudancas = () => () => {};
 const obterSuporteLeituraQr = () =>
   typeof window !== "undefined" && "BarcodeDetector" in window;
 const obterSuporteLeituraQrServidor = () => true;
+type ResultadoBarcode = { rawValue?: string };
+type DetectorCodigoBarras = { detect: (source: HTMLVideoElement) => Promise<ResultadoBarcode[]> };
+type JanelaComDetector = Window & { BarcodeDetector?: new (options: { formats: string[] }) => DetectorCodigoBarras };
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
@@ -38,6 +42,7 @@ type Resultado = {
 };
 
 export default function AcessosPage() {
+  const router = useRouter();
   const [matricula, setMatricula] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [erro, setErro] = useState("");
@@ -59,7 +64,7 @@ export default function AcessosPage() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        window.location.href = "/login?redirect=/acessos";
+        router.push("/login?redirect=/acessos");
         return;
       }
       const r = await fetch("/api/acessos", {
@@ -111,7 +116,8 @@ export default function AcessosPage() {
 
       // BarcodeDetector é suportado nos navegadores modernos. O QR retorna a URL
       // /acessos/validar?id=... e a API também aceita diretamente essa URL.
-      const Detector = (window as unknown as { BarcodeDetector: new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+      const Detector = (window as JanelaComDetector).BarcodeDetector;
+      if (!Detector) throw new Error("Este navegador não oferece suporte à leitura de QR Code.");
       const detector = new Detector({ formats: ["qr_code"] });
       const ler = async () => {
         if (!videoRef.current || !streamRef.current) return;
