@@ -565,11 +565,19 @@ export default function FinanceiroPage() {
   }, [movimentosFluxo, paginaMovimentos]);
 
   useEffect(() => {
-    setPaginaMovimentos(1);
+    // Redefine a paginação após a atualização dos filtros, fora da fase síncrona do efeito.
+    const temporizador = window.setTimeout(() => setPaginaMovimentos(1), 0);
+    return () => window.clearTimeout(temporizador);
   }, [fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
 
   useEffect(() => {
-    if (paginaMovimentos > totalPaginasMovimentos) setPaginaMovimentos(totalPaginasMovimentos);
+    if (paginaMovimentos <= totalPaginasMovimentos) return;
+    // Mantém a página dentro dos limites quando os filtros reduzem os resultados.
+    const temporizador = window.setTimeout(
+      () => setPaginaMovimentos(totalPaginasMovimentos),
+      0,
+    );
+    return () => window.clearTimeout(temporizador);
   }, [paginaMovimentos, totalPaginasMovimentos]);
 
   const entradasPeriodo = movimentosFluxo
