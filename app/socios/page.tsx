@@ -1064,15 +1064,38 @@ export default function Home() {
 
         if (resultado.error) throw resultado.error;
 
-        // Sincroniza o valor nas mensalidades ainda não pagas do associado.
-        // Registros pagos são preservados para manter o histórico financeiro.
-        const atualizacaoMensalidades = await supabase
-          .from("mensalidades")
-          .update({ valor: Number(form.valor_mensalidade || 0) })
-          .eq("socio_id", socioEditando.id)
-          .in("situacao", ["em_aberto", "em_atraso"]);
+        // Sincroniza os lançamentos ainda não pagos com o valor atual do cadastro.
+        // Atualiza a base e recalcula o total mantendo tarifas, multa, juros e desconto
+        // já registrados. Mensalidades pagas e canceladas ficam intactas.
+        if (form.possui_mensalidade) {
+          const valorAtualizado = Number(form.valor_mensalidade || 0);
+          const { data: lancamentosAbertos, error: erroConsultaMensalidades } = await supabase
+            .from("mensalidades")
+            .select("id, tarifa_pagamento, multa, juros, desconto")
+            .eq("socio_id", socioEditando.id)
+            .in("situacao", ["em_aberto", "em_atraso"]);
 
-        if (atualizacaoMensalidades.error) throw atualizacaoMensalidades.error;
+          if (erroConsultaMensalidades) throw erroConsultaMensalidades;
+
+          for (const lancamento of lancamentosAbertos || []) {
+            const tarifa = Number(lancamento.tarifa_pagamento || 0);
+            const multa = Number(lancamento.multa || 0);
+            const juros = Number(lancamento.juros || 0);
+            const desconto = Number(lancamento.desconto || 0);
+            const totalAtualizado = Math.max(0, valorAtualizado + tarifa + multa + juros - desconto);
+            const { error: erroAtualizacaoMensalidade } = await supabase
+              .from("mensalidades")
+              .update({
+                valor: valorAtualizado,
+                valor_base: valorAtualizado,
+                total_cobrado: totalAtualizado,
+              })
+              .eq("id", lancamento.id)
+              .in("situacao", ["em_aberto", "em_atraso"]);
+
+            if (erroAtualizacaoMensalidade) throw erroAtualizacaoMensalidade;
+          }
+        }
       } else {
         const resultado = await supabase
           .from("socios")
