@@ -218,10 +218,22 @@ export default function RelatorioReservasPage() {
     }
   }
 
+  // Recarrega automaticamente quando o período ou qualquer filtro mudar.
+  // O pequeno debounce evita várias consultas enquanto o usuário ajusta os filtros.
   useEffect(() => {
-    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
-    return () => window.clearTimeout(agendamento);
-  }, []);
+    let cancelado = false;
+    const agendamento = window.setTimeout(() => {
+      if (!cancelado) {
+        void carregar(visualizacao === "limpeza"
+          ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" }
+          : {});
+      }
+    }, 180);
+    return () => {
+      cancelado = true;
+      window.clearTimeout(agendamento);
+    };
+  }, [dataInicial, dataFinal, status, espacoId, pagamento, tipoPessoa, visualizacao]);
 
   // Mantém uma barra de rolagem horizontal sempre visível acima da grade,
   // sincronizada com a tabela para facilitar a navegação entre todos os espaços.
@@ -372,14 +384,12 @@ export default function RelatorioReservasPage() {
   }
 
   function abrirAgendaLimpeza() {
+    // A mudança de visualização dispara a atualização automática pelo efeito.
     setVisualizacao("limpeza");
-    // A agenda de limpeza inclui reservas confirmadas e pendentes, sem filtrar pagamento ou tipo de pessoa.
-    void carregar({ status: "todos", pagamento: "todos", tipoPessoa: "todos" });
   }
 
   function abrirRelatorioAdministrativo() {
     setVisualizacao("administrativo");
-    void carregar();
   }
 
   function obterEspacosGrade(): EspacoFiltro[] {
@@ -410,7 +420,7 @@ export default function RelatorioReservasPage() {
       const reservasDia = ativos.filter((r) => r.data_reserva === data);
       const celulas = espacosGrade.map((espaco) => {
         const itens = reservasDia.filter((r) => r.espaco_id && espaco.id ? r.espaco_id === espaco.id : r.espaco_nome === espaco.nome);
-        if (!itens.length) return `<td colspan="3" style="border:1px solid #cbd5e1;padding:6px;color:#94a3b8">Livre</td>`;
+        if (!itens.length) return [0, 1, 2].map((coluna) => `<td style="vertical-align:top;background:#ffffff;border:1px solid #cbd5e1;padding:6px;color:#94a3b8;min-width:${coluna === 0 ? 145 : coluna === 1 ? 130 : 120}px">${coluna === 0 ? "Livre" : ""}</td>`).join("");
         const nomes = itens.map((r) => `<div style="padding:2px 0"><b>${escapeHtml(r.responsavel_nome || "Responsável não informado")}</b><br/><span style="color:#64748b;font-size:9pt">${escapeHtml(horarioExibicao(r))} · ${escapeHtml(statusBR(r.status))}</span></div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
         const motivos = itens.map((r) => `<div style="padding:2px 0">${escapeHtml(r.motivo_locacao || "Não informado")}</div>`).join("<hr style='border:0;border-top:1px solid #e2e8f0'/>");
         const pagamentos = itens.map((r) => {
@@ -565,7 +575,7 @@ export default function RelatorioReservasPage() {
             <p className="print-apenas mt-2 hidden text-xs text-gray-600">Período: {dataBR(dataInicial)} a {dataBR(dataFinal)} · Emitido em {dataBR(hoje)}. A grade visual foi substituída no PDF pelo detalhamento para manter a leitura das colunas.</p>
           </div>
           <div className="nao-imprimir flex flex-wrap gap-2">
-            <button onClick={() => void carregar(visualizacao === "limpeza" ? { status: "todos", pagamento: "todos", tipoPessoa: "todos" } : {})} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Atualizar</button>
+            {carregando && <span role="status" className="inline-flex items-center px-3 text-sm font-semibold text-[#64748b]">Atualizando relatório…</span>}
             {visualizacao === "administrativo" && periodoRapido === "mes" && dataInicial.slice(0, 7) === dataFinal.slice(0, 7) && <button onClick={exportarExcelGrade} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-[#e8f3ee] px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Excel colorido</button>}<button onClick={exportarCsv} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cbd9d2] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] shadow-sm"><Download className="h-4 w-4" /> Exportar {visualizacao === "limpeza" ? "agenda CSV" : "CSV"}</button>
             <button onClick={imprimir} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white shadow-sm"><Printer className="h-4 w-4" /> Imprimir / PDF</button>
           </div>
