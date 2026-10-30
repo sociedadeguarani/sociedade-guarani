@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { CalendarDays, CheckCircle2, Search, ShieldAlert, UserRound } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
@@ -66,6 +68,7 @@ function hojeISO() {
 }
 
 export default function RelatorioAcessosPage() {
+  const router = useRouter();
   const [data, setData] = useState(hojeISO());
   const [acessos, setAcessos] = useState<Acesso[]>([]);
   const [busca, setBusca] = useState("");
@@ -85,7 +88,7 @@ export default function RelatorioAcessosPage() {
         setErro("");
 
         if (!session) {
-          window.location.href = "/login?redirect=/acessos/relatorio";
+          router.replace("/login?redirect=/acessos/relatorio");
           return;
         }
 
@@ -110,7 +113,7 @@ export default function RelatorioAcessosPage() {
     return () => {
       ativo = false;
     };
-  }, [data]);
+  }, [data, router]);
 
   const termo = busca.trim().toLowerCase();
   const filtrados = acessos.filter((a) => {
@@ -205,7 +208,7 @@ export default function RelatorioAcessosPage() {
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-100">
-                            {(a.socio?.foto_url || a.temporada_participante?.foto_url) ? <img src={(a.socio?.foto_url || a.temporada_participante?.foto_url) as string} alt={nomePessoaDoAcesso(a)} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
+                            {(a.socio?.foto_url || a.temporada_participante?.foto_url) ? <Image src={(a.socio?.foto_url || a.temporada_participante?.foto_url) as string} alt={nomePessoaDoAcesso(a)} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
                           </div>
                           <div>
                             <span className="font-semibold">{nomePessoaDoAcesso(a)}</span>
