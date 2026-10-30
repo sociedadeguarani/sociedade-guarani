@@ -232,6 +232,8 @@ export default function Page() {
   const [filtroSituacaoMensalidade, setFiltroSituacaoMensalidade] = useState("todas");
   const [cobrancasSelecionadas, setCobrancasSelecionadas] = useState<string[]>([]);
   const [lista, setLista] = useState<M[]>([]);
+  const [carregandoMensalidades, setCarregandoMensalidades] = useState(true);
+  const [preparandoMensalidadesAutomaticamente, setPreparandoMensalidadesAutomaticamente] = useState(false);
   const [socios, setSocios] = useState<Socio[]>([]);
   const [configs, setConfigs] = useState<C[]>([]);
   const [tarifas, setTarifas] = useState<T[]>([]);
@@ -488,6 +490,7 @@ export default function Page() {
   }
 
   async function carregar() {
+    setCarregandoMensalidades(true);
     try {
       setErro("");
       const mesesConsulta: number[] = [...new Set<number>(mesesSelecionados)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
@@ -528,6 +531,8 @@ export default function Page() {
       setContas(contasData || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
+    } finally {
+      setCarregandoMensalidades(false);
     }
   }
 
@@ -555,6 +560,7 @@ export default function Page() {
     if (!faltantes.length) return;
 
     faltantes.forEach((mesItem) => competenciasEmCriacaoRef.current.add(`${ano}-${String(mesItem).padStart(2, "0")}`));
+    setPreparandoMensalidadesAutomaticamente(true);
 
     void (async () => {
       let houveCriacao = false;
@@ -574,6 +580,7 @@ export default function Page() {
         setErro(erro instanceof Error ? erro.message : "Não foi possível preparar as mensalidades automaticamente.");
       } finally {
         faltantes.forEach((mesItem) => competenciasEmCriacaoRef.current.delete(`${ano}-${String(mesItem).padStart(2, "0")}`));
+        setPreparandoMensalidadesAutomaticamente(false);
       }
     })();
   }, [ano, mesesSelecionados, lista, socios]);
@@ -737,6 +744,10 @@ export default function Page() {
   );
 
   const linhasExibicao = useMemo<M[]>(() => {
+    // Não mostrar estados virtuais "Não gerada" enquanto os dados reais
+    // estão carregando ou a API está criando as cobranças automaticamente.
+    if (carregandoMensalidades || preparandoMensalidadesAutomaticamente) return [];
+
     const existentes = new Map<string, M>();
     mensalidadesElegiveisParaExibicao.forEach((item) => {
       const mesItem = Number(String(item.competencia || "").slice(5, 7));
@@ -779,7 +790,7 @@ export default function Page() {
     }
 
     return linhas.map((item) => ({ ...item, situacao: situacaoVisual(item) }));
-  }, [mensalidadesElegiveisParaExibicao, sociosElegiveis, ano, mesesSelecionados]);
+  }, [mensalidadesElegiveisParaExibicao, sociosElegiveis, ano, mesesSelecionados, carregandoMensalidades, preparandoMensalidadesAutomaticamente]);
 
   const tiposSocioDisponiveis = useMemo<string[]>(() => {
     const tipos = sociosElegiveis
@@ -1349,7 +1360,7 @@ const selecionadasBaixa = useMemo(
             <div className="mt-4 grid gap-3 md:hidden">
               {filtrada.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-6 text-center text-sm text-gray-500">
-                  Nenhum associado encontrado com os filtros atuais.
+                  {carregandoMensalidades || preparandoMensalidadesAutomaticamente ? "Carregando e preparando as mensalidades automaticamente..." : "Nenhum associado encontrado com os filtros atuais."}
                 </div>
               ) : (
                 filtrada.map((x) => {
