@@ -26,6 +26,31 @@ function normalizarTexto(valor: unknown) {
     .trim();
 }
 
+
+/**
+ * Associado dependente com cobrança individual usa o valor próprio do cadastro.
+ * A configuração geral por tipo_socio não deve sobrescrever esse valor.
+ */
+function usaValorIndividual(socio: any) {
+  const categoria = normalizarTexto(socio?.categoria || "");
+  return (
+    categoria.includes("individual") &&
+    categoria.includes("com mensalidade") &&
+    Number.isFinite(Number(socio?.valor_mensalidade)) &&
+    socio?.valor_mensalidade !== null &&
+    socio?.valor_mensalidade !== undefined
+  );
+}
+
+function valorMensalidadeEfetivo(socio: any, configuracao: any) {
+  if (usaValorIndividual(socio)) {
+    return Number(socio.valor_mensalidade || 0);
+  }
+  return configuracao?.valor !== undefined
+    ? Number(configuracao.valor || 0)
+    : Number(socio?.valor_mensalidade || 0);
+}
+
 /**
  * O cadastro pode guardar o banco (Banrisul/Sicredi/BB) ou a descrição
  * completa da forma de pagamento, mas mensalidades.tipo_pagamento aceita
@@ -508,10 +533,7 @@ export async function POST(request: Request) {
             competencia
           );
 
-          const valor =
-            config?.valor !== undefined
-              ? Number(config.valor || 0)
-              : Number(s.valor_mensalidade || 0);
+          const valor = valorMensalidadeEfetivo(s, config);
 
           const dia = config?.dia_vencimento
             ? Number(config.dia_vencimento)
@@ -693,6 +715,47 @@ export async function POST(request: Request) {
         (existentes || []).map((x: any) => String(x.socio_id))
       );
 
+      // Corrige lançamentos já existentes de dependentes com cobrança individual,
+      // mas somente quando ainda estão em aberto/atraso. Pagamentos, isenções e
+      // demais estados históricos ficam intocados.
+      const sociosIndividuais = (socios || []).filter(usaValorIndividual);
+      if (sociosIndividuais.length > 0) {
+        const mapaIndividual = new Map<string, any>(
+          sociosIndividuais.map((s: any) => [String(s.id), s])
+        );
+        const { data: lancamentosAbertos, error: erroAbertos } = await db
+          .from("mensalidades")
+          .select("id,socio_id,situacao,valor,valor_base,tarifa_pagamento,multa,juros,desconto,total_cobrado")
+          .eq("competencia", competencia)
+          .in("situacao", ["em_aberto", "em_atraso"]);
+        if (erroAbertos) throw erroAbertos;
+
+        for (const lancamento of lancamentosAbertos || []) {
+          const socioIndividual = mapaIndividual.get(String(lancamento.socio_id));
+          if (!socioIndividual) continue;
+          const valorCorreto = Number(Number(socioIndividual.valor_mensalidade || 0).toFixed(2));
+          const valorAtual = Number(lancamento.valor_base ?? lancamento.valor ?? 0);
+          if (Math.abs(valorAtual - valorCorreto) < 0.005) continue;
+
+          const tarifa = Number(lancamento.tarifa_pagamento || 0);
+          const multa = Number(lancamento.multa || 0);
+          const juros = Number(lancamento.juros || 0);
+          const desconto = Number(lancamento.desconto || 0);
+          const total = Math.max(0, valorCorreto + tarifa + multa + juros - desconto);
+
+          const { error: erroAtualizacao } = await db
+            .from("mensalidades")
+            .update({
+              valor: valorCorreto,
+              valor_base: valorCorreto,
+              total_cobrado: Number(total.toFixed(2)),
+            })
+            .eq("id", lancamento.id)
+            .in("situacao", ["em_aberto", "em_atraso"]);
+          if (erroAtualizacao) throw erroAtualizacao;
+        }
+      }
+
       /*
        * A lista "cobraveis" acima já representa os pagadores desta
        * competência. O gerador apenas cria o lançamento financeiro;
@@ -707,10 +770,7 @@ export async function POST(request: Request) {
             competencia
           );
 
-          const valor =
-            config?.valor !== undefined
-              ? Number(config.valor || 0)
-              : Number(s.valor_mensalidade || 0);
+          const valor = valorMensalidadeEfetivo(s, config);
 
           const dia = config?.dia_vencimento
             ? Number(config.dia_vencimento)
