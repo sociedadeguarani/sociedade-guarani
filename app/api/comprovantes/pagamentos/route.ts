@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server";
 import { exigirAdministrador, usuarioAutenticado } from "@/lib/guaraniAuth";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
 const BUCKET = "comprovantes-financeiro";
 const TIPOS = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
-type RegistroGenerico = Record<string, any>;
+type PessoaAssociada = { id?: string; nome?: string | null; matricula?: string | null } | null;
+type RegistroGenerico = {
+  id: string;
+  socio_id?: string | null;
+  dependente_id?: string | null;
+  situacao?: string | null;
+  status?: string | null;
+  comprovante_status?: string | null;
+  comprovante_enviado_em?: string | null;
+  socios?: PessoaAssociada | PessoaAssociada[];
+  espacos?: { id?: string; nome?: string | null } | { id?: string; nome?: string | null }[] | null;
+  [campo: string]: unknown;
+};
 
-async function prepararBucket(db: any) {
+async function prepararBucket(db: SupabaseClient) {
   const bucketAtual = await db.storage.getBucket(BUCKET);
   if (!bucketAtual.error) return;
 
@@ -24,7 +37,7 @@ async function prepararBucket(db: any) {
 }
 
 async function notificar(
-  db: any,
+  db: SupabaseClient,
   titulo: string,
   mensagem: string,
   tipo: string,
@@ -140,7 +153,7 @@ export async function POST(request: Request) {
 
     if (origemIds) {
       try {
-        const parsed = JSON.parse(origemIds);
+        const parsed: unknown = JSON.parse(origemIds);
         if (Array.isArray(parsed)) {
           ids = parsed.map((value: unknown) => String(value).trim()).filter(Boolean);
         }
@@ -189,7 +202,7 @@ export async function POST(request: Request) {
       );
     }
 
-    for (const registro of registros as RegistroGenerico[]) {
+    for (const registro of (registros || []) as RegistroGenerico[]) {
       if (tipo === "mensalidade" && registro.socio_id !== auth.usuario.socio_id) {
         return NextResponse.json(
           { error: "Você não pode alterar uma destas mensalidades." },
