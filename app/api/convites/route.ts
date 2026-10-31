@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { exigirAdministrador } from "@/lib/guaraniAuth";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 const BUCKET = "comprovantes-financeiro";
 const TIPOS = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 const dataHoje = () => new Date().toISOString().slice(0, 10);
 
-async function garantirBucket(db: any) {
+async function garantirBucket(db: SupabaseClient) {
   const atual = await db.storage.getBucket(BUCKET);
   if (!atual.error) return;
   const cr = await db.storage.createBucket(BUCKET, { public: true, fileSizeLimit: "8MB", allowedMimeTypes: TIPOS });
