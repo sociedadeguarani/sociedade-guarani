@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
     const carregarTodosMovimentos = async () => {
       const tamanhoLote = 1000;
-      const todos: any[] = [];
+      const todos = [];
       for (let inicio = 0; ; inicio += tamanhoLote) {
         let consulta = supabase
           .from("movimentacoes_financeiras")
@@ -66,8 +66,8 @@ export async function GET(request: Request) {
     ));
     const idsMovimentosTemporada = movimentosTemporada.map((movimento) => String(movimento.id));
 
-    let parcelasPorId: any[] = [];
-    let parcelasPorMovimento: any[] = [];
+    let parcelasPorId: { id: string; numero: number | null; temporada_id: string | null; movimentacao_id: string | null }[] = [];
+    let parcelasPorMovimento: { id: string; numero: number | null; temporada_id: string | null; movimentacao_id: string | null }[] = [];
     if (idsParcelasTemporada.length) {
       const resultadoParcelasId = await supabase
         .from("temporadas_parcelas")
