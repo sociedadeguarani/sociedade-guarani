@@ -1134,8 +1134,24 @@ const selecionadasBaixa = useMemo(
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
               <p className="font-extrabold">Conflito de classificação de dependentes</p>
               <p className="mt-1">
-                {dependentesComConflitoMensalidade.length} dependente(s) estão marcados com mensalidade no cadastro, mas a categoria não indica cobrança própria. Eles foram excluídos da geração automática. Se já houver lançamentos financeiros anteriores, eles permanecem visíveis para conferência do histórico.
+                {dependentesComConflitoMensalidade.length} dependente(s) estão marcados com mensalidade no cadastro, mas a regra atual não reconhece a categoria como cobrança própria. Confira os cadastros abaixo; eles foram excluídos da geração automática. Lançamentos financeiros anteriores permanecem visíveis para conferência do histórico.
               </p>
+              <ul className="mt-3 space-y-2">
+                {dependentesComConflitoMensalidade.map((dependente) => (
+                  <li key={dependente.id} className="rounded-lg border border-amber-300 bg-white/80 p-3">
+                    <p className="font-bold">{dependente.nome || "Nome não informado"}</p>
+                    <p className="mt-1 text-xs">
+                      Matrícula: <strong>{dependente.matricula || "sem matrícula"}</strong>
+                      {" · "}Categoria: <strong>{dependente.categoria || "não informada"}</strong>
+                    </p>
+                    <p className="text-xs">
+                      Tipo de sócio: <strong>{dependente.tipo_socio || "não informado"}</strong>
+                      {" · "}Possui mensalidade: <strong>{dependente.possui_mensalidade ? "Sim" : "Não"}</strong>
+                    </p>
+                    <p className="break-all text-[11px] text-amber-800">ID: {dependente.id}</p>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
