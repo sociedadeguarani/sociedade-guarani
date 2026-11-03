@@ -392,6 +392,10 @@ export default function Page() {
       setErro("Selecione pelo menos uma mensalidade gerada e ainda não paga.");
       return;
     }
+    if (!contaRecebimentoSelecionada) {
+      setErro("Selecione a conta bancária de recebimento antes de dar baixa nos meses selecionados.");
+      return;
+    }
     const competencias = registros.map((item) => String(item.competencia || "").slice(5, 7) + "/" + String(item.competencia || "").slice(0, 4));
     if (!window.confirm(`Confirmar o pagamento de ${registros.length} mensalidade(s) de ${socioSelecionado.socio?.nome || "este associado"}?\n\nCompetências: ${competencias.join(", ")}\n\nA baixa será registrada no Financeiro.`)) return;
 
@@ -406,7 +410,7 @@ export default function Page() {
           acao: "baixar",
           ids: registros.map((item) => item.id),
           data_pagamento: new Date().toISOString().slice(0, 10),
-          ...(contaRecebimentoSelecionada ? { conta_recebimento_id: contaRecebimentoSelecionada } : {}),
+          conta_recebimento_id: contaRecebimentoSelecionada,
         }),
       });
       const d = await r.json();
@@ -1825,11 +1829,28 @@ const selecionadasBaixa = useMemo(
                     })}
                   </div>
                   {mesesHistoricoSelecionadosBaixa.length > 0 && (
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label htmlFor="conta-baixa-multiplos-meses" className="mb-1 block text-xs font-black text-[#005a3c]">Conta bancária de recebimento</label>
+                        <select
+                          id="conta-baixa-multiplos-meses"
+                          value={contaRecebimentoSelecionada}
+                          onChange={(e) => setContaRecebimentoSelecionada(e.target.value)}
+                          disabled={processandoBaixaHistorico}
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold"
+                        >
+                          <option value="">Selecione a conta bancária...</option>
+                          {contas.map((conta) => (
+                            <option key={conta.id} value={conta.id}>{conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}</option>
+                          ))}
+                        </select>
+                      </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-gray-600">{mesesHistoricoSelecionadosBaixa.length} mês(es) selecionado(s). A baixa usa a data de pagamento de hoje.</p>
                       <button type="button" disabled={processandoBaixaHistorico} onClick={() => void baixarMesesDoHistorico()} className="rounded-xl bg-[#005a3c] px-4 py-2 text-sm font-black text-white disabled:opacity-50">
                         {processandoBaixaHistorico ? "Processando..." : `💰 Dar baixa em ${mesesHistoricoSelecionadosBaixa.length} mês(es)`}
                       </button>
+                    </div>
                     </div>
                   )}
                 </div>
