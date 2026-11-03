@@ -407,9 +407,11 @@ export default function CarteirinhasPage(): JSX.Element {
       });
     });
 
-    dependentes.filter((d) => d.ativo !== false && String(d.situacao || "").toLowerCase() !== "inativo").forEach((d) => {
+    dependentes.filter((d) => d.ativo !== false && String(d.situacao || "").trim().toLowerCase() !== "inativo").forEach((d) => {
       const socioVinculado = sociosPorId.get(String(d.socio_id));
       const titular = socioVinculado ? obterTitular(socioVinculado) : null;
+      if (socioVinculado && String(socioVinculado.situacao || "").trim().toLowerCase() === "inativo") return;
+      if (titular && String(titular.situacao || "").trim().toLowerCase() === "inativo") return;
       cartoes.push({
         key: `dependente-${d.id}`, id: String(d.id), tipo: "dependente", nome: d.nome,
         matricula: String(d.matricula || "—"), cpf: formatarCpf(d.cpf), categoria: "Dependente",
@@ -445,6 +447,11 @@ export default function CarteirinhasPage(): JSX.Element {
       || a.ordemFamilia.localeCompare(b.ordemFamilia, "pt-BR")
       || (a.nome === a.ordemFamilia ? -1 : b.nome === b.ordemFamilia ? 1 : a.nome.localeCompare(b.nome, "pt-BR")));
   }, [socios, dependentes, temporadas]);
+
+  const chavesCartoesImprimiveis = useMemo(
+    () => new Set(cartoesParaImpressao.map((cartao) => cartao.key)),
+    [cartoesParaImpressao],
+  );
 
   const cartoesSelecionadosParaImpressao = useMemo(
     () => cartoesParaImpressao.filter((cartao) => cartoesSelecionados.includes(cartao.key)),
@@ -723,23 +730,7 @@ ${qrSvg}
               <button type="button" onClick={imprimirCarteirinhasSelecionadas} disabled={!cartoesSelecionadosParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><Printer className="h-4 w-4" /> {loteImpressaoMontado ? "Preparando..." : `Imprimir selecionadas (${cartoesSelecionadosParaImpressao.length})`}</button>
               <button type="button" onClick={() => setIndiceAberto((aberto) => !aberto)} className="inline-flex items-center gap-2 rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"><Search className="h-4 w-4" /> {indiceAberto ? "Ocultar índice" : "Lista alfabética"}</button>
             </div>
-            <div className="print-hide mt-3 rounded-2xl border border-[#d8e9df] bg-white p-3">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-black text-[#005a3c]">Selecionar carteirinhas para impressão</div>
-                <div className="text-xs font-semibold text-gray-500">{cartoesSelecionadosParaImpressao.length} selecionada(s) de {cartoesParaImpressao.length} ativas</div>
-              </div>
-              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
-                {cartoesParaImpressao.map((cartao) => (
-                  <label key={cartao.key} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-[#f4faf7] ${cartoesSelecionados.includes(cartao.key) ? "border-[#83b99d] bg-[#edf7f1]" : "border-gray-100 bg-white"}`}>
-                    <input type="checkbox" checked={cartoesSelecionados.includes(cartao.key)} onChange={() => alternarSelecaoCartao(cartao.key)} disabled={loteImpressaoMontado} className="h-4 w-4 accent-[#005a3c]" />
-                    <span className="min-w-0 flex-1"><span className="block truncate font-bold text-gray-800">{cartao.nome}</span><span className="block truncate text-xs text-gray-500">{cartao.matricula} · {cartao.categoria}{cartao.tipo === "dependente" ? ` · ${cartao.titular}` : ""}</span></span>
-                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-800">ATIVA</span>
-                  </label>
-                ))}
-                {!cartoesParaImpressao.length && <p className="py-4 text-center text-sm text-gray-500">Nenhuma carteirinha ativa disponível.</p>}
-              </div>
-              <p className="mt-2 text-[11px] text-gray-500">Carteirinhas inativas ou bloqueadas não aparecem nesta seleção e não entram na impressão em lote.</p>
-            </div>
+            <span className="self-center text-xs font-semibold text-gray-500">{cartoesSelecionadosParaImpressao.length} carteirinha(s) marcada(s)</span>
           </div>}
 
           {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
@@ -764,12 +755,24 @@ ${qrSvg}
               </div>
               <div className="mt-3 text-xs font-semibold text-gray-500">{lista.length} associado(s) encontrado(s)</div>
               <div className="mt-4 space-y-2">
-                {lista.map((s) => (
-                  <button key={s.id} onClick={() => { setSelecionado(s); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
-                    <b>{s.nome}</b>
-                    <div className="text-xs text-gray-500">Matrícula: {s.matricula || "—"} · {visual(s.tipo_socio).nome}</div>
-                  </button>
-                ))}
+                {lista.map((s) => {
+                  const chaveCartao = `socio-${s.id}`;
+                  const socioAtivo = chavesCartoesImprimiveis.has(chaveCartao);
+                  return (
+                    <div key={s.id} className={`flex items-stretch gap-2 rounded-xl border p-2 ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "border-transparent bg-white"}`}>
+                      <button type="button" onClick={() => { setSelecionado(s); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
+                        <b>{s.nome}</b>
+                        <div className="text-xs text-gray-500">Matrícula: {s.matricula || "—"} · {visual(s.tipo_socio).nome}</div>
+                        {!socioAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
+                      </button>
+                      {socioAtivo && (
+                        <label title={`Selecionar carteirinha de ${s.nome}`} className="flex shrink-0 cursor-pointer items-center justify-center rounded-lg px-3 hover:bg-[#edf7f1]">
+                          <input type="checkbox" aria-label={`Selecionar carteirinha de ${s.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" />
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {temporadasLista.length > 0 && (
                   <div className="pt-4">
@@ -794,13 +797,20 @@ ${qrSvg}
                           {temporadaSelecionada?.id === t.id && (t.participantes || []).length > 0 && (
                             <div className="mt-3 space-y-2 border-t border-orange-200 pt-3">
                               <div className="text-[10px] font-black uppercase tracking-wide text-orange-800">Carteirinhas individuais</div>
-                              {t.participantes!.map((p) => (
-                                <button key={p.id} onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className={`flex w-full items-center gap-3 rounded-lg border bg-white p-2 text-left ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "hover:border-orange-300"}`}>
-                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
-                                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
-                                  <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : p.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : p.status_carteirinha === "ativa" ? "ATIVA" : "INATIVA"}</span>
-                                </button>
-                              ))}
+                              {t.participantes!.map((p) => {
+                                const chaveCartao = `temporada-${p.id}`;
+                                const participanteAtivo = chavesCartoesImprimiveis.has(chaveCartao);
+                                return (
+                                  <div key={p.id} className={`flex items-center gap-2 rounded-lg border bg-white p-2 ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "border-gray-100"}`}>
+                                    <button type="button" onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                      <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                                      <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
+                                      <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : participanteAtivo ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : participanteAtivo ? "ATIVA" : "INATIVA"}</span>
+                                    </button>
+                                    {participanteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-2" title={`Selecionar carteirinha de ${p.nome || "participante"}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${p.nome || "participante"}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -819,20 +829,33 @@ ${qrSvg}
                       Selecionado: <b>{selecionado.nome}</b>. Abaixo aparecem cônjuge, filhos e demais integrantes vinculados à mesma família.
                     </div>
                     <div className="mt-2 space-y-2">
-                      {familiaSelecionada.map((membro) => (
-                        <button key={membro.id} onClick={() => { setSelecionado(membro); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
-                          <b>{membro.nome}</b>
-                          <div className="text-xs text-gray-500">
-                            Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}
+                      {familiaSelecionada.map((membro) => {
+                        const chaveCartao = `socio-${membro.id}`;
+                        return (
+                          <div key={membro.id} className="flex items-stretch gap-2 rounded-xl border bg-white p-2">
+                            <button type="button" onClick={() => { setSelecionado(membro); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
+                              <b>{membro.nome}</b>
+                              <div className="text-xs text-gray-500">Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}</div>
+                            </button>
+                            <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${membro.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${membro.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>
                           </div>
-                        </button>
-                      ))}
-                      {dependentesFamiliaSelecionada.map((d) => (
-                        <button key={`dep-${d.id}`} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
-                          <b>{d.nome}</b>
-                          <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
-                        </button>
-                      ))}
+                        );
+                      })}
+                      {dependentesFamiliaSelecionada.map((d) => {
+                        const chaveCartao = `dependente-${d.id}`;
+                        const titular = socios.find((s) => String(s.id) === String(d.socio_id));
+                        const dependenteAtivo = chavesCartoesImprimiveis.has(chaveCartao) && (!titular || String(titular.situacao || "").trim().toLowerCase() !== "inativo");
+                        return (
+                          <div key={`dep-${d.id}`} className="flex items-stretch gap-2 rounded-xl border bg-white p-2">
+                            <button type="button" onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
+                              <b>{d.nome}</b>
+                              <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
+                              {!dependenteAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
+                            </button>
+                            {dependenteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${d.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${d.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -841,12 +864,21 @@ ${qrSvg}
                   <div className="pt-3">
                     <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-400">Dependentes da família</div>
                     <div className="space-y-2">
-                      {dependentesLista.map((d) => (
-                        <button key={d.id} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${dependenteSelecionado?.id === d.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
-                          <b>{d.nome}</b>
-                          <div className="text-xs text-gray-500">Dependente · {d.parentesco || "Família"} · Titular: {d.titular_nome || "—"}</div>
-                        </button>
-                      ))}
+                      {dependentesLista.map((d) => {
+                        const chaveCartao = `dependente-${d.id}`;
+                        const titular = socios.find((s) => String(s.id) === String(d.socio_id));
+                        const dependenteAtivo = chavesCartoesImprimiveis.has(chaveCartao) && (!titular || String(titular.situacao || "").trim().toLowerCase() !== "inativo");
+                        return (
+                          <div key={d.id} className={`flex items-stretch gap-2 rounded-xl border p-2 ${dependenteSelecionado?.id === d.id ? "border-[#005a3c] bg-[#e8f3ee]" : "border-gray-100 bg-white"}`}>
+                            <button type="button" onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
+                              <b>{d.nome}</b>
+                              <div className="text-xs text-gray-500">Dependente · {d.parentesco || "Família"} · Titular: {d.titular_nome || "—"}</div>
+                              {!dependenteAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
+                            </button>
+                            {dependenteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${d.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${d.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
