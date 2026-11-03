@@ -527,6 +527,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
     }
 
+    const temporadaParticipanteId = String(body.temporada_participante_id || "").trim();
+    if (temporadaParticipanteId) {
+      const { data: participante, error: erroParticipante } = await db
+        .from("temporadas_participantes")
+        .select("id,nome,matricula,temporada_id,temporadas:temporada_id(id,situacao,inicio,fim,codigo)")
+        .eq("id", temporadaParticipanteId)
+        .maybeSingle();
+      if (erroParticipante) throw erroParticipante;
+      const temporada = participante?.temporadas as Record<string, unknown> | null;
+      if (!participante || !temporada || String(temporada.situacao || "").toLowerCase() !== "ativa" || !temporada.codigo || String(temporada.inicio || "").slice(0, 10) > data || String(temporada.fim || "").slice(0, 10) < data) {
+        return NextResponse.json({ error: "O participante não possui uma Temporada ativa e válida para a data da reserva." }, { status: 400 });
+      }
+    }
+
     const espacoId = await resolverEspacoId(db, espacoInformado, espacoNome);
     const { inicio, fim } = dividirHorario(horario);
     const conflito = await verificarConflitoReserva(db, { espacoId, data, inicio, fim });
@@ -539,6 +553,7 @@ export async function POST(request: Request) {
       espaco_id: espacoId,
       socio_id: body.socio_id || null,
       dependente_id: body.dependente_id || null,
+      temporada_participante_id: temporadaParticipanteId || null,
       responsavel_nome: nome,
       motivo_locacao: motivoLocacao,
       data_reserva: data,
