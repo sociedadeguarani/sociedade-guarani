@@ -138,6 +138,7 @@ export default function ImprimirCarteirinhasPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [categoriaSelecionada, setCategoriaSelecionada] = useState("__todos__");
+  const [busca, setBusca] = useState("");
   const [modo, setModo] = useState<"cartoes" | "lista">("cartoes");
   const [preparandoImpressao, setPreparandoImpressao] = useState(false);
   const [selecionadasIds, setSelecionadasIds] = useState<string[]>([]);
@@ -219,12 +220,26 @@ export default function ImprimirCarteirinhasPage() {
     return Array.from(new Set(tipos)).sort((a, b) => a.localeCompare(b, "pt-BR"));
   }, [socios, familias]);
 
-  const familiasFiltradas = useMemo(() => categoriaSelecionada === "__todos__"
-    ? familias
-    : familias.filter((familia) =>
-        [familia.titular, ...familia.membrosSocios].some((socio) => rotuloCategoria(socio) === categoriaSelecionada)
-        || (familia.dependentes.length > 0 && rotuloDependente(familia.titular) === categoriaSelecionada)
-      ), [familias, categoriaSelecionada]);
+  const familiasFiltradas = useMemo(() => {
+    const termo = normalizar(busca);
+    return familias.filter((familia) => {
+      const passaCategoria = categoriaSelecionada === "__todos__"
+        || [familia.titular, ...familia.membrosSocios].some((socio) => rotuloCategoria(socio) === categoriaSelecionada)
+        || (familia.dependentes.length > 0 && rotuloDependente(familia.titular) === categoriaSelecionada);
+      if (!passaCategoria) return false;
+      if (!termo) return true;
+
+      const pessoasFamilia = [
+        familia.titular,
+        ...familia.membrosSocios,
+        ...familia.dependentes,
+      ];
+      return pessoasFamilia.some((pessoa) =>
+        normalizar(pessoa.nome).includes(termo)
+        || normalizar(pessoa.matricula).includes(termo)
+      );
+    });
+  }, [familias, categoriaSelecionada, busca]);
 
   const pessoas = useMemo<PessoaCarteira[]>(() => {
     const baseUrl = origem;
@@ -527,6 +542,20 @@ export default function ImprimirCarteirinhasPage() {
                       Selecionar todas
                     </label>
                   </div>
+                  <div className="mt-3">
+                    <label htmlFor="buscar-carteirinha" className="mb-1.5 block text-xs font-bold text-[#005a3c]">Buscar associado</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="buscar-carteirinha"
+                        type="search"
+                        value={busca}
+                        onChange={(e) => setBusca(e.target.value)}
+                        placeholder="Digite o nome ou a matrícula..."
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/15"
+                      />
+                      {busca && <button type="button" onClick={() => setBusca("")} className="shrink-0 rounded-lg border px-3 py-2 text-xs font-bold text-gray-600">Limpar busca</button>}
+                    </div>
+                  </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-gray-600">{pessoasSelecionadas.length} de {pessoas.length} selecionada(s)</span>
                     <button type="button" onClick={() => imprimir("cartoes")} disabled={!pessoasSelecionadas.length || preparandoImpressao} className="inline-flex items-center gap-2 rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-black text-white hover:bg-[#00442f] disabled:cursor-not-allowed disabled:opacity-50"><Printer className="h-4 w-4" /> Imprimir selecionadas</button>
@@ -534,7 +563,9 @@ export default function ImprimirCarteirinhasPage() {
                     <button type="button" onClick={() => imprimir("lista")} disabled={!familiasFiltradas.length || preparandoImpressao} className="inline-flex items-center gap-2 rounded-lg border border-[#005a3c] px-4 py-2 text-sm font-black text-[#005a3c] hover:bg-[#f1f7f4] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="h-4 w-4" /> Imprimir lista</button>
                   </div>
                   <div className="mt-3 max-h-[520px] divide-y overflow-y-auto rounded-lg border bg-white">
-                    {pessoas.map((pessoa) => (
+                    {!pessoas.length ? (
+                      <div className="px-4 py-8 text-center text-sm text-gray-500">Nenhum associado encontrado para essa busca.</div>
+                    ) : pessoas.map((pessoa) => (
                       <div key={pessoa.id} className="flex flex-wrap items-center gap-3 px-3 py-3 sm:flex-nowrap">
                         <input type="checkbox" aria-label={`Selecionar carteirinha de ${pessoa.nome}`} checked={selecionadasIds.includes(pessoa.id)} onChange={() => alternarSelecaoPessoa(pessoa.id)} disabled={preparandoImpressao} className="h-4 w-4 shrink-0 accent-[#005a3c]" />
                         <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-gray-100">
@@ -554,7 +585,6 @@ export default function ImprimirCarteirinhasPage() {
                         </div>
                       </div>
                     ))}
-                    {!pessoas.length && <div className="p-4 text-sm text-gray-500">Nenhuma carteirinha ativa encontrada para este tipo.</div>}
                   </div>
                 </div>
                 {feedback && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{feedback}</p>}
