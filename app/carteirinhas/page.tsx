@@ -20,7 +20,6 @@ type Dependente = {
   matricula?: number | string | null;
   foto_url?: string | null;
   situacao?: string | null;
-  exame_medico_validade?: string | null;
   financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado" | "restrito";
   dias_atraso?: number;
   meses_atraso?: number;
@@ -123,41 +122,6 @@ function formatarCpf(valor: string | null | undefined) {
   return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
-type CartaoLote = {
-  key: string;
-  id: string;
-  tipo: "socio" | "dependente" | "temporada";
-  nome: string;
-  matricula: string;
-  cpf: string;
-  categoria: string;
-  parentesco: string;
-  titular: string;
-  fotoUrl: string | null;
-  qrValue: string;
-  cor: string;
-  textoCor: string;
-  situacao: string;
-  validade: string | null;
-  exame: string | null;
-  ordemFamilia: string;
-};
-
-function sobrenomeDe(nome: string) {
-  const partes = String(nome || "").trim().split(/\s+/).filter(Boolean);
-  return partes.length > 1 ? partes[partes.length - 1] : (partes[0] || "#");
-}
-
-function escaparXml(valor: unknown) {
-  return String(valor ?? "").replace(/[&<>\"']/g, (char) => {
-    if (char === "&") return "&amp;";
-    if (char === "<") return "&lt;";
-    if (char === ">") return "&gt;";
-    if (char === "\"") return "&quot;";
-    return "&apos;";
-  });
-}
-
 export default function CarteirinhasPage(): JSX.Element {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
@@ -173,9 +137,6 @@ export default function CarteirinhasPage(): JSX.Element {
   const [camposVisiveis, setCamposVisiveis] = useState({ financeiro: true, exameMedico: true });
   const [digitalAberta, setDigitalAberta] = useState(false);
   const [modoQr, setModoQr] = useState(false);
-  const [indiceAberto, setIndiceAberto] = useState(false);
-  const [loteImpressaoMontado, setLoteImpressaoMontado] = useState(false);
-  const [cartoesSelecionados, setCartoesSelecionados] = useState<string[]>([]);
 
   useEffect(() => {
     let ativo = true;
@@ -322,175 +283,6 @@ export default function CarteirinhasPage(): JSX.Element {
     });
   }, [temporadas, buscaNormalizada]);
 
-  const indiceFamilias = useMemo(() => {
-    const sociosPorId = new Map(socios.map((s) => [String(s.id), s]));
-    const familias = new Map<string, { titular: Socio; socios: Socio[]; dependentes: Dependente[] }>();
-
-    const obterTitular = (socio: Socio) => {
-      let atual = socio;
-      const vistos = new Set<string>([String(socio.id)]);
-      while (atual.responsavel_id) {
-        const responsavel = sociosPorId.get(String(atual.responsavel_id));
-        if (!responsavel || vistos.has(String(responsavel.id))) break;
-        atual = responsavel;
-        vistos.add(String(atual.id));
-      }
-      return atual;
-    };
-
-    for (const socio of socios) {
-      const titular = obterTitular(socio);
-      const chave = String(titular.id);
-      if (!familias.has(chave)) familias.set(chave, { titular, socios: [], dependentes: [] });
-      familias.get(chave)!.socios.push(socio);
-    }
-
-    for (const dependente of dependentes) {
-      const socioVinculado = sociosPorId.get(String(dependente.socio_id));
-      const titular = socioVinculado ? obterTitular(socioVinculado) : null;
-      const chave = titular ? String(titular.id) : `dep-${dependente.socio_id || dependente.id}`;
-      if (!familias.has(chave)) {
-        if (!titular) continue;
-        familias.set(chave, { titular, socios: [titular], dependentes: [] });
-      }
-      familias.get(chave)!.dependentes.push(dependente);
-    }
-
-    return Array.from(familias.values())
-      .map((familia) => ({
-        ...familia,
-        socios: familia.socios.filter((s) => String(s.id) !== String(familia.titular.id)).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
-        dependentes: familia.dependentes.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
-      }))
-      .sort((a, b) => sobrenomeDe(a.titular.nome).localeCompare(sobrenomeDe(b.titular.nome), "pt-BR") || a.titular.nome.localeCompare(b.titular.nome, "pt-BR"));
-  }, [socios, dependentes]);
-
-  const indicePorSobrenome = useMemo(() => {
-    const grupos = new Map<string, { letra: string; sobrenome: string; familias: typeof indiceFamilias }>();
-    for (const familia of indiceFamilias) {
-      const sobrenome = sobrenomeDe(familia.titular.nome).toLocaleUpperCase("pt-BR");
-      const chave = sobrenome.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const letra = chave.charAt(0) || "#";
-      if (!grupos.has(chave)) grupos.set(chave, { letra, sobrenome, familias: [] });
-      grupos.get(chave)!.familias.push(familia);
-    }
-    return Array.from(grupos.values()).sort((a, b) => a.sobrenome.localeCompare(b.sobrenome, "pt-BR"));
-  }, [indiceFamilias]);
-
-  const cartoesParaImpressao = useMemo<CartaoLote[]>(() => {
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    const cartoes: CartaoLote[] = [];
-    const sociosPorId = new Map(socios.map((s) => [String(s.id), s]));
-    const obterTitular = (socio: Socio) => {
-      let atual = socio;
-      const vistos = new Set<string>([String(socio.id)]);
-      while (atual.responsavel_id) {
-        const pai = sociosPorId.get(String(atual.responsavel_id));
-        if (!pai || vistos.has(String(pai.id))) break;
-        atual = pai;
-        vistos.add(String(atual.id));
-      }
-      return atual;
-    };
-
-    socios.filter((s) => String(s.situacao || "").toLowerCase() !== "inativo").forEach((s) => {
-      const titular = obterTitular(s);
-      const cor = visual(s.tipo_socio);
-      cartoes.push({
-        key: `socio-${s.id}`, id: String(s.id), tipo: "socio", nome: s.nome,
-        matricula: String(s.matricula || "—"), cpf: formatarCpf(s.cpf), categoria: cor.nome,
-        parentesco: s.parentesco || "", titular: titular.nome, fotoUrl: s.foto_url,
-        qrValue: `${baseUrl}/acessos/validar?id=${encodeURIComponent(s.id)}`,
-        cor: cor.bg, textoCor: cor.text, situacao: s.situacao || "Ativo",
-        validade: s.fim_temporada, exame: s.exame_medico_validade || null,
-        ordemFamilia: titular.nome,
-      });
-    });
-
-    dependentes.filter((d) => d.ativo !== false && String(d.situacao || "").trim().toLowerCase() !== "inativo").forEach((d) => {
-      const socioVinculado = sociosPorId.get(String(d.socio_id));
-      const titular = socioVinculado ? obterTitular(socioVinculado) : null;
-      if (socioVinculado && String(socioVinculado.situacao || "").trim().toLowerCase() === "inativo") return;
-      if (titular && String(titular.situacao || "").trim().toLowerCase() === "inativo") return;
-      cartoes.push({
-        key: `dependente-${d.id}`, id: String(d.id), tipo: "dependente", nome: d.nome,
-        matricula: String(d.matricula || "—"), cpf: formatarCpf(d.cpf), categoria: "Dependente",
-        parentesco: d.parentesco || "Família", titular: titular?.nome || d.titular_nome || "—",
-        fotoUrl: d.foto_url || null,
-        qrValue: `${baseUrl}/acessos/validar?id=${encodeURIComponent(d.id)}`,
-        cor: "#005a3c", textoCor: "#ffffff", situacao: d.situacao || "Vinculado ao titular",
-        validade: null, exame: d.exame_medico_validade || null,
-        ordemFamilia: titular?.nome || d.titular_nome || d.nome,
-      });
-    });
-
-    temporadas.forEach((temporada) => (temporada.participantes || []).forEach((p) => {
-      const statusEfetivo = String(p.status_carteirinha || temporada.status_carteirinha || "").toLowerCase();
-      // Só participantes explicitamente ativos entram na seleção e impressão em lote.
-      if (statusEfetivo !== "ativa") return;
-      const cor = visual("temporada");
-      cartoes.push({
-        key: `temporada-${p.id}`, id: String(p.id), tipo: "temporada",
-        nome: p.nome || temporada.responsavel_nome || "Participante",
-        matricula: String(p.matricula || temporada.matricula || "—"),
-        cpf: formatarCpf(p.cpf || temporada.responsavel_cpf), categoria: p.parentesco || (p.papel === "titular" ? "Titular da temporada" : "Temporada"),
-        parentesco: p.parentesco || "", titular: temporada.responsavel_nome || "—", fotoUrl: p.foto_url || null,
-        qrValue: `guarani:temporada-participante:${p.id}`,
-        cor: cor.bg, textoCor: cor.text,
-        situacao: p.status_carteirinha_texto || temporada.status_carteirinha_texto || temporada.situacao || "Não informada",
-        validade: temporada.fim || null, exame: p.exame_medico_validade || null,
-        ordemFamilia: temporada.responsavel_nome || p.nome || "",
-      });
-    }));
-
-    return cartoes.sort((a, b) => sobrenomeDe(a.ordemFamilia).localeCompare(sobrenomeDe(b.ordemFamilia), "pt-BR")
-      || a.ordemFamilia.localeCompare(b.ordemFamilia, "pt-BR")
-      || (a.nome === a.ordemFamilia ? -1 : b.nome === b.ordemFamilia ? 1 : a.nome.localeCompare(b.nome, "pt-BR")));
-  }, [socios, dependentes, temporadas]);
-
-  const chavesCartoesImprimiveis = useMemo(
-    () => new Set(cartoesParaImpressao.map((cartao) => cartao.key)),
-    [cartoesParaImpressao],
-  );
-
-  const cartoesSelecionadosParaImpressao = useMemo(
-    () => cartoesParaImpressao.filter((cartao) => cartoesSelecionados.includes(cartao.key)),
-    [cartoesParaImpressao, cartoesSelecionados],
-  );
-
-  useEffect(() => {
-    const chavesAtivas = new Set(cartoesParaImpressao.map((cartao) => cartao.key));
-    setCartoesSelecionados((atuais) => atuais.filter((chave) => chavesAtivas.has(chave)));
-  }, [cartoesParaImpressao]);
-
-  useEffect(() => {
-    if (!loteImpressaoMontado) return;
-    let cancelado = false;
-    const frame = window.requestAnimationFrame(() => {
-      void (async () => {
-        const raiz = document.querySelector<HTMLElement>(".print-lote-root");
-        if (!raiz) {
-          setErro("Não foi possível preparar as carteirinhas para impressão.");
-          setLoteImpressaoMontado(false);
-          return;
-        }
-        const imagens = Array.from(raiz.querySelectorAll("img"));
-        await Promise.all(imagens.map((img) => img.decode().catch(() => undefined)));
-        if (cancelado) return;
-        const limpar = prepararImpressao("print-all-mode");
-        window.print();
-        window.setTimeout(() => {
-          limpar();
-          setLoteImpressaoMontado(false);
-        }, 1500);
-      })();
-    });
-    return () => {
-      cancelado = true;
-      window.cancelAnimationFrame(frame);
-    };
-  }, [loteImpressaoMontado, cartoesSelecionadosParaImpressao.length]);
-
   const contadores = useMemo(() => {
     let ativos = 0;
     let inativos = 0;
@@ -539,180 +331,99 @@ export default function CarteirinhasPage(): JSX.Element {
   const exame = statusExame(selecionado?.exame_medico_validade);
   const exameTemporada = statusExame(participanteTemporadaAtual?.exame_medico_validade);
 
-  function prepararImpressao(modo: "print-all-mode" | "print-index-mode") {
-    const classes = ["print-all-mode", "print-index-mode"];
-    classes.forEach((classe) => document.body.classList.remove(classe));
-    document.body.classList.add(modo);
-    const limpar = () => {
-      document.body.classList.remove(modo);
-      window.removeEventListener("afterprint", limpar);
-    };
-    window.addEventListener("afterprint", limpar);
-    return limpar;
-  }
-
-  function selecionarTodasAtivas() {
-    setCartoesSelecionados(cartoesParaImpressao.map((cartao) => cartao.key));
-  }
-
-  function alternarSelecaoCartao(chave: string) {
-    setCartoesSelecionados((atuais) => atuais.includes(chave)
-      ? atuais.filter((item) => item !== chave)
-      : [...atuais, chave]);
-  }
-
-  function limparSelecaoCartoes() {
-    setCartoesSelecionados([]);
-  }
-
-  function imprimirCarteirinhasSelecionadas() {
-    if (!cartoesSelecionadosParaImpressao.length || loteImpressaoMontado) return;
-    setErro("");
-    setLoteImpressaoMontado(true);
-  }
-
-  function imprimirIndice() {
-    const limpar = prepararImpressao("print-index-mode");
-    window.print();
-    window.setTimeout(limpar, 1500);
-  }
-
-  async function baixarCarteirinhaDigital() {
-    let cartao: { nome: string; matricula: string; cpf: string; categoria: string; situacao: string; validade: string | null; fotoUrl: string | null; cor: string; textoCor: string; chaveQr: string } | null = null;
-    if (temporadaSelecionada && participanteTemporadaAtual) {
-      cartao = { nome: participanteTemporadaAtual.nome || temporadaSelecionada.responsavel_nome || "Participante", matricula: String(participanteTemporadaAtual.matricula || temporadaSelecionada.matricula || "—"), cpf: formatarCpf(participanteTemporadaAtual.cpf || temporadaSelecionada.responsavel_cpf), categoria: participanteTemporadaAtual.parentesco || "Temporada", situacao: participanteTemporadaAtual.status_carteirinha_texto || statusTemporadaTexto, validade: temporadaSelecionada.fim || null, fotoUrl: participanteTemporadaAtual.foto_url || null, cor: "#e87511", textoCor: "#ffffff", chaveQr: "temporada-atual" };
-    } else if (dependenteSelecionado) {
-      cartao = { nome: dependenteSelecionado.nome, matricula: String(dependenteSelecionado.matricula || "—"), cpf: formatarCpf(dependenteSelecionado.cpf), categoria: `Dependente · ${dependenteSelecionado.parentesco || "Família"}`, situacao: dependenteSelecionado.situacao || "Vinculado ao titular", validade: null, fotoUrl: dependenteSelecionado.foto_url || null, cor: "#005a3c", textoCor: "#ffffff", chaveQr: `dependente-atual-${dependenteSelecionado.id}` };
-    } else if (selecionado) {
-      cartao = { nome: selecionado.nome, matricula: String(selecionado.matricula || "—"), cpf: formatarCpf(selecionado.cpf), categoria: visual(selecionado.tipo_socio).nome, situacao: selecionado.situacao || "Não informada", validade: selecionado.fim_temporada, fotoUrl: selecionado.foto_url || null, cor: visual(selecionado.tipo_socio).bg, textoCor: visual(selecionado.tipo_socio).text, chaveQr: `socio-atual-${selecionado.id}` };
-    }
-    if (!cartao) return;
-
-    const qrElemento = document.querySelector<SVGSVGElement>(`svg[data-carteirinha-qr="${cartao.chaveQr}"]`);
-    if (!qrElemento) {
-      setErro("Não foi possível localizar o QR Code desta carteirinha para exportar.");
-      return;
-    }
-
-    const imagemComoDataUri = async (origem: string) => {
-      if (!origem) return "";
-      try {
-        const resposta = await fetch(origem, { mode: "cors", credentials: "omit" });
-        if (!resposta.ok) return origem;
-        const blob = await resposta.blob();
-        if (!blob.type.startsWith("image/")) return origem;
-        return await new Promise<string>((resolve, reject) => {
-          const leitor = new FileReader();
-          leitor.onload = () => resolve(String(leitor.result || origem));
-          leitor.onerror = () => reject(new Error("Falha ao carregar imagem"));
-          leitor.readAsDataURL(blob);
-        });
-      } catch {
-        // Se o servidor de fotos não liberar CORS, conserva o endereço público.
-        return origem;
-      }
-    };
-    const fotoHref = await imagemComoDataUri(cartao.fotoUrl || "");
-    const logoOrigem = `${window.location.origin}/logo-guarani.png`;
-    const logoHref = await imagemComoDataUri(logoOrigem);
-
-    const qrSvg = qrElemento.outerHTML
-      .replace(/class="[^"]*"/g, "")
-      .replace(/data-carteirinha-qr="[^"]*"/g, "")
-      .replace(/style="[^"]*"/g, "")
-      .replace(/width="[^"]*"/, 'x="680" width="150"')
-      .replace(/height="[^"]*"/, 'y="145" height="150"');
-    const cor = escaparXml(cartao.cor);
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="85.6mm" height="53.98mm" viewBox="0 0 856 540">
-<rect x="4" y="4" width="848" height="532" rx="34" fill="#ffffff" stroke="${cor}" stroke-width="9"/>
-<path d="M20 20h816v92H20z" rx="20" fill="${cor}"/>
-<image x="35" y="28" width="70" height="70" href="${escaparXml(logoHref)}" xlink:href="${escaparXml(logoHref)}" preserveAspectRatio="xMidYMid meet"/>
-<text x="125" y="55" fill="${escaparXml(cartao.textoCor)}" font-family="Arial,sans-serif" font-size="20" font-weight="700">SOCIEDADE RECREATIVA GUARANI</text>
-<text x="125" y="87" fill="${escaparXml(cartao.textoCor)}" font-family="Arial,sans-serif" font-size="27" font-weight="800">CARTEIRA DIGITAL</text>
-<rect x="30" y="135" width="145" height="185" rx="16" fill="#eef2f0"/>
-${fotoHref ? `<image x="30" y="135" width="145" height="185" href="${escaparXml(fotoHref)}" xlink:href="${escaparXml(fotoHref)}" preserveAspectRatio="xMidYMid slice"/>` : `<text x="102" y="235" text-anchor="middle" font-size="58">👤</text>`}
-<text x="195" y="166" fill="#17382c" font-family="Arial,sans-serif" font-size="29" font-weight="800">${escaparXml(cartao.nome.slice(0, 30))}</text>
-<text x="195" y="211" fill="#4b5563" font-family="Arial,sans-serif" font-size="21">Matrícula: ${escaparXml(cartao.matricula)}</text>
-<text x="195" y="250" fill="#4b5563" font-family="Arial,sans-serif" font-size="19">CPF: ${escaparXml(cartao.cpf)}</text>
-<rect x="195" y="273" width="240" height="38" rx="18" fill="${cor}"/>
-<text x="315" y="299" text-anchor="middle" fill="${escaparXml(cartao.textoCor)}" font-family="Arial,sans-serif" font-size="18" font-weight="700">${escaparXml(cartao.categoria.slice(0, 25))}</text>
-<text x="30" y="380" fill="#6b7280" font-family="Arial,sans-serif" font-size="16">SITUAÇÃO</text>
-<text x="30" y="410" fill="#17382c" font-family="Arial,sans-serif" font-size="20" font-weight="700">${escaparXml(cartao.situacao.slice(0, 35))}</text>
-<text x="30" y="455" fill="#6b7280" font-family="Arial,sans-serif" font-size="16">VALIDADE</text>
-<text x="30" y="485" fill="#17382c" font-family="Arial,sans-serif" font-size="19">${escaparXml(cartao.validade ? formatarData(cartao.validade) : "Conforme cadastro")}</text>
-${qrSvg}
-<text x="755" y="330" text-anchor="middle" fill="#4b5563" font-family="Arial,sans-serif" font-size="14">QR DE ACESSO</text>
-</svg>`;
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `carteirinha-${cartao.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}.svg`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function imprimirCarteirinha() {
-    if (!selecionado && !temporadaSelecionada && !dependenteSelecionado) return;
-    document.body.classList.remove("print-all-mode", "print-index-mode");
-    window.print();
-  }
-
   return (
     <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
       <style jsx global>{`
         @media print {
-          @page { size: A4 portrait; margin: 8mm; }
-          html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+          @page {
+            size: auto;
+            margin: 0;
+          }
 
-          body.print-all-mode *, body.print-index-mode * { visibility: hidden !important; }
-          body.print-all-mode .print-lote-root,
-          body.print-all-mode .print-lote-root *,
-          body.print-index-mode .print-index-root,
-          body.print-index-mode .print-index-root * { visibility: visible !important; }
-          .print-lote-root, .print-index-root { display: none !important; }
-          body.print-all-mode .print-lote-root { display: block !important; position: absolute !important; left: 0 !important; top: 0 !important; width: 194mm !important; }
-          body.print-index-mode .print-index-root { display: block !important; position: absolute !important; left: 0 !important; top: 0 !important; width: 194mm !important; padding: 0 !important; color: #111 !important; background: #fff !important; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
 
-          body:not(.print-all-mode):not(.print-index-mode) * { visibility: hidden !important; }
-          body:not(.print-all-mode):not(.print-index-mode) .print-carteirinha,
-          body:not(.print-all-mode):not(.print-index-mode) .print-carteirinha * { visibility: visible !important; }
-          body:not(.print-all-mode):not(.print-index-mode) .print-carteirinha { position: absolute !important; left: 50% !important; top: 12mm !important; transform: translateX(-50%) !important; width: 85.60mm !important; height: 53.98mm !important; margin: 0 !important; border-width: 0.6mm !important; border-radius: 4mm !important; box-shadow: none !important; overflow: hidden !important; page-break-inside: avoid !important; font-size: 7px !important; }
-          .print-carteirinha .card-top { padding: 3mm !important; }
-          .print-carteirinha .card-logo { width: 8mm !important; height: 8mm !important; }
-          .print-carteirinha .card-title { font-size: 7px !important; }
-          .print-carteirinha .card-subtitle { margin-top: 0.5mm !important; font-size: 5px !important; }
-          .print-carteirinha .card-body { padding: 3mm !important; }
-          .print-carteirinha > .p-6 { padding: 3mm !important; }
-          .print-carteirinha .card-photo { width: 16mm !important; height: 20mm !important; }
-          .print-carteirinha .card-name { font-size: 9px !important; }
-          .print-carteirinha .card-info { font-size: 5.5px !important; }
-          .print-carteirinha .card-badge { margin-top: 1mm !important; padding: 1mm 2mm !important; font-size: 5px !important; }
-          .print-carteirinha .card-bottom { margin-top: 2mm !important; }
-          .print-carteirinha .card-qr { width: 22mm !important; height: 22mm !important; display: block !important; }
-          .print-hide { display: none !important; }
+          body * {
+            visibility: hidden !important;
+          }
 
-          .print-sheet { display: grid !important; grid-template-columns: repeat(2, 85.6mm) !important; grid-template-rows: repeat(5, 53.98mm) !important; gap: 1mm !important; justify-content: center !important; align-content: start !important; width: 100% !important; height: 274mm !important; page-break-after: always !important; break-after: page !important; }
-          .print-sheet:last-child { page-break-after: auto !important; break-after: auto !important; }
-          .print-batch-card { width: 85.6mm !important; height: 53.98mm !important; overflow: hidden !important; border: 0.55mm solid #17382c !important; border-radius: 2.5mm !important; background: #fff !important; display: flex !important; flex-direction: column !important; color: #17382c !important; break-inside: avoid !important; }
-          .print-batch-head { height: 12mm !important; min-height: 12mm !important; display: flex !important; align-items: center !important; gap: 2mm !important; padding: 1.5mm 2mm !important; color: white !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
-          .print-batch-logo { width: 8mm !important; height: 8mm !important; object-fit: contain !important; }
-          .print-batch-title { font: 700 5pt Arial,sans-serif !important; letter-spacing: .2pt !important; }
-          .print-batch-subtitle { font: 800 8pt Arial,sans-serif !important; }
-          .print-batch-main { display: grid !important; grid-template-columns: 15mm 1fr 19mm !important; gap: 2mm !important; align-items: center !important; padding: 2mm !important; height: 41.98mm !important; }
-          .print-batch-photo { width: 15mm !important; height: 20mm !important; object-fit: cover !important; border-radius: 1mm !important; background: #eef2f0 !important; }
-          .print-batch-name { font: 800 7pt Arial,sans-serif !important; line-height: 1.1 !important; margin-bottom: 1.5mm !important; }
-          .print-batch-info { font: 5pt Arial,sans-serif !important; line-height: 1.25 !important; margin-top: .8mm !important; }
-          .print-batch-qr { width: 18mm !important; height: 18mm !important; display: block !important; }
-          .print-index-root { font: 10pt Arial,sans-serif !important; }
-          .print-index-group { margin: 0 0 5mm !important; break-inside: avoid !important; }
-          .print-index-letter { font-size: 14pt !important; font-weight: 800 !important; border-bottom: 1px solid #333 !important; padding-bottom: 1mm !important; margin-bottom: 2mm !important; }
-          .print-index-family { margin: 0 0 3mm 0 !important; break-inside: avoid !important; }
-          .print-index-line { display: flex !important; justify-content: space-between !important; gap: 8mm !important; padding: 1mm 0 !important; }
-          .print-index-dependent { padding-left: 8mm !important; color: #333 !important; font-size: 9pt !important; }
+          .print-carteirinha,
+          .print-carteirinha * {
+            visibility: visible !important;
+          }
+
+          .print-carteirinha {
+            position: absolute !important;
+            left: 50% !important;
+            top: 12mm !important;
+            transform: translateX(-50%) !important;
+            width: 85.60mm !important;
+            height: 53.98mm !important;
+            margin: 0 !important;
+            border-width: 0.6mm !important;
+            border-radius: 4mm !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            font-size: 7px !important;
+          }
+
+          .print-carteirinha .card-top {
+            padding: 3mm !important;
+          }
+
+          .print-carteirinha .card-logo {
+            width: 8mm !important;
+            height: 8mm !important;
+          }
+
+          .print-carteirinha .card-title {
+            font-size: 7px !important;
+          }
+
+          .print-carteirinha .card-subtitle {
+            margin-top: 0.5mm !important;
+            font-size: 5px !important;
+          }
+
+          .print-carteirinha .card-body {
+            padding: 3mm !important;
+          }
+
+          .print-carteirinha .card-photo {
+            width: 16mm !important;
+            height: 20mm !important;
+          }
+
+          .print-carteirinha .card-name {
+            font-size: 9px !important;
+          }
+
+          .print-carteirinha .card-info {
+            font-size: 5.5px !important;
+          }
+
+          .print-carteirinha .card-badge {
+            margin-top: 1mm !important;
+            padding: 1mm 2mm !important;
+            font-size: 5px !important;
+          }
+
+          .print-carteirinha .card-bottom {
+            margin-top: 2mm !important;
+          }
+
+          .print-carteirinha .card-qr {
+            width: 22mm !important;
+            height: 22mm !important;
+          }
+
+          .print-hide {
+            display: none !important;
+          }
         }
       `}</style>
 
@@ -723,14 +434,10 @@ ${qrSvg}
           {!modoQr && <div>
             <p className="text-sm text-gray-500">Identificação</p>
             <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
-            <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
-            <div className="mt-4 flex flex-wrap gap-2 print-hide">
-              <button type="button" onClick={selecionarTodasAtivas} disabled={!cartoesParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-50">☑ Selecionar todas as ativas ({cartoesParaImpressao.length})</button>
-              <button type="button" onClick={limparSelecaoCartoes} disabled={!cartoesSelecionados.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-bold text-gray-700 disabled:opacity-50">Limpar seleção</button>
-              <button type="button" onClick={imprimirCarteirinhasSelecionadas} disabled={!cartoesSelecionadosParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><Printer className="h-4 w-4" /> {loteImpressaoMontado ? "Preparando..." : `Imprimir selecionadas (${cartoesSelecionadosParaImpressao.length})`}</button>
-              <button type="button" onClick={() => setIndiceAberto((aberto) => !aberto)} className="inline-flex items-center gap-2 rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"><Search className="h-4 w-4" /> {indiceAberto ? "Ocultar índice" : "Lista alfabética"}</button>
-            </div>
-            <span className="self-center text-xs font-semibold text-gray-500">{cartoesSelecionadosParaImpressao.length} carteirinha(s) marcada(s)</span>
+            <p className="mt-1 text-sm text-gray-500">Consulta de associados, dependentes e QR Codes de acesso. A impressão e as listas ficam em uma guia separada para manter esta tela leve.</p>
+            <a href="/carteirinhas/imprimir" target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white shadow-sm hover:bg-[#00442f]">
+              <Printer className="h-4 w-4" /> Impressão e listas em nova guia
+            </a>
           </div>}
 
           {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
@@ -755,24 +462,12 @@ ${qrSvg}
               </div>
               <div className="mt-3 text-xs font-semibold text-gray-500">{lista.length} associado(s) encontrado(s)</div>
               <div className="mt-4 space-y-2">
-                {lista.map((s) => {
-                  const chaveCartao = `socio-${s.id}`;
-                  const socioAtivo = chavesCartoesImprimiveis.has(chaveCartao);
-                  return (
-                    <div key={s.id} className={`flex items-stretch gap-2 rounded-xl border p-2 ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "border-transparent bg-white"}`}>
-                      <button type="button" onClick={() => { setSelecionado(s); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
-                        <b>{s.nome}</b>
-                        <div className="text-xs text-gray-500">Matrícula: {s.matricula || "—"} · {visual(s.tipo_socio).nome}</div>
-                        {!socioAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
-                      </button>
-                      {socioAtivo && (
-                        <label title={`Selecionar carteirinha de ${s.nome}`} className="flex shrink-0 cursor-pointer items-center justify-center rounded-lg px-3 hover:bg-[#edf7f1]">
-                          <input type="checkbox" aria-label={`Selecionar carteirinha de ${s.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" />
-                        </label>
-                      )}
-                    </div>
-                  );
-                })}
+                {lista.map((s) => (
+                  <button key={s.id} onClick={() => { setSelecionado(s); setDependenteSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
+                    <b>{s.nome}</b>
+                    <div className="text-xs text-gray-500">Matrícula: {s.matricula || "—"} · {visual(s.tipo_socio).nome}</div>
+                  </button>
+                ))}
 
                 {temporadasLista.length > 0 && (
                   <div className="pt-4">
@@ -797,20 +492,13 @@ ${qrSvg}
                           {temporadaSelecionada?.id === t.id && (t.participantes || []).length > 0 && (
                             <div className="mt-3 space-y-2 border-t border-orange-200 pt-3">
                               <div className="text-[10px] font-black uppercase tracking-wide text-orange-800">Carteirinhas individuais</div>
-                              {t.participantes!.map((p) => {
-                                const chaveCartao = `temporada-${p.id}`;
-                                const participanteAtivo = chavesCartoesImprimiveis.has(chaveCartao);
-                                return (
-                                  <div key={p.id} className={`flex items-center gap-2 rounded-lg border bg-white p-2 ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "border-gray-100"}`}>
-                                    <button type="button" onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                                      <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
-                                      <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
-                                      <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : participanteAtivo ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : participanteAtivo ? "ATIVA" : "INATIVA"}</span>
-                                    </button>
-                                    {participanteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-2" title={`Selecionar carteirinha de ${p.nome || "participante"}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${p.nome || "participante"}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
-                                  </div>
-                                );
-                              })}
+                              {t.participantes!.map((p) => (
+                                <button key={p.id} onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className={`flex w-full items-center gap-3 rounded-lg border bg-white p-2 text-left ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "hover:border-orange-300"}`}>
+                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
+                                  <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : p.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : p.status_carteirinha === "ativa" ? "ATIVA" : "INATIVA"}</span>
+                                </button>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -829,33 +517,20 @@ ${qrSvg}
                       Selecionado: <b>{selecionado.nome}</b>. Abaixo aparecem cônjuge, filhos e demais integrantes vinculados à mesma família.
                     </div>
                     <div className="mt-2 space-y-2">
-                      {familiaSelecionada.map((membro) => {
-                        const chaveCartao = `socio-${membro.id}`;
-                        return (
-                          <div key={membro.id} className="flex items-stretch gap-2 rounded-xl border bg-white p-2">
-                            <button type="button" onClick={() => { setSelecionado(membro); setDependenteSelecionado(null); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
-                              <b>{membro.nome}</b>
-                              <div className="text-xs text-gray-500">Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}</div>
-                            </button>
-                            <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${membro.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${membro.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>
+                      {familiaSelecionada.map((membro) => (
+                        <button key={membro.id} onClick={() => setSelecionado(membro)} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{membro.nome}</b>
+                          <div className="text-xs text-gray-500">
+                            Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}
                           </div>
-                        );
-                      })}
-                      {dependentesFamiliaSelecionada.map((d) => {
-                        const chaveCartao = `dependente-${d.id}`;
-                        const titular = socios.find((s) => String(s.id) === String(d.socio_id));
-                        const dependenteAtivo = chavesCartoesImprimiveis.has(chaveCartao) && (!titular || String(titular.situacao || "").trim().toLowerCase() !== "inativo");
-                        return (
-                          <div key={`dep-${d.id}`} className="flex items-stretch gap-2 rounded-xl border bg-white p-2">
-                            <button type="button" onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
-                              <b>{d.nome}</b>
-                              <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
-                              {!dependenteAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
-                            </button>
-                            {dependenteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${d.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${d.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
-                          </div>
-                        );
-                      })}
+                        </button>
+                      ))}
+                      {dependentesFamiliaSelecionada.map((d) => (
+                        <button key={`dep-${d.id}`} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); }} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{d.nome}</b>
+                          <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -864,21 +539,12 @@ ${qrSvg}
                   <div className="pt-3">
                     <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-400">Dependentes da família</div>
                     <div className="space-y-2">
-                      {dependentesLista.map((d) => {
-                        const chaveCartao = `dependente-${d.id}`;
-                        const titular = socios.find((s) => String(s.id) === String(d.socio_id));
-                        const dependenteAtivo = chavesCartoesImprimiveis.has(chaveCartao) && (!titular || String(titular.situacao || "").trim().toLowerCase() !== "inativo");
-                        return (
-                          <div key={d.id} className={`flex items-stretch gap-2 rounded-xl border p-2 ${dependenteSelecionado?.id === d.id ? "border-[#005a3c] bg-[#e8f3ee]" : "border-gray-100 bg-white"}`}>
-                            <button type="button" onClick={() => { setSelecionado(null); setDependenteSelecionado(d); setTemporadaSelecionada(null); setParticipanteTemporadaSelecionado(null); }} className="min-w-0 flex-1 rounded-lg p-2 text-left hover:bg-gray-50">
-                              <b>{d.nome}</b>
-                              <div className="text-xs text-gray-500">Dependente · {d.parentesco || "Família"} · Titular: {d.titular_nome || "—"}</div>
-                              {!dependenteAtivo && <span className="mt-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-500">INATIVO · fora da impressão</span>}
-                            </button>
-                            {dependenteAtivo && <label className="flex shrink-0 cursor-pointer items-center px-3 hover:bg-[#edf7f1]" title={`Selecionar carteirinha de ${d.nome}`}><input type="checkbox" aria-label={`Selecionar carteirinha de ${d.nome}`} checked={cartoesSelecionados.includes(chaveCartao)} onChange={() => alternarSelecaoCartao(chaveCartao)} disabled={loteImpressaoMontado} className="h-5 w-5 accent-[#005a3c]" /></label>}
-                          </div>
-                        );
-                      })}
+                      {dependentesLista.map((d) => (
+                        <button key={d.id} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); }} className={`w-full rounded-xl border p-4 text-left ${dependenteSelecionado?.id === d.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
+                          <b>{d.nome}</b>
+                          <div className="text-xs text-gray-500">Dependente · {d.parentesco || "Família"} · Titular: {d.titular_nome || "—"}</div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -920,16 +586,12 @@ ${qrSvg}
                         <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade da temporada</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
                         {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
                       </div>
-                      <QRCodeSVG className="card-qr" data-carteirinha-qr="temporada-atual" value={temporadaQrValue} size={112} includeMargin />
+                      <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
                     </div>
                   </div>
                 </div>
 
-                <div className={`${modoQr ? "hidden" : "grid grid-cols-3 gap-2"}`}>
-                  <button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 font-bold text-white hover:bg-orange-700"><Printer className="h-4 w-4" /> Imprimir</button>
-                  <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-sm font-bold"><Smartphone className="h-4 w-4" /> Digital</button>
-                  <button onClick={() => void baixarCarteirinhaDigital()} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-xs font-bold"><IdCard className="h-4 w-4" /> Exportar digital</button>
-                </div>
+
 
                 {modoQr && (
                   <div className="overflow-hidden rounded-[26px] border-4 border-orange-700 bg-white shadow-2xl">
@@ -963,10 +625,10 @@ ${qrSvg}
                     <div className="flex gap-4"><div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
                         {dependenteSelecionado.foto_url ? <img src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
-                    <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div>{camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div></div>}</div><QRCodeSVG className="card-qr" data-carteirinha-qr={`dependente-atual-${dependenteSelecionado.id}`} value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div>{camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div></div>}</div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
                   </div>
                 </div>
-                <div className={`${modoQr ? "hidden" : "grid grid-cols-3 gap-2"}`}><button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-3 py-3 text-sm font-bold text-white hover:bg-[#003d2b]"><Printer className="h-4 w-4" /> Imprimir</button><button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Digital</button><button onClick={() => void baixarCarteirinhaDigital()} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-xs font-bold hover:bg-gray-50"><IdCard className="h-4 w-4" /> Exportar digital</button></div>
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-1 gap-2"}`}><button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button></div>
                 <div className={`${modoQr ? "hidden" : "rounded-xl bg-[#e8f3ee] p-4 text-sm"}`}><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
                 {modoQr && <div className="rounded-xl bg-[#e8f3ee] p-4 text-center text-sm font-semibold text-[#005a3c]">Carteira digital do dependente · titular: {dependenteSelecionado.titular_nome || "—"}</div>}
               </section>
@@ -1008,15 +670,13 @@ ${qrSvg}
                         {camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>}
                         {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exame.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exame.textoClasse}`}>{exame.texto}</div></div></div>}
                       </div>
-                      <QRCodeSVG className="card-qr" data-carteirinha-qr={`socio-atual-${selecionado.id}`} value={qrValue} size={112} includeMargin />
+                      <QRCodeSVG className="card-qr" value={qrValue} size={112} includeMargin />
                     </div>
                   </div>
                 </div>
 
-                <div className={`${modoQr ? "hidden" : "grid grid-cols-3 gap-2"}`}>
-                  <button onClick={imprimirCarteirinha} className="flex items-center justify-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 font-bold text-white hover:bg-[#003d2b]"><Printer className="h-4 w-4" /> Imprimir</button>
-                  <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Digital</button>
-                  <button onClick={() => void baixarCarteirinhaDigital()} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-3 text-xs font-bold hover:bg-gray-50"><IdCard className="h-4 w-4" /> Exportar digital</button>
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-1 gap-2"}`}>
+                  <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button>
                 </div>
 
                 <div className={`${modoQr ? "hidden" : "rounded-xl bg-[#e8f3ee] p-4 text-sm"}`}><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
@@ -1046,55 +706,6 @@ ${qrSvg}
               </section>
             )}
           </div>
-          {indiceAberto && !modoQr && (
-            <section className="print-index-root mt-6 rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print-hide">
-                <div><h2 className="text-lg font-black text-[#005a3c]">Índice alfabético de associados</h2><p className="text-xs text-gray-500">Famílias agrupadas pelo sobrenome, com as matrículas alinhadas à direita.</p></div>
-                <button type="button" onClick={imprimirIndice} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white"><Printer className="h-4 w-4" /> Imprimir lista</button>
-              </div>
-              <div>
-                {indicePorSobrenome.map((grupo) => (
-                  <div className="print-index-group mb-5" key={grupo.sobrenome}>
-                    <div className="print-index-letter border-b border-gray-300 pb-1 text-base font-black text-[#005a3c]">{grupo.letra} — {grupo.sobrenome}</div>
-                    {grupo.familias.map((familia) => (
-                      <div className="print-index-family py-2" key={familia.titular.id}>
-                        <div className="print-index-line flex justify-between gap-4 text-sm"><span className="font-bold">{familia.titular.nome}</span><span className="font-mono font-bold">{familia.titular.matricula || "—"}</span></div>
-                        {familia.socios.map((membro) => <div className="print-index-line print-index-dependent ml-4 flex justify-between gap-4 text-sm text-gray-600" key={membro.id}><span>↳ {membro.nome} ({membro.parentesco || visual(membro.tipo_socio).nome})</span><span className="font-mono">{membro.matricula || "—"}</span></div>)}
-                        {familia.dependentes.map((membro) => <div className="print-index-line print-index-dependent ml-4 flex justify-between gap-4 text-sm text-gray-600" key={`dep-${membro.id}`}><span>↳ {membro.nome} ({membro.parentesco || "Dependente"})</span><span className="font-mono">{membro.matricula || "—"}</span></div>)}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-                {!indicePorSobrenome.length && <p className="text-sm text-gray-500">Nenhum associado encontrado.</p>}
-              </div>
-            </section>
-          )}
-          {loteImpressaoMontado && <div className="print-lote-root hidden" aria-hidden="true">
-            {Array.from({ length: Math.ceil(cartoesSelecionadosParaImpressao.length / 10) }, (_, folha) => (
-              <div className="print-sheet" key={`folha-${folha}`}>
-                {cartoesSelecionadosParaImpressao.slice(folha * 10, folha * 10 + 10).map((cartao) => (
-                  <article className="print-batch-card" key={cartao.key}>
-                    <div className="print-batch-head" style={{ background: cartao.cor, color: cartao.textoCor }}>
-                      <img className="print-batch-logo" src="/logo-guarani.png" alt="" />
-                      <div><div className="print-batch-title">SOCIEDADE RECREATIVA GUARANI</div><div className="print-batch-subtitle">CARTEIRA · {cartao.categoria.toLocaleUpperCase("pt-BR")}</div></div>
-                    </div>
-                    <div className="print-batch-main">
-                      {cartao.fotoUrl ? <img className="print-batch-photo" src={cartao.fotoUrl} alt={cartao.nome} /> : <div className="print-batch-photo grid place-items-center text-xl">👤</div>}
-                      <div className="min-w-0">
-                        <div className="print-batch-name">{cartao.nome}</div>
-                        <div className="print-batch-info">Matrícula: <b>{cartao.matricula}</b></div>
-                        <div className="print-batch-info">CPF: {cartao.cpf}</div>
-                        <div className="print-batch-info">{cartao.tipo === "dependente" ? `Titular: ${cartao.titular}` : cartao.situacao}</div>
-                        {cartao.validade && <div className="print-batch-info">Validade: {formatarData(cartao.validade)}</div>}
-                        {camposVisiveis.exameMedico && cartao.exame && <div className="print-batch-info">Exame: {formatarData(cartao.exame)}</div>}
-                      </div>
-                      <QRCodeSVG className="print-batch-qr" value={cartao.qrValue} size={100} includeMargin />
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ))}
-          </div>}
         </div>
       </main>
 
@@ -1147,7 +758,7 @@ ${qrSvg}
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
           <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
             <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
-            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="h-24 w-20 overflow-hidden rounded-xl bg-gray-100">{dependenteSelecionado.foto_url ? <img src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
           </div>
         </div>
       )}
