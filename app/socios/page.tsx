@@ -27,6 +27,7 @@ type Socio = {
   estado: string | null;
   cep: string | null;
   data_associacao: string | null;
+  exame_medico_validade: string | null;
   categoria: string | null;
   situacao: string | null;
   observacoes: string | null;
@@ -159,6 +160,7 @@ const socioInicial: Partial<Socio> = {
   estado: "RS",
   cep: "",
   data_associacao: "",
+  exame_medico_validade: "",
   categoria: "Titular",
   situacao: "ativo",
   observacoes: "",
@@ -1010,6 +1012,7 @@ export default function Home() {
       estado: form.estado || null,
       cep: form.cep || null,
       data_associacao: form.data_associacao || null,
+      exame_medico_validade: form.exame_medico_validade || null,
       categoria: form.categoria || "Titular",
       situacao: form.situacao || "ativo",
       observacoes: form.observacoes || null,
@@ -3424,6 +3427,13 @@ function ModalSocio({
               type="date"
               value={form.data_associacao}
               onChange={(v) => alterarCampo("data_associacao", v)}
+            />
+
+            <Campo
+              label="Validade do exame médico"
+              type="date"
+              value={form.exame_medico_validade || ""}
+              onChange={(v) => alterarCampo("exame_medico_validade", v)}
             />
 
             <SelectCampo
