@@ -535,7 +535,7 @@ export async function POST(request: Request) {
         .eq("id", temporadaParticipanteId)
         .maybeSingle();
       if (erroParticipante) throw erroParticipante;
-      const temporada = participante?.temporadas as Record<string, unknown> | null;
+      const temporada = participante?.temporadas as unknown as Record<string, unknown> | null;
       if (!participante || !temporada || String(temporada.situacao || "").toLowerCase() !== "ativa" || !temporada.codigo || String(temporada.inicio || "").slice(0, 10) > data || String(temporada.fim || "").slice(0, 10) < data) {
         return NextResponse.json({ error: "O participante não possui uma Temporada ativa e válida para a data da reserva." }, { status: 400 });
       }
