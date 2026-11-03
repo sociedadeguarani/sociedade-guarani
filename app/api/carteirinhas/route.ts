@@ -41,6 +41,7 @@ type DependenteCarteirinha = {
   nome?: string | null;
   cpf?: string | null;
   data_nascimento?: string | null;
+  exame_medico_validade?: string | null;
   parentesco?: string | null;
   telefone?: string | null;
   whatsapp?: string | null;
@@ -342,7 +343,7 @@ export async function GET(request: Request) {
     // Os dependentes familiares agora ficam na tabela public.dependentes.
     // A tabela socios contém somente quem possui matrícula própria.
     const colunasDependente = [
-      "id", "socio_id", "matricula", "nome", "cpf", "data_nascimento", "parentesco",
+      "id", "socio_id", "matricula", "nome", "cpf", "data_nascimento", "exame_medico_validade", "parentesco",
       "telefone", "whatsapp", "email", "ativo", "created_at", "updated_at", "foto_url", "observacoes",
       "migrado_para_socio_id",
     ];
