@@ -11,7 +11,7 @@ const COLUNAS_BASE = [
   "situacao", "observacoes", "tipo_socio", "responsavel_id", "possui_mensalidade", "remido",
 ];
 const COLUNAS_EXTRAS = [
-  "foto_url", "parentesco", "valor_mensalidade",
+  "foto_url", "parentesco", "valor_mensalidade", "exame_medico_validade",
   "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "modalidade_temporada", "inicio_temporada", "fim_temporada",
   "situacao_financeira", "data_ultimo_pagamento",
 ];
