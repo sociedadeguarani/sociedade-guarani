@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     if (categoriasError) throw new Error(categoriasError.message);
     if (localizacoesError) throw new Error(localizacoesError.message);
 
-    const sociosPorId = new Map<string, any>((socios || []).map((s: any) => [String(s.id), s] as [string, any]));
+    const sociosPorId = new Map<string, { id: string; nome: string | null; matricula: string | null }>((socios || []).map((s: any) => [String(s.id), { id: String(s.id), nome: s.nome ?? null, matricula: s.matricula ?? null }] as [string, { id: string; nome: string | null; matricula: string | null }]));
     const dependentesPorId = new Map<string, any>((dependentes || []).map((d: any) => [String(d.id), d] as [string, any]));
 
     // A tabela public.socios contém os titulares e também alguns dependentes legados.
