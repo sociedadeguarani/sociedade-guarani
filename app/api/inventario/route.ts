@@ -49,8 +49,8 @@ export async function GET(request: Request) {
     if (categoriasError) throw new Error(categoriasError.message);
     if (localizacoesError) throw new Error(localizacoesError.message);
 
-    const sociosPorId = new Map((socios || []).map((s) => [String(s.id), s]));
-    const dependentesPorId = new Map((dependentes || []).map((d) => [String(d.id), d]));
+    const sociosPorId = new Map<string, any>((socios || []).map((s: any) => [String(s.id), s] as [string, any]));
+    const dependentesPorId = new Map<string, any>((dependentes || []).map((d: any) => [String(d.id), d] as [string, any]));
 
     // A tabela public.socios contém os titulares e também alguns dependentes legados.
     // Os dependentes familiares atuais ficam em public.dependentes e precisam ser
@@ -62,31 +62,31 @@ export async function GET(request: Request) {
       .replace(/\s+/g, " ")
       .trim();
     const matriculasDosDependentesAtivos = new Set((dependentes || [])
-      .filter((d) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
-      .map((d) => normalizarNome(d.matricula))
+      .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+      .map((d: any) => normalizarNome(d.matricula))
       .filter(Boolean));
     // Se um dependente ainda existir também em public.socios com a mesma
     // matrícula, priorizamos o registro de public.dependentes para vinculá-lo
     // ao titular correto e evitar duas opções iguais na busca.
-    const sociosParaEmprestimo = (socios || []).filter((s) => {
+    const sociosParaEmprestimo = (socios || []).filter((s: any) => {
       const matricula = normalizarNome(s.matricula);
       return !matricula || !matriculasDosDependentesAtivos.has(matricula);
     });
     const matriculasJaEmSocios = new Set(sociosParaEmprestimo
-      .map((s) => normalizarNome(s.matricula))
+      .map((s: any) => normalizarNome(s.matricula))
       .filter(Boolean));
     const associadosParaEmprestimo = [
-      ...sociosParaEmprestimo.map((s) => ({
+      ...sociosParaEmprestimo.map((s: any) => ({
         id: String(s.id), socio_id: String(s.id), dependente_id: null,
         nome: s.nome, matricula: s.matricula || null, tipo_pessoa: "socio", titular_nome: null,
       })),
       ...(dependentes || [])
-        .filter((d) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
-        .filter((d) => {
+        .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+        .filter((d: any) => {
           const matricula = normalizarNome(d.matricula);
           return !(matricula && matriculasJaEmSocios.has(matricula));
         })
-        .map((d) => ({
+        .map((d: any) => ({
           id: `dependente:${String(d.id)}`,
           socio_id: String(d.socio_id),
           dependente_id: String(d.id),
@@ -95,9 +95,9 @@ export async function GET(request: Request) {
           tipo_pessoa: "dependente",
           titular_nome: sociosPorId.get(String(d.socio_id))?.nome || null,
         })),
-    ].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    ].sort((a: any, b: any) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
 
-    const emprestimosComDependente = (emprestimos || []).map((emprestimo) => {
+    const emprestimosComDependente = (emprestimos || []).map((emprestimo: any) => {
       const dependente = emprestimo.dependente_id
         ? dependentesPorId.get(String(emprestimo.dependente_id))
         : null;
@@ -106,7 +106,7 @@ export async function GET(request: Request) {
         dependente: dependente ? {
           nome: dependente.nome,
           matricula: dependente.matricula || null,
-          titular_nome: sociosPorId.get(String(dependente.socio_id))?.nome || emprestimo.socio?.nome || null,
+          titular_nome: sociosPorId.get(String(dependente.socio_id))?.nome || sociosPorId.get(String(emprestimo.socio_id))?.nome || null,
         } : null,
       };
     });
@@ -114,18 +114,18 @@ export async function GET(request: Request) {
     // A visibilidade aplica-se aos dois perfis operacionais. Empréstimos ainda
     // ativos continuam disponíveis para que a equipe consiga registrar a devolução.
     const itensVisiveis = perfilFuncionario
-      ? (itens || []).filter((item) => item.acesso_funcionario === true)
+      ? (itens || []).filter((item: any) => item.acesso_funcionario === true)
       : (itens || []);
-    const idsItensVisiveis = new Set(itensVisiveis.map((item) => String(item.id)));
+    const idsItensVisiveis = new Set(itensVisiveis.map((item: any) => String(item.id)));
     const statusAtivos = new Set(["emprestado", "atrasado"]);
     const emprestimosDoPerfil = perfilFuncionario
-      ? emprestimosComDependente.filter((emprestimo) =>
+      ? emprestimosComDependente.filter((emprestimo: any) =>
           idsItensVisiveis.has(String(emprestimo.item_id)) || statusAtivos.has(String(emprestimo.status || "").toLowerCase())
         )
       : emprestimosComDependente;
     const emprestimosSeguros = podeVincularAssociado
       ? emprestimosDoPerfil
-      : emprestimosDoPerfil.map((emprestimo) => ({ ...emprestimo, socio: null, socio_id: null, dependente: null, dependente_id: null }));
+      : emprestimosDoPerfil.map((emprestimo: any) => ({ ...emprestimo, socio: null, socio_id: null, dependente: null, dependente_id: null }));
 
     return NextResponse.json({
       itens: itensVisiveis,
