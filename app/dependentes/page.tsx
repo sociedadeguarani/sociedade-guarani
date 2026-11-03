@@ -17,6 +17,7 @@ type Socio = {
   categoria?: string | null;
   cpf?: string | null;
   data_nascimento?: string | null;
+  exame_medico_validade?: string | null;
   telefone?: string | null;
   foto_url?: string | null;
   possui_mensalidade?: boolean | null;
@@ -37,6 +38,7 @@ type Dependente = {
   nome: string;
   cpf: string | null;
   data_nascimento: string | null;
+  exame_medico_validade?: string | null;
   parentesco: string | null;
   telefone: string | null;
   ativo: boolean | null;
@@ -165,6 +167,7 @@ export default function DependentesPage() {
     nome: string;
     cpf: string;
     data_nascimento: string;
+    exame_medico_validade: string;
     parentesco: string;
     telefone: string;
     ativo: boolean;
@@ -265,6 +268,7 @@ export default function DependentesPage() {
         categoria: s.categoria ?? null,
         cpf: s.cpf ?? null,
         data_nascimento: s.data_nascimento ?? null,
+        exame_medico_validade: s.exame_medico_validade ?? null,
         telefone: s.telefone ?? s.whatsapp ?? null,
         foto_url: s.foto_url ?? null,
         possui_mensalidade: s.possui_mensalidade === true,
@@ -291,6 +295,7 @@ export default function DependentesPage() {
           nome: d.nome ?? "",
           cpf: d.cpf ?? null,
           data_nascimento: d.data_nascimento ?? null,
+          exame_medico_validade: d.exame_medico_validade ?? null,
           parentesco: d.parentesco ?? null,
           telefone: d.telefone ?? d.whatsapp ?? null,
           ativo: d.ativo !== false,
@@ -329,6 +334,7 @@ export default function DependentesPage() {
           nome: s.nome,
           cpf: s.cpf ?? null,
           data_nascimento: s.data_nascimento ?? null,
+          exame_medico_validade: s.exame_medico_validade ?? null,
           parentesco: null,
           telefone: s.telefone ?? null,
           ativo: s.situacao !== "inativo",
@@ -376,6 +382,7 @@ export default function DependentesPage() {
       nome: "",
       cpf: "",
       data_nascimento: "",
+      exame_medico_validade: "",
       parentesco: "",
       telefone: "",
       ativo: true,
@@ -400,6 +407,7 @@ export default function DependentesPage() {
       nome: d.nome || "",
       cpf: d.cpf || "",
       data_nascimento: d.data_nascimento || "",
+      exame_medico_validade: d.exame_medico_validade || "",
       parentesco: d.parentesco || "",
       telefone: d.telefone || "",
       ativo: d.ativo !== false,
@@ -440,6 +448,7 @@ export default function DependentesPage() {
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
+      exame_medico_validade: form.exame_medico_validade || null,
       parentesco: form.parentesco || null,
       telefone: form.telefone.trim() || null,
       ativo: form.ativo,
@@ -468,6 +477,7 @@ export default function DependentesPage() {
           nome: dados.nome,
           cpf: dados.cpf,
           data_nascimento: dados.data_nascimento,
+          exame_medico_validade: dados.exame_medico_validade,
           telefone: dados.telefone,
           parentesco: dados.parentesco,
           possui_mensalidade: dados.possui_mensalidade,
@@ -742,6 +752,7 @@ export default function DependentesPage() {
                   <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Nome completo *</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo do dependente" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">CPF</span><input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} inputMode="numeric" placeholder="Somente números" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
+                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Validade do exame médico</span><input type="date" value={form.exame_medico_validade} onChange={(e) => setForm({ ...form, exame_medico_validade: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /><span className="mt-1 block text-xs text-slate-500">Exame individual do dependente.</span></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
                   <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
                   <div className="md:col-span-2 rounded-xl border border-dashed border-[#9fc8b5] bg-white p-4">
