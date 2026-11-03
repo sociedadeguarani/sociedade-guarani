@@ -137,8 +137,12 @@ export default function CarteirinhasPage(): JSX.Element {
   const [camposVisiveis, setCamposVisiveis] = useState({ financeiro: true, exameMedico: true });
   const [digitalAberta, setDigitalAberta] = useState(false);
   const [modoQr, setModoQr] = useState(false);
+  const [indiceAberto, setIndiceAberto] = useState(false);
+  const [impressaoLote, setImpressaoLote] = useState(false);
 
   useEffect(() => {
+    const limparImpressao = () => setImpressaoLote(false);
+    window.addEventListener("afterprint", limparImpressao);
     let ativo = true;
     (async () => {
       const { supabase } = await import("@/lib/supabaseClient");
@@ -196,7 +200,7 @@ export default function CarteirinhasPage(): JSX.Element {
       }
 
     })();
-    return () => { ativo = false; };
+    return () => { ativo = false; window.removeEventListener("afterprint", limparImpressao); };
   }, []);
 
   const normalizarBusca = (valor: unknown) =>
@@ -331,6 +335,25 @@ export default function CarteirinhasPage(): JSX.Element {
   const exame = statusExame(selecionado?.exame_medico_validade);
   const exameTemporada = statusExame(participanteTemporadaAtual?.exame_medico_validade);
 
+  const indiceFamilias = useMemo(() => {
+    const normalizarSobrenome = (nome: string) => {
+      const partes = String(nome || "").trim().split(/\s+/).filter(Boolean);
+      return normalizarBusca(partes.length > 1 ? partes[partes.length - 1] : (partes[0] || ""));
+    };
+    const titulares = socios.filter((s) => !s.responsavel_id || !socios.some((x) => String(x.id) === String(s.responsavel_id)))
+      .map((titular) => {
+        const membros = socios.filter((s) => String(s.id) === String(titular.id) || String(s.responsavel_id || "") === String(titular.id));
+        const deps = dependentes.filter((d) => String(d.socio_id) === String(titular.id) && d.ativo !== false);
+        return { titular, membros: [...membros.filter((s) => String(s.id) !== String(titular.id)).map((s) => ({ nome: s.nome, matricula: s.matricula, parentesco: s.parentesco || visual(s.tipo_socio).nome })), ...deps.map((d) => ({ nome: d.nome, matricula: d.matricula, parentesco: d.parentesco || "Dependente" }))] };
+      }).sort((a, b) => normalizarSobrenome(a.titular.nome).localeCompare(normalizarSobrenome(b.titular.nome), "pt-BR") || a.titular.nome.localeCompare(b.titular.nome, "pt-BR"));
+    return titulares;
+  }, [socios, dependentes]);
+
+  const carteirinhasLote = useMemo(() => indiceFamilias.flatMap(({ titular, membros }) => [
+    { id: String(titular.id), nome: titular.nome, matricula: titular.matricula, categoria: "Associado", qr: `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(titular.id)}` },
+    ...membros.map((m, i) => ({ id: `${titular.id}-${i}`, nome: m.nome, matricula: m.matricula, categoria: m.parentesco, qr: `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(titular.id)}` }))
+  ]), [indiceFamilias]);
+
   function imprimirCarteirinha() {
     if (!selecionado && !temporadaSelecionada && !dependenteSelecionado) return;
     window.print();
@@ -426,15 +449,22 @@ export default function CarteirinhasPage(): JSX.Element {
             height: 22mm !important;
           }
 
-          .print-hide {
-            display: none !important;
-          }
+          .print-lote, .print-lote * { visibility: visible !important; }
+          .print-batch .print-carteirinha { display: none !important; }
+          .print-lote { display: grid !important; grid-template-columns: repeat(2, 85.60mm); gap: 3mm; padding: 5mm; }
+          .print-lote-card { width: 85.60mm !important; height: 53.98mm !important; box-sizing: border-box !important; break-inside: avoid !important; page-break-inside: avoid !important; border: 0.6mm solid #17382c; border-radius: 4mm; overflow: hidden; display: flex; flex-direction: column; }
+          .print-lote-card-header { background: #005a3c; color: white; padding: 2.5mm 3mm; font-size: 6.5pt; font-weight: 900; }
+          .print-lote-card-body { display: flex; justify-content: space-between; align-items: center; padding: 3mm; flex: 1; }
+          .print-lote-card-name { font-size: 9pt; font-weight: 900; line-height: 1.15; max-height: 18mm; overflow: hidden; }
+          .print-lote-card-info { font-size: 6pt; margin-top: 1.5mm; }
+          .print-lote-card-qr { width: 21mm; height: 21mm; }
+          .print-hide { display: none !important; }
         }
       `}</style>
 
       <div className="print-hide"><CabecalhoPadrao /><MenuLateralPadrao /></div>
 
-      <main className={`${modoQr ? "min-h-screen px-3 py-4" : "min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8"}`}>
+      <main className={`${modoQr ? "min-h-screen px-3 py-4" : `min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8 ${impressaoLote ? "print-batch" : ""}`}`}>
         <div className={`${modoQr ? "mx-auto max-w-md" : "mx-auto max-w-7xl space-y-6"}`}>
           {!modoQr && <div>
             <p className="text-sm text-gray-500">Identificação</p>
@@ -442,6 +472,7 @@ export default function CarteirinhasPage(): JSX.Element {
             <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
           </div>}
 
+          {!modoQr && <div className="print-lote hidden">{carteirinhasLote.map((c) => <div key={c.id} className="print-lote-card"><div className="print-lote-card-header">SOCIEDADE RECREATIVA GUARANI · CARTEIRA DE ASSOCIADO</div><div className="print-lote-card-body"><div className="min-w-0 pr-2"><div className="print-lote-card-name">{c.nome}</div><div className="print-lote-card-info">Matrícula: <b>{c.matricula || "—"}</b></div><div className="print-lote-card-info">{c.categoria}</div><div className="print-lote-card-info">S.R.G. · Sociedade Recreativa Guarani</div></div><QRCodeSVG value={c.qr} className="print-lote-card-qr" /></div></div>)}</div>}
           {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
 
           <div className={`${modoQr ? "" : "grid gap-6 lg:grid-cols-[1fr_430px]"}`}>
@@ -462,7 +493,8 @@ export default function CarteirinhasPage(): JSX.Element {
                   </button>
                 ))}
               </div>
-              <div className="mt-3 text-xs font-semibold text-gray-500">{lista.length} associado(s) encontrado(s)</div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-gray-500"><span>{lista.length} associado(s) encontrado(s)</span><div className="flex gap-2"><button type="button" onClick={() => { setImpressaoLote(true); setTimeout(() => window.print(), 100); }} className="rounded-lg bg-[#005a3c] px-3 py-2 font-bold text-white"><Printer className="mr-1 inline h-3.5 w-3.5" /> Imprimir todas</button><button type="button" onClick={() => setIndiceAberto((v) => !v)} className="rounded-lg border px-3 py-2 font-bold text-[#005a3c]">{indiceAberto ? "Ocultar índice" : "Lista por sobrenome"}</button></div></div>
+              {indiceAberto && <div className="mt-3 rounded-xl border bg-white p-3 print-hide"><div className="mb-2 text-sm font-black text-[#005a3c]">Índice alfabético de associados</div>{Object.entries(indiceFamilias.reduce((acc, item) => { const n = String(item.titular.nome || "").trim().split(/\s+/); const letra = (n.length > 1 ? n[n.length - 1] : n[0] || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").charAt(0).toUpperCase() || "#"; (acc[letra] ||= []).push(item); return acc; }, {} as Record<string, typeof indiceFamilias>)).sort(([a],[b]) => a.localeCompare(b, "pt-BR")).map(([letra, familias]) => <div key={letra} className="mb-3"><div className="border-b pb-1 text-sm font-black">{letra} — {familias[0]?.titular.nome.split(/\s+/).slice(-1)[0]?.toUpperCase()}</div>{familias.map(({ titular, membros }) => <div key={titular.id} className="py-1 text-sm"><div className="flex justify-between gap-3"><span className="font-semibold">{titular.nome}</span><span className="font-mono font-bold">{titular.matricula || "—"}</span></div>{membros.map((m, i) => <div key={`${titular.id}-${i}`} className="ml-4 flex justify-between gap-3 text-gray-600"><span>↳ {m.nome} ({m.parentesco})</span><span className="font-mono">{m.matricula || "—"}</span></div>)}</div>)}</div>)}</div>}
               <div className="mt-4 space-y-2">
                 {lista.map((s) => (
                   <button key={s.id} onClick={() => { setSelecionado(s); setDependenteSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
