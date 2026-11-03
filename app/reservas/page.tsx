@@ -107,6 +107,9 @@ export default function ReservasPage() {
   const [dependenteId, setDependenteId] = useState("");
   const [socios, setSocios] = useState<SocioReserva[]>([]);
   const [dependentes, setDependentes] = useState<DependenteReserva[]>([]);
+  const [participantesTemporada, setParticipantesTemporada] = useState<{ id: string; nome: string; matricula: string | null; temporada: string }[]>([]);
+  const [participanteTemporadaId, setParticipanteTemporadaId] = useState("");
+  const [modoParticipanteTemporada, setModoParticipanteTemporada] = useState(false);
   const [buscaSocio, setBuscaSocio] = useState("");
   const [tipoPessoa, setTipoPessoa] = useState<TipoPessoa>("socio");
   const [etapa, setEtapa] = useState<"selecao" | "confirmacao">("selecao");
@@ -221,9 +224,10 @@ export default function ReservasPage() {
     setCarregandoPessoas(true);
     try {
       const token = await tokenAtual();
-      const [sociosResponse, carteirinhasResponse] = await Promise.all([
+      const [sociosResponse, carteirinhasResponse, temporadasResponse] = await Promise.all([
         fetch("/api/socios", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
         fetch("/api/carteirinhas", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+        fetch("/api/temporadas", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
       ]);
       const sociosPayload = await sociosResponse.json().catch(() => ({}));
       if (!sociosResponse.ok) throw new Error(sociosPayload?.error || "Não foi possível carregar os sócios.");
@@ -258,6 +262,15 @@ export default function ReservasPage() {
         });
       }
       setDependentes(Array.from(porId.values()));
+      const temporadasPayload = await temporadasResponse.json().catch(() => ({}));
+      if (!temporadasResponse.ok) throw new Error(temporadasPayload?.error || "Não foi possível carregar participantes de Temporada.");
+      const hoje = new Date().toISOString().slice(0, 10);
+      const participantesTemporadaAtivos = (Array.isArray(temporadasPayload?.temporadas) ? temporadasPayload.temporadas : [])
+        .filter((t: Record<string, unknown>) => String(t.situacao || "").toLowerCase() === "ativa" && Boolean(t.codigo) && String(t.inicio || "").slice(0, 10) <= hoje && String(t.fim || "").slice(0, 10) >= hoje)
+        .flatMap((t: Record<string, unknown>) => (Array.isArray(t.participantes) ? t.participantes : [])
+          .map((p: Record<string, unknown>) => ({ id: String(p.id || ""), nome: String(p.nome || ""), matricula: p.matricula == null ? null : String(p.matricula), temporada: String(t.codigo || t.matricula || "Temporada") }))
+          .filter((p: { id: string; nome: string }) => p.id && p.nome));
+      setParticipantesTemporada(participantesTemporadaAtivos);
       setPessoasCarregadas(true);
     } catch (error) {
       setErro(error instanceof Error ? error.message : "Não foi possível carregar os sócios.");
@@ -369,6 +382,7 @@ export default function ReservasPage() {
     if (tipo === "nao_socio") {
       setSocioId("");
       setDependenteId("");
+      setParticipanteTemporadaId("");
       setMatriculaResponsavel(null);
       setBuscaSocio("");
       setNome("");
@@ -520,6 +534,7 @@ export default function ReservasPage() {
         motivo_locacao: motivoLocacao.trim().slice(0, 200),
         socio_id: socioId || null,
         dependente_id: dependenteId || null,
+        temporada_participante_id: participanteTemporadaId || null,
         matricula: matriculaResponsavel ?? null,
         tipo_pessoa: tipoPessoa,
         valor,
@@ -586,6 +601,7 @@ export default function ReservasPage() {
       setMotivoLocacao("");
       setSocioId("");
       setDependenteId("");
+      setParticipanteTemporadaId("");
       setMatriculaResponsavel(null);
       setBuscaSocio("");
       setData("");
@@ -866,6 +882,7 @@ export default function ReservasPage() {
                         <button onClick={() => mudarTipo("nao_socio")} className={`rounded-2xl border-2 p-5 text-left ${tipoPessoa === "nao_socio" ? "border-[#f4b400] bg-[#fff8df]" : "border-[#dfe7e2]"}`}>
                           <UserRound className="h-8 w-8 text-[#8a6700]" /><b className="mt-3 block text-lg">Não sou sócio</b><span className="text-sm text-gray-500">Somente espaços liberados pela administração.</span>
                         </button>
+                        <button type="button" onClick={() => { void carregarPessoas(); setTipoPessoa("socio"); setSocioId(""); setDependenteId(""); setParticipanteTemporadaId(""); setModoParticipanteTemporada(true); setNome(""); setMatriculaResponsavel(null); setBuscaSocio(""); }} className={`rounded-2xl border-2 p-5 text-left ${modoParticipanteTemporada ? "border-[#005a3c] bg-[#e8f3ee]" : "border-[#dfe7e2]"}`}><Users className="h-8 w-8 text-[#005a3c]"/><b className="mt-3 block text-lg">Participante de Temporada</b><span className="text-sm text-gray-500">Reservar com matrícula de Temporada ativa.</span></button>
                       </div>
                     </section>
 
@@ -886,7 +903,9 @@ export default function ReservasPage() {
 
                     <section className="rounded-2xl border bg-white p-5 shadow-sm">
                       <h2 className="text-xl font-extrabold text-[#005a3c]">3. Responsável</h2>
-                      {tipoPessoa === "socio" && !publico ? (
+                      {tipoPessoa === "socio" && !publico && modoParticipanteTemporada ? (
+                        <div className="mt-4"><label className="block text-sm font-bold">Participante de Temporada<select value={participanteTemporadaId} onChange={(e) => { const p = participantesTemporada.find((x) => x.id === e.target.value); setParticipanteTemporadaId(e.target.value); setNome(p?.nome || ""); setMatriculaResponsavel(p?.matricula || null); setSocioId(""); setDependenteId(""); }} className="mt-2 w-full rounded-xl border px-3 py-3"><option value="">Selecione...</option>{participantesTemporada.map((p) => <option key={p.id} value={p.id}>{p.nome} — {p.matricula || "sem matrícula"} · {p.temporada}</option>)}</select></label><button type="button" onClick={() => { setParticipanteTemporadaId(""); setModoParticipanteTemporada(false); setNome(""); setMatriculaResponsavel(null); }} className="mt-2 text-sm font-bold text-[#005a3c]">Voltar para sócios/dependentes</button></div>
+                      ) : tipoPessoa === "socio" && !publico ? (
                         <div className="relative mt-4">
                           <div className="flex items-center gap-2 rounded-xl border px-3 py-3 focus-within:border-[#005a3c]"><Users className="h-5 w-5 text-gray-400" /><input value={buscaSocio} onFocus={() => void carregarPessoas()} onChange={(e) => { setBuscaSocio(e.target.value); setSocioId(""); setDependenteId(""); setMatriculaResponsavel(null); setNome(""); }} placeholder={carregandoPessoas ? "Carregando sócios..." : "Buscar sócio por nome ou matrícula..."} className="w-full outline-none" /></div>
                           {buscaSocio && !socioId && <div className="absolute z-20 mt-2 max-h-[430px] w-full overflow-y-auto rounded-xl border bg-white shadow-lg">{sociosFiltrados.length ? sociosFiltrados.map((s) => {
