@@ -184,6 +184,7 @@ export default function DependentesPage() {
     nome: "",
     cpf: "",
     data_nascimento: "",
+    exame_medico_validade: "",
     parentesco: "",
     telefone: "",
     ativo: true,
