@@ -175,6 +175,7 @@ export default function CarteirinhasPage(): JSX.Element {
   const [modoQr, setModoQr] = useState(false);
   const [indiceAberto, setIndiceAberto] = useState(false);
   const [loteImpressaoMontado, setLoteImpressaoMontado] = useState(false);
+  const [cartoesSelecionados, setCartoesSelecionados] = useState<string[]>([]);
 
   useEffect(() => {
     let ativo = true;
@@ -406,7 +407,7 @@ export default function CarteirinhasPage(): JSX.Element {
       });
     });
 
-    dependentes.filter((d) => d.ativo !== false).forEach((d) => {
+    dependentes.filter((d) => d.ativo !== false && String(d.situacao || "").toLowerCase() !== "inativo").forEach((d) => {
       const socioVinculado = sociosPorId.get(String(d.socio_id));
       const titular = socioVinculado ? obterTitular(socioVinculado) : null;
       cartoes.push({
@@ -422,6 +423,9 @@ export default function CarteirinhasPage(): JSX.Element {
     });
 
     temporadas.forEach((temporada) => (temporada.participantes || []).forEach((p) => {
+      const statusEfetivo = String(p.status_carteirinha || temporada.status_carteirinha || "").toLowerCase();
+      // Só participantes explicitamente ativos entram na seleção e impressão em lote.
+      if (statusEfetivo !== "ativa") return;
       const cor = visual("temporada");
       cartoes.push({
         key: `temporada-${p.id}`, id: String(p.id), tipo: "temporada",
@@ -441,6 +445,16 @@ export default function CarteirinhasPage(): JSX.Element {
       || a.ordemFamilia.localeCompare(b.ordemFamilia, "pt-BR")
       || (a.nome === a.ordemFamilia ? -1 : b.nome === b.ordemFamilia ? 1 : a.nome.localeCompare(b.nome, "pt-BR")));
   }, [socios, dependentes, temporadas]);
+
+  const cartoesSelecionadosParaImpressao = useMemo(
+    () => cartoesParaImpressao.filter((cartao) => cartoesSelecionados.includes(cartao.key)),
+    [cartoesParaImpressao, cartoesSelecionados],
+  );
+
+  useEffect(() => {
+    const chavesAtivas = new Set(cartoesParaImpressao.map((cartao) => cartao.key));
+    setCartoesSelecionados((atuais) => atuais.filter((chave) => chavesAtivas.has(chave)));
+  }, [cartoesParaImpressao]);
 
   useEffect(() => {
     if (!loteImpressaoMontado) return;
@@ -468,7 +482,7 @@ export default function CarteirinhasPage(): JSX.Element {
       cancelado = true;
       window.cancelAnimationFrame(frame);
     };
-  }, [loteImpressaoMontado, cartoesParaImpressao.length]);
+  }, [loteImpressaoMontado, cartoesSelecionadosParaImpressao.length]);
 
   const contadores = useMemo(() => {
     let ativos = 0;
@@ -530,8 +544,22 @@ export default function CarteirinhasPage(): JSX.Element {
     return limpar;
   }
 
-  function imprimirTodasCarteirinhas() {
-    if (!cartoesParaImpressao.length || loteImpressaoMontado) return;
+  function selecionarTodasAtivas() {
+    setCartoesSelecionados(cartoesParaImpressao.map((cartao) => cartao.key));
+  }
+
+  function alternarSelecaoCartao(chave: string) {
+    setCartoesSelecionados((atuais) => atuais.includes(chave)
+      ? atuais.filter((item) => item !== chave)
+      : [...atuais, chave]);
+  }
+
+  function limparSelecaoCartoes() {
+    setCartoesSelecionados([]);
+  }
+
+  function imprimirCarteirinhasSelecionadas() {
+    if (!cartoesSelecionadosParaImpressao.length || loteImpressaoMontado) return;
     setErro("");
     setLoteImpressaoMontado(true);
   }
@@ -690,8 +718,27 @@ ${qrSvg}
             <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
             <p className="mt-1 text-sm text-gray-500">Carteirinha física, carteira digital e QR Code de acesso. Ao ler o QR, esta carteirinha é aberta e o acesso é contabilizado automaticamente.</p>
             <div className="mt-4 flex flex-wrap gap-2 print-hide">
-              <button type="button" onClick={() => void imprimirTodasCarteirinhas()} disabled={!cartoesParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><Printer className="h-4 w-4" /> {loteImpressaoMontado ? "Preparando..." : `Imprimir todas (${cartoesParaImpressao.length})`}</button>
+              <button type="button" onClick={selecionarTodasAtivas} disabled={!cartoesParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-50">☑ Selecionar todas as ativas ({cartoesParaImpressao.length})</button>
+              <button type="button" onClick={limparSelecaoCartoes} disabled={!cartoesSelecionados.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-bold text-gray-700 disabled:opacity-50">Limpar seleção</button>
+              <button type="button" onClick={imprimirCarteirinhasSelecionadas} disabled={!cartoesSelecionadosParaImpressao.length || loteImpressaoMontado} className="inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><Printer className="h-4 w-4" /> {loteImpressaoMontado ? "Preparando..." : `Imprimir selecionadas (${cartoesSelecionadosParaImpressao.length})`}</button>
               <button type="button" onClick={() => setIndiceAberto((aberto) => !aberto)} className="inline-flex items-center gap-2 rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"><Search className="h-4 w-4" /> {indiceAberto ? "Ocultar índice" : "Lista alfabética"}</button>
+            </div>
+            <div className="print-hide mt-3 rounded-2xl border border-[#d8e9df] bg-white p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-black text-[#005a3c]">Selecionar carteirinhas para impressão</div>
+                <div className="text-xs font-semibold text-gray-500">{cartoesSelecionadosParaImpressao.length} selecionada(s) de {cartoesParaImpressao.length} ativas</div>
+              </div>
+              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                {cartoesParaImpressao.map((cartao) => (
+                  <label key={cartao.key} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-[#f4faf7] ${cartoesSelecionados.includes(cartao.key) ? "border-[#83b99d] bg-[#edf7f1]" : "border-gray-100 bg-white"}`}>
+                    <input type="checkbox" checked={cartoesSelecionados.includes(cartao.key)} onChange={() => alternarSelecaoCartao(cartao.key)} disabled={loteImpressaoMontado} className="h-4 w-4 accent-[#005a3c]" />
+                    <span className="min-w-0 flex-1"><span className="block truncate font-bold text-gray-800">{cartao.nome}</span><span className="block truncate text-xs text-gray-500">{cartao.matricula} · {cartao.categoria}{cartao.tipo === "dependente" ? ` · ${cartao.titular}` : ""}</span></span>
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-800">ATIVA</span>
+                  </label>
+                ))}
+                {!cartoesParaImpressao.length && <p className="py-4 text-center text-sm text-gray-500">Nenhuma carteirinha ativa disponível.</p>}
+              </div>
+              <p className="mt-2 text-[11px] text-gray-500">Carteirinhas inativas ou bloqueadas não aparecem nesta seleção e não entram na impressão em lote.</p>
             </div>
           </div>}
 
@@ -991,9 +1038,9 @@ ${qrSvg}
             </section>
           )}
           {loteImpressaoMontado && <div className="print-lote-root hidden" aria-hidden="true">
-            {Array.from({ length: Math.ceil(cartoesParaImpressao.length / 10) }, (_, folha) => (
+            {Array.from({ length: Math.ceil(cartoesSelecionadosParaImpressao.length / 10) }, (_, folha) => (
               <div className="print-sheet" key={`folha-${folha}`}>
-                {cartoesParaImpressao.slice(folha * 10, folha * 10 + 10).map((cartao) => (
+                {cartoesSelecionadosParaImpressao.slice(folha * 10, folha * 10 + 10).map((cartao) => (
                   <article className="print-batch-card" key={cartao.key}>
                     <div className="print-batch-head" style={{ background: cartao.cor, color: cartao.textoCor }}>
                       <img className="print-batch-logo" src="/logo-guarani.png" alt="" />
