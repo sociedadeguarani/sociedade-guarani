@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Bell, CircleUserRound } from "lucide-react";
 
@@ -78,6 +80,7 @@ const getNomeSnapshot = () => readLocalStorage("guarani_usuario_nome");
 const getPerfilSnapshot = () => readLocalStorage("guarani_usuario_perfil");
 
 export default function CabecalhoPadrao() {
+  const router = useRouter();
   const email = useSyncExternalStore(subscribeLocalStorage, getEmailSnapshot, getEmptyServerSnapshot);
   const nome = useSyncExternalStore(subscribeLocalStorage, getNomeSnapshot, getEmptyServerSnapshot);
   const perfilArmazenado = useSyncExternalStore(subscribeLocalStorage, getPerfilSnapshot, getEmptyServerSnapshot);
@@ -182,7 +185,7 @@ export default function CabecalhoPadrao() {
         // Ignora bloqueio do localStorage.
       }
 
-      window.location.href = "/login";
+      router.replace("/login");
     }
   }
 
@@ -196,9 +199,11 @@ export default function CabecalhoPadrao() {
       <div className="flex min-h-[76px] items-center justify-between gap-3 px-3 sm:px-5 lg:px-6 lg:pl-[245px]">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#005a3c] p-1 shadow-sm lg:hidden">
-            <img
+            <Image
               src="/logo-guarani-header.webp"
               alt="Sociedade Guarani"
+              width={40}
+              height={40}
               className="h-full w-full object-contain"
             />
           </div>
@@ -217,7 +222,7 @@ export default function CabecalhoPadrao() {
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
-            onClick={() => (window.location.href = "/avisos")}
+            onClick={() => router.push("/avisos")}
             aria-label={avisosAtivos > 0 ? `Avisos ativos: ${avisosAtivos}` : "Avisos"}
             title={avisosAtivos > 0 ? `${avisosAtivos} aviso(s) ativo(s)` : "Abrir avisos"}
             className="relative flex h-10 w-10 items-center justify-center rounded-xl text-[#426258] transition hover:bg-[#e8f3ee] hover:text-[#005a3c]"
