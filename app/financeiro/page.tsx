@@ -21,6 +21,11 @@ type Socio = {
   valor_mensalidade: number | null;
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
+  data_associacao: string | null;
+  tipo_socio: string | null;
+  categoria: string | null;
+  remido: boolean | null;
+  ativo: boolean | null;
 };
 
 type Dependente = {
@@ -306,27 +311,76 @@ export default function FinanceiroPage() {
   }, [mensalidades]);
 
   const historicoPorPessoa = useMemo(() => {
-    const map = new Map<string, number>();
+    // Apura competências vencidas em aberto a partir dos lançamentos existentes
+    // e completa virtualmente os meses não gerados, sem depender de geração manual.
+    const map = new Map<string, Set<string>>();
     const hojeIso = dataHojeBrasil();
-    const statusQuitados = new Set(["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"]);
+    const mesAtual = hojeIso.slice(0, 7);
+    const normalizarStatus = (valor: unknown) => String(valor || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const quitados = new Set(["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"]);
+    const chaveCompetencia = (valor: string | null | undefined) => {
+      if (!valor) return "";
+      const raw = valor.slice(0, 10);
+      if (/^\d{4}-\d{2}/.test(raw)) return raw.slice(0, 7);
+      const br = raw.match(/^(\d{2})\/(\d{4})$/);
+      return br ? `${br[2]}-${br[1]}` : "";
+    };
+    const adiciona = (chave: string, competencia: string) => {
+      if (!chave || !competencia) return;
+      const set = map.get(chave) || new Set<string>();
+      set.add(competencia);
+      map.set(chave, set);
+    };
+
     for (const [chave, lancamentos] of lancamentosPorPessoa) {
-      const competencias = new Set<string>();
-      for (const mensalidade of lancamentos) {
-        const status = String(mensalidade.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const vencimento = String(mensalidade.data_vencimento || "").slice(0, 10);
-        if (statusQuitados.has(status) || !vencimento || vencimento >= hojeIso) continue;
-        const competencia = String(mensalidade.competencia || vencimento).slice(0, 7);
-        if (/^\d{4}-\d{2}$/.test(competencia)) competencias.add(competencia);
+      for (const m of lancamentos) {
+        const status = normalizarStatus(m.situacao);
+        const vencimento = String(m.data_vencimento || "").slice(0, 10);
+        const competencia = chaveCompetencia(m.competencia || vencimento);
+        if (!quitados.has(status) && vencimento && vencimento < hojeIso && competencia) adiciona(chave, competencia);
       }
-      if (competencias.size > 0) map.set(chave, competencias.size);
     }
-    return map;
-  }, [lancamentosPorPessoa]);
+
+    const sociosPorId = new Map(socios.map((s) => [String(s.id), s]));
+    const pessoasComCobranca = pessoas;
+    for (const pessoa of pessoasComCobranca) {
+      const socio = sociosPorId.get(String(pessoa.socio_id));
+      if (!socio) continue;
+      const tipo = normalizarStatus(socio.tipo_socio);
+      const categoria = normalizarStatus(socio.categoria);
+      const situacao = normalizarStatus(socio.situacao);
+      if (socio.remido === true || tipo.includes("remido") || categoria.includes("remido") || tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio") || ["inativo", "cancelado", "cancelada"].includes(situacao)) continue;
+
+      const chavePessoa = pessoa.chave;
+      const rows = lancamentosPorPessoa.get(chavePessoa) || [];
+      const pagos = rows.filter((m) => ["pago", "paid", "quitado", "recebido"].includes(normalizarStatus(m.situacao)))
+        .map((m) => chaveCompetencia(m.competencia || m.data_vencimento)).filter(Boolean).sort();
+      let inicio = pessoa.dependente_id ? (pagos[0] || "") : chaveCompetencia(socio.data_associacao);
+      if (!inicio) inicio = pagos[0] || "";
+      if (!/^\d{4}-\d{2}$/.test(inicio)) continue;
+      if (!(pessoa.valor_mensalidade > 0)) continue;
+
+      const [anoInicial, mesInicial] = inicio.split("-").map(Number);
+      const cursor = new Date(anoInicial, mesInicial - 1, 1);
+      while (`${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}` <= mesAtual) {
+        const comp = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}`;
+        const ultimoDia = new Date(cursor.getFullYear(), cursor.getMonth()+1, 0).getDate();
+        const dia = Math.min(Math.max(1, Number(pessoa.dia_vencimento || 10)), ultimoDia);
+        const vencimento = `${comp}-${String(dia).padStart(2,"0")}`;
+        if (vencimento < hojeIso) {
+          const existentes = rows.filter((m) => chaveCompetencia(m.competencia || m.data_vencimento) === comp);
+          if (!existentes.some((m) => quitados.has(normalizarStatus(m.situacao)))) adiciona(chavePessoa, comp);
+        }
+        cursor.setMonth(cursor.getMonth()+1);
+      }
+    }
+    return new Map(Array.from(map.entries()).map(([chave, competencias]) => [chave, Array.from(competencias).sort()]));
+  }, [lancamentosPorPessoa, socios, pessoas]);
 
   const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
     pessoa: p,
-    meses: historicoPorPessoa.get(p.chave) || 0,
-    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0, politicaInadimplencia),
+    meses: historicoPorPessoa.get(p.chave)?.length || 0,
+    nivel: nivelAtraso(historicoPorPessoa.get(p.chave)?.length || 0, politicaInadimplencia),
   })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa, politicaInadimplencia]);
 
   const quantidadeAtrasados = atrasoPessoas.length;
@@ -336,16 +390,36 @@ export default function FinanceiroPage() {
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return atrasoPessoas.map((x) => {
-      const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || []).filter((m) => {
+      const rows = lancamentosPorPessoa.get(x.pessoa.chave) || [];
+      const quitados = ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"];
+      const lancamentos = rows.filter((m) => {
         const status = String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        if (["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status)) return false;
+        if (quitados.includes(status)) return false;
         return Boolean(m.data_vencimento && m.data_vencimento.slice(0, 10) < dataHojeBrasil());
-      }).sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
-      const valorDevido = lancamentos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
+      });
+      const competenciasExistentes = new Set(lancamentos.map((m) => String(m.competencia || m.data_vencimento || "").slice(0, 7)));
+      const virtuais = (historicoPorPessoa.get(x.pessoa.chave) || [])
+        .filter((competencia) => !competenciasExistentes.has(competencia))
+        .map((competencia) => {
+          const [ano, mes] = competencia.split("-").map(Number);
+          const ultimoDia = new Date(ano, mes, 0).getDate();
+          const dia = Math.min(Math.max(1, Number(x.pessoa.dia_vencimento || 10)), ultimoDia);
+          return {
+            id: `virtual-${x.pessoa.chave}-${competencia}`,
+            socio_id: x.pessoa.socio_id,
+            dependente_id: x.pessoa.dependente_id,
+            competencia,
+            valor: x.pessoa.valor_mensalidade,
+            data_vencimento: `${competencia}-${String(dia).padStart(2, "0")}`,
+            situacao: "em aberto",
+          } as Mensalidade;
+        });
+      const lancamentosCompletos = [...lancamentos, ...virtuais].sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
+      const valorDevido = lancamentosCompletos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
       const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
-      return { ...x, lancamentos, valorDevido, competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentos[0]?.competencia || null, correspondeBusca };
+      return { ...x, lancamentos: lancamentosCompletos, valorDevido, competencias: lancamentosCompletos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentosCompletos[0]?.competencia || null, correspondeBusca };
     }).filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, busca, lancamentosPorPessoa]);
+  }, [atrasoPessoas, busca, lancamentosPorPessoa, historicoPorPessoa]);
 
   const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
   const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
@@ -440,7 +514,7 @@ export default function FinanceiroPage() {
         setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
       }
       const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
+        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,data_associacao,tipo_socio,categoria,remido,ativo").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
         supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao").order("competencia", { ascending: false }),
       ]);
