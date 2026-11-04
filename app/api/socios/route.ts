@@ -220,6 +220,7 @@ export async function POST(request: Request) {
     const auth = await autenticarAdmin(request);
     if ("response" in auth) return auth.response;
     const body = await request.json() as Record<string, unknown>;
+    const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
     const possuiMensalidadeTitular = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
