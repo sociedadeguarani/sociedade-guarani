@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Megaphone, Plus, Edit3, Trash2, Pin, Upload, X, Bell, CheckCheck, ExternalLink, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -22,6 +23,18 @@ type Aviso = {
   id:string; titulo:string; mensagem:string; imagem_url:string|null; tipo:string;
   prioridade:string; fixado:boolean; ativo:boolean; publico:string;
   data_publicacao:string; data_inicio:string|null; data_fim:string|null;
+};
+type FormAviso = {
+  titulo: string;
+  mensagem: string;
+  imagem_url: string;
+  tipo: string;
+  prioridade: string;
+  fixado: boolean;
+  ativo: boolean;
+  publico: string;
+  data_inicio: string;
+  data_fim: string;
 };
 
 async function getToken(){
@@ -49,7 +62,7 @@ export default function AvisosPage(){
   const [reservaSelecionada,setReservaSelecionada]=useState<ReservaPendente|null>(null);
   const [processandoReserva,setProcessandoReserva]=useState<string|null>(null);
   const podeGerenciarAvisos=["administrador","administrador_master","admin","master"].includes(perfil);
-  const [form,setForm]=useState<any>({
+  const [form,setForm]=useState<FormAviso>({
     titulo:"",mensagem:"",imagem_url:"",tipo:"informativo",prioridade:"normal",
     fixado:false,ativo:true,publico:"todos",data_inicio:"",data_fim:""
   });
@@ -278,7 +291,14 @@ export default function AvisosPage(){
   function editar(a:Aviso){
     setErro("");setArquivo(null);setEdit(a);
     setForm({
-      ...a,
+      titulo: a.titulo,
+      mensagem: a.mensagem,
+      imagem_url: a.imagem_url || "",
+      tipo: a.tipo,
+      prioridade: a.prioridade,
+      fixado: a.fixado,
+      ativo: a.ativo,
+      publico: a.publico,
       data_inicio:a.data_inicio?new Date(a.data_inicio).toISOString().slice(0,16):"",
       data_fim:a.data_fim?new Date(a.data_fim).toISOString().slice(0,16):""
     });
@@ -540,7 +560,7 @@ export default function AvisosPage(){
         {avisos.map(a=>{
           const avisoAutomatico = String(a.tipo || "").toLowerCase() === "sistema" || a.titulo === "Pagamento de temporada confirmado";
           return <article key={a.id} className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
-            {a.imagem_url&&<img src={a.imagem_url} alt="" className="h-48 w-full object-cover"/>}
+            {a.imagem_url&&<Image src={a.imagem_url} alt="" width={1200} height={600} unoptimized className="h-48 w-full object-cover"/>}
             <div className="p-5">
               <div className="flex items-center justify-between gap-2"><span className="rounded-full bg-[#e8f3ee] px-2.5 py-1 text-[10px] font-black uppercase text-[#005a3c]">{avisoAutomatico ? "Automático do sistema" : a.tipo}</span>{a.fixado&&<Pin className="h-4 w-4 text-amber-600"/>}</div>
               <h2 className="mt-3 text-xl font-black text-[#003d2b]">{a.titulo}</h2>
@@ -615,7 +635,7 @@ export default function AvisosPage(){
                 <input value={form.imagem_url||""} onChange={e=>setForm({...form,imagem_url:e.target.value})} className="input" placeholder="Ou cole a URL da imagem"/>
               </div>
               {arquivo&&<p className="mt-2 text-xs font-bold text-[#005a3c]">Arquivo selecionado: {arquivo.name}</p>}
-              {form.imagem_url&&<img src={form.imagem_url} alt="Prévia" className="mt-3 h-36 w-full rounded-xl object-cover"/>}
+              {form.imagem_url&&<Image src={form.imagem_url} alt="Prévia" width={1200} height={450} unoptimized className="mt-3 h-36 w-full rounded-xl object-cover"/>}
               <p className="mt-2 text-xs text-gray-500">Você pode usar os dois: enviar do PC ou informar uma URL.</p>
             </div>
             <label><span className="label">Público</span><select value={form.publico} onChange={e=>setForm({...form,publico:e.target.value})} className="input"><option value="todos">Todos</option><option value="associados">Associados</option><option value="funcionarios">Funcionários</option></select></label>
