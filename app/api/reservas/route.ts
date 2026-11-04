@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { assinarArquivosEmLote } from "@/lib/storageSignedUrls";
 
 export const dynamic = "force-dynamic";
 
-const PAGAMENTOS_DB = ["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "cartao", "outro"] as const;
-type PagamentoDb = (typeof PAGAMENTOS_DB)[number];
+type PagamentoDb = "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "cartao" | "outro";
 type PagamentoEntrada = "pix" | "dinheiro" | "transferencia" | "pendente";
 
 function erroBanco(error: unknown) {
@@ -85,7 +85,7 @@ function normalizarEspacoBanco(row: Record<string, unknown>) {
   };
 }
 
-async function resolverEspacoId(db: any, informado: string, nome: string) {
+async function resolverEspacoId(db: SupabaseClient, informado: string, nome: string) {
   const valor = informado.trim();
   if (UUID_RE.test(valor)) {
     const { data, error } = await db.from("espacos").select("id,nome").eq("id", valor).limit(1);
@@ -131,7 +131,7 @@ function minutosDoDia(valor: unknown) {
  * Espaços por hora não podem ter períodos sobrepostos.
  */
 async function verificarConflitoReserva(
-  db: any,
+  db: SupabaseClient,
   dados: {
     espacoId: string;
     data: string;
@@ -234,7 +234,7 @@ function normalizarReserva(dbRow: Record<string, unknown>) {
   };
 }
 
-async function verificarMovimentacao(db: any, reservaId: string) {
+async function verificarMovimentacao(db: SupabaseClient, reservaId: string) {
   const { data, error } = await db
     .from("movimentacoes_financeiras")
     .select("id,valor,forma_pagamento")
@@ -247,8 +247,8 @@ async function verificarMovimentacao(db: any, reservaId: string) {
 }
 
 async function registrarFinanceiro(
-  db: any,
-  reserva: Record<string, any>,
+  db: SupabaseClient,
+  reserva: Record<string, unknown>,
   contaBancariaId: string,
   usuarioId: string,
   formaPagamento: "pix" | "dinheiro",
@@ -267,7 +267,7 @@ async function registrarFinanceiro(
   const existente = await verificarMovimentacao(db, String(reserva.id));
   if (existente) return existente;
 
-  const normalizada = normalizarReserva(reserva) as Record<string, any>;
+  const normalizada = normalizarReserva(reserva);
   const conciliado = true;
   const { data: movimento, error } = await db
     .from("movimentacoes_financeiras")
@@ -277,9 +277,9 @@ async function registrarFinanceiro(
       grupo_transferencia: null,
       tipo: "entrada",
       categoria: "Reserva",
-      descricao: `Reserva - ${normalizada.nome || "Responsável"}${normalizada.data ? ` - ${normalizada.data}` : ""}`,
+      descricao: `Reserva - ${String(normalizada.nome || "Responsável")}${normalizada.data ? ` - ${String(normalizada.data)}` : ""}`,
       valor: Number(normalizada.valor || 0),
-      data_movimentacao: normalizada.data || new Date().toISOString().slice(0, 10),
+      data_movimentacao: typeof normalizada.data === "string" ? normalizada.data : new Date().toISOString().slice(0, 10),
       forma_pagamento: formaPagamento,
       origem_tipo: "reserva",
       origem_id: String(reserva.id),
@@ -320,7 +320,7 @@ function selecionarCampoExistente(row: Record<string, unknown>, candidates: stri
   return candidates.find((key) => Object.prototype.hasOwnProperty.call(row, key));
 }
 
-async function atualizarEspaco(db: any, body: Record<string, unknown>) {
+async function atualizarEspaco(db: SupabaseClient, body: Record<string, unknown>) {
   const id = String(body.id || "").trim();
   if (!id) throw new Error("Espaço não informado.");
 
