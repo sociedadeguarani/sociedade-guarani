@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, Info, Save, Settings2, ShieldAlert } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
@@ -12,17 +13,18 @@ import {
 } from "@/lib/politicaInadimplencia";
 
 export default function PoliticaAcessoPage() {
+  const router = useRouter();
   const [politica, setPolitica] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState("");
 
-  async function requisicao(url: string, init: RequestInit = {}) {
+  const requisicao = useCallback(async (url: string, init: RequestInit = {}) => {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) {
-      window.location.href = "/login";
+      router.replace("/login");
       throw new Error("Sua sessão expirou. Entre novamente.");
     }
 
@@ -30,9 +32,9 @@ export default function PoliticaAcessoPage() {
     headers.set("Authorization", `Bearer ${token}`);
     if (init.body) headers.set("Content-Type", "application/json");
     return fetch(url, { ...init, headers, cache: "no-store" });
-  }
+  }, [router]);
 
-  async function carregar() {
+  const carregar = useCallback(async () => {
     setCarregando(true);
     setErro("");
     try {
@@ -45,14 +47,14 @@ export default function PoliticaAcessoPage() {
     } finally {
       setCarregando(false);
     }
-  }
+  }, [requisicao]);
 
   useEffect(() => {
     const agendamento = window.setTimeout(() => {
       void carregar();
     }, 0);
     return () => window.clearTimeout(agendamento);
-  }, []);
+  }, [carregar]);
 
   async function salvar() {
     setSalvando(true);
