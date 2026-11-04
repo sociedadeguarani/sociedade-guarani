@@ -56,14 +56,36 @@ function competenciaBR(valor: string | null | undefined) {
   return `${partes[1]}/${partes[0]}`;
 }
 
+function normalizarSituacao(m: Mensalidade) {
+  return String(m.situacao || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+// Mantém o relatório alinhado à apuração financeira usada na tela de Sócios.
 function isPago(m: Mensalidade) {
-  const status = String(m.situacao || "").toLowerCase();
-  return ["pago", "paid", "quitado", "recebido", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  return [
+    "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
+    "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada",
+    "isento", "isenta", "cancelado", "cancelada",
+  ].includes(normalizarSituacao(m));
 }
 
 function isIsento(m: Mensalidade) {
-  const status = String(m.situacao || "").toLowerCase();
-  return ["isento", "isenta", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  return ["isento", "isenta", "cancelado", "cancelada"].includes(normalizarSituacao(m));
+}
+
+/** Usa a competência como referência para mensalidades legadas sem vencimento. */
+function vencimentoEfetivo(m: Mensalidade, hoje: string): string {
+  const vencimentoInformado = String(m.data_vencimento || "").slice(0, 10);
+  if (vencimentoInformado) return vencimentoInformado;
+
+  const competencia = String(m.competencia || "").slice(0, 7);
+  if (/^\d{4}-\d{2}$/.test(competencia) && competencia < hoje.slice(0, 7)) {
+    return `${competencia}-01`;
+  }
+  return "";
 }
 
 type DadosInadimplencia = {
@@ -250,7 +272,8 @@ export default function InadimplenciaPage() {
     }
 
     for (const m of mensalidades) {
-      if (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hoje) continue;
+      const vencimento = vencimentoEfetivo(m, hoje);
+      if (!vencimento || vencimento >= hoje) continue;
       if (isPago(m) || isIsento(m)) continue;
 
       const dependente = m.dependente_id
