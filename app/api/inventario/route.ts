@@ -57,6 +57,17 @@ type EmprestimoComDependente = EmprestimoInventarioRow & {
   } | null;
 };
 
+/**
+ * O Supabase pode inferir relações aninhadas como array, mesmo quando a
+ * aplicação espera uma única relação. Normalizamos a resposta para manter
+ * o formato singular já consumido pela tela de Inventário.
+ */
+function normalizarRelacao<T>(
+  valor: T | T[] | null | undefined
+): T | null {
+  return Array.isArray(valor) ? valor[0] ?? null : valor ?? null;
+}
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -107,7 +118,11 @@ export async function GET(request: Request) {
     const sociosRows = (socios || []) as SocioInventarioRow[];
     const dependentesRows = (dependentes || []) as DependenteInventarioRow[];
     const itensRows = (itens || []) as ItemInventarioRow[];
-    const emprestimosRows = (emprestimos || []) as EmprestimoInventarioRow[];
+    const emprestimosRows: EmprestimoInventarioRow[] = (emprestimos || []).map((emprestimo) => ({
+      ...emprestimo,
+      item: normalizarRelacao(emprestimo.item),
+      socio: normalizarRelacao(emprestimo.socio),
+    }));
 
     const sociosPorId = new Map<string, SocioInventarioRow>(
       sociosRows.map((s) => [
