@@ -1,1545 +1,701 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import MenuLateralPadrao from "../../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
-import { Campo, Modal, Resumo } from "./components/FinanceiroUI";
+import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
 
 type Socio = {
   id: string;
   matricula: string | number | null;
   nome: string;
-  cpf: string | null;
-  whatsapp: string | null;
-  telefone: string | null;
-  foto_url: string | null;
+  data_associacao: string | null;
+  valor_mensalidade: number | string | null;
+  dia_vencimento: number | null;
   situacao: string | null;
+  categoria: string | null;
+  tipo_socio: string | null;
   responsavel_id: string | null;
   possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
+  remido: boolean | null;
+  modalidade_temporada: string | null;
 };
 
 type Dependente = {
   id: string;
   socio_id: string;
   nome: string;
-  cpf: string | null;
-  telefone: string | null;
   ativo: boolean | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
 };
 
 type Mensalidade = {
   id: string;
-  socio_id: string;
+  socio_id: string | null;
   dependente_id: string | null;
-  competencia: string;
-  valor: number;
+  competencia: string | null;
   data_vencimento: string | null;
+  valor: number | string | null;
   situacao: string | null;
 };
 
-type PessoaFinanceira = {
-  chave: string;
-  socio_id: string;
-  dependente_id: string | null;
+type Inadimplente = {
+  pessoaId: string;
+  socioId: string;
   nome: string;
-  matricula: string | number | null;
-  cpf: string | null;
-  foto_url: string | null;
-  responsavel_nome: string | null;
-  possui_mensalidade: boolean;
-  valor_mensalidade: number;
-  dia_vencimento: number;
-  tipo_pagamento: string;
-};
-
-type ContaBancaria = {
-  id: string;
-  nome: string;
-  banco: string | null;
-  agencia: string | null;
-  conta: string | null;
-  saldo_inicial: number;
-  data_saldo_inicial: string | null;
-  ativo: boolean;
-  observacoes: string | null;
-};
-
-type MovimentoFinanceiro = {
-  id: string;
-  conta_bancaria_id: string;
-  conta_destino_id: string | null;
-  grupo_transferencia: string | null;
-  tipo: "entrada" | "saida" | "transferencia";
-  categoria: string | null;
-  descricao: string;
+  matricula: string;
+  responsavel: string;
+  meses: number;
   valor: number;
-  data_movimentacao: string;
-  created_at: string | null;
-  created_by: string | null;
-  created_by_nome?: string | null;
-  created_by_email?: string | null;
-  forma_pagamento: string | null;
-  origem_tipo: string | null;
-  origem_id: string | null;
-  socio_id: string | null;
-  dependente_id: string | null;
-  comprovante_url: string | null;
-  conciliado: boolean;
-  data_conciliacao: string | null;
-  observacoes: string | null;
+  competencias: string[];
+  nivel: "verde" | "amarelo" | "vermelho";
 };
 
-
-
-const FORMAS = [
-  ["pix", "PIX"],
-  ["debito_em_conta", "Débito em conta"],
-  ["boleto", "Boleto"],
-  ["dinheiro", "Dinheiro"],
-  ["transferencia", "Transferência"],
-  ["outro", "Outro"],
-] as const;
-
-function formatarMoeda(valor: number | string | null | undefined) {
+function moeda(valor: number | string | null | undefined) {
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
 }
 
-function formatarData(data: string | null | undefined) {
-  if (!data) return "—";
-  const p = data.slice(0, 10).split("-");
-  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : data;
+function competenciaISO(valor: string | null | undefined): string | null {
+  if (!valor) return null;
+  const bruto = String(valor).trim().slice(0, 10);
+  const iso = bruto.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const br = bruto.match(/^(\d{2})\/(\d{4})$/);
+  if (br) return `${br[2]}-${br[1]}`;
+  return null;
 }
 
-function formatarHora(data: string | null | undefined) {
-  if (!data) return "—";
-  const d = new Date(data);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+function competenciaBR(valor: string | null | undefined) {
+  const iso = competenciaISO(valor);
+  if (!iso) return valor || "—";
+  const [ano, mes] = iso.split("-");
+  return `${mes}/${ano}`;
 }
 
-function formatarCompetencia(valor: string) {
-  const p = valor.slice(0, 7).split("-");
-  return p.length === 2 ? `${p[1]}/${p[0]}` : valor;
+function dataVencimentoCompetencia(competencia: string, diaInformado: unknown): string {
+  const [ano, mes] = competencia.split("-").map(Number);
+  const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const dia = Math.max(1, Math.min(ultimoDia, Math.trunc(Number(diaInformado) || 10)));
+  return `${ano}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
 }
 
-function ehUrlAbsoluta(valor: string) {
-  return /^https?:\/\//i.test(valor);
+function normalizarStatus(valor: unknown) {
+  return String(valor || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
-function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
-  const nivel = classificarMesesAtraso(meses, politica);
-  if (nivel === "vermelho") {
-    return {
-      texto: `${meses} ${meses === 1 ? "mês" : "meses"} · bloqueio`,
-      classe: "bg-red-100 text-red-700 ring-1 ring-red-200",
-      ponto: "bg-red-500",
-    };
+function statusQuitado(valor: unknown) {
+  return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada"].includes(normalizarStatus(valor));
+}
+
+function socioRemidoOuTemporada(socio: Socio) {
+  const texto = `${socio.tipo_socio || ""} ${socio.categoria || ""} ${socio.modalidade_temporada || ""}`
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return socio.remido === true || texto.includes("remido") || texto.includes("temporada");
+}
+
+function isPago(m: Mensalidade) {
+  return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada"]
+    .includes(normalizarStatus(m.situacao));
+}
+
+function isIsento(m: Mensalidade) {
+  return ["isento", "isenta", "cancelado", "cancelada"].includes(normalizarStatus(m.situacao));
+}
+
+type DadosInadimplencia = {
+  socios: Socio[];
+  dependentes: Dependente[];
+  mensalidades: Mensalidade[];
+  politicaInadimplencia: PoliticaInadimplencia;
+};
+
+/** Busca os dados sem atualizar estado React; pode ser chamada pelo efeito ou pelo botão Atualizar. */
+async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
+  const [sociosResult, dependentesResult, mensalidadesResult] =
+    await Promise.all([
+      supabase
+        .from("socios")
+        .select("id,matricula,nome,data_associacao,valor_mensalidade,dia_vencimento,situacao,categoria,tipo_socio,responsavel_id,possui_mensalidade,remido,modalidade_temporada")
+        .order("nome"),
+      supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,ativo")
+        .eq("ativo", true)
+        .order("nome"),
+      supabase
+        .from("mensalidades")
+        .select(
+          "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao"
+        )
+        .order("data_vencimento", { ascending: false }),
+    ]);
+
+  if (sociosResult.error) throw new Error(sociosResult.error.message);
+  if (dependentesResult.error) throw new Error(dependentesResult.error.message);
+  if (mensalidadesResult.error) throw new Error(mensalidadesResult.error.message);
+
+  let politicaInadimplencia = POLITICA_INADIMPLENCIA_PADRAO;
+  try {
+    const { data: authData } = await supabase.auth.getSession();
+    const token = authData.session?.access_token;
+    if (token) {
+      const policyResponse = await fetch("/api/configuracoes/acessos", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const policyJson = await policyResponse.json().catch(() => ({}));
+      if (policyResponse.ok) {
+        politicaInadimplencia = normalizarPoliticaInadimplencia(
+          policyJson?.politica
+        );
+      }
+    }
+  } catch {
+    // Mantém a política padrão caso a configuração não possa ser consultada.
   }
-  if (nivel === "amarelo") {
-    return {
-      texto: `${meses} ${meses === 1 ? "mês" : "meses"} · atenção`,
-      classe: "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200",
-      ponto: "bg-yellow-500",
-    };
-  }
+
   return {
-    texto: meses > 0 ? `${meses} ${meses === 1 ? "mês" : "meses"} · tolerância` : "Em dia",
-    classe: "bg-green-100 text-green-700 ring-1 ring-green-200",
-    ponto: "bg-green-500",
+    socios: (sociosResult.data || []) as Socio[],
+    dependentes: (dependentesResult.data || []) as Dependente[],
+    mensalidades: (mensalidadesResult.data || []) as Mensalidade[],
+    politicaInadimplencia,
   };
 }
 
-export default function FinanceiroPage() {
+export default function InadimplenciaPage() {
+  const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
-  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
-  const [mensagem, setMensagem] = useState("");
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [filtro, setFiltro] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
   const [busca, setBusca] = useState("");
-  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
-  const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
-  const [paginaMovimentos, setPaginaMovimentos] = useState(1);
-  const movimentosPorPagina = 50;
-  const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
-  const [usuariosMovimentos, setUsuariosMovimentos] = useState<Map<string, { nome: string; email: string | null }>>(new Map());
-  const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
-  const [mostrarContaModal, setMostrarContaModal] = useState(false);
-  const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
-  const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
-  const [contaEditando, setContaEditando] = useState<ContaBancaria | null>(null);
-  const [contaNome, setContaNome] = useState("");
-  const [contaBanco, setContaBanco] = useState("");
-  const [contaAgencia, setContaAgencia] = useState("");
-  const [contaNumero, setContaNumero] = useState("");
-  const [contaSaldoInicial, setContaSaldoInicial] = useState("0");
-  const [contaDataSaldo, setContaDataSaldo] = useState(new Date().toISOString().slice(0, 10));
-  const [contaObservacoes, setContaObservacoes] = useState("");
-  const [contaConferindo, setContaConferindo] = useState<ContaBancaria | null>(null);
-  const [saldoConferido, setSaldoConferido] = useState("");
-  const [dataConferencia, setDataConferencia] = useState(new Date().toISOString().slice(0, 10));
-  const [observacaoConferencia, setObservacaoConferencia] = useState("");
-  const [salvandoConferencia, setSalvandoConferencia] = useState(false);
-  const [movTipo, setMovTipo] = useState<"entrada" | "saida">("saida");
-  const [movConta, setMovConta] = useState("");
-  const [movCategoria, setMovCategoria] = useState("");
-  const [movDescricao, setMovDescricao] = useState("");
-  const [movValor, setMovValor] = useState("");
-  const [movData, setMovData] = useState(new Date().toISOString().slice(0, 10));
-  const [movForma, setMovForma] = useState("pix");
-  const [movObservacoes, setMovObservacoes] = useState("");
-  const [movArquivo, setMovArquivo] = useState<File | null>(null);
-  const [transOrigem, setTransOrigem] = useState("");
-  const [transDestino, setTransDestino] = useState("");
-  const [transValor, setTransValor] = useState("");
-  const [transData, setTransData] = useState(new Date().toISOString().slice(0, 10));
-  const [transDescricao, setTransDescricao] = useState("Transferência entre contas");
-  const [transObservacoes, setTransObservacoes] = useState("");
+  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
 
-  // Filtros do fluxo de caixa
-  const [fluxoInicio, setFluxoInicio] = useState("");
-  const [fluxoFim, setFluxoFim] = useState("");
-  const [fluxoConta, setFluxoConta] = useState("");
-  const [fluxoTipo, setFluxoTipo] = useState<"todos" | "entrada" | "saida" | "transferencia">("todos");
-  const [fluxoForma, setFluxoForma] = useState<"todos" | "pix" | "debito_em_conta" | "boleto" | "dinheiro" | "transferencia" | "outro">("todos");
-  const [fluxoConciliacao, setFluxoConciliacao] = useState<"todos" | "pendente" | "conciliado">("todos");
-  const [movimentoEstornandoId, setMovimentoEstornandoId] = useState<string | null>(null);
-  const [movimentoEstornoSelecionado, setMovimentoEstornoSelecionado] = useState<{ movimento: MovimentoFinanceiro; tipo: "movimento" | "reserva" } | null>(null);
-  const [motivoEstorno, setMotivoEstorno] = useState("Não informado");
-  const [carregandoFinanceiro, setCarregandoFinanceiro] = useState(true);
-  const [salvandoConta, setSalvandoConta] = useState(false);
-  const [salvandoMovimento, setSalvandoMovimento] = useState(false);
-  const [salvandoTransferencia, setSalvandoTransferencia] = useState(false);
-  const [movimentoConferindo, setMovimentoConferindo] = useState<MovimentoFinanceiro | null>(null);
-  const [dataConciliacao, setDataConciliacao] = useState(new Date().toISOString().slice(0, 10));
-  const [observacaoConciliacao, setObservacaoConciliacao] = useState("");
-  const [salvandoConciliacao, setSalvandoConciliacao] = useState(false);
-
-  const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map<string, Socio>(
-      socios.map((s) => [s.id, s] as [string, Socio])
-    );
-    const cpfsSociosDependentes = new Set(
-      socios
-        .filter((s) => Boolean(s.responsavel_id) && s.cpf)
-        .map((s) => s.cpf!.replace(/\D/g, ""))
-        .filter(Boolean)
-    );
-    const resultado: PessoaFinanceira[] = [];
-
-    for (const s of socios) {
-      if (s.situacao?.toLowerCase() === "inativo") continue;
-      if (!s.possui_mensalidade) continue;
-
-      resultado.push({
-        chave: `socio:${s.id}`,
-        socio_id: s.id,
-        dependente_id: null,
-        nome: s.nome,
-        matricula: s.matricula,
-        cpf: s.cpf,
-        foto_url: s.foto_url,
-        responsavel_nome: s.responsavel_id
-          ? responsaveis.get(s.responsavel_id)?.nome || null
-          : null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: Number(s.dia_vencimento || 10),
-        tipo_pagamento: s.tipo_pagamento || "pix",
-      });
-    }
-
-    for (const d of dependentes) {
-      if (d.ativo === false || !d.possui_mensalidade) continue;
-
-      const responsavel = responsaveis.get(d.socio_id);
-
-      // Evita duplicação quando o mesmo dependente já estiver
-      // cadastrado também na tabela socios com a mesma pessoa.
-      const cpfDependente = d.cpf?.replace(/\D/g, "");
-      const duplicado = Boolean(
-        cpfDependente &&
-          cpfsSociosDependentes.has(cpfDependente)
-      );
-
-      if (duplicado) continue;
-
-      resultado.push({
-        chave: `dependente:${d.id}`,
-        socio_id: d.socio_id,
-        dependente_id: d.id,
-        nome: d.nome,
-        matricula: responsavel?.matricula || null,
-        cpf: d.cpf,
-        foto_url: null,
-        responsavel_nome: responsavel?.nome || null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(d.valor_mensalidade || 0),
-        dia_vencimento: Number(d.dia_vencimento || 10),
-        tipo_pagamento: d.tipo_pagamento || "pix",
-      });
-    }
-
-    return resultado;
-  }, [socios, dependentes]);
-
-  const lancamentosPorPessoa = useMemo(() => {
-    const map = new Map<string, Mensalidade[]>();
-    for (const m of mensalidades) {
-      const chave = m.dependente_id ? `dependente:${m.dependente_id}` : `socio:${m.socio_id}`;
-      const lista = map.get(chave);
-      if (lista) lista.push(m);
-      else map.set(chave, [m]);
-    }
-    return map;
-  }, [mensalidades]);
-
-  const historicoPorPessoa = useMemo(() => {
-    const map = new Map<string, number>();
-    const hojeIso = dataHojeBrasil();
-    const statusQuitados = new Set(["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"]);
-    for (const [chave, lancamentos] of lancamentosPorPessoa) {
-      const competencias = new Set<string>();
-      for (const mensalidade of lancamentos) {
-        const status = String(mensalidade.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const vencimento = String(mensalidade.data_vencimento || "").slice(0, 10);
-        if (statusQuitados.has(status) || !vencimento || vencimento >= hojeIso) continue;
-        const competencia = String(mensalidade.competencia || vencimento).slice(0, 7);
-        if (/^\d{4}-\d{2}$/.test(competencia)) competencias.add(competencia);
-      }
-      if (competencias.size > 0) map.set(chave, competencias.size);
-    }
-    return map;
-  }, [lancamentosPorPessoa]);
-
-  const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
-    pessoa: p,
-    meses: historicoPorPessoa.get(p.chave) || 0,
-    nivel: nivelAtraso(historicoPorPessoa.get(p.chave) || 0, politicaInadimplencia),
-  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa, politicaInadimplencia]);
-
-  const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-yellow-500").length;
-  const vermelhos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-red-500").length;
-
-  const inadimplenciaDetalhada = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    return atrasoPessoas.map((x) => {
-      const lancamentos = (lancamentosPorPessoa.get(x.pessoa.chave) || []).filter((m) => {
-        const status = String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        if (["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(status)) return false;
-        return Boolean(m.data_vencimento && m.data_vencimento.slice(0, 10) < dataHojeBrasil());
-      }).sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
-      const valorDevido = lancamentos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
-      const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
-      return { ...x, lancamentos, valorDevido, competencias: lancamentos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentos[0]?.competencia || null, correspondeBusca };
-    }).filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, busca, lancamentosPorPessoa]);
-
-  const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
-  const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
-
-  async function apiFinanceiro(input: string, init: RequestInit = {}) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) throw new Error("Sessão expirada.");
-    const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${token}`);
-    if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    const response = await fetch(input, { ...init, headers, cache: "no-store" });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result?.error || "Operação financeira não concluída.");
-    return result;
-  }
-
-  async function carregarFinanceiro() {
-    setCarregandoFinanceiro(true);
+  async function carregar() {
+    setCarregando(true);
+    setErro("");
     try {
-      const result = await apiFinanceiro("/api/financeiro", { method: "GET" });
-      const movimentos = (result.movimentos || []) as MovimentoFinanceiro[];
-      const contas = (result.contas || []) as ContaBancaria[];
-      setContasBancarias(contas);
-      setMovimentosFinanceiros(movimentos);
-
-      const socioIds = Array.from(new Set(movimentos.map((m) => m.socio_id).filter(Boolean))) as string[];
-      const dependenteIds = Array.from(new Set(movimentos.map((m) => m.dependente_id).filter(Boolean))) as string[];
-      const usuarioIds = Array.from(new Set(movimentos.map((m) => m.created_by).filter(Boolean))) as string[];
-
-      if (!socioIds.length && !dependenteIds.length && !usuarioIds.length) {
-        setPessoasMovimentos(new Map());
-        setUsuariosMovimentos(new Map());
-        return;
-      }
-
-      const [{ data: socios, error: sociosError }, { data: dependentes, error: dependentesError }, { data: usuarios, error: usuariosError }] = await Promise.all([
-        socioIds.length ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds) : Promise.resolve({ data: [], error: null }),
-        dependenteIds.length ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds) : Promise.resolve({ data: [], error: null }),
-        usuarioIds.length ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds) : Promise.resolve({ data: [], error: null }),
-      ]);
-      if (sociosError) throw sociosError;
-      if (dependentesError) throw dependentesError;
-      if (usuariosError) throw usuariosError;
-
-      const socioRows = (socios || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
-      const dependenteRows = (dependentes || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
-      const socioMap = new Map(socioRows.map((socio) => [socio.id, socio]));
-      const mapa = new Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>();
-      for (const socio of socioRows) mapa.set(`socio:${socio.id}`, { nome: socio.nome, matricula: socio.matricula, tipo: "socio" });
-      for (const dependente of dependenteRows) {
-        const responsavel = dependente.socio_id ? socioMap.get(dependente.socio_id) : null;
-        mapa.set(`dependente:${dependente.id}`, { nome: dependente.nome, matricula: responsavel?.matricula ?? null, tipo: "dependente", responsavelNome: responsavel?.nome ?? null });
-      }
-      setPessoasMovimentos(mapa);
-      const usuarioMap = new Map<string, { nome: string; email: string | null }>();
-      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null }>) {
-        usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: null });
-      }
-      setUsuariosMovimentos(usuarioMap);
-    } catch (error) {
-      setMensagem(`Não foi possível carregar o Financeiro. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setCarregandoFinanceiro(false);
-    }
-  }
-
-  async function abrirComprovante(path: string | null) {
-    if (!path) return;
-    if (ehUrlAbsoluta(path)) {
-      window.open(path, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const { data, error } = await supabase.storage
-      .from("comprovantes-financeiro")
-      .createSignedUrl(path, 10 * 60);
-    if (error || !data?.signedUrl) {
-      setMensagem(`Não foi possível abrir o comprovante. ${error?.message || "Arquivo não encontrado."}`);
-      return;
-    }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
-
-  async function carregarInadimplencia() {
-    if (inadimplenciaCarregada || carregandoInadimplencia) return;
-    setCarregandoInadimplencia(true);
-    try {
-      try {
-        const configuracao = await apiFinanceiro("/api/configuracoes/acessos", { method: "GET" });
-        setPoliticaInadimplencia(normalizarPoliticaInadimplencia(configuracao?.politica));
-      } catch {
-        setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
-      }
-      const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("matricula", { ascending: true }),
-        supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
-        supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao").order("competencia", { ascending: false }),
-      ]);
-      if (sociosResult.error) throw sociosResult.error;
-      if (dependentesResult.error) throw dependentesResult.error;
-      if (mensalidadesResult.error) throw mensalidadesResult.error;
-      setSocios((sociosResult.data || []) as Socio[]);
-      setDependentes((dependentesResult.data || []) as Dependente[]);
-      setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
-      setInadimplenciaCarregada(true);
-    } catch (error) {
-      setMensagem(
-        `Não foi possível carregar a inadimplência. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
+      const dados = await buscarDadosInadimplencia();
+      setSocios(dados.socios);
+      setDependentes(dados.dependentes);
+      setMensalidades(dados.mensalidades);
+      setPoliticaInadimplencia(dados.politicaInadimplencia);
+    } catch (error: unknown) {
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar o relatório de inadimplência."
       );
     } finally {
-      setCarregandoInadimplencia(false);
+      setCarregando(false);
     }
   }
 
   useEffect(() => {
-    const agendamento = window.setTimeout(() => {
-      void carregarFinanceiro();
-    }, 0);
-    return () => window.clearTimeout(agendamento);
+    let ativo = true;
+
+    // O efeito só atualiza estado após a Promise de busca concluir; evita setState síncrono no efeito.
+    void buscarDadosInadimplencia()
+      .then((dados) => {
+        if (!ativo) return;
+        setSocios(dados.socios);
+        setDependentes(dados.dependentes);
+        setMensalidades(dados.mensalidades);
+        setPoliticaInadimplencia(dados.politicaInadimplencia);
+      })
+      .catch((error: unknown) => {
+        if (!ativo) return;
+        setErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar o relatório de inadimplência."
+        );
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
+
+    return () => {
+      ativo = false;
+    };
   }, []);
 
-  const saldosPorConta = useMemo(() => {
-    const saldos = new Map<string, number>(
-      contasBancarias.map((c) => [c.id, Number(c.saldo_inicial || 0)])
-    );
-
-    for (const m of movimentosFinanceiros) {
-      const valor = Number(m.valor || 0);
-      if (m.tipo === "transferencia") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
-        if (m.conta_destino_id) {
-          saldos.set(
-            m.conta_destino_id,
-            (saldos.get(m.conta_destino_id) || 0) + valor
-          );
-        }
-      } else if (m.tipo === "entrada") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) + valor
-        );
-      } else if (m.tipo === "saida") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
-      }
-    }
-
-    return saldos;
-  }, [contasBancarias, movimentosFinanceiros]);
-
-  const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
-  const contasPorId = useMemo(() => new Map(contasBancarias.map((conta) => [conta.id, conta])), [contasBancarias]);
-
-  const pessoaDoMovimento = (movimento: MovimentoFinanceiro) => {
-    if (movimento.dependente_id) return pessoasMovimentos.get(`dependente:${movimento.dependente_id}`) || null;
-    if (movimento.socio_id) return pessoasMovimentos.get(`socio:${movimento.socio_id}`) || null;
-    return null;
-  };
-
-  const usuarioDoMovimento = (movimento: MovimentoFinanceiro) => {
-    // Preferir o nome resolvido pela API no servidor, onde a consulta não
-    // depende das políticas RLS do navegador.
-    if (movimento.created_by_nome || movimento.created_by_email) {
-      return {
-        nome: movimento.created_by_nome || movimento.created_by_email || "Usuário sem nome",
-        email: movimento.created_by_email || null,
-      };
-    }
-    if (!movimento.created_by) return null;
-    return usuariosMovimentos.get(movimento.created_by) || null;
-  };
-
-  const saldoTotalBancos = useMemo(
-    () => Array.from(saldosPorConta.values()).reduce((sum: number, saldo: number) => sum + saldo, 0),
-    [saldosPorConta]
+  const socioMap = useMemo(
+    () => new Map(socios.map((s) => [s.id, s])),
+    [socios]
   );
 
-  const estornosPorOrigem = useMemo(() => new Set(
-    movimentosFinanceiros
-      .filter((m) => String(m.origem_tipo || "").startsWith("estorno_") && m.origem_id)
-      .map((m) => String(m.origem_id))
-  ), [movimentosFinanceiros]);
+  const dependenteMap = useMemo(
+    () => new Map(dependentes.map((d) => [d.id, d])),
+    [dependentes]
+  );
 
-  const movimentosFluxo = useMemo(() => {
-    return movimentosFinanceiros.filter((m) => {
-      const data = String(m.data_movimentacao || "").slice(0, 10);
-      if (fluxoInicio && data < fluxoInicio) return false;
-      if (fluxoFim && data > fluxoFim) return false;
-      if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
+  const responsaveis = useMemo(
+    () =>
+      new Map(
+        dependentes.map((d) => [
+          d.id,
+          socioMap.get(d.socio_id)?.nome || "Responsável não localizado",
+        ])
+      ),
+    [dependentes, socioMap]
+  );
 
-      if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
-      if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
-      if (
-        abaFinanceira === "aluguéis" &&
-        !String(m.categoria || "").toLowerCase().includes("alug")
-      ) return false;
+  const hoje = useMemo(() => dataHojeBrasil(), []);
 
-      if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
-      if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
-      if (fluxoConciliacao === "pendente" && m.conciliado) return false;
-      if (fluxoConciliacao === "conciliado" && !m.conciliado) return false;
-      return true;
-    });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
+  const inadimplentes = useMemo<Inadimplente[]>(() => {
+    const grupos = new Map<
+      string,
+      {
+        pessoaId: string;
+        socioId: string;
+        nome: string;
+        matricula: string;
+        responsavel: string;
+        competencias: Set<string>;
+        valor: number;
+      }
+    >();
 
-  const totalPaginasMovimentos = Math.max(1, Math.ceil(movimentosFluxo.length / movimentosPorPagina));
-  const movimentosVisiveis = useMemo(() => {
-    const inicio = (paginaMovimentos - 1) * movimentosPorPagina;
-    return movimentosFluxo.slice(inicio, inicio + movimentosPorPagina);
-  }, [movimentosFluxo, paginaMovimentos]);
-
-  useEffect(() => {
-    // Redefine a paginação após a atualização dos filtros, fora da fase síncrona do efeito.
-    const temporizador = window.setTimeout(() => setPaginaMovimentos(1), 0);
-    return () => window.clearTimeout(temporizador);
-  }, [fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
-
-  useEffect(() => {
-    if (paginaMovimentos <= totalPaginasMovimentos) return;
-    // Mantém a página dentro dos limites quando os filtros reduzem os resultados.
-    const temporizador = window.setTimeout(
-      () => setPaginaMovimentos(totalPaginasMovimentos),
-      0,
-    );
-    return () => window.clearTimeout(temporizador);
-  }, [paginaMovimentos, totalPaginasMovimentos]);
-
-  const entradasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "entrada")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const saidasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "saida")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const transferenciasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "transferencia")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const conciliacoesPendentes = movimentosFinanceiros.filter((m) => !m.conciliado).length;
-
-  function abrirConcilacao(movimento: MovimentoFinanceiro) {
-    setMovimentoConferindo(movimento);
-    setDataConciliacao(new Date().toISOString().slice(0, 10));
-    setObservacaoConciliacao("");
-  }
-
-  async function confirmarConcilacao() {
-    if (!movimentoConferindo || salvandoConciliacao) return;
-    setSalvandoConciliacao(true);
-    try {
-      const result = await apiFinanceiro("/api/financeiro", {
-        method: "PATCH",
-        body: JSON.stringify({
-          acao: "conciliar_movimento",
-          id: movimentoConferindo.id,
-          data_conciliacao: dataConciliacao,
-          observacao: observacaoConciliacao || "Conferido no extrato bancário.",
-        }),
+    // Começa com todas as pessoas cadastradas para que quem está em dia
+    // também apareça no relatório para conferência.
+    for (const socio of socios) {
+      grupos.set(socio.id, {
+        pessoaId: socio.id,
+        socioId: socio.id,
+        nome: socio.nome,
+        matricula: socio.matricula != null ? String(socio.matricula) : "—",
+        responsavel: "Titular",
+        competencias: new Set<string>(),
+        valor: 0,
       });
-      const movimentoAtualizado = result.movimento as MovimentoFinanceiro;
-      setMovimentosFinanceiros((lista) => lista.map((m) => m.id === movimentoAtualizado.id ? movimentoAtualizado : m));
-      setMovimentoConferindo(null);
-      setMensagem(result.message || "Conciliação registrada com sucesso.");
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível registrar a conciliação.");
-    } finally {
-      setSalvandoConciliacao(false);
     }
-  }
 
-  function infoConciliacao(movimento: MovimentoFinanceiro) {
-    if (!movimento.conciliado) return null;
-    const texto = String(movimento.observacoes || "");
-    const match = texto.match(/\[CONCILIACAO_BANCARIA\]\s*([^|]+)\s*\|\s*por:\s*([^|]+)\s*\|\s*email:\s*([^|]*)/i);
-    return {
-      data: movimento.data_conciliacao,
-      instante: match?.[1]?.trim() || null,
-      usuario: match?.[2]?.trim() || null,
-      email: match?.[3]?.trim() || null,
-    };
-  }
-
-  function infoEstorno(movimento: MovimentoFinanceiro) {
-    const texto = String(movimento.observacoes || "");
-    const match = texto.match(/\[ESTORNO_FINANCEIRO\]\s*([^|]+)\s*\|\s*por:\s*([^|]+)\s*\|\s*usuario_id:\s*([^|]+)\s*\|\s*motivo:\s*(.*)$/i);
-    if (!match) return null;
-    return { instante: match[1].trim(), usuario: match[2].trim(), motivo: match[4].trim() };
-  }
-
-  function selecionarAbaFinanceira(aba: typeof abaFinanceira) {
-    setAbaFinanceira(aba);
-    if (aba === "entradas") setFluxoTipo("entrada");
-    else if (aba === "saidas") setFluxoTipo("saida");
-    else if (aba === "fluxo") { setFluxoTipo("todos"); setFluxoForma("todos"); setFluxoConciliacao("todos"); }
-    if (aba === "aluguéis") {
-      setMovTipo("entrada");
-      setMovCategoria("Aluguel");
+    // Mantém compatibilidade com dependentes do modelo antigo.
+    for (const dependente of dependentes) {
+      grupos.set(dependente.id, {
+        pessoaId: dependente.id,
+        socioId: dependente.socio_id,
+        nome: dependente.nome,
+        matricula: socioMap.get(dependente.socio_id)?.matricula != null
+          ? String(socioMap.get(dependente.socio_id)?.matricula)
+          : "—",
+        responsavel: responsaveis.get(dependente.id) || "—",
+        competencias: new Set<string>(),
+        valor: 0,
+      });
     }
-    if (aba === "inadimplencia") void carregarInadimplencia();
-  }
 
-  function abrirEstorno(movimento: MovimentoFinanceiro, tipo: "movimento" | "reserva") {
-    setMovimentoEstornoSelecionado({ movimento, tipo });
-    setMotivoEstorno(tipo === "reserva" ? "Cancelamento da reserva e devolução do pagamento." : "Correção de lançamento.");
-  }
+    // Apuração automática de competências ausentes: para cada associado pagador,
+    // usa data_associacao; sem ela, usa a primeira competência efetivamente paga.
+    // Não cria lançamentos no banco, apenas complementa o cálculo deste relatório.
+    const hojeCompetencia = competenciaISO(hoje)!;
+    const mensalidadesApuradas: Mensalidade[] = [...mensalidades];
+    const mesesConhecidosPorSocio = new Map<string, Set<string>>();
+    const pagamentosPorSocio = new Map<string, string[]>();
 
-  async function confirmarEstorno() {
-    const selecionado = movimentoEstornoSelecionado;
-    if (!selecionado || movimentoEstornandoId === selecionado.movimento.id) return;
-    const motivo = motivoEstorno.trim();
-    if (!motivo) {
-      setMensagem("Informe o motivo do estorno.");
-      return;
+    for (const mensalidade of mensalidades) {
+      if (!mensalidade.socio_id || mensalidade.dependente_id) continue;
+      const competencia = competenciaISO(mensalidade.competencia || mensalidade.data_vencimento);
+      if (!competencia) continue;
+      const conhecidos = mesesConhecidosPorSocio.get(mensalidade.socio_id) || new Set<string>();
+      conhecidos.add(competencia);
+      mesesConhecidosPorSocio.set(mensalidade.socio_id, conhecidos);
+      if (statusQuitado(mensalidade.situacao)) {
+        const pagos = pagamentosPorSocio.get(mensalidade.socio_id) || [];
+        pagos.push(competencia);
+        pagamentosPorSocio.set(mensalidade.socio_id, pagos);
+      }
     }
-    const { movimento, tipo } = selecionado;
-    setMovimentoEstornandoId(movimento.id);
-    try {
-      let result: { message?: string };
-      if (tipo === "reserva") {
-        if (movimento.origem_tipo !== "reserva" || !movimento.origem_id) throw new Error("Reserva de origem não encontrada.");
-        result = await apiFinanceiro("/api/reservas", {
-          method: "PATCH",
-          body: JSON.stringify({ id: movimento.origem_id, acao: "estornar_pagamento", motivo }),
-        });
-      } else {
-        const origem = String(movimento.origem_tipo || "").toLowerCase();
-        if (!["manual", "transferencia"].includes(origem)) {
-          throw new Error("Este lançamento está vinculado a outro módulo. Use o estorno no módulo de origem para manter os registros sincronizados.");
+
+    for (const socio of socios) {
+      if (socioRemidoOuTemporada(socio)) continue;
+      const matricula = String(socio.matricula ?? "").trim().toUpperCase();
+      const terminaA = matricula.endsWith("A");
+      const terminaB = matricula.endsWith("B");
+      const cadastroElegivel = socioElegivelParaMensalidade({
+        categoria: socio.categoria,
+        tipo_socio: socio.tipo_socio,
+        responsavel_id: socio.responsavel_id,
+        possui_mensalidade: terminaA ? true : socio.possui_mensalidade,
+        situacao: socio.situacao,
+      });
+      if (!cadastroElegivel || terminaB) continue;
+
+      const dataAssociacao = competenciaISO(socio.data_associacao);
+      const primeiraPaga = (pagamentosPorSocio.get(socio.id) || []).sort()[0] || null;
+      const competenciaInicial = dataAssociacao || primeiraPaga;
+      const valorMensalidade = Number(socio.valor_mensalidade || 0);
+      if (!competenciaInicial || valorMensalidade <= 0) continue;
+
+      const conhecidos = mesesConhecidosPorSocio.get(socio.id) || new Set<string>();
+      let [ano, mes] = competenciaInicial.split("-").map(Number);
+      while (`${ano}-${String(mes).padStart(2, "0")}` <= hojeCompetencia) {
+        const competencia = `${ano}-${String(mes).padStart(2, "0")}`;
+        if (!conhecidos.has(competencia)) {
+          const vencimento = dataVencimentoCompetencia(competencia, socio.dia_vencimento);
+          if (vencimento < hoje) {
+            mensalidadesApuradas.push({
+              id: `apuracao-${socio.id}-${competencia}`,
+              socio_id: socio.id,
+              dependente_id: null,
+              competencia,
+              data_vencimento: vencimento,
+              valor: valorMensalidade,
+              situacao: "pendente",
+            });
+          }
         }
-        result = await apiFinanceiro("/api/financeiro", {
-          method: "PATCH",
-          body: JSON.stringify({ acao: "estornar_movimento", id: movimento.id, motivo }),
+        mes += 1;
+        if (mes > 12) { mes = 1; ano += 1; }
+      }
+    }
+
+    for (const m of mensalidadesApuradas) {
+      const competenciaISOAtual = competenciaISO(m.competencia || m.data_vencimento);
+      const socioDaMensalidade = m.socio_id ? socioMap.get(m.socio_id) : null;
+      const vencimento = (m.data_vencimento || (competenciaISOAtual
+        ? dataVencimentoCompetencia(competenciaISOAtual, socioDaMensalidade?.dia_vencimento)
+        : "")).slice(0, 10);
+      if (!vencimento || vencimento >= hoje) continue;
+      if (isPago(m) || isIsento(m)) continue;
+
+      const dependente = m.dependente_id
+        ? dependenteMap.get(m.dependente_id)
+        : null;
+      const socio = m.socio_id ? socioMap.get(m.socio_id) : null;
+      const pessoaId = dependente?.id || socio?.id;
+      if (!pessoaId) continue;
+
+      if (!grupos.has(pessoaId)) {
+        grupos.set(pessoaId, {
+          pessoaId,
+          socioId: m.socio_id || dependente?.socio_id || pessoaId,
+          nome: dependente?.nome || socio?.nome || "Pessoa",
+          matricula: socio?.matricula != null ? String(socio.matricula) : "—",
+          responsavel: dependente
+            ? responsaveis.get(dependente.id) || "—"
+            : "Titular",
+          competencias: new Set<string>(),
+          valor: 0,
         });
       }
-      await carregarFinanceiro();
-      setMovimentoEstornoSelecionado(null);
-      setMensagem(result?.message || "Estorno registrado com sucesso.");
-    } catch (error) {
-      setMensagem(error instanceof Error ? error.message : "Não foi possível registrar o estorno.");
-    } finally {
-      setMovimentoEstornandoId(null);
+
+      const grupo = grupos.get(pessoaId)!;
+      const comp = competenciaBR(m.competencia || m.data_vencimento);
+
+      if (!grupo.competencias.has(comp)) {
+        grupo.competencias.add(comp);
+        grupo.valor += Number(m.valor || 0);
+      }
     }
+
+    return Array.from(grupos.values())
+      .map((g) => {
+        const meses = g.competencias.size;
+        return {
+          ...g,
+          competencias: Array.from(g.competencias),
+          meses,
+          nivel: classificarMesesAtraso(meses, politicaInadimplencia),
+        };
+      })
+      .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
+  }, [mensalidades, socios, dependentes, socioMap, dependenteMap, responsaveis, hoje, politicaInadimplencia]);
+
+  const filtrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+
+    return inadimplentes.filter((item) => {
+      const bateFiltro =
+        filtro === "todos" || item.nivel === filtro;
+
+      const bateBusca =
+        !termo ||
+        item.nome.toLowerCase().includes(termo) ||
+        item.matricula.toLowerCase().includes(termo) ||
+        item.responsavel.toLowerCase().includes(termo);
+
+      return bateFiltro && bateBusca;
+    });
+  }, [inadimplentes, filtro, busca]);
+
+  const totalDevido = inadimplentes.reduce((s, i) => s + i.valor, 0);
+  const verdes = inadimplentes.filter((i) => i.nivel === "verde").length;
+  const amarelos = inadimplentes.filter((i) => i.nivel === "amarelo").length;
+  const vermelhos = inadimplentes.filter((i) => i.nivel === "vermelho").length;
+
+  function abrirSocio(item: Inadimplente) {
+    router.push(`/socios?id=${encodeURIComponent(item.socioId)}`);
   }
 
-  function abrirNovaMovimentacao(tipo: "entrada" | "saida" = "saida") {
-    setMovTipo(tipo);
-    setMovConta((atual) => atual || contasBancarias[0]?.id || "");
-    setMovCategoria(tipo === "entrada" ? "Recebimento" : "Despesa");
-    setMovDescricao("");
-    setMovValor("");
-    setMovData(new Date().toISOString().slice(0, 10));
-    setMovForma("pix");
-    setMovObservacoes("");
-    setMovArquivo(null);
-    setMostrarMovimentoModal(true);
+  function imprimir() {
+    window.print();
   }
-
-  function abrirNovaTransferencia() {
-    setTransOrigem(contasBancarias[0]?.id || "");
-    setTransDestino(contasBancarias[1]?.id || "");
-    setTransValor("");
-    setTransData(new Date().toISOString().slice(0, 10));
-    setTransDescricao("Transferência entre contas");
-    setTransObservacoes("");
-    setMostrarTransferenciaModal(true);
-  }
-
-  async function salvarContaBancaria() {
-    if (salvandoConta) return;
-    if (!contaNome.trim()) { setMensagem("Informe o nome da conta."); return; }
-    const saldoInicial = Number(String(contaSaldoInicial || "0").replace(",", "."));
-    if (!Number.isFinite(saldoInicial) || saldoInicial < 0) { setMensagem("Informe um saldo inicial válido."); return; }
-    setSalvandoConta(true);
-    try {
-      const result = await apiFinanceiro("/api/financeiro", {
-        method: "POST",
-        body: JSON.stringify({
-          acao: "salvar_conta",
-          id: contaEditando?.id || null,
-          nome: contaNome.trim(),
-          banco: contaBanco,
-          agencia: contaAgencia,
-          conta: contaNumero,
-          saldo_inicial: saldoInicial,
-          data_saldo_inicial: contaDataSaldo || null,
-          observacoes: contaObservacoes,
-        }),
-      });
-      const conta = result.conta as ContaBancaria;
-      if (contaEditando) setContasBancarias((lista) => lista.map((c) => c.id === contaEditando.id ? conta : c));
-      else setContasBancarias((lista) => [...lista, conta].sort((a, b) => a.nome.localeCompare(b.nome)));
-      setMostrarContaModal(false);
-      setContaEditando(null);
-      setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes("");
-      setMensagem("Conta bancária salva com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível salvar a conta. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoConta(false);
-    }
-  }
-
-  function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
-  function editarConta(c: ContaBancaria) { setContaEditando(c); setContaNome(c.nome); setContaBanco(c.banco || ""); setContaAgencia(c.agencia || ""); setContaNumero(c.conta || ""); setContaSaldoInicial(String(c.saldo_inicial || 0)); setContaDataSaldo(c.data_saldo_inicial || new Date().toISOString().slice(0,10)); setContaObservacoes(c.observacoes || ""); setMostrarContaModal(true); }
-
-  function abrirConferenciaSaldo(c: ContaBancaria) {
-    setContaConferindo(c);
-    setSaldoConferido(saldoConta(c).toFixed(2));
-    setDataConferencia(new Date().toISOString().slice(0, 10));
-    setObservacaoConferencia("Conferência do saldo bancário");
-  }
-
-  async function salvarConferenciaSaldo() {
-    if (!contaConferindo) return;
-    const saldoInformado = Number(String(saldoConferido).replace(",", "."));
-    if (!Number.isFinite(saldoInformado) || saldoInformado < 0) { setMensagem("Informe um saldo bancário válido."); return; }
-    setSalvandoConferencia(true);
-    try {
-      const result = await apiFinanceiro("/api/financeiro", {
-        method: "POST",
-        body: JSON.stringify({
-          acao: "conferir_saldo",
-          conta_bancaria_id: contaConferindo.id,
-          saldo_banco: saldoInformado,
-          data_conferencia: dataConferencia,
-          observacao: observacaoConferencia || "Conferência do saldo bancário",
-        }),
-      });
-      const diferenca = Number(result.conferencia?.diferenca || 0);
-      setMensagem(diferenca === 0
-        ? `Saldo de ${contaConferindo.nome} conferido: ${formatarMoeda(saldoInformado)}.`
-        : `Conferência de ${contaConferindo.nome} registrada. Diferença: ${formatarMoeda(diferenca)}.`);
-      setContaConferindo(null);
-    } catch (error) {
-      setMensagem(`Não foi possível registrar a conferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoConferencia(false);
-    }
-  }
-
-  async function salvarMovimentoFinanceiro() {
-    if (salvandoMovimento) return;
-    const valor = Number(String(movValor || "0").replace(",", "."));
-    if (!movConta || !movDescricao.trim() || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe conta, descrição e valor válido."); return; }
-    setSalvandoMovimento(true);
-    try {
-      const form = new FormData();
-      form.set("acao", "salvar_movimento");
-      form.set("conta_bancaria_id", movConta);
-      form.set("tipo", movTipo);
-      form.set("categoria", movCategoria || "");
-      form.set("descricao", movDescricao.trim());
-      form.set("valor", String(valor));
-      form.set("data_movimentacao", movData);
-      form.set("forma_pagamento", movForma || "");
-      form.set("observacoes", movObservacoes || "");
-      if (movArquivo) form.set("arquivo", movArquivo);
-      const result = await apiFinanceiro("/api/financeiro", { method: "POST", body: form });
-      const movimento = result.movimento as MovimentoFinanceiro;
-      setMovimentosFinanceiros((lista) => [movimento, ...lista]);
-      setMostrarMovimentoModal(false);
-      setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null);
-      setMensagem("Movimentação registrada com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível registrar a movimentação. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoMovimento(false);
-    }
-  }
-
-  async function salvarTransferencia() {
-    if (salvandoTransferencia) return;
-    const valor = Number(String(transValor || "0").replace(",", "."));
-    if (!transOrigem || !transDestino || transOrigem === transDestino || !Number.isFinite(valor) || valor <= 0) { setMensagem("Informe contas diferentes e um valor válido."); return; }
-    setSalvandoTransferencia(true);
-    try {
-      const result = await apiFinanceiro("/api/financeiro", {
-        method: "POST",
-        body: JSON.stringify({
-          acao: "transferencia",
-          conta_origem_id: transOrigem,
-          conta_destino_id: transDestino,
-          valor,
-          data_movimentacao: transData,
-          descricao: transDescricao || "Transferência entre contas",
-          observacoes: transObservacoes || null,
-        }),
-      });
-      const movimento = result.movimento as MovimentoFinanceiro;
-      setMovimentosFinanceiros((lista) => [movimento, ...lista]);
-      setMostrarTransferenciaModal(false);
-      setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes("");
-      setMensagem("Transferência registrada com sucesso.");
-    } catch (error) {
-      setMensagem(`Não foi possível registrar a transferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
-    } finally {
-      setSalvandoTransferencia(false);
-    }
-  }
-
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
+    <div className="min-h-screen bg-[#f8faf9] text-[#18362b]">
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+
+          body {
+            background: white !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .area-impressao,
+          .area-impressao * {
+            visibility: visible !important;
+          }
+
+          .area-impressao {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            background: white !important;
+          }
+
+          .nao-imprimir {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       <CabecalhoPadrao />
+      <MenuLateralPadrao />
 
-      <div className="min-h-[calc(100vh-80px)]">
-        <MenuLateralPadrao />
-
-                <section className="min-w-0 flex-1 bg-[#f8faf9] p-5 sm:p-7 lg:ml-[220px] lg:p-8">
-          <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Administração</p>
-              <h2 className="mt-1 text-3xl font-bold text-[#005a3c]">
-                Financeiro
-              </h2>
-              <p className="mt-1 text-gray-500">
-                Contas bancárias, receitas, despesas e fluxo de caixa.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => void carregarFinanceiro()}
-                disabled={carregandoFinanceiro}
-                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-60"
-              >
-                {carregandoFinanceiro ? "Atualizando..." : "↻ Atualizar"}
-              </button>
-              <button
-                onClick={() => setAbaFinanceira("contas")}
-                className={`rounded-xl border border-[#cfe3d8] px-4 py-3 text-sm font-bold ${abaFinanceira === "contas" ? "bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-[#005a3c]"}`}
-              >
-                🏦 Contas bancárias
-              </button>
-              <button
-                onClick={() => setAbaFinanceira("fluxo")}
-                className={`rounded-xl px-4 py-3 text-sm font-bold shadow-sm ${abaFinanceira === "fluxo" ? "bg-[#005a3c] text-white" : "border border-[#cfe3d8] bg-white text-[#005a3c]"}`}
-              >
-                📊 Fluxo de caixa
-              </button>
-            </div>
+      <main className="area-impressao mx-auto max-w-[1500px] px-6 py-8 lg:ml-[220px]">
+        <div className="nao-imprimir mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div>
+            <button
+              onClick={() => router.push("/relatorios")}
+              className="mb-3 text-sm font-semibold text-[#005a3c]"
+            >
+              ← Voltar para Relatórios
+            </button>
+            <p className="text-sm font-medium text-gray-500">Financeiro</p>
+            <h1 className="mt-1 text-3xl font-extrabold text-[#005a3c]">
+              Relatório de Inadimplência
+            </h1>
+            <p className="mt-1 text-gray-500">
+              Controle de mensalidades, situação por meses em atraso e valores devidos.
+            </p>
           </div>
 
-          {carregandoFinanceiro && contasBancarias.length === 0 && movimentosFinanceiros.length === 0 && (
-            <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              Carregando contas e movimentações...
-            </div>
-          )}
-
-          {mensagem && (
-            <div className="mb-5 rounded-xl border border-[#cfe3d8] bg-[#eef7f2] px-4 py-3 text-sm font-semibold text-[#005a3c]">
-              {mensagem}
-            </div>
-          )}
-
-          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Resumo
-              titulo="Saldo em bancos"
-              valor={formatarMoeda(saldoTotalBancos)}
-              subtitulo={`${contasBancarias.length} conta(s) ativa(s)`}
-              destaque
-            />
-            <Resumo
-              titulo="Entradas"
-              valor={formatarMoeda(entradasPeriodo)}
-              subtitulo="Movimentações financeiras"
-            />
-            <Resumo
-              titulo="Saídas"
-              valor={formatarMoeda(saidasPeriodo)}
-              subtitulo="Movimentações financeiras"
-            />
-            <Resumo
-              titulo="Resultado"
-              valor={formatarMoeda(entradasPeriodo - saidasPeriodo)}
-              subtitulo="Entradas − saídas"
-            />
+          <div className="flex gap-2">
+            <button
+              onClick={carregar}
+              className="rounded-xl border border-[#cddbd4] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]"
+            >
+              ↻ Atualizar
+            </button>
+            <button
+              onClick={imprimir}
+              className="rounded-xl bg-[#005a3c] px-5 py-3 text-sm font-bold text-white"
+            >
+              🖨️ Imprimir / Salvar PDF
+            </button>
           </div>
+        </div>
 
-          <div className="mb-6 border-b border-[#dfe9e3]">
-            <div className="flex flex-wrap gap-1 overflow-x-auto">
-              {[
-                ["aluguéis", "🏠", "Aluguéis"],
-                ["entradas", "💵", "Entradas"],
-                ["saidas", "💸", "Saídas"],
-                ["inadimplencia", "🚨", `Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
-                ["contas", "🏦", "Contas bancárias"],
-                ["fluxo", "📊", "Fluxo de caixa"],
-              ].map(([id, icone, label]) => (
-                <button
-                  key={id}
-                  onClick={() => selecionarAbaFinanceira(id as typeof abaFinanceira)}
-                  className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-semibold transition ${
-                    abaFinanceira === id
-                      ? "text-[#005a3c]"
-                      : "text-[#8a9a92] hover:text-[#005a3c]"
-                  }`}
-                >
-                  <span className="text-base">{icone}</span>
-                  {label}
-                  {abaFinanceira === id && (
-                    <span className="absolute inset-x-2 -bottom-px h-[3px] rounded-full bg-[#005a3c]" />
-                  )}
-                </button>
-              ))}
-            </div>
+        {erro && (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            Erro ao carregar: {erro}
           </div>
+        )}
 
-          {abaFinanceira === "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Resumo
-                  titulo="Pessoas com competências vencidas"
-                  valor={String(quantidadeAtrasados)}
-                  subtitulo="Inclui quem está na tolerância de acesso"
-                />
-                <Resumo
-                  titulo={`${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses`}
-                  valor={String(amarelos)}
-                  subtitulo="Faixa de atenção"
-                />
-                <Resumo
-                  titulo={`${politicaInadimplencia.meses_bloqueio}+ meses`}
-                  valor={String(vermelhos)}
-                  subtitulo="Bloqueio da entrada"
-                />
-                <Resumo
-                  titulo="Valor total devido"
-                  valor={formatarMoeda(
-                    inadimplenciaDetalhada.reduce(
-                      (soma, item) => soma + item.valorDevido,
-                      0
-                    )
-                  )}
-                  subtitulo="Mensalidades vencidas"
-                />
+        {carregando ? (
+          <div className="rounded-2xl border border-[#dfe7e2] bg-white p-12 text-center text-gray-500 shadow-sm">
+            Carregando inadimplência...
+          </div>
+        ) : (
+          <>
+            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">Pessoas monitoradas</p>
+                <p className="mt-2 text-3xl font-extrabold text-[#005a3c]">
+                  {inadimplentes.length}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Em dia + atenção + crítico</p>
               </div>
 
-              <div className={`rounded-2xl border p-5 ${vermelhos > 0 ? "border-red-200 bg-red-50" : amarelos > 0 ? "border-amber-200 bg-amber-50" : "border-green-200 bg-green-50"}`}>
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className={`text-lg font-extrabold ${vermelhos > 0 ? "text-red-700" : amarelos > 0 ? "text-amber-700" : "text-green-700"}`}>
-                      {vermelhos > 0
-                        ? `🔴 ${vermelhos} pessoa(s) com entrada bloqueada`
-                        : amarelos > 0
-                          ? `🟡 ${amarelos} pessoa(s) em faixa de atenção`
-                          : quantidadeAtrasados > 0
-                            ? `🟢 ${quantidadeAtrasados} pessoa(s) com saldo vencido dentro da tolerância de acesso`
-                            : "✓ Nenhuma mensalidade vencida"}
-                    </p>
-                    <p className="mt-1 text-sm text-gray-600">
-                      🟢 0–{politicaInadimplencia.meses_atencao - 1} competências · 🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} · 🔴 {politicaInadimplencia.meses_bloqueio}+ competências.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() =>
-                      (window.location.href = "/relatorios/inadimplencia")
-                    }
-                    className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
-                  >
-                    📊 Relatório completo
-                  </button>
-                </div>
+              <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">0 a {politicaInadimplencia.meses_atencao - 1} meses</p>
+                <p className="mt-2 text-3xl font-extrabold text-green-600">
+                  {verdes}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Dentro da tolerância de acesso</p>
               </div>
 
-              <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-lg font-extrabold text-[#003d2b]">
-                      Lista de mensalidades vencidas
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      Consulte valores vencidos, meses de atraso e a faixa de acesso definida pela política vigente.
-                    </p>
-                  </div>
+              <div className="rounded-2xl border border-yellow-100 bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">{politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} meses</p>
+                <p className="mt-2 text-3xl font-extrabold text-yellow-600">
+                  {amarelos}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Atenção</p>
+              </div>
+
+              <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">{politicaInadimplencia.meses_bloqueio}+ meses</p>
+                <p className="mt-2 text-3xl font-extrabold text-red-600">
+                  {vermelhos}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Bloqueio da entrada</p>
+              </div>
+
+              <div className="rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+                <p className="text-sm text-gray-500">Valor total devido</p>
+                <p className="mt-2 text-3xl font-extrabold text-[#005a3c]">
+                  {moeda(totalDevido)}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Mensalidades vencidas</p>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-2xl border border-[#dfe7e2] bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+                <div className="flex-1">
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                    Buscar
+                  </label>
                   <input
                     value={busca}
                     onChange={(e) => setBusca(e.target.value)}
-                    placeholder="Buscar nome, matrícula ou responsável..."
-                    className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-sm outline-none focus:border-[#005a3c] sm:max-w-md"
+                    placeholder="Nome, matrícula ou responsável..."
+                    className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 outline-none focus:border-[#005a3c]"
                   />
                 </div>
 
-                <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
-                  <span className="rounded-full bg-green-100 px-3 py-2 text-green-700">
-                    🟢 Até {politicaInadimplencia.meses_atencao - 1} competências: dentro da tolerância de acesso
-                  </span>
-                  <span className="rounded-full bg-yellow-100 px-3 py-2 text-yellow-700">
-                    🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} competências: {amarelos}
-                  </span>
-                  <span className="rounded-full bg-red-100 px-3 py-2 text-red-700">
-                    🔴 {politicaInadimplencia.meses_bloqueio}+ competências: {vermelhos}
-                  </span>
+                <div className="flex gap-2">
+                  {[
+                    ["todos", "Todos"],
+                    ["verde", `🟢 0–${politicaInadimplencia.meses_atencao - 1} meses`],
+                    ["amarelo", `🟡 ${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses`],
+                    ["vermelho", `🔴 ${politicaInadimplencia.meses_bloqueio}+ meses`],
+                  ].map(([valor, label]) => (
+                    <button
+                      key={valor}
+                      onClick={() => setFiltro(valor as typeof filtro)}
+                      className={`rounded-xl px-4 py-3 text-sm font-bold ${
+                        filtro === valor
+                          ? "bg-[#005a3c] text-white"
+                          : "border border-[#d5e0da] bg-white text-[#18362b]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
+              </div>
 
-                {inadimplenciaDetalhada.length === 0 ? (
-                  <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
-                    <div className="text-4xl">✅</div>
-                    <p className="mt-3 font-bold text-gray-700">
-                      Nenhuma mensalidade vencida encontrada
-                    </p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Quando houver valores vencidos, eles aparecerão aqui, separados por tolerância, atenção e bloqueio de acesso.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[900px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Pessoa</th>
-                          <th className="px-4 py-3">Matrícula</th>
-                          <th className="px-4 py-3">Responsável</th>
-                          <th className="px-4 py-3">Meses</th>
-                          <th className="px-4 py-3">Competências</th>
-                          <th className="px-4 py-3">Valor devido</th>
-                          <th className="px-4 py-3 text-right">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {inadimplenciaDetalhada.map((item) => (
-                          <tr key={item.pessoa.chave} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-4">
-                              <p className="font-bold text-[#173d2e]">
-                                {item.pessoa.nome}
-                              </p>
-                              {item.pessoa.dependente_id && (
-                                <p className="text-xs text-gray-500">Dependente</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.matricula || "—"}
-                            </td>
-                            <td className="px-4 py-4">
-                              {item.pessoa.responsavel_nome || "Titular"}
-                            </td>
-                            <td className="px-4 py-4">
-                              <span
-                                className={`rounded-full px-3 py-1.5 text-xs font-extrabold ${item.nivel.classe}`}
-                              >
-                                {item.meses}{" "}
-                                {item.meses === 1 ? "mês" : "meses"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              {item.competencias.join(", ")}
-                            </td>
-                            <td className="px-4 py-4 font-extrabold text-red-600">
-                              {formatarMoeda(item.valorDevido)}
-                            </td>
-                            <td className="px-4 py-4 text-right">
-                              <button
-                                onClick={() => {
-                                  window.location.href = "/socios";
-                                }}
-                                className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]"
-                              >
-                                Abrir cadastro
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold">
+                <span className="rounded-full bg-green-50 px-3 py-2 text-green-700">
+                  🟢 0–{politicaInadimplencia.meses_atencao - 1} meses: Em dia
+                </span>
+                <span className="rounded-full bg-yellow-50 px-3 py-2 text-yellow-700">
+                  🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} meses: Atenção
+                </span>
+                <span className="rounded-full bg-red-50 px-3 py-2 text-red-700">
+                  🔴 {politicaInadimplencia.meses_bloqueio} meses ou mais: Bloqueio
+                </span>
               </div>
             </div>
-          )}
 
-          {abaFinanceira !== "inadimplencia" && (
-            <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Resumo titulo="Entradas no período" valor={formatarMoeda(entradasPeriodo)} subtitulo="Conforme filtro aplicado" />
-                <Resumo titulo="Saídas no período" valor={formatarMoeda(saidasPeriodo)} subtitulo="Conforme filtro aplicado" />
-                <Resumo titulo="Resultado do período" valor={formatarMoeda(entradasPeriodo - saidasPeriodo)} subtitulo="Entradas − saídas" />
+            <section className="overflow-hidden rounded-2xl border border-[#dfe7e2] bg-white shadow-sm">
+              <div className="border-b border-[#dfe7e2] p-5">
+                <h2 className="text-xl font-extrabold text-[#003d2b]">
+                  Controle de mensalidades
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  {filtrados.length} registro(s) encontrado(s).
+                </p>
               </div>
 
-              {abaFinanceira === "contas" && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
-                    <div className="flex gap-2"><button onClick={() => abrirNovaMovimentacao("saida")} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
-                  </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
+              {filtrados.length === 0 ? (
+                <div className="p-12 text-center">
+                  <div className="text-4xl">✅</div>
+                  <h3 className="mt-3 font-extrabold text-[#005a3c]">
+                    Nenhuma pessoa encontrada com esse filtro
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Ajuste os filtros ou atualize os dados.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-[#e8f3ee] text-left text-xs uppercase tracking-wide text-gray-600">
+                      <tr>
+                        <th className="px-5 py-4">Pessoa</th>
+                        <th className="px-5 py-4">Matrícula</th>
+                        <th className="px-5 py-4">Responsável</th>
+                        <th className="px-5 py-4">Meses</th>
+                        <th className="px-5 py-4">Competências</th>
+                        <th className="px-5 py-4">Valor devido</th>
+                        <th className="nao-imprimir px-5 py-4">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtrados.map((item) => (
+                        <tr key={item.pessoaId} className="border-t border-[#e5ece8]">
+                          <td className="px-5 py-4 font-extrabold text-[#18362b]">
+                            {item.nome}
+                          </td>
+                          <td className="px-5 py-4">{item.matricula}</td>
+                          <td className="px-5 py-4 text-gray-600">
+                            {item.responsavel}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${
+                                item.nivel === "vermelho"
+                                  ? "bg-red-100 text-red-700"
+                                  : item.nivel === "amarelo"
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-green-100 text-green-700"
+                              }`}
+                            >
+                              {item.meses} {item.meses === 1 ? "mês" : "meses"}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-gray-600">
+                            {item.competencias.length ? item.competencias.join(", ") : "Nenhuma em atraso"}
+                          </td>
+                          <td className={`px-5 py-4 font-extrabold ${item.nivel === "verde" ? "text-green-600" : "text-red-600"}`}>
+                            {moeda(item.valor)}
+                          </td>
+                          <td className="nao-imprimir px-5 py-4">
+                            <button
+                              onClick={() => abrirSocio(item)}
+                              className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]"
+                            >
+                              Abrir cadastro
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-
-              {["fluxo", "entradas", "saidas", "aluguéis"].includes(abaFinanceira) && (
-                <div className="rounded-2xl border border-[#e2ebe6] bg-white p-5 shadow-sm">
-                  <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-[#003d2b]">
-                        {abaFinanceira === "aluguéis"
-                          ? "Aluguéis recebidos"
-                          : abaFinanceira === "entradas"
-                            ? "Entradas financeiras"
-                            : abaFinanceira === "saidas"
-                              ? "Saídas financeiras"
-                              : "Livro de movimentações"}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {abaFinanceira === "aluguéis"
-                          ? "Registre e acompanhe os valores recebidos pelo aluguel dos espaços da Sociedade."
-                          : "Entradas, saídas e transferências ficam registradas para prestação de contas."}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          if (abaFinanceira === "aluguéis") {
-                            abrirNovaMovimentacao("entrada");
-                            setMovCategoria("Aluguel");
-                          } else {
-                            abrirNovaMovimentacao("saida");
-                          }
-                        }}
-                        className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
-                      >
-                        ＋ {abaFinanceira === "aluguéis" ? "Novo aluguel" : "Nova movimentação"}
-                      </button>
-                      {abaFinanceira === "fluxo" && (
-                        <button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">
-                          ↔ Transferência
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mb-5 rounded-2xl bg-[#f7faf8] p-4">
-                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="font-bold text-[#003d2b]">Filtros do fluxo de caixa</p>
-                        <p className="text-xs text-gray-500">Consulte por período, banco e tipo de movimentação.</p>
-                      </div>
-                      <button
-                        onClick={() => { setFluxoInicio(""); setFluxoFim(""); setFluxoConta(""); setFluxoTipo("todos"); setFluxoForma("todos"); }}
-                        className="rounded-lg border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]"
-                      >
-                        Limpar filtros
-                      </button>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <Campo label="Data inicial" type="date" value={fluxoInicio} onChange={setFluxoInicio} />
-                      <Campo label="Data final" type="date" value={fluxoFim} onChange={setFluxoFim} />
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Conta</label>
-                        <select value={fluxoConta} onChange={(e) => setFluxoConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="">Todas as contas</option>
-                          {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label>
-                        <select
-                          value={abaFinanceira === "entradas" ? "entrada" : abaFinanceira === "saidas" ? "saida" : fluxoTipo}
-                          disabled={abaFinanceira === "entradas" || abaFinanceira === "saidas"}
-                          onChange={(e) => setFluxoTipo(e.target.value as typeof fluxoTipo)}
-                          className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 disabled:bg-gray-100"
-                        >
-                          <option value="todos">Todos</option>
-                          <option value="entrada">Entradas</option>
-                          <option value="saida">Saídas</option>
-                          <option value="transferencia">Transferências</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label>
-                        <select value={fluxoForma} onChange={(e) => setFluxoForma(e.target.value as typeof fluxoForma)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="todos">Todas</option>
-                          <option value="pix">PIX</option>
-                          <option value="debito_em_conta">Débito em conta</option>
-                          <option value="boleto">Boleto</option>
-                          <option value="dinheiro">Dinheiro</option>
-                          <option value="transferencia">Transferência</option>
-                          <option value="outro">Outro</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-gray-700">Conciliação</label>
-                        <select value={fluxoConciliacao} onChange={(e) => setFluxoConciliacao(e.target.value as typeof fluxoConciliacao)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3">
-                          <option value="todos">Todas</option>
-                          <option value="pendente">Aguardando conciliação</option>
-                          <option value="conciliado">Conciliados</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Aguardando conciliação</p>
-                      <p className="mt-1 text-xl font-extrabold text-amber-700">{conciliacoesPendentes}</p>
-                      <p className="mt-1 text-xs text-gray-500">lançamentos ainda não conferidos</p>
-                    </div>
-                    <div className="rounded-xl border border-green-100 bg-green-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Entradas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-green-700">{formatarMoeda(entradasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-red-100 bg-red-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Saídas no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-red-700">{formatarMoeda(saidasPeriodo)}</p>
-                    </div>
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                      <p className="text-xs font-semibold text-gray-500">Transferências no filtro</p>
-                      <p className="mt-1 text-xl font-extrabold text-blue-700">{formatarMoeda(transferenciasPeriodo)}</p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px]">
-                      <thead className="bg-[#e8f3ee]">
-                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                          <th className="px-4 py-3">Data / hora</th>
-                          <th className="px-4 py-3">Associado</th>
-                          <th className="px-4 py-3">Registrado por</th>
-                          <th className="px-4 py-3">Conta</th>
-                          <th className="px-4 py-3">Descrição</th>
-                          <th className="px-4 py-3">Tipo</th>
-                          <th className="px-4 py-3">Valor</th>
-                          <th className="px-4 py-3">Conciliação</th>
-                          <th className="px-4 py-3">Comprovante</th>
-                          <th className="px-4 py-3">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {movimentosVisiveis.map((m) => (
-                          <tr key={m.id} className="hover:bg-[#fafcfb]">
-                            <td className="px-4 py-3 text-sm">
-                              <div className="font-semibold">{formatarData(m.data_movimentacao)}</div>
-                              <div className="text-xs text-gray-500">{formatarHora(m.created_at)}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              {(() => {
-                                const pessoa = pessoaDoMovimento(m);
-                                if (!pessoa) return <span className="text-gray-400">—</span>;
-                                return (
-                                  <div>
-                                    <div className="font-semibold">{pessoa.nome}</div>
-                                    <div className="text-xs text-gray-500">{pessoa.tipo === "dependente" ? "Dependente" : "Associado"}{pessoa.matricula ? ` • ${pessoa.matricula}` : ""}</div>
-                                    {pessoa.tipo === "dependente" && pessoa.responsavelNome ? <div className="text-xs text-gray-400">Resp.: {pessoa.responsavelNome}</div> : null}
-                                  </div>
-                                );
-                              })()}
-                            </td>
-                            <td className="px-4 py-3">
-                              {(() => {
-                                const usuario = usuarioDoMovimento(m);
-                                if (!usuario) return <span className="text-xs text-gray-400">Não identificado</span>;
-                                return (
-                                  <div>
-                                    <div className="font-semibold">{usuario.nome}</div>
-                                    {usuario.email ? <div className="text-xs text-gray-400">{usuario.email}</div> : null}
-                                  </div>
-                                );
-                              })()}
-                            </td>
-                            <td className="px-4 py-3 font-semibold">{contasPorId.get(m.conta_bancaria_id)?.nome || "—"}</td>
-                            <td className="px-4 py-3">
-                              <p className="font-semibold">{m.descricao}</p>
-                              <p className="text-xs text-gray-500">{m.categoria || "Sem categoria"}</p>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${m.tipo === "entrada" ? "bg-green-100 text-green-700" : m.tipo === "saida" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
-                                {m.tipo === "entrada" ? "Entrada" : m.tipo === "saida" ? "Saída" : "Transferência"}
-                              </span>
-                            </td>
-                            <td className={`px-4 py-3 font-bold ${m.tipo === "entrada" ? "text-green-700" : m.tipo === "saida" ? "text-red-700" : "text-blue-700"}`}>
-                              {m.tipo === "saida" ? "− " : m.tipo === "entrada" ? "+ " : "↔ "}{formatarMoeda(m.valor)}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {m.conciliado ? (
-                                (() => {
-                                  const info = infoConciliacao(m);
-                                  const quando = info?.data ? formatarData(info.data) : "—";
-                                  return (
-                                    <div>
-                                      <div className="font-semibold text-green-700">✅ Conciliado</div>
-                                      <div className="text-xs text-gray-500">{quando}{info?.instante ? ` · ${formatarHora(info.instante)}` : ""}</div>
-                                      {info?.usuario ? <div className="text-xs text-gray-400">por {info.usuario}</div> : null}
-                                    </div>
-                                  );
-                                })()
-                              ) : (
-                                <div className="space-y-2">
-                                  <div className="font-semibold text-amber-700">⏳ Aguardando conciliação</div>
-                                  <button onClick={() => abrirConcilacao(m)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conciliar</button>
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {m.comprovante_url ? (
-                                <button onClick={() => void abrirComprovante(m.comprovante_url)} className="font-bold text-[#005a3c] underline">Abrir</button>
-                              ) : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {estornosPorOrigem.has(m.id) ? (
-                                (() => {
-                                  const estorno = movimentosFinanceiros.find((x) => x.origem_tipo === "estorno_movimento" && x.origem_id === m.id);
-                                  const info = estorno ? infoEstorno(estorno) : null;
-                                  return (
-                                    <div>
-                                      <div className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">↩ Estornado</div>
-                                      {info?.instante ? <div className="mt-1 text-xs text-gray-500">{formatarData(info.instante)} {formatarHora(info.instante)}</div> : null}
-                                      {info?.usuario ? <div className="text-xs text-gray-400">por {info.usuario}</div> : null}
-                                      {info?.motivo ? <div className="mt-1 max-w-xs text-xs text-gray-400">Motivo: {info.motivo}</div> : null}
-                                    </div>
-                                  );
-                                })()
-                              ) : m.origem_tipo === "reserva" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => abrirEstorno(m, "reserva")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
-                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar reserva"}
-                                </button>
-                              ) : m.origem_tipo === "manual" || m.origem_tipo === "transferencia" ? (
-                                <button disabled={movimentoEstornandoId === m.id} onClick={() => abrirEstorno(m, "movimento")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
-                                  {movimentoEstornandoId === m.id ? "Estornando..." : "↩ Estornar"}
-                                </button>
-                              ) : String(m.origem_tipo || "").startsWith("estorno_") ? (
-                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">Estornado</span>
-                              ) : (
-                                <span className="text-xs text-gray-400">Módulo de origem</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                        {movimentosFluxo.length === 0 && (
-                          <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">Nenhuma movimentação encontrada com esses filtros.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  {movimentosFluxo.length > movimentosPorPagina && (
-                    <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm text-gray-600">
-                        Exibindo {((paginaMovimentos - 1) * movimentosPorPagina) + 1}–{Math.min(paginaMovimentos * movimentosPorPagina, movimentosFluxo.length)} de {movimentosFluxo.length} lançamentos filtrados. Os totais e saldos continuam calculados sobre todos os lançamentos.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => setPaginaMovimentos((pagina) => Math.max(1, pagina - 1))} disabled={paginaMovimentos <= 1} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
-                        <span className="text-sm font-semibold text-gray-700">Página {paginaMovimentos} de {totalPaginasMovimentos}</span>
-                        <button type="button" onClick={() => setPaginaMovimentos((pagina) => Math.min(totalPaginasMovimentos, pagina + 1))} disabled={paginaMovimentos >= totalPaginasMovimentos} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40">Próxima</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-
-        </section>
-      </div>
-
-      {mostrarContaModal && (
-        <Modal titulo={contaEditando ? "Editar conta bancária" : "Nova conta bancária"} fechar={() => setMostrarContaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Campo label="Nome da conta" value={contaNome} onChange={setContaNome} />
-            <Campo label="Banco" value={contaBanco} onChange={setContaBanco} />
-            <Campo label="Agência" value={contaAgencia} onChange={setContaAgencia} />
-            <Campo label="Número da conta" value={contaNumero} onChange={setContaNumero} />
-            <Campo label="Saldo inicial" type="number" value={contaSaldoInicial} onChange={setContaSaldoInicial} />
-            <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoConta} onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoConta ? "Salvando..." : "Salvar conta"}</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {contaConferindo && (
-        <Modal titulo={`Conferir saldo — ${contaConferindo.nome}`} fechar={() => setContaConferindo(null)}>
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-4">
-              <p className="text-sm text-gray-500">Saldo calculado pelo sistema</p>
-              <p className="mt-1 text-3xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(contaConferindo))}</p>
-              <p className="mt-1 text-xs text-gray-500">Saldo de abertura + entradas − saídas + transferências.</p>
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Saldo real informado pelo banco</label>
-              <input type="number" step="0.01" min="0" value={saldoConferido} onChange={(e) => setSaldoConferido(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-lg font-bold outline-none focus:border-[#005a3c]" />
-              <p className="mt-2 text-xs text-gray-500">A conferência fica registrada separadamente e não cria entrada nem saída no caixa.</p>
-            </div>
-            <Campo label="Data da conferência" type="date" value={dataConferencia} onChange={setDataConferencia} />
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação</label>
-              <textarea rows={3} value={observacaoConferencia} onChange={(e) => setObservacaoConferencia(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
-            </div>
-            <div className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">
-              <strong>Transparência:</strong> o saldo inicial e as movimentações não serão alterados. A diferença ficará registrada apenas no histórico de conferência bancária.
-            </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setContaConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
-              <button disabled={salvandoConferencia} onClick={() => void salvarConferenciaSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConferencia ? "Salvando..." : "Conferir e salvar saldo"}</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {movimentoConferindo && (
-        <Modal titulo="Conciliar lançamento bancário" fechar={() => setMovimentoConferindo(null)}>
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-[#e8f3ee] p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Lançamento</p>
-              <p className="mt-1 text-lg font-extrabold text-[#003d2b]">{movimentoConferindo.descricao}</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div><p className="text-xs text-gray-500">Data</p><p className="font-bold">{formatarData(movimentoConferindo.data_movimentacao)}</p></div>
-                <div><p className="text-xs text-gray-500">Conta</p><p className="font-bold">{contasPorId.get(movimentoConferindo.conta_bancaria_id)?.nome || "—"}</p></div>
-                <div><p className="text-xs text-gray-500">Valor</p><p className="font-bold text-[#005a3c]">{formatarMoeda(movimentoConferindo.valor)}</p></div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <strong>Confirme somente depois de conferir o extrato bancário.</strong> A conciliação não altera o valor do lançamento e não cria uma nova entrada ou saída.
-            </div>
-            <Campo label="Data da conciliação" type="date" value={dataConciliacao} onChange={setDataConciliacao} />
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação (opcional)</label>
-              <textarea rows={3} value={observacaoConciliacao} onChange={(e) => setObservacaoConciliacao(e.target.value)} placeholder="Ex.: crédito conferido no extrato do Sicredi." className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
-            </div>
-            <div className="rounded-xl bg-[#f7faf8] p-3 text-xs text-gray-500">O sistema registrará a data, o horário e o usuário que realizou a conciliação.</div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setMovimentoConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
-              <button disabled={salvandoConciliacao} onClick={() => void confirmarConcilacao()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConciliacao ? "Conciliando..." : "✓ Confirmar conciliação"}</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {movimentoEstornoSelecionado && (
-        <Modal
-          titulo={movimentoEstornoSelecionado.tipo === "reserva" ? "Estornar pagamento da reserva" : "Estornar lançamento financeiro"}
-          fechar={() => movimentoEstornandoId ? undefined : setMovimentoEstornoSelecionado(null)}
-        >
-          <div className="space-y-5">
-            <div className="rounded-2xl bg-amber-50 p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Estorno</p>
-              <p className="mt-1 text-lg font-extrabold text-[#003d2b]">{movimentoEstornoSelecionado.movimento.descricao}</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div><p className="text-xs text-gray-500">Data original</p><p className="font-bold">{formatarData(movimentoEstornoSelecionado.movimento.data_movimentacao)}</p></div>
-                <div><p className="text-xs text-gray-500">Valor</p><p className="font-bold text-[#b45309]">{formatarMoeda(movimentoEstornoSelecionado.movimento.valor)}</p></div>
-                <div><p className="text-xs text-gray-500">Tipo</p><p className="font-bold">{movimentoEstornoSelecionado.movimento.tipo === "entrada" ? "Entrada" : movimentoEstornoSelecionado.movimento.tipo === "saida" ? "Saída" : "Transferência"}</p></div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              O lançamento original <strong>não será apagado</strong>. Será criado um lançamento compensatório de estorno, mantendo o histórico.
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Motivo do estorno <span className="text-red-600">*</span></label>
-              <textarea rows={4} value={motivoEstorno} onChange={(e) => setMotivoEstorno(e.target.value)} maxLength={500} placeholder="Informe o motivo do estorno..." className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
-              <p className="mt-1 text-xs text-gray-400">O motivo será registrado junto com o usuário e o horário.</p>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button disabled={Boolean(movimentoEstornandoId)} onClick={() => setMovimentoEstornoSelecionado(null)} className="rounded-xl border px-5 py-3 font-semibold disabled:opacity-50">Cancelar</button>
-              <button disabled={Boolean(movimentoEstornandoId)} onClick={() => void confirmarEstorno()} className="rounded-xl bg-[#a16207] px-5 py-3 font-bold text-white disabled:opacity-50">{movimentoEstornandoId ? "Estornando..." : "↩ Confirmar estorno"}</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarMovimentoModal && (
-        <Modal titulo="Nova movimentação financeira" fechar={() => setMostrarMovimentoModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Tipo</label><select value={movTipo} onChange={(e)=>setMovTipo(e.target.value as "entrada"|"saida")} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta bancária</label><select value={movConta} onChange={(e)=>setMovConta(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome} — {c.banco || ""}</option>)}</select></div>
-            <Campo label="Categoria" value={movCategoria} onChange={setMovCategoria} />
-            <Campo label="Descrição" value={movDescricao} onChange={setMovDescricao} />
-            <Campo label="Valor" type="number" value={movValor} onChange={setMovValor} />
-            <Campo label="Data" type="date" value={movData} onChange={setMovData} />
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Forma de pagamento</label><select value={movForma} onChange={(e)=>setMovForma(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3">{FORMAS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Comprovante</label><input type="file" accept="image/*,.pdf" onChange={(e)=>setMovArquivo(e.target.files?.[0]||null)} className="w-full rounded-xl border border-[#d5e0da] bg-white px-4 py-3 text-sm" /></div>
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={movObservacoes} onChange={(e)=>setMovObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarMovimentoModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoMovimento} onClick={()=>void salvarMovimentoFinanceiro()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoMovimento ? "Registrando..." : "Registrar movimentação"}</button></div>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarTransferenciaModal && (
-        <Modal titulo="Transferência entre contas" fechar={() => setMostrarTransferenciaModal(false)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de origem</label><select value={transOrigem} onChange={(e)=>setTransOrigem(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <div><label className="mb-2 block text-sm font-semibold text-gray-700">Conta de destino</label><select value={transDestino} onChange={(e)=>setTransDestino(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"><option value="">Selecione</option>{contasBancarias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
-            <Campo label="Valor" type="number" value={transValor} onChange={setTransValor} />
-            <Campo label="Data" type="date" value={transData} onChange={setTransData} />
-            <Campo label="Descrição" value={transDescricao} onChange={setTransDescricao} />
-            <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={transObservacoes} onChange={(e)=>setTransObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
-            <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">A transferência reduz o saldo da conta de origem e aumenta o saldo da conta de destino, sem contar como receita ou despesa.</div>
-            <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarTransferenciaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoTransferencia} onClick={()=>void salvarTransferencia()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoTransferencia ? "Transferindo..." : "Transferir"}</button></div>
-          </div>
-        </Modal>
-      )}
-
-
-    </main>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
   );
 }
