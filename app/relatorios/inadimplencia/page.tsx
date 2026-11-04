@@ -317,8 +317,8 @@ export default function InadimplenciaPage() {
     const chaveCompetencia = (valor: string | null | undefined) => {
       if (!valor) return "";
       const raw = valor.slice(0, 10);
-      if (/^\\d{4}-\\d{2}/.test(raw)) return raw.slice(0, 7);
-      const br = raw.match(/^(\\d{2})\\/(\\d{4})$/);
+      if (/^\d{4}-\d{2}/.test(raw)) return raw.slice(0, 7);
+      const br = raw.match(/^(\d{2})\/(\d{4})$/);
       return br ? `${br[2]}-${br[1]}` : "";
     };
 
