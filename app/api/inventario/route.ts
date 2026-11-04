@@ -2,6 +2,61 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { exigirAdministrador, requireRoles } from "@/lib/guaraniAuth";
 
+type SocioInventarioRow = {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+};
+
+type DependenteInventarioRow = {
+  id: string;
+  socio_id: string | null;
+  nome: string | null;
+  matricula: string | null;
+  ativo: boolean | null;
+};
+
+type ItemInventarioRow = {
+  id: string;
+  acesso_funcionario: boolean | null;
+  [campo: string]: unknown;
+};
+
+type EmprestimoInventarioRow = {
+  id: string;
+  item_id: string;
+  socio_id: string | null;
+  dependente_id: string | null;
+  quantidade: number;
+  data_emprestimo: string;
+  data_prevista_devolucao: string | null;
+  data_devolucao: string | null;
+  status: string | null;
+  responsavel_emprestimo: string | null;
+  responsavel_devolucao: string | null;
+  observacoes: string | null;
+  item: { nome: string | null } | null;
+  socio: { nome: string | null; matricula: string | null } | null;
+};
+
+type PessoaParaEmprestimo = {
+  id: string;
+  socio_id: string;
+  dependente_id: string | null;
+  nome: string | null;
+  matricula: string | null;
+  tipo_pessoa: "socio" | "dependente";
+  titular_nome: string | null;
+};
+
+type EmprestimoComDependente = EmprestimoInventarioRow & {
+  dependente: {
+    nome: string | null;
+    matricula: string | null;
+    titular_nome: string | null;
+  } | null;
+};
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -49,44 +104,65 @@ export async function GET(request: Request) {
     if (categoriasError) throw new Error(categoriasError.message);
     if (localizacoesError) throw new Error(localizacoesError.message);
 
-    const sociosPorId = new Map<string, { id: string; nome: string | null; matricula: string | null }>((socios || []).map((s: any) => [String(s.id), { id: String(s.id), nome: s.nome ?? null, matricula: s.matricula ?? null }] as [string, { id: string; nome: string | null; matricula: string | null }]));
-    const dependentesPorId = new Map<string, any>((dependentes || []).map((d: any) => [String(d.id), d] as [string, any]));
+    const sociosRows = (socios || []) as SocioInventarioRow[];
+    const dependentesRows = (dependentes || []) as DependenteInventarioRow[];
+    const itensRows = (itens || []) as ItemInventarioRow[];
+    const emprestimosRows = (emprestimos || []) as EmprestimoInventarioRow[];
+
+    const sociosPorId = new Map<string, SocioInventarioRow>(
+      sociosRows.map((s) => [
+        String(s.id),
+        { id: String(s.id), nome: s.nome ?? null, matricula: s.matricula ?? null },
+      ])
+    );
+    const dependentesPorId = new Map<string, DependenteInventarioRow>(
+      dependentesRows.map((d) => [String(d.id), d])
+    );
 
     // A tabela public.socios contém os titulares e também alguns dependentes legados.
     // Os dependentes familiares atuais ficam em public.dependentes e precisam ser
     // apresentados como pessoa que retirou o item, mantendo socio_id apontando ao titular.
     const normalizarNome = (valor: unknown) => String(valor || "")
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\\u0300-\\u036f]/g, "")
       .toLowerCase()
-      .replace(/\s+/g, " ")
+      .replace(/\\s+/g, " ")
       .trim();
-    const matriculasDosDependentesAtivos = new Set((dependentes || [])
-      .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
-      .map((d: any) => normalizarNome(d.matricula))
-      .filter(Boolean));
+    const matriculasDosDependentesAtivos = new Set(
+      dependentesRows
+        .filter((d) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+        .map((d) => normalizarNome(d.matricula))
+        .filter(Boolean)
+    );
     // Se um dependente ainda existir também em public.socios com a mesma
     // matrícula, priorizamos o registro de public.dependentes para vinculá-lo
     // ao titular correto e evitar duas opções iguais na busca.
-    const sociosParaEmprestimo = (socios || []).filter((s: any) => {
+    const sociosParaEmprestimo = sociosRows.filter((s) => {
       const matricula = normalizarNome(s.matricula);
       return !matricula || !matriculasDosDependentesAtivos.has(matricula);
     });
-    const matriculasJaEmSocios = new Set(sociosParaEmprestimo
-      .map((s: any) => normalizarNome(s.matricula))
-      .filter(Boolean));
-    const associadosParaEmprestimo = [
-      ...sociosParaEmprestimo.map((s: any) => ({
-        id: String(s.id), socio_id: String(s.id), dependente_id: null,
-        nome: s.nome, matricula: s.matricula || null, tipo_pessoa: "socio", titular_nome: null,
+    const matriculasJaEmSocios = new Set(
+      sociosParaEmprestimo
+        .map((s) => normalizarNome(s.matricula))
+        .filter(Boolean)
+    );
+    const associadosParaEmprestimo: PessoaParaEmprestimo[] = [
+      ...sociosParaEmprestimo.map((s): PessoaParaEmprestimo => ({
+        id: String(s.id),
+        socio_id: String(s.id),
+        dependente_id: null,
+        nome: s.nome,
+        matricula: s.matricula || null,
+        tipo_pessoa: "socio",
+        titular_nome: null,
       })),
-      ...(dependentes || [])
-        .filter((d: any) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
-        .filter((d: any) => {
+      ...dependentesRows
+        .filter((d) => d.ativo !== false && d.socio_id && sociosPorId.has(String(d.socio_id)))
+        .filter((d) => {
           const matricula = normalizarNome(d.matricula);
           return !(matricula && matriculasJaEmSocios.has(matricula));
         })
-        .map((d: any) => ({
+        .map((d): PessoaParaEmprestimo => ({
           id: `dependente:${String(d.id)}`,
           socio_id: String(d.socio_id),
           dependente_id: String(d.id),
@@ -95,9 +171,11 @@ export async function GET(request: Request) {
           tipo_pessoa: "dependente",
           titular_nome: sociosPorId.get(String(d.socio_id))?.nome || null,
         })),
-    ].sort((a: any, b: any) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    ].sort((a, b) =>
+      String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR")
+    );
 
-    const emprestimosComDependente = (emprestimos || []).map((emprestimo: any) => {
+    const emprestimosComDependente: EmprestimoComDependente[] = emprestimosRows.map((emprestimo) => {
       const dependente = emprestimo.dependente_id
         ? dependentesPorId.get(String(emprestimo.dependente_id))
         : null;
@@ -114,18 +192,18 @@ export async function GET(request: Request) {
     // A visibilidade aplica-se aos dois perfis operacionais. Empréstimos ainda
     // ativos continuam disponíveis para que a equipe consiga registrar a devolução.
     const itensVisiveis = perfilFuncionario
-      ? (itens || []).filter((item: any) => item.acesso_funcionario === true)
-      : (itens || []);
-    const idsItensVisiveis = new Set(itensVisiveis.map((item: any) => String(item.id)));
+      ? itensRows.filter((item) => item.acesso_funcionario === true)
+      : itensRows;
+    const idsItensVisiveis = new Set(itensVisiveis.map((item) => String(item.id)));
     const statusAtivos = new Set(["emprestado", "atrasado"]);
     const emprestimosDoPerfil = perfilFuncionario
-      ? emprestimosComDependente.filter((emprestimo: any) =>
+      ? emprestimosComDependente.filter((emprestimo) =>
           idsItensVisiveis.has(String(emprestimo.item_id)) || statusAtivos.has(String(emprestimo.status || "").toLowerCase())
         )
       : emprestimosComDependente;
     const emprestimosSeguros = podeVincularAssociado
       ? emprestimosDoPerfil
-      : emprestimosDoPerfil.map((emprestimo: any) => ({ ...emprestimo, socio: null, socio_id: null, dependente: null, dependente_id: null }));
+      : emprestimosDoPerfil.map((emprestimo) => ({ ...emprestimo, socio: null, socio_id: null, dependente: null, dependente_id: null }));
 
     return NextResponse.json({
       itens: itensVisiveis,
