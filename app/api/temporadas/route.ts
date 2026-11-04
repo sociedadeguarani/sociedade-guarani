@@ -33,7 +33,9 @@ type ParcelaRegistro = {
   conta_bancaria_id?: string | null;
 };
 
-type AdminDb = ReturnType<typeof createClient>;
+// O cliente é criado sem um Database gerado; manter o tipo genérico alinhado ao createClient.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AdminDb = SupabaseClient<any>;
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -92,7 +94,7 @@ async function autenticar(request: NextRequest) {
   return { db, user };
 }
 
-async function proximoCodigo(db: SupabaseClient) {
+async function proximoCodigo(db: AdminDb) {
   const { data, error } = await db
     .from("temporadas")
     .select("codigo")
