@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../../components/CabecalhoPadrao";
+import MenuLateralPadrao from "../components/MenuLateralPadrao";
+import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
 
