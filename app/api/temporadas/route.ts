@@ -33,6 +33,19 @@ type ParcelaRegistro = {
   conta_bancaria_id?: string | null;
 };
 
+type TemporadaListRow = Record<string, unknown> & { id: string };
+type RelacaoTemporadaRow = Record<string, unknown> & { temporada_id: string };
+type ParcelaCriadaRow = {
+  id: string;
+  numero: number | string | null;
+  valor: number | string;
+  situacao: string;
+  forma_pagamento: string;
+  data_pagamento: string | null;
+  conta_bancaria_id: string | null;
+};
+type TemporadaRequestBody = Record<string, unknown>;
+
 // O cliente é criado sem um Database gerado; manter o tipo genérico alinhado ao createClient.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AdminDb = SupabaseClient<any>;
@@ -358,7 +371,8 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    const ids = (temporadas || []).map((t: any) => String(t.id));
+    const temporadasRows = (temporadas || []) as TemporadaListRow[];
+    const ids = temporadasRows.map((temporada) => String(temporada.id));
     const [{ data: parcelas, error: erroParcelas }, { data: participantes, error: erroParticipantes }] =
       await Promise.all([
         ids.length
@@ -372,26 +386,28 @@ export async function GET(request: NextRequest) {
     if (erroParcelas) throw erroParcelas;
     if (erroParticipantes) throw erroParticipantes;
 
-    const mapaParcelas = new Map<string, any[]>();
-    const mapaParticipantes = new Map<string, any[]>();
+    const parcelasRows = (parcelas || []) as RelacaoTemporadaRow[];
+    const participantesRows = (participantes || []) as RelacaoTemporadaRow[];
+    const mapaParcelas = new Map<string, RelacaoTemporadaRow[]>();
+    const mapaParticipantes = new Map<string, RelacaoTemporadaRow[]>();
 
-    for (const p of parcelas || []) {
-      const chave = String((p as any).temporada_id);
+    for (const parcela of parcelasRows) {
+      const chave = String(parcela.temporada_id);
       if (!mapaParcelas.has(chave)) mapaParcelas.set(chave, []);
-      mapaParcelas.get(chave)!.push(p);
+      mapaParcelas.get(chave)!.push(parcela);
     }
 
-    for (const p of participantes || []) {
-      const chave = String((p as any).temporada_id);
+    for (const participante of participantesRows) {
+      const chave = String(participante.temporada_id);
       if (!mapaParticipantes.has(chave)) mapaParticipantes.set(chave, []);
-      mapaParticipantes.get(chave)!.push(p);
+      mapaParticipantes.get(chave)!.push(participante);
     }
 
     return NextResponse.json({
-      temporadas: (temporadas || []).map((t: any) => ({
-        ...t,
-        parcelas: mapaParcelas.get(String(t.id)) || [],
-        participantes: mapaParticipantes.get(String(t.id)) || [],
+      temporadas: temporadasRows.map((temporada) => ({
+        ...temporada,
+        parcelas: mapaParcelas.get(String(temporada.id)) || [],
+        participantes: mapaParticipantes.get(String(temporada.id)) || [],
       })),
     });
   } catch (error) {
@@ -405,12 +421,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const contentType = request.headers.get("content-type") || "";
-    let body: Record<string, any>;
+    let body: TemporadaRequestBody;
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
-      body = Object.fromEntries(form.entries()) as Record<string, any>;
+      body = Object.fromEntries(form.entries());
     } else {
-      body = (await request.json()) as Record<string, any>;
+      const payload: unknown = await request.json();
+      body = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as TemporadaRequestBody
+        : {};
     }
     const acao = String(body?.acao || "criar");
 
@@ -456,10 +475,10 @@ export async function POST(request: NextRequest) {
           valor_total: valorTotal,
           situacao: parcelas[0]?.confirmar ? "ativa" : "pendente",
           forma_pagamento: formas.length === 1 ? formas[0] : "misto",
-          conta_bancaria_id: body.conta_bancaria_id || null,
+          conta_bancaria_id: body.conta_bancaria_id ? String(body.conta_bancaria_id) : null,
           data_contratacao: new Date().toISOString().slice(0, 10),
           data_pagamento: parcelas[0]?.confirmar ? new Date().toISOString().slice(0, 10) : null,
-          observacoes: body.observacoes || null,
+          observacoes: body.observacoes ? String(body.observacoes) : null,
           created_by: auth.user.id,
         })
         .select("*")
@@ -500,7 +519,8 @@ export async function POST(request: NextRequest) {
 
         if (erroParcelas) throw erroParcelas;
 
-        const primeiraConfirmada = (parcelasCriadas || []).find((p: any) => p.situacao === "pago");
+        const primeiraConfirmada = ((parcelasCriadas || []) as ParcelaCriadaRow[])
+          .find((parcela) => parcela.situacao === "pago");
         if (primeiraConfirmada) {
           if (!primeiraConfirmada.conta_bancaria_id) {
             throw new Error("A parcela confirmada precisa de uma conta de recebimento.");
@@ -517,7 +537,7 @@ export async function POST(request: NextRequest) {
             String(primeiraConfirmada.data_pagamento),
             auth.user.id,
             responsavelNome,
-            primeiraConfirmada.numero
+            primeiraConfirmada.numero ?? "—"
           );
 
           const { error: atualiza } = await auth.db
@@ -593,17 +613,18 @@ export async function POST(request: NextRequest) {
         return jsonError("Selecione a conta que receberá o pagamento.");
       }
 
-      const arquivoComprovante = body.arquivo;
-      const temArquivoComprovante = arquivoComprovante instanceof File && arquivoComprovante.size > 0;
-      if (temArquivoComprovante && situacao !== "pago") {
+      const arquivoComprovante = body.arquivo instanceof File ? body.arquivo : null;
+      const comprovantePresente = arquivoComprovante !== null && arquivoComprovante.size > 0;
+      if (comprovantePresente && situacao !== "pago") {
         return jsonError("O comprovante pode ser anexado após a confirmação do pagamento. Cheques ficam em compensação.");
       }
-      if (temArquivoComprovante && (!TIPOS_COMPROVANTE.has(arquivoComprovante.type) || arquivoComprovante.size > 8 * 1024 * 1024)) {
+      if (arquivoComprovante && arquivoComprovante.size > 0 &&
+        (!TIPOS_COMPROVANTE.has(arquivoComprovante.type) || arquivoComprovante.size > 8 * 1024 * 1024)) {
         return jsonError("Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB.");
       }
 
       let comprovantePath: string | null = null;
-      if (temArquivoComprovante) {
+      if (arquivoComprovante && arquivoComprovante.size > 0) {
         try {
           comprovantePath = await salvarComprovante(auth.db, arquivoComprovante);
         } catch (erroUpload) {
@@ -780,7 +801,7 @@ export async function POST(request: NextRequest) {
           responsavel_email: body.responsavel_email ? String(body.responsavel_email).trim() : null,
           inicio,
           fim,
-          observacoes: body.observacoes || null,
+          observacoes: body.observacoes ? String(body.observacoes) : null,
         })
         .eq("id", temporadaId)
         .select("*")
