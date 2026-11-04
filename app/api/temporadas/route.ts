@@ -13,6 +13,28 @@ type ParcelaEntrada = {
   conta_bancaria_id?: string | null;
 };
 
+type TemporadaRegistro = {
+  id: string;
+  codigo?: string | null;
+  matricula?: string | null;
+  socio_id?: string | null;
+  responsavel_nome?: string | null;
+  responsavel_cpf?: string | null;
+  responsavel_telefone?: string | null;
+};
+
+type ParcelaRegistro = {
+  numero?: number | string | null;
+  descricao?: string | null;
+  valor?: number | string | null;
+  situacao?: string | null;
+  forma_pagamento?: string | null;
+  data_pagamento?: string | null;
+  conta_bancaria_id?: string | null;
+};
+
+type AdminDb = ReturnType<typeof createClient>;
+
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -86,7 +108,7 @@ async function proximoCodigo(db: SupabaseClient) {
   return `TE${String(maior + 1).padStart(4, "0")}A`;
 }
 
-async function garantirTitularParticipante(db: any, temporada: any) {
+async function garantirTitularParticipante(db: AdminDb, temporada: TemporadaRegistro) {
   const nome = String(temporada.responsavel_nome || "").trim();
   if (!nome) return null;
 
@@ -132,7 +154,7 @@ async function garantirTitularParticipante(db: any, temporada: any) {
   return data;
 }
 
-async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo: string) {
+async function proximaMatriculaParticipante(db: AdminDb, temporadaId: string, codigo: string) {
   const { data, error } = await db
     .from("temporadas_participantes")
     .select("matricula")
@@ -141,7 +163,7 @@ async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo
   if (error) throw error;
 
   const usadas = new Set(
-    (data || []).map((row: any) => String(row.matricula || "").trim().toUpperCase())
+    (data || []).map((row: { matricula: string | null }) => String(row.matricula || "").trim().toUpperCase())
   );
 
   // O código da temporada já termina em A (ex.: TE0001A).
@@ -160,7 +182,7 @@ async function proximaMatriculaParticipante(db: any, temporadaId: string, codigo
   throw new Error("Limite de participantes da temporada atingido.");
 }
 
-async function registrarAvisoPagamentoTemporada(db: any, temporada: any, parcela: any, usuarioId: string | null) {
+async function registrarAvisoPagamentoTemporada(db: AdminDb, temporada: TemporadaRegistro, parcela: ParcelaRegistro, usuarioId: string | null) {
   try {
     const codigo = String(temporada?.codigo || temporada?.matricula || temporada?.id || "Temporada").trim();
     const numero = parcela?.numero ? `parcela ${parcela.numero}` : String(parcela?.descricao || "parcela");
@@ -200,7 +222,7 @@ async function registrarAvisoPagamentoTemporada(db: any, temporada: any, parcela
 const BUCKET_COMPROVANTES = "comprovantes-financeiro";
 const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
-async function garantirBucketComprovantes(db: any) {
+async function garantirBucketComprovantes(db: AdminDb) {
   const atual = await db.storage.getBucket(BUCKET_COMPROVANTES);
   if (!atual.error) return;
   const criado = await db.storage.createBucket(BUCKET_COMPROVANTES, {
@@ -213,7 +235,7 @@ async function garantirBucketComprovantes(db: any) {
   }
 }
 
-async function salvarComprovante(db: any, arquivo: File): Promise<string> {
+async function salvarComprovante(db: AdminDb, arquivo: File): Promise<string> {
   if (!TIPOS_COMPROVANTE.has(arquivo.type) || arquivo.size > 8 * 1024 * 1024) {
     throw new Error("Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB.");
   }
@@ -235,7 +257,7 @@ async function salvarComprovante(db: any, arquivo: File): Promise<string> {
 }
 
 async function criarMovimentacao(
-  db: any,
+  db: AdminDb,
   temporadaId: string,
   parcelaId: string,
   socioId: string | null,
