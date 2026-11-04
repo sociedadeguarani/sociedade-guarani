@@ -313,6 +313,9 @@ export default function FinanceiroPage() {
   const [dataConciliacao, setDataConciliacao] = useState(new Date().toISOString().slice(0, 10));
   const [observacaoConciliacao, setObservacaoConciliacao] = useState("");
   const [salvandoConciliacao, setSalvandoConciliacao] = useState(false);
+  const [idsMovimentosSelecionadosConciliacao, setIdsMovimentosSelecionadosConciliacao] = useState<string[]>([]);
+  const [mostrarConciliacaoEmLote, setMostrarConciliacaoEmLote] = useState(false);
+  const [salvandoConciliacaoEmLote, setSalvandoConciliacaoEmLote] = useState(false);
 
   const pessoas = useMemo<PessoaFinanceira[]>(() => {
     const responsaveis = new Map<string, Socio>(
@@ -788,6 +791,17 @@ export default function FinanceiroPage() {
     .filter((m) => m.tipo === "transferencia")
     .reduce((sum, m) => sum + Number(m.valor || 0), 0);
   const conciliacoesPendentes = movimentosFinanceiros.filter((m) => !m.conciliado).length;
+  const idsPendentesVisiveis = movimentosVisiveis.filter((m) => !m.conciliado).map((m) => m.id);
+  const todosPendentesVisiveisSelecionados =
+    idsPendentesVisiveis.length > 0 &&
+    idsPendentesVisiveis.every((id) => idsMovimentosSelecionadosConciliacao.includes(id));
+  const movimentosSelecionadosParaConciliar = movimentosFinanceiros.filter(
+    (m) => idsMovimentosSelecionadosConciliacao.includes(m.id) && !m.conciliado,
+  );
+  const totalSelecionadoConciliacao = movimentosSelecionadosParaConciliar.reduce(
+    (total, movimento) => total + Number(movimento.valor || 0),
+    0,
+  );
 
   function abrirConcilacao(movimento: MovimentoFinanceiro) {
     setMovimentoConferindo(movimento);
@@ -816,6 +830,44 @@ export default function FinanceiroPage() {
       setMensagem(error instanceof Error ? error.message : "Não foi possível registrar a conciliação.");
     } finally {
       setSalvandoConciliacao(false);
+    }
+  }
+
+  async function confirmarConciliacaoEmLote() {
+    const ids = movimentosSelecionadosParaConciliar.map((movimento) => movimento.id);
+    if (ids.length === 0 || salvandoConciliacaoEmLote) return;
+
+    setSalvandoConciliacaoEmLote(true);
+    try {
+      const result = await apiFinanceiro("/api/financeiro", {
+        method: "PATCH",
+        body: JSON.stringify({
+          acao: "conciliar_movimentos",
+          ids,
+          data_conciliacao: dataConciliacao,
+          observacao: observacaoConciliacao || "Conferido em lote no extrato bancário.",
+        }),
+      });
+
+      const movimentosAtualizados = Array.isArray(result.movimentos)
+        ? (result.movimentos as MovimentoFinanceiro[])
+        : [];
+      const atualizadosPorId = new Map(movimentosAtualizados.map((movimento) => [movimento.id, movimento]));
+
+      setMovimentosFinanceiros((lista) =>
+        lista.map((movimento) => atualizadosPorId.get(movimento.id) || movimento),
+      );
+      setIdsMovimentosSelecionadosConciliacao([]);
+      setMostrarConciliacaoEmLote(false);
+
+      const detalhesFalhas = Array.isArray(result.falhas) && result.falhas.length > 0
+        ? ` ${result.falhas.length} lançamento(s) precisam ser conferidos novamente.`
+        : "";
+      setMensagem(`${result.message || `${movimentosAtualizados.length} lançamento(s) conciliado(s).`}${detalhesFalhas}`);
+    } catch (error) {
+      setMensagem(error instanceof Error ? error.message : "Não foi possível conciliar os lançamentos selecionados.");
+    } finally {
+      setSalvandoConciliacaoEmLote(false);
     }
   }
 
@@ -1482,10 +1534,60 @@ export default function FinanceiroPage() {
                     </div>
                   </div>
 
+                  <div className="mb-3 flex flex-col gap-3 rounded-xl border border-[#d5e0da] bg-[#f8fbf9] p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-[#174c39]">
+                      <input
+                        type="checkbox"
+                        checked={todosPendentesVisiveisSelecionados}
+                        disabled={idsPendentesVisiveis.length === 0}
+                        onChange={(evento) => {
+                          if (evento.target.checked) {
+                            setIdsMovimentosSelecionadosConciliacao((atuais) =>
+                              Array.from(new Set([...atuais, ...idsPendentesVisiveis])),
+                            );
+                          } else {
+                            setIdsMovimentosSelecionadosConciliacao((atuais) =>
+                              atuais.filter((id) => !idsPendentesVisiveis.includes(id)),
+                            );
+                          }
+                        }}
+                        className="h-4 w-4 accent-[#005a3c]"
+                      />
+                      Selecionar pendentes desta página ({idsPendentesVisiveis.length})
+                    </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold text-gray-600">
+                        {movimentosSelecionadosParaConciliar.length} selecionado(s)
+                      </span>
+                      <button
+                        type="button"
+                        disabled={movimentosSelecionadosParaConciliar.length === 0}
+                        onClick={() => {
+                          setDataConciliacao(new Date().toISOString().slice(0, 10));
+                          setObservacaoConciliacao("");
+                          setMostrarConciliacaoEmLote(true);
+                        }}
+                        className="rounded-lg bg-[#005a3c] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ✓ Conciliar selecionados
+                      </button>
+                      {idsMovimentosSelecionadosConciliacao.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setIdsMovimentosSelecionadosConciliacao([])}
+                          className="text-xs font-semibold text-gray-500 underline"
+                        >
+                          Limpar seleção
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px]">
+                    <table className="w-full min-w-[1100px]">
                       <thead className="bg-[#e8f3ee]">
                         <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                          <th className="w-10 px-3 py-3 text-center">Sel.</th>
                           <th className="px-4 py-3">Data / hora</th>
                           <th className="px-4 py-3">Associado</th>
                           <th className="px-4 py-3">Registrado por</th>
@@ -1501,6 +1603,25 @@ export default function FinanceiroPage() {
                       <tbody className="divide-y">
                         {movimentosVisiveis.map((m) => (
                           <tr key={m.id} className="hover:bg-[#fafcfb]">
+                            <td className="px-3 py-3 text-center">
+                              {!m.conciliado ? (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Selecionar lançamento ${m.descricao}`}
+                                  checked={idsMovimentosSelecionadosConciliacao.includes(m.id)}
+                                  onChange={(evento) => {
+                                    setIdsMovimentosSelecionadosConciliacao((atuais) =>
+                                      evento.target.checked
+                                        ? Array.from(new Set([...atuais, m.id]))
+                                        : atuais.filter((id) => id !== m.id),
+                                    );
+                                  }}
+                                  className="h-4 w-4 accent-[#005a3c]"
+                                />
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-sm">
                               <div className="font-semibold">{formatarData(m.data_movimentacao)}</div>
                               <div className="text-xs text-gray-500">{formatarHora(m.created_at)}</div>
@@ -1693,6 +1814,54 @@ export default function FinanceiroPage() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setMovimentoConferindo(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
               <button disabled={salvandoConciliacao} onClick={() => void confirmarConcilacao()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoConciliacao ? "Conciliando..." : "✓ Confirmar conciliação"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {mostrarConciliacaoEmLote && (
+        <Modal titulo="Conciliar lançamentos selecionados" fechar={() => setMostrarConciliacaoEmLote(false)}>
+          <div className="space-y-5">
+            <div className="rounded-2xl bg-[#e8f3ee] p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Conferência em lote</p>
+              <p className="mt-1 text-2xl font-extrabold text-[#003d2b]">
+                {movimentosSelecionadosParaConciliar.length} lançamento(s)
+              </p>
+              <p className="mt-1 text-lg font-bold text-[#005a3c]">
+                Total selecionado: {formatarMoeda(totalSelecionadoConciliacao)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <strong>Confira todos os itens no extrato bancário antes de confirmar.</strong>
+              Esta ação apenas registra que os lançamentos selecionados foram conferidos. O sistema não consulta o banco automaticamente, não altera os valores e não cria novas movimentações.
+            </div>
+            <Campo label="Data da conciliação" type="date" value={dataConciliacao} onChange={setDataConciliacao} />
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação (opcional)</label>
+              <textarea
+                rows={3}
+                value={observacaoConciliacao}
+                onChange={(evento) => setObservacaoConciliacao(evento.target.value)}
+                placeholder="Ex.: valores conferidos no extrato do Sicredi."
+                className="w-full rounded-xl border border-[#d5e0da] px-4 py-3"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setMostrarConciliacaoEmLote(false)}
+                className="rounded-xl border px-5 py-3 font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={salvandoConciliacaoEmLote || movimentosSelecionadosParaConciliar.length === 0}
+                onClick={() => void confirmarConciliacaoEmLote()}
+                className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50"
+              >
+                {salvandoConciliacaoEmLote ? "Conciliando..." : `✓ Confirmar ${movimentosSelecionadosParaConciliar.length} conciliação(ões)`}
+              </button>
             </div>
           </div>
         </Modal>
