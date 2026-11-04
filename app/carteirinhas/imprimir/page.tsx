@@ -370,7 +370,7 @@ export default function ImprimirCarteirinhasPage() {
   const converterSvgParaPng = useCallback(async (svgBlob: Blob) => {
     const url = URL.createObjectURL(svgBlob);
     try {
-      const imagem = new Image();
+      const imagem = new window.Image();
       imagem.src = url;
       await new Promise<void>((resolve, reject) => {
         imagem.onload = () => resolve();
