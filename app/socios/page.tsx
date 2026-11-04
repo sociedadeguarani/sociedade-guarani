@@ -920,8 +920,17 @@ export default function Home() {
     setForm((atual) => {
       const proximo = {
         ...atual,
-        [campo]: campo === "possui_mensalidade" ? valor === "true" : valor,
+        [campo]: campo === "possui_mensalidade" || campo === "remido" ? valor === "true" : valor,
       };
+
+      if (campo === "remido") {
+        if (proximo.remido) {
+          proximo.possui_mensalidade = false;
+          proximo.valor_mensalidade = 0;
+          proximo.situacao_financeira = "isento";
+          proximo.categoria = proximo.categoria || "Titular";
+        }
+      }
 
       if (campo === "responsavel_id" && valor.trim()) {
         proximo.categoria = proximo.possui_mensalidade
@@ -1018,6 +1027,7 @@ export default function Home() {
       observacoes: form.observacoes || null,
 
       tipo_socio: form.tipo_socio || "patrimonial_individual",
+      remido: Boolean(form.remido),
       responsavel_id: form.responsavel_id || null,
       parentesco: form.parentesco || null,
       possui_mensalidade: Boolean(form.possui_mensalidade),
@@ -3443,6 +3453,26 @@ function ModalSocio({
               opcoes={TIPOS_SOCIO.map((item) => item.value)}
               labels={Object.fromEntries(TIPOS_SOCIO.map((item) => [item.value, item.label]))}
             />
+
+            {!form.responsavel_id &&
+              !String(form.tipo_socio || "").startsWith("dependente_") &&
+              !String(form.tipo_socio || "").startsWith("temporada_") &&
+              form.tipo_socio !== "dependente_temporada_familiar" && (
+                <div className="md:col-span-2 flex items-center rounded-xl border border-[#d5e0da] bg-[#f7faf8] px-4 py-3">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.remido)}
+                      onChange={(e) => alterarCampo("remido", e.target.checked ? "true" : "false")}
+                      className="mt-1 h-4 w-4 accent-[#005a3c]"
+                    />
+                    <span>
+                      <span className="block text-sm font-bold text-[#005a3c]">Associado Remido</span>
+                      <span className="mt-1 block text-xs text-gray-500">Isento de mensalidade. O cadastro ficará marcado como remido e a situação financeira como isento.</span>
+                    </span>
+                  </label>
+                </div>
+              )}
 
             <SelectCampo
               label="Situação"
