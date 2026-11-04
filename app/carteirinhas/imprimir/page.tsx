@@ -275,11 +275,6 @@ export default function ImprimirCarteirinhasPage() {
   );
   const todasSelecionadas = pessoas.length > 0 && pessoasSelecionadas.length === pessoas.length;
 
-  useEffect(() => {
-    const idsVisiveis = new Set(pessoas.map((pessoa) => pessoa.id));
-    setSelecionadasIds((atuais) => atuais.filter((id) => idsVisiveis.has(id)));
-  }, [pessoas]);
-
   const alternarSelecaoPessoa = useCallback((id: string) => {
     setSelecionadasIds((atuais) => atuais.includes(id) ? atuais.filter((item) => item !== id) : [...atuais, id]);
   }, []);
