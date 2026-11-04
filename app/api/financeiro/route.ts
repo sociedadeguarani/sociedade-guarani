@@ -350,11 +350,85 @@ export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const acao = String(body.acao || "").trim().toLowerCase();
+    const supabase = getServiceClient();
+
+    if (acao === "conciliar_movimentos") {
+      const ids = Array.isArray(body.ids)
+        ? Array.from(new Set(body.ids.map((valor: unknown) => String(valor || "").trim()).filter(Boolean)))
+        : [];
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "Selecione ao menos um lançamento pendente." }, { status: 400 });
+      }
+      if (ids.length > 100) {
+        return NextResponse.json({ error: "Concilie no máximo 100 lançamentos por vez." }, { status: 400 });
+      }
+
+      const dataConciliacao = String(body.data_conciliacao || "").trim();
+      const observacao = String(body.observacao || "").trim().slice(0, 500);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataConciliacao)) {
+        return NextResponse.json({ error: "Informe uma data de conciliação válida." }, { status: 400 });
+      }
+
+      const { data: registros, error: buscaError } = await supabase
+        .from("movimentacoes_financeiras")
+        .select("id,observacoes,conciliado")
+        .in("id", ids);
+
+      if (buscaError) throw buscaError;
+
+      const registrosEncontrados = registros || [];
+      const encontrados = new Set(registrosEncontrados.map((registro) => String(registro.id)));
+      const naoEncontrados = ids.filter((idSelecionado) => !encontrados.has(idSelecionado)).length;
+      const movimentosAtualizados: NonNullable<typeof registros> = [];
+      const falhas: Array<{ id: string; erro: string }> = [];
+      let jaConciliados = 0;
+
+      for (const registro of registrosEncontrados) {
+        if (registro.conciliado) {
+          jaConciliados += 1;
+          continue;
+        }
+
+        const instante = new Date().toISOString();
+        const nomeUsuario = auth.usuario.nome_exibicao || "Administrador";
+        const usuarioId = auth.usuario.id;
+        const blocoAuditoria = `[CONCILIACAO_BANCARIA] ${instante} | por: ${nomeUsuario} | usuario_id: ${usuarioId} | observação: ${observacao || "Conferido em lote no extrato bancário."}`;
+        const novasObservacoes = [String(registro.observacoes || "").trim(), blocoAuditoria].filter(Boolean).join("\n");
+
+        const { data: atualizado, error: atualizarError } = await supabase
+          .from("movimentacoes_financeiras")
+          .update({
+            conciliado: true,
+            data_conciliacao: dataConciliacao,
+            observacoes: novasObservacoes,
+          })
+          .eq("id", registro.id)
+          .eq("conciliado", false)
+          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,created_at,created_by,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes")
+          .maybeSingle();
+
+        if (atualizarError) {
+          falhas.push({ id: String(registro.id), erro: "Não foi possível atualizar este lançamento." });
+        } else if (atualizado) {
+          movimentosAtualizados.push(atualizado);
+        } else {
+          jaConciliados += 1;
+        }
+      }
+
+      return NextResponse.json({
+        ok: falhas.length === 0,
+        movimentos: movimentosAtualizados,
+        conciliados: movimentosAtualizados.length,
+        ja_conciliados: jaConciliados,
+        nao_encontrados: naoEncontrados,
+        falhas,
+        message: `${movimentosAtualizados.length} lançamento(s) conciliado(s). ${jaConciliados} já estavam conciliados.${naoEncontrados ? ` ${naoEncontrados} não encontrado(s).` : ""}`,
+      });
+    }
 
     const id = String(body.id || "").trim();
     if (!id) return NextResponse.json({ error: "Lançamento não informado." }, { status: 400 });
-
-    const supabase = getServiceClient();
 
     if (acao === "conciliar_movimento") {
       const dataConciliacao = String(body.data_conciliacao || "").trim();
