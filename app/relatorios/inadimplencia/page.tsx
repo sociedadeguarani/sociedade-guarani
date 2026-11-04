@@ -11,6 +11,7 @@ type Socio = {
   id: string;
   matricula: string | number | null;
   nome: string;
+  cpf: string | null;
   data_associacao: string | null;
   valor_mensalidade: number | string | null;
   dia_vencimento: number | null;
@@ -26,7 +27,9 @@ type Dependente = {
   id: string;
   socio_id: string;
   nome: string;
+  cpf: string | null;
   ativo: boolean | null;
+  possui_mensalidade: boolean | null;
 };
 
 type Mensalidade = {
@@ -66,14 +69,20 @@ function competenciaBR(valor: string | null | undefined) {
   return `${partes[1]}/${partes[0]}`;
 }
 
+function normalizarSituacao(valor: unknown) {
+  return String(valor || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
 function isPago(m: Mensalidade) {
-  const status = String(m.situacao || "").toLowerCase();
-  return ["pago", "paid", "quitado", "recebido", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  return Boolean(m.data_pagamento) || ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "compensado", "compensada"].includes(normalizarSituacao(m.situacao));
 }
 
 function isIsento(m: Mensalidade) {
-  const status = String(m.situacao || "").toLowerCase();
-  return ["isento", "isenta", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  return ["isento", "isenta", "cancelado", "cancelada"].includes(normalizarSituacao(m.situacao));
 }
 
 type DadosInadimplencia = {
@@ -83,30 +92,47 @@ type DadosInadimplencia = {
   politicaInadimplencia: PoliticaInadimplencia;
 };
 
+async function buscarMensalidadesPaginadas(): Promise<Mensalidade[]> {
+  const tamanhoLote = 1000;
+  const todas: Mensalidade[] = [];
+
+  // A apuração usa o histórico completo; o limite padrão do Supabase pode
+  // ocultar pagamentos antigos e classificar associados em dia como devedores.
+  for (let offset = 0; offset < 100_000; offset += tamanhoLote) {
+    const { data, error } = await supabase
+      .from("mensalidades")
+      .select("id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao,data_pagamento")
+      .order("data_vencimento", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + tamanhoLote - 1);
+
+    if (error) throw new Error(error.message);
+    const lote = (data || []) as Mensalidade[];
+    todas.push(...lote);
+    if (lote.length < tamanhoLote) return todas;
+  }
+
+  throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
+}
+
 /** Busca os dados sem atualizar estado React; pode ser chamada pelo efeito ou pelo botão Atualizar. */
 async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
-  const [sociosResult, dependentesResult, mensalidadesResult] =
+  const [sociosResult, dependentesResult, mensalidadesCompletas] =
     await Promise.all([
       supabase
         .from("socios")
-        .select("id,matricula,nome,data_associacao,valor_mensalidade,dia_vencimento,possui_mensalidade,tipo_socio,categoria,situacao,remido")
+        .select("id,matricula,nome,cpf,data_associacao,valor_mensalidade,dia_vencimento,possui_mensalidade,tipo_socio,categoria,situacao,remido,ativo")
         .order("nome"),
       supabase
         .from("dependentes")
-        .select("id,socio_id,nome,ativo")
+        .select("id,socio_id,nome,cpf,ativo,possui_mensalidade")
         .eq("ativo", true)
         .order("nome"),
-      supabase
-        .from("mensalidades")
-        .select(
-          "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao,data_pagamento"
-        )
-        .order("data_vencimento", { ascending: false }),
+      buscarMensalidadesPaginadas(),
     ]);
 
   if (sociosResult.error) throw new Error(sociosResult.error.message);
   if (dependentesResult.error) throw new Error(dependentesResult.error.message);
-  if (mensalidadesResult.error) throw new Error(mensalidadesResult.error.message);
 
   let politicaInadimplencia = POLITICA_INADIMPLENCIA_PADRAO;
   try {
@@ -131,7 +157,7 @@ async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
   return {
     socios: (sociosResult.data || []) as Socio[],
     dependentes: (dependentesResult.data || []) as Dependente[],
-    mensalidades: (mensalidadesResult.data || []) as Mensalidade[],
+    mensalidades: mensalidadesCompletas,
     politicaInadimplencia,
   };
 }
@@ -201,6 +227,25 @@ export default function InadimplenciaPage() {
     [socios]
   );
 
+  const socioPorCpf = useMemo(() => {
+    const mapa = new Map<string, Socio>();
+    for (const socio of socios) {
+      const cpf = String(socio.cpf || "").replace(/\D/g, "");
+      if (cpf) mapa.set(cpf, socio);
+    }
+    return mapa;
+  }, [socios]);
+
+  const socioElegivel = (socio: Socio) => {
+    const tipo = normalizarSituacao(socio.tipo_socio);
+    const categoria = normalizarSituacao(socio.categoria);
+    const situacao = normalizarSituacao(socio.situacao);
+    const remido = socio.remido === true || tipo.includes("remido") || categoria.includes("remido");
+    const temporada = tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio");
+    const ativo = socio.ativo !== false && !["inativo", "cancelado", "cancelada"].includes(situacao);
+    return ativo && !remido && !temporada && socio.possui_mensalidade === true;
+  };
+
   const dependenteMap = useMemo(
     () => new Map(dependentes.map((d) => [d.id, d])),
     [dependentes]
@@ -236,6 +281,7 @@ export default function InadimplenciaPage() {
     // Começa com todas as pessoas cadastradas para que quem está em dia
     // também apareça no relatório para conferência.
     for (const socio of socios) {
+      if (!socioElegivel(socio)) continue;
       grupos.set(socio.id, {
         pessoaId: socio.id,
         socioId: socio.id,
@@ -249,6 +295,10 @@ export default function InadimplenciaPage() {
 
     // Mantém compatibilidade com dependentes do modelo antigo.
     for (const dependente of dependentes) {
+      if (dependente.ativo === false || dependente.possui_mensalidade !== true) continue;
+      const cpfDependente = String(dependente.cpf || "").replace(/\D/g, "");
+      const socioMigrado = cpfDependente ? socioPorCpf.get(cpfDependente) : null;
+      if (socioMigrado && socioElegivel(socioMigrado)) continue;
       grupos.set(dependente.id, {
         pessoaId: dependente.id,
         socioId: dependente.socio_id,
@@ -270,16 +320,29 @@ export default function InadimplenciaPage() {
         ? dependenteMap.get(m.dependente_id)
         : null;
       const socio = m.socio_id ? socioMap.get(m.socio_id) : null;
-      const pessoaId = dependente?.id || socio?.id;
+      const cpfDependente = String(dependente?.cpf || "").replace(/\D/g, "");
+      const socioMigrado = cpfDependente ? socioPorCpf.get(cpfDependente) : null;
+      // Se o cadastro antigo do dependente já foi removido, mas o socio_id
+      // está vinculado diretamente ao sócio atual, preserva o histórico nele.
+      const pessoaSocio = socioMigrado && socioElegivel(socioMigrado)
+        ? socioMigrado
+        : !dependente && socio && socioElegivel(socio)
+          ? socio
+          : null;
+      if (m.dependente_id && !dependente && !pessoaSocio) continue;
+      const pessoaId = pessoaSocio?.id || dependente?.id || socio?.id;
       if (!pessoaId) continue;
+      if (pessoaSocio && !grupos.has(pessoaSocio.id)) continue;
+      if (!pessoaSocio && dependente && (dependente.ativo === false || dependente.possui_mensalidade !== true)) continue;
+      if (!pessoaSocio && !dependente && socio && !socioElegivel(socio)) continue;
 
       if (!grupos.has(pessoaId)) {
         grupos.set(pessoaId, {
           pessoaId,
           socioId: m.socio_id || dependente?.socio_id || pessoaId,
-          nome: dependente?.nome || socio?.nome || "Pessoa",
-          matricula: socio?.matricula != null ? String(socio.matricula) : "—",
-          responsavel: dependente
+          nome: pessoaSocio?.nome || dependente?.nome || socio?.nome || "Pessoa",
+          matricula: pessoaSocio?.matricula != null ? String(pessoaSocio.matricula) : socio?.matricula != null ? String(socio.matricula) : "—",
+          responsavel: pessoaSocio ? (socioMap.get(pessoaSocio.id)?.nome || "—") : dependente
             ? responsaveis.get(dependente.id) || "—"
             : "Titular",
           competencias: new Set<string>(),
@@ -306,13 +369,18 @@ export default function InadimplenciaPage() {
         .replace(/[\u0300-\u036f]/g, "")
         .trim();
 
-    const statusQuitadoOuIsento = (valor: unknown) =>
-      ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(
-        normalizarStatus(valor)
-      );
+    const statusQuitadoOuIsento = (registro: Mensalidade) =>
+      Boolean(registro.data_pagamento) || [
+        "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
+        "baixado", "baixada", "compensado", "compensada", "isento", "isenta",
+        "cancelado", "cancelada",
+      ].includes(normalizarStatus(registro.situacao));
 
-    const statusPago = (valor: unknown) =>
-      ["pago", "paid", "quitado", "recebido"].includes(normalizarStatus(valor));
+    const statusPago = (registro: Mensalidade) =>
+      Boolean(registro.data_pagamento) || [
+        "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
+        "baixado", "baixada", "compensado", "compensada",
+      ].includes(normalizarStatus(registro.situacao));
 
     const chaveCompetencia = (valor: string | null | undefined) => {
       if (!valor) return "";
@@ -327,7 +395,6 @@ export default function InadimplenciaPage() {
       return `${mes}/${ano}`;
     };
 
-    const hojeDate = new Date(`${hoje}T00:00:00`);
     const mesAtual = hoje.slice(0, 7);
 
     for (const socio of socios) {
@@ -341,9 +408,20 @@ export default function InadimplenciaPage() {
 
       if (ehRemido || ehTemporada || !ativo || !cobraMensalidade) continue;
 
-      const rowsSocio = mensalidades.filter((m) => String(m.socio_id || "") === String(socio.id) && !m.dependente_id);
+      const cpfSocio = String(socio.cpf || "").replace(/\D/g, "");
+      const rowsSocio = mensalidades.filter((m) => {
+        if (String(m.socio_id || "") !== String(socio.id)) return false;
+        if (!m.dependente_id) return true;
+        const dependente = dependenteMap.get(m.dependente_id);
+        // O socio_id da consulta já é o ID do cadastro atual. Se o registro
+        // legado do dependente não existe mais, mantém o lançamento nesse sócio.
+        if (!dependente) return true;
+        const cpfDependente = String(dependente.cpf || "").replace(/\D/g, "");
+        // Histórico antigo de uma pessoa migrada para socios: vincula ao CPF atual.
+        return Boolean(cpfSocio && cpfDependente && cpfDependente === cpfSocio);
+      });
       const paidKeys = rowsSocio
-        .filter((m) => statusPago(m.situacao))
+        .filter((m) => statusPago(m))
         .map((m) => chaveCompetencia(m.competencia || m.data_vencimento))
         .filter(Boolean)
         .sort();
@@ -355,7 +433,7 @@ export default function InadimplenciaPage() {
       const valorMensal = Number(socio.valor_mensalidade || 0);
       if (!(valorMensal > 0)) continue;
 
-      const diaVencimento = Math.min(31, Math.max(1, Number(socio.dia_vencimento || 10)));
+      const diaVencimento = Math.min(28, Math.max(1, Number(socio.dia_vencimento || 10)));
       let cursor = new Date(`${inicio}-01T00:00:00`);
 
       while (cursor.toISOString().slice(0, 7) <= mesAtual) {
@@ -364,9 +442,11 @@ export default function InadimplenciaPage() {
         const ultimoDia = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
         const dia = Math.min(diaVencimento, ultimoDia);
         const vencimento = `${chave}-${String(dia).padStart(2, "0")}`;
-        if (vencimento < hoje) {
+        const [anoAssociacao, mesAssociacao, diaAssociacao] = String(socio.data_associacao || "").slice(0, 10).split("-").map(Number);
+        const associacaoDepoisDoVencimento = Boolean(socio.data_associacao) && anoAssociacao === cursor.getFullYear() && mesAssociacao === cursor.getMonth() + 1 && Number.isFinite(diaAssociacao) && diaAssociacao > dia;
+        if (vencimento < hoje && !associacaoDepoisDoVencimento) {
           const existentes = rowsSocio.filter((m) => chaveCompetencia(m.competencia || m.data_vencimento) === chave);
-          const algumaQuitada = existentes.some((m) => statusQuitadoOuIsento(m.situacao));
+          const algumaQuitada = existentes.some((m) => statusQuitadoOuIsento(m));
           if (!algumaQuitada) {
             const grupo = grupos.get(socio.id);
             if (grupo && !grupo.competencias.has(compBR)) {
