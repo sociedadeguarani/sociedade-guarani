@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
@@ -525,7 +526,11 @@ export default function DependentesPage() {
       return;
     }
 
-    let resultado: any;
+    type ResultadoPersistencia = {
+      data: { id?: string } | { id?: string }[] | null;
+      error: { message: string } | null;
+    };
+    let resultado: ResultadoPersistencia;
     const editandoSocio = editando?.source === "socios" && editando.source_socio_id;
 
     if (editandoSocio) {
@@ -559,9 +564,10 @@ export default function DependentesPage() {
       return;
     }
 
+    const dadosResultado = Array.isArray(resultado.data) ? resultado.data[0] : resultado.data;
     const dependenteId = editandoSocio
       ? editando.source_socio_id
-      : editando?.id || (Array.isArray(resultado.data) ? resultado.data[0]?.id : resultado.data?.id);
+      : editando?.id || dadosResultado?.id;
     if (fotoArquivo && dependenteId) {
       try {
         const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
@@ -724,7 +730,7 @@ export default function DependentesPage() {
                             <td className="px-3 py-3 sm:px-5 sm:py-4">
                               <div className="flex items-center gap-3">
                                 {d.foto_url ? (
-                                  <img src={d.foto_url} alt={`Foto de ${d.nome}`} loading="lazy" decoding="async" className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+                                  <Image src={d.foto_url} alt={`Foto de ${d.nome}`} width={40} height={40} unoptimized className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
                                 ) : (
                                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
                                     {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
@@ -818,9 +824,12 @@ export default function DependentesPage() {
                     <div className="flex flex-wrap items-center gap-4">
                       {(fotoArquivo || editando?.foto_url) && (
                         <div className="h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                          <img
+                          <Image
                             src={fotoArquivo ? URL.createObjectURL(fotoArquivo) : editando?.foto_url || ""}
                             alt="Prévia"
+                            width={80}
+                            height={80}
+                            unoptimized
                             className="h-full w-full object-cover"
                           />
                         </div>
