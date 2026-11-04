@@ -22,9 +22,9 @@ type Socio = {
   dia_vencimento: number | null;
   tipo_pagamento: string | null;
   data_associacao: string | null;
+  remido: boolean | null;
   tipo_socio: string | null;
   categoria: string | null;
-  remido: boolean | null;
   ativo: boolean | null;
 };
 
@@ -49,6 +49,9 @@ type Mensalidade = {
   valor: number;
   data_vencimento: string | null;
   situacao: string | null;
+  data_pagamento?: string | null;
+  motivo?: string | null;
+  observacoes?: string | null;
 };
 
 type PessoaFinanceira = {
@@ -64,6 +67,7 @@ type PessoaFinanceira = {
   valor_mensalidade: number;
   dia_vencimento: number;
   tipo_pagamento: string;
+  data_associacao: string | null;
 };
 
 type ContaBancaria = {
@@ -143,6 +147,84 @@ function ehUrlAbsoluta(valor: string) {
   return /^https?:\/\//i.test(valor);
 }
 
+function ehMovimentoDeAluguel(movimento: MovimentoFinanceiro) {
+  if (movimento.tipo !== "entrada") return false;
+  const texto = normalizarStatusMensalidade(
+    `${movimento.categoria || ""} ${movimento.descricao || ""} ${movimento.origem_tipo || ""} ${movimento.observacoes || ""}`
+  );
+  return (
+    String(movimento.origem_tipo || "").toLowerCase() === "reserva" ||
+    texto.includes("alug") ||
+    texto.includes("locac") ||
+    texto.includes("arrendamento")
+  );
+}
+
+function normalizarStatusMensalidade(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function mensalidadePaga(item: Mensalidade) {
+  return Boolean(item.data_pagamento) || new Set([
+    "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
+    "baixado", "baixada", "compensado", "compensada",
+  ]).has(normalizarStatusMensalidade(item.situacao));
+}
+
+function mensalidadeQuitadaOuIsenta(item: Mensalidade) {
+  const situacao = normalizarStatusMensalidade(item.situacao);
+  return mensalidadePaga(item) || new Set([
+    "isento", "isenta", "cancelado", "cancelada",
+  ]).has(situacao);
+}
+
+async function buscarMensalidadesPaginadas(): Promise<Mensalidade[]> {
+  const tamanhoLote = 1000;
+  const todas: Mensalidade[] = [];
+
+  // Supabase pode limitar uma consulta a 1.000 linhas. Percorremos o histórico
+  // inteiro, em ordem estável, para não confundir pagamentos antigos com dívida.
+  for (let offset = 0; offset < 100_000; offset += tamanhoLote) {
+    const { data, error } = await supabase
+      .from("mensalidades")
+      .select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,data_pagamento,motivo,observacoes")
+      .order("competencia", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + tamanhoLote - 1);
+
+    if (error) throw error;
+    const lote = (data || []) as Mensalidade[];
+    todas.push(...lote);
+    if (lote.length < tamanhoLote) return todas;
+  }
+
+  throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
+}
+
+function chaveCompetencia(valor: string | null | undefined) {
+  if (!valor) return "";
+  const bruto = String(valor).slice(0, 10);
+  if (/^\d{4}-\d{2}/.test(bruto)) return bruto.slice(0, 7);
+  const brasileiro = bruto.match(/^(\d{2})\/(\d{4})$/);
+  return brasileiro ? `${brasileiro[2]}-${brasileiro[1]}` : "";
+}
+
+function competenciaPorExtenso(chave: string) {
+  const [ano, mes] = chave.split("-");
+  return `${mes}/${ano}`;
+}
+
+function vencimentoDaCompetencia(chave: string, dia: number) {
+  const [ano, mes] = chave.split("-").map(Number);
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const diaValido = Math.min(Math.max(dia || 10, 1), 28, ultimoDia);
+  return `${chave}-${String(diaValido).padStart(2, "0")}`;
+}
+
 function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
   const nivel = classificarMesesAtraso(meses, politica);
   if (nivel === "vermelho") {
@@ -173,6 +255,7 @@ export default function FinanceiroPage() {
   const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
+  const [filtroInadimplencia, setFiltroInadimplencia] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
   const [paginaMovimentos, setPaginaMovimentos] = useState(1);
@@ -244,8 +327,12 @@ export default function FinanceiroPage() {
     const resultado: PessoaFinanceira[] = [];
 
     for (const s of socios) {
-      if (s.situacao?.toLowerCase() === "inativo") continue;
-      if (!s.possui_mensalidade) continue;
+      const tipoNormalizado = normalizarStatusMensalidade(s.tipo_socio);
+      const categoriaNormalizada = normalizarStatusMensalidade(s.categoria);
+      const remido = s.remido === true || tipoNormalizado.includes("remido") || categoriaNormalizada.includes("remido");
+      const temporario = tipoNormalizado.includes("temporada") || categoriaNormalizada.includes("temporada") || tipoNormalizado.includes("transitorio") || categoriaNormalizada.includes("transitorio");
+      if (s.situacao?.toLowerCase() === "inativo" || s.ativo === false) continue;
+      if (remido || temporario || !s.possui_mensalidade) continue;
 
       resultado.push({
         chave: `socio:${s.id}`,
@@ -262,6 +349,7 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(s.valor_mensalidade || 0),
         dia_vencimento: Number(s.dia_vencimento || 10),
         tipo_pagamento: s.tipo_pagamento || "pix",
+        data_associacao: s.data_associacao || null,
       });
     }
 
@@ -293,133 +381,173 @@ export default function FinanceiroPage() {
         valor_mensalidade: Number(d.valor_mensalidade || 0),
         dia_vencimento: Number(d.dia_vencimento || 10),
         tipo_pagamento: d.tipo_pagamento || "pix",
+        data_associacao: null,
       });
     }
 
     return resultado;
   }, [socios, dependentes]);
 
+  // Vincula cada mensalidade à pessoa que realmente paga. Registros antigos
+  // podem guardar o dependente_id mesmo depois de essa pessoa ter sido migrada
+  // para a tabela socios; nesse caso, o CPF permite reencontrar seu cadastro atual.
   const lancamentosPorPessoa = useMemo(() => {
     const map = new Map<string, Mensalidade[]>();
-    for (const m of mensalidades) {
-      const chave = m.dependente_id ? `dependente:${m.dependente_id}` : `socio:${m.socio_id}`;
+    const pessoasValidas = new Set(pessoas.map((p) => p.chave));
+    const sociosPorCpf = new Map<string, Socio>();
+    for (const socio of socios) {
+      const cpf = String(socio.cpf || "").replace(/\D/g, "");
+      if (cpf) sociosPorCpf.set(cpf, socio);
+    }
+    const dependentesPorId = new Map<string, Dependente>(
+      dependentes.map((d) => [String(d.id), d] as const)
+    );
+
+    for (const mensalidade of mensalidades) {
+      let chave = `socio:${mensalidade.socio_id}`;
+      if (mensalidade.dependente_id) {
+        const dependente = dependentesPorId.get(String(mensalidade.dependente_id));
+        const cpfDependente = String(dependente?.cpf || "").replace(/\D/g, "");
+        const socioMigrado = cpfDependente ? sociosPorCpf.get(cpfDependente) : null;
+        if (socioMigrado && pessoasValidas.has(`socio:${socioMigrado.id}`)) {
+          chave = `socio:${socioMigrado.id}`;
+        } else if (pessoasValidas.has(`dependente:${mensalidade.dependente_id}`)) {
+          chave = `dependente:${mensalidade.dependente_id}`;
+        }
+      }
+
+      if (!pessoasValidas.has(chave)) continue;
+
       const lista = map.get(chave);
-      if (lista) lista.push(m);
-      else map.set(chave, [m]);
+      if (lista) lista.push(mensalidade);
+      else map.set(chave, [mensalidade]);
     }
     return map;
-  }, [mensalidades]);
+  }, [mensalidades, pessoas, socios, dependentes]);
 
-  const historicoPorPessoa = useMemo(() => {
-    // Apura competências vencidas em aberto a partir dos lançamentos existentes
-    // e completa virtualmente os meses não gerados, sem depender de geração manual.
-    const map = new Map<string, Set<string>>();
-    const hojeIso = dataHojeBrasil();
-    const mesAtual = hojeIso.slice(0, 7);
-    const normalizarStatus = (valor: unknown) => String(valor || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-    const quitados = new Set(["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"]);
-    const chaveCompetencia = (valor: string | null | undefined) => {
-      if (!valor) return "";
-      const raw = valor.slice(0, 10);
-      if (/^\d{4}-\d{2}/.test(raw)) return raw.slice(0, 7);
-      const br = raw.match(/^(\d{2})\/(\d{4})$/);
-      return br ? `${br[2]}-${br[1]}` : "";
-    };
-    const adiciona = (chave: string, competencia: string) => {
-      if (!chave || !competencia) return;
-      const set = map.get(chave) || new Set<string>();
-      set.add(competencia);
-      map.set(chave, set);
-    };
+  // Apuração automática: não depende de existir uma linha mensalidade gerada
+  // para cada competência. Usa data_associacao; se ausente, a primeira
+  // competência paga é a referência e a cobrança começa no mês seguinte.
+  const apuracaoPorPessoa = useMemo(() => {
+    const resultado = new Map<string, { meses: number; competencias: string[]; valorDevido: number; lancamentos: Mensalidade[] }>();
+    const hoje = dataHojeBrasil();
+    const mesAtual = hoje.slice(0, 7);
 
-    for (const [chave, lancamentos] of lancamentosPorPessoa) {
-      for (const m of lancamentos) {
-        const status = normalizarStatus(m.situacao);
-        const vencimento = String(m.data_vencimento || "").slice(0, 10);
-        const competencia = chaveCompetencia(m.competencia || vencimento);
-        if (!quitados.has(status) && vencimento && vencimento < hojeIso && competencia) adiciona(chave, competencia);
+    for (const pessoa of pessoas) {
+      const registros = lancamentosPorPessoa.get(pessoa.chave) || [];
+      const inicioCadastral = chaveCompetencia(pessoa.data_associacao);
+      const primeiroPago = registros
+        .filter(mensalidadePaga)
+        .map((item) => chaveCompetencia(item.competencia || item.data_vencimento))
+        .filter(Boolean)
+        .sort()[0] || "";
+      const temDataAssociacao = Boolean(inicioCadastral);
+      const inicio = inicioCadastral || primeiroPago;
+      const porCompetencia = new Map<string, Mensalidade[]>();
+
+      for (const registro of registros) {
+        const chave = chaveCompetencia(registro.competencia || registro.data_vencimento);
+        if (!chave) continue;
+        const atual = porCompetencia.get(chave) || [];
+        atual.push(registro);
+        porCompetencia.set(chave, atual);
       }
-    }
 
-    const sociosPorId = new Map(socios.map((s) => [String(s.id), s]));
-    const pessoasComCobranca = pessoas;
-    for (const pessoa of pessoasComCobranca) {
-      const socio = sociosPorId.get(String(pessoa.socio_id));
-      if (!socio) continue;
-      const tipo = normalizarStatus(socio.tipo_socio);
-      const categoria = normalizarStatus(socio.categoria);
-      const situacao = normalizarStatus(socio.situacao);
-      if (socio.remido === true || tipo.includes("remido") || categoria.includes("remido") || tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio") || ["inativo", "cancelado", "cancelada"].includes(situacao)) continue;
+      const competenciasDevidas: string[] = [];
+      const lancamentosDevidos: Mensalidade[] = [];
+      let valorDevido = 0;
 
-      const chavePessoa = pessoa.chave;
-      const rows = lancamentosPorPessoa.get(chavePessoa) || [];
-      const pagos = rows.filter((m) => ["pago", "paid", "quitado", "recebido"].includes(normalizarStatus(m.situacao)))
-        .map((m) => chaveCompetencia(m.competencia || m.data_vencimento)).filter(Boolean).sort();
-      let inicio = pessoa.dependente_id ? (pagos[0] || "") : chaveCompetencia(socio.data_associacao);
-      if (!inicio) inicio = pagos[0] || "";
-      if (!/^\d{4}-\d{2}$/.test(inicio)) continue;
-      if (!(pessoa.valor_mensalidade > 0)) continue;
-
-      const [anoInicial, mesInicial] = inicio.split("-").map(Number);
-      const cursor = new Date(anoInicial, mesInicial - 1, 1);
-      while (`${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}` <= mesAtual) {
-        const comp = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}`;
-        const ultimoDia = new Date(cursor.getFullYear(), cursor.getMonth()+1, 0).getDate();
-        const dia = Math.min(Math.max(1, Number(pessoa.dia_vencimento || 10)), ultimoDia);
-        const vencimento = `${comp}-${String(dia).padStart(2,"0")}`;
-        if (vencimento < hojeIso) {
-          const existentes = rows.filter((m) => chaveCompetencia(m.competencia || m.data_vencimento) === comp);
-          if (!existentes.some((m) => quitados.has(normalizarStatus(m.situacao)))) adiciona(chavePessoa, comp);
+      // Se não houver data de associação nem histórico de pagamento, não
+      // inventa início de vínculo: considera apenas cobranças reais existentes.
+      if (!inicio) {
+        for (const [chave, itens] of porCompetencia) {
+          const quitada = itens.some(mensalidadeQuitadaOuIsenta);
+          const dataVencimento = itens.find((m) => m.data_vencimento)?.data_vencimento || vencimentoDaCompetencia(chave, pessoa.dia_vencimento);
+          if (quitada || dataVencimento >= hoje) continue;
+          competenciasDevidas.push(chave);
+          lancamentosDevidos.push(...itens);
+          valorDevido += Math.max(...itens.map((item) => Number(item.valor || 0)), 0);
         }
-        cursor.setMonth(cursor.getMonth()+1);
+      } else {
+        const [anoInicio, mesInicio] = inicio.split("-").map(Number);
+        const cursor = new Date(anoInicio, mesInicio - 1, 1);
+        // A primeira competência paga, quando usada como referência, já está quitada.
+        if (!temDataAssociacao) cursor.setMonth(cursor.getMonth() + 1);
+
+        while (cursor.getFullYear() < 2100) {
+          const chave = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+          if (chave > mesAtual) break;
+          const itens = porCompetencia.get(chave) || [];
+          const vencimentoRegistrado = itens.find((item) => item.data_vencimento)?.data_vencimento?.slice(0, 10);
+          const vencimento = vencimentoRegistrado || vencimentoDaCompetencia(chave, pessoa.dia_vencimento);
+          const [anoVencimento, mesVencimento] = chave.split("-").map(Number);
+          const [anoAssociacao, mesAssociacao, diaAssociacao] = String(pessoa.data_associacao || "").slice(0, 10).split("-").map(Number);
+          const associacaoDepoisDoVencimento = temDataAssociacao && anoAssociacao === anoVencimento && mesAssociacao === mesVencimento && Number.isFinite(diaAssociacao) && diaAssociacao > Number(vencimento.slice(8, 10));
+          const jaVenceu = vencimento < hoje && !associacaoDepoisDoVencimento;
+          const quitada = itens.some(mensalidadeQuitadaOuIsenta);
+
+          if (jaVenceu && !quitada) {
+            competenciasDevidas.push(chave);
+            if (itens.length) {
+              lancamentosDevidos.push(...itens.filter((item) => !mensalidadeQuitadaOuIsenta(item)));
+              valorDevido += Math.max(...itens.filter((item) => !mensalidadeQuitadaOuIsenta(item)).map((item) => Number(item.valor || 0)), 0);
+            } else {
+              valorDevido += Number(pessoa.valor_mensalidade || 0);
+            }
+          }
+          cursor.setMonth(cursor.getMonth() + 1);
+        }
       }
+
+      competenciasDevidas.sort();
+      resultado.set(pessoa.chave, {
+        meses: competenciasDevidas.length,
+        competencias: competenciasDevidas.map(competenciaPorExtenso).reverse(),
+        valorDevido: Number(valorDevido.toFixed(2)),
+        lancamentos: lancamentosDevidos.sort((a, b) => String(b.competencia || "").localeCompare(String(a.competencia || ""))),
+      });
     }
-    return new Map(Array.from(map.entries()).map(([chave, competencias]) => [chave, Array.from(competencias).sort()]));
-  }, [lancamentosPorPessoa, socios, pessoas]);
+    return resultado;
+  }, [pessoas, lancamentosPorPessoa]);
 
-  const atrasoPessoas = useMemo(() => pessoas.map((p) => ({
-    pessoa: p,
-    meses: historicoPorPessoa.get(p.chave)?.length || 0,
-    nivel: nivelAtraso(historicoPorPessoa.get(p.chave)?.length || 0, politicaInadimplencia),
-  })).filter((x) => x.meses > 0), [pessoas, historicoPorPessoa, politicaInadimplencia]);
+  const monitoramentoPessoas = useMemo(() => pessoas.map((pessoa) => {
+    const apuracao = apuracaoPorPessoa.get(pessoa.chave);
+    const meses = apuracao?.meses || 0;
+    return { pessoa, meses, nivel: nivelAtraso(meses, politicaInadimplencia) };
+  }), [pessoas, apuracaoPorPessoa, politicaInadimplencia]);
 
+  const atrasoPessoas = monitoramentoPessoas.filter((item) => item.meses > 0);
   const quantidadeAtrasados = atrasoPessoas.length;
-  const amarelos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-yellow-500").length;
-  const vermelhos = atrasoPessoas.filter((x) => x.nivel.ponto === "bg-red-500").length;
+  const valorTotalDevido = Array.from(apuracaoPorPessoa.values()).reduce(
+    (total, item) => total + item.valorDevido,
+    0
+  );
+  const verdes = monitoramentoPessoas.filter((item) => item.nivel.ponto === "bg-green-500").length;
+  const amarelos = monitoramentoPessoas.filter((item) => item.nivel.ponto === "bg-yellow-500").length;
+  const vermelhos = monitoramentoPessoas.filter((item) => item.nivel.ponto === "bg-red-500").length;
 
   const inadimplenciaDetalhada = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    return atrasoPessoas.map((x) => {
-      const rows = lancamentosPorPessoa.get(x.pessoa.chave) || [];
-      const quitados = ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"];
-      const lancamentos = rows.filter((m) => {
-        const status = String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        if (quitados.includes(status)) return false;
-        return Boolean(m.data_vencimento && m.data_vencimento.slice(0, 10) < dataHojeBrasil());
-      });
-      const competenciasExistentes = new Set(lancamentos.map((m) => String(m.competencia || m.data_vencimento || "").slice(0, 7)));
-      const virtuais = (historicoPorPessoa.get(x.pessoa.chave) || [])
-        .filter((competencia) => !competenciasExistentes.has(competencia))
-        .map((competencia) => {
-          const [ano, mes] = competencia.split("-").map(Number);
-          const ultimoDia = new Date(ano, mes, 0).getDate();
-          const dia = Math.min(Math.max(1, Number(x.pessoa.dia_vencimento || 10)), ultimoDia);
-          return {
-            id: `virtual-${x.pessoa.chave}-${competencia}`,
-            socio_id: x.pessoa.socio_id,
-            dependente_id: x.pessoa.dependente_id,
-            competencia,
-            valor: x.pessoa.valor_mensalidade,
-            data_vencimento: `${competencia}-${String(dia).padStart(2, "0")}`,
-            situacao: "em aberto",
-          } as Mensalidade;
-        });
-      const lancamentosCompletos = [...lancamentos, ...virtuais].sort((a,b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
-      const valorDevido = lancamentosCompletos.reduce((soma, item) => soma + Number(item.valor || 0), 0);
-      const correspondeBusca = !termo || x.pessoa.nome.toLowerCase().includes(termo) || String(x.pessoa.matricula || "").includes(termo) || String(x.pessoa.cpf || "").includes(termo) || String(x.pessoa.responsavel_nome || "").toLowerCase().includes(termo);
-      return { ...x, lancamentos: lancamentosCompletos, valorDevido, competencias: lancamentosCompletos.map((m) => formatarCompetencia(m.competencia)), ultimaCompetencia: lancamentosCompletos[0]?.competencia || null, correspondeBusca };
-    }).filter((x) => x.correspondeBusca);
-  }, [atrasoPessoas, busca, lancamentosPorPessoa, historicoPorPessoa]);
+    const termo = busca.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return monitoramentoPessoas
+      .filter((item) => filtroInadimplencia === "todos" || (filtroInadimplencia === "verde" && item.nivel.ponto === "bg-green-500") || (filtroInadimplencia === "amarelo" && item.nivel.ponto === "bg-yellow-500") || (filtroInadimplencia === "vermelho" && item.nivel.ponto === "bg-red-500"))
+      .map((item) => {
+        const apuracao = apuracaoPorPessoa.get(item.pessoa.chave);
+        const nome = item.pessoa.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const responsavel = String(item.pessoa.responsavel_nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const matricula = String(item.pessoa.matricula || "").toLowerCase();
+        const cpf = String(item.pessoa.cpf || "");
+        const correspondeBusca = !termo || nome.includes(termo) || matricula.includes(termo) || cpf.includes(termo) || responsavel.includes(termo);
+        return {
+          ...item,
+          lancamentos: apuracao?.lancamentos || [],
+          valorDevido: apuracao?.valorDevido || 0,
+          competencias: apuracao?.competencias || [],
+          ultimaCompetencia: apuracao?.competencias?.[0] || null,
+          correspondeBusca,
+        };
+      })
+      .filter((item) => item.correspondeBusca);
+  }, [monitoramentoPessoas, apuracaoPorPessoa, busca, filtroInadimplencia]);
 
   const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
   const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
@@ -513,17 +641,16 @@ export default function FinanceiroPage() {
       } catch {
         setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
       }
-      const [sociosResult, dependentesResult, mensalidadesResult] = await Promise.all([
-        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,data_associacao,tipo_socio,categoria,remido,ativo").order("matricula", { ascending: true }),
+      const [sociosResult, dependentesResult, mensalidadesCompletas] = await Promise.all([
+        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,ativo,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,data_associacao,remido,tipo_socio,categoria").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
-        supabase.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao").order("competencia", { ascending: false }),
+        buscarMensalidadesPaginadas(),
       ]);
       if (sociosResult.error) throw sociosResult.error;
       if (dependentesResult.error) throw dependentesResult.error;
-      if (mensalidadesResult.error) throw mensalidadesResult.error;
       setSocios((sociosResult.data || []) as Socio[]);
       setDependentes((dependentesResult.data || []) as Dependente[]);
-      setMensalidades((mensalidadesResult.data || []) as Mensalidade[]);
+      setMensalidades(mensalidadesCompletas);
       setInadimplenciaCarregada(true);
     } catch (error) {
       setMensagem(
@@ -619,10 +746,7 @@ export default function FinanceiroPage() {
 
       if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
       if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
-      if (
-        abaFinanceira === "aluguéis" &&
-        !String(m.categoria || "").toLowerCase().includes("alug")
-      ) return false;
+      if (abaFinanceira === "aluguéis" && !ehMovimentoDeAluguel(m)) return false;
 
       if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
       if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
@@ -722,6 +846,12 @@ export default function FinanceiroPage() {
     if (aba === "aluguéis") {
       setMovTipo("entrada");
       setMovCategoria("Aluguel");
+      // A guia Aluguéis começa sem filtros herdados das outras abas.
+      setFluxoInicio("");
+      setFluxoFim("");
+      setFluxoConta("");
+      setFluxoForma("todos");
+      setFluxoConciliacao("todos");
     }
     if (aba === "inadimplencia") void carregarInadimplencia();
   }
@@ -1035,9 +1165,14 @@ export default function FinanceiroPage() {
 
           {abaFinanceira === "inadimplencia" && (
             <div className="mb-6 space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                 <Resumo
-                  titulo="Pessoas com competências vencidas"
+                  titulo="Pessoas monitoradas"
+                  valor={String(monitoramentoPessoas.length)}
+                  subtitulo="Associados e dependentes com mensalidade própria"
+                />
+                <Resumo
+                  titulo="Com competências vencidas"
                   valor={String(quantidadeAtrasados)}
                   subtitulo="Inclui quem está na tolerância de acesso"
                 />
@@ -1053,12 +1188,7 @@ export default function FinanceiroPage() {
                 />
                 <Resumo
                   titulo="Valor total devido"
-                  valor={formatarMoeda(
-                    inadimplenciaDetalhada.reduce(
-                      (soma, item) => soma + item.valorDevido,
-                      0
-                    )
-                  )}
+                  valor={formatarMoeda(valorTotalDevido)}
                   subtitulo="Mensalidades vencidas"
                 />
               </div>
@@ -1094,10 +1224,10 @@ export default function FinanceiroPage() {
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-lg font-extrabold text-[#003d2b]">
-                      Lista de mensalidades vencidas
+                      Situação das mensalidades
                     </h3>
                     <p className="text-sm text-gray-500">
-                      Consulte valores vencidos, meses de atraso e a faixa de acesso definida pela política vigente.
+                      Consulte quem está em dia, em atenção ou com entrada bloqueada, incluindo os valores vencidos.
                     </p>
                   </div>
                   <input
@@ -1106,6 +1236,24 @@ export default function FinanceiroPage() {
                     placeholder="Buscar nome, matrícula ou responsável..."
                     className="w-full rounded-xl border border-[#d5e0da] px-4 py-3 text-sm outline-none focus:border-[#005a3c] sm:max-w-md"
                   />
+                </div>
+
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {[
+                    ["todos", `Todos (${monitoramentoPessoas.length})`],
+                    ["verde", `🟢 Em dia / tolerância (${verdes})`],
+                    ["amarelo", `🟡 Atenção (${amarelos})`],
+                    ["vermelho", `🔴 Bloqueio (${vermelhos})`],
+                  ].map(([valor, rotulo]) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() => setFiltroInadimplencia(valor as typeof filtroInadimplencia)}
+                      className={`rounded-xl px-4 py-2 text-xs font-bold transition ${filtroInadimplencia === valor ? "bg-[#005a3c] text-white" : "border border-[#d5e0da] bg-white text-[#18362b] hover:bg-[#f7faf8]"}`}
+                    >
+                      {rotulo}
+                    </button>
+                  ))}
                 </div>
 
                 <div className="mb-4 flex flex-wrap gap-2 text-xs font-bold">
@@ -1124,10 +1272,10 @@ export default function FinanceiroPage() {
                   <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
                     <div className="text-4xl">✅</div>
                     <p className="mt-3 font-bold text-gray-700">
-                      Nenhuma mensalidade vencida encontrada
+                      Nenhuma pessoa encontrada com esse filtro
                     </p>
                     <p className="mt-1 text-sm text-gray-500">
-                      Quando houver valores vencidos, eles aparecerão aqui, separados por tolerância, atenção e bloqueio de acesso.
+                      Ajuste a busca ou escolha outra faixa de situação. Pessoas em dia aparecem com zero competências e valor devido zero.
                     </p>
                   </div>
                 ) : (
