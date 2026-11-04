@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
+import Image from "next/image";
 import { ArrowLeft, Download, FileText, Loader2, Printer } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
@@ -564,7 +565,7 @@ export default function ImprimirCarteirinhasPage() {
                       <div key={pessoa.id} className="flex flex-wrap items-center gap-3 px-3 py-3 sm:flex-nowrap">
                         <input type="checkbox" aria-label={`Selecionar carteirinha de ${pessoa.nome}`} checked={selecionadasIds.includes(pessoa.id)} onChange={() => alternarSelecaoPessoa(pessoa.id)} disabled={preparandoImpressao} className="h-4 w-4 shrink-0 accent-[#005a3c]" />
                         <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-gray-100">
-                          {pessoa.fotoUrl ? <img src={pessoa.fotoUrl} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-lg">👤</div>}
+                          {pessoa.fotoUrl ? <Image src={pessoa.fotoUrl} alt="" width={44} height={44} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-lg">👤</div>}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-bold text-[#17382c]">{pessoa.nome}</div>
@@ -595,12 +596,12 @@ export default function ImprimirCarteirinhasPage() {
                   const cor = corTipo(pessoa.tipo);
                   return <article key={pessoa.id} data-print-card={pessoa.id} className="print-card relative overflow-hidden rounded-xl border-2 border-[#17382c] bg-white shadow-sm">
                     <header className="print-card-header flex items-center gap-2 px-3 py-2" style={{ background: cor, color: "#fff" }}>
-                      <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="print-card-logo h-8 w-8 rounded object-contain" />
+                      <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={32} height={32} className="print-card-logo h-8 w-8 rounded object-contain" />
                       <div className="min-w-0"><div className="print-card-subtitle text-[7px] font-bold tracking-wider">SOCIEDADE RECREATIVA GUARANI</div><div className="print-card-title text-xs font-black">CARTEIRA DE ASSOCIADO</div></div>
                     </header>
                     <div className="print-card-content flex items-start gap-3 p-3">
                       <div className="print-card-photo h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-gray-100">
-                        {pessoa.fotoUrl ? <img src={pessoa.fotoUrl} alt={pessoa.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}
+                        {pessoa.fotoUrl ? <Image src={pessoa.fotoUrl} alt={pessoa.nome} width={80} height={96} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}
                       </div>
                       <div className="min-w-0 flex-1 pt-1">
                         <div className="print-card-name break-words text-sm font-black leading-tight text-[#17382c]">{pessoa.nome}</div>
