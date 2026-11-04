@@ -11,6 +11,15 @@ type Socio = {
   id: string;
   matricula: string | number | null;
   nome: string;
+  data_associacao: string | null;
+  valor_mensalidade: number | string | null;
+  dia_vencimento: number | null;
+  possui_mensalidade: boolean | null;
+  tipo_socio: string | null;
+  categoria: string | null;
+  situacao: string | null;
+  remido: boolean | null;
+  ativo: boolean | null;
 };
 
 type Dependente = {
@@ -28,6 +37,7 @@ type Mensalidade = {
   data_vencimento: string | null;
   valor: number | string | null;
   situacao: string | null;
+  data_pagamento?: string | null;
 };
 
 type Inadimplente = {
@@ -56,36 +66,14 @@ function competenciaBR(valor: string | null | undefined) {
   return `${partes[1]}/${partes[0]}`;
 }
 
-function normalizarSituacao(m: Mensalidade) {
-  return String(m.situacao || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-// Mantém o relatório alinhado à apuração financeira usada na tela de Sócios.
 function isPago(m: Mensalidade) {
-  return [
-    "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
-    "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada",
-    "isento", "isenta", "cancelado", "cancelada",
-  ].includes(normalizarSituacao(m));
+  const status = String(m.situacao || "").toLowerCase();
+  return ["pago", "paid", "quitado", "recebido", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 function isIsento(m: Mensalidade) {
-  return ["isento", "isenta", "cancelado", "cancelada"].includes(normalizarSituacao(m));
-}
-
-/** Usa a competência como referência para mensalidades legadas sem vencimento. */
-function vencimentoEfetivo(m: Mensalidade, hoje: string): string {
-  const vencimentoInformado = String(m.data_vencimento || "").slice(0, 10);
-  if (vencimentoInformado) return vencimentoInformado;
-
-  const competencia = String(m.competencia || "").slice(0, 7);
-  if (/^\d{4}-\d{2}$/.test(competencia) && competencia < hoje.slice(0, 7)) {
-    return `${competencia}-01`;
-  }
-  return "";
+  const status = String(m.situacao || "").toLowerCase();
+  return ["isento", "isenta", "cancelado", "cancelada"].includes(status.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 type DadosInadimplencia = {
@@ -99,7 +87,10 @@ type DadosInadimplencia = {
 async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
   const [sociosResult, dependentesResult, mensalidadesResult] =
     await Promise.all([
-      supabase.from("socios").select("id,matricula,nome").order("nome"),
+      supabase
+        .from("socios")
+        .select("id,matricula,nome,data_associacao,valor_mensalidade,dia_vencimento,possui_mensalidade,tipo_socio,categoria,situacao,remido")
+        .order("nome"),
       supabase
         .from("dependentes")
         .select("id,socio_id,nome,ativo")
@@ -108,7 +99,7 @@ async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
       supabase
         .from("mensalidades")
         .select(
-          "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao"
+          "id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao,data_pagamento"
         )
         .order("data_vencimento", { ascending: false }),
     ]);
@@ -272,8 +263,7 @@ export default function InadimplenciaPage() {
     }
 
     for (const m of mensalidades) {
-      const vencimento = vencimentoEfetivo(m, hoje);
-      if (!vencimento || vencimento >= hoje) continue;
+      if (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hoje) continue;
       if (isPago(m) || isIsento(m)) continue;
 
       const dependente = m.dependente_id
@@ -303,6 +293,90 @@ export default function InadimplenciaPage() {
       if (!grupo.competencias.has(comp)) {
         grupo.competencias.add(comp);
         grupo.valor += Number(m.valor || 0);
+      }
+    }
+
+    // Apuração virtual: o relatório não depende mais de mensalidades terem sido
+    // previamente geradas. Usa data de associação; se estiver ausente, toma
+    // a primeira competência paga como início do histórico de cobrança.
+    const normalizarStatus = (valor: unknown) =>
+      String(valor || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\\u0300-\\u036f]/g, "")
+        .trim();
+
+    const statusQuitadoOuIsento = (valor: unknown) =>
+      ["pago", "paid", "quitado", "recebido", "isento", "isenta", "cancelado", "cancelada"].includes(
+        normalizarStatus(valor)
+      );
+
+    const statusPago = (valor: unknown) =>
+      ["pago", "paid", "quitado", "recebido"].includes(normalizarStatus(valor));
+
+    const chaveCompetencia = (valor: string | null | undefined) => {
+      if (!valor) return "";
+      const raw = valor.slice(0, 10);
+      if (/^\\d{4}-\\d{2}/.test(raw)) return raw.slice(0, 7);
+      const br = raw.match(/^(\\d{2})\\/(\\d{4})$/);
+      return br ? `${br[2]}-${br[1]}` : "";
+    };
+
+    const competenciaParaBR = (chave: string) => {
+      const [ano, mes] = chave.split("-");
+      return `${mes}/${ano}`;
+    };
+
+    const hojeDate = new Date(`${hoje}T00:00:00`);
+    const mesAtual = hoje.slice(0, 7);
+
+    for (const socio of socios) {
+      const tipo = String(socio.tipo_socio || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+      const categoria = String(socio.categoria || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+      const situacaoSocio = String(socio.situacao || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+      const ehRemido = socio.remido === true || tipo.includes("remido") || categoria.includes("remido");
+      const ehTemporada = tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio");
+      const ativo = !["inativo", "cancelado", "cancelada"].includes(situacaoSocio);
+      const cobraMensalidade = socio.possui_mensalidade === true || String(socio.possui_mensalidade || "").toLowerCase() === "true";
+
+      if (ehRemido || ehTemporada || !ativo || !cobraMensalidade) continue;
+
+      const rowsSocio = mensalidades.filter((m) => String(m.socio_id || "") === String(socio.id) && !m.dependente_id);
+      const paidKeys = rowsSocio
+        .filter((m) => statusPago(m.situacao))
+        .map((m) => chaveCompetencia(m.competencia || m.data_vencimento))
+        .filter(Boolean)
+        .sort();
+
+      let inicio = chaveCompetencia(socio.data_associacao);
+      if (!inicio) inicio = paidKeys[0] || "";
+      if (!inicio || !/^\\d{4}-\\d{2}$/.test(inicio)) continue;
+
+      const valorMensal = Number(socio.valor_mensalidade || 0);
+      if (!(valorMensal > 0)) continue;
+
+      const diaVencimento = Math.min(31, Math.max(1, Number(socio.dia_vencimento || 10)));
+      let cursor = new Date(`${inicio}-01T00:00:00`);
+
+      while (cursor.toISOString().slice(0, 7) <= mesAtual) {
+        const chave = cursor.toISOString().slice(0, 7);
+        const compBR = competenciaParaBR(chave);
+        const ultimoDia = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+        const dia = Math.min(diaVencimento, ultimoDia);
+        const vencimento = `${chave}-${String(dia).padStart(2, "0")}`;
+        if (vencimento < hoje) {
+          const existentes = rowsSocio.filter((m) => chaveCompetencia(m.competencia || m.data_vencimento) === chave);
+          const algumaQuitada = existentes.some((m) => statusQuitadoOuIsento(m.situacao));
+          if (!algumaQuitada) {
+            const grupo = grupos.get(socio.id);
+            if (grupo && !grupo.competencias.has(compBR)) {
+              grupo.competencias.add(compBR);
+              const valorExistente = existentes.reduce((sum, m) => sum + Number(m.valor || 0), 0);
+              grupo.valor += valorExistente > 0 ? valorExistente : valorMensal;
+            }
+          }
+        }
+        cursor.setMonth(cursor.getMonth() + 1);
       }
     }
 
