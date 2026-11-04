@@ -303,7 +303,7 @@ export default function InadimplenciaPage() {
       String(valor || "")
         .toLowerCase()
         .normalize("NFD")
-        .replace(/[\\u0300-\\u036f]/g, "")
+        .replace(/[\u0300-\u036f]/g, "")
         .trim();
 
     const statusQuitadoOuIsento = (valor: unknown) =>
@@ -331,9 +331,9 @@ export default function InadimplenciaPage() {
     const mesAtual = hoje.slice(0, 7);
 
     for (const socio of socios) {
-      const tipo = String(socio.tipo_socio || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
-      const categoria = String(socio.categoria || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
-      const situacaoSocio = String(socio.situacao || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+      const tipo = String(socio.tipo_socio || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const categoria = String(socio.categoria || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const situacaoSocio = String(socio.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const ehRemido = socio.remido === true || tipo.includes("remido") || categoria.includes("remido");
       const ehTemporada = tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio");
       const ativo = !["inativo", "cancelado", "cancelada"].includes(situacaoSocio);
@@ -350,7 +350,7 @@ export default function InadimplenciaPage() {
 
       let inicio = chaveCompetencia(socio.data_associacao);
       if (!inicio) inicio = paidKeys[0] || "";
-      if (!inicio || !/^\\d{4}-\\d{2}$/.test(inicio)) continue;
+      if (!inicio || !/^\d{4}-\d{2}$/.test(inicio)) continue;
 
       const valorMensal = Number(socio.valor_mensalidade || 0);
       if (!(valorMensal > 0)) continue;
