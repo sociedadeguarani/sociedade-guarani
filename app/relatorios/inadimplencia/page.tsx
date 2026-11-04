@@ -434,7 +434,7 @@ export default function InadimplenciaPage() {
       if (!(valorMensal > 0)) continue;
 
       const diaVencimento = Math.min(28, Math.max(1, Number(socio.dia_vencimento || 10)));
-      let cursor = new Date(`${inicio}-01T00:00:00`);
+      const cursor = new Date(`${inicio}-01T00:00:00`);
 
       while (cursor.toISOString().slice(0, 7) <= mesAtual) {
         const chave = cursor.toISOString().slice(0, 7);
