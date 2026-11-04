@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
@@ -17,9 +17,40 @@ export default function ConvitesPage(){
  const [editandoId,setEditandoId]=useState<string|null>(null);
  const [cidadeOutra,setCidadeOutra]=useState("");
  const ehAugusto=form.cidade.trim().toLowerCase()==="augusto pestana";
- async function apiFetch(input:RequestInfo|URL,init:RequestInit={}){const {data}=await supabase.auth.getSession();const token=data.session?.access_token;if(!token)throw new Error("Sessão não encontrada. Faça login novamente.");const headers=new Headers(init.headers);headers.set("Authorization",`Bearer ${token}`);return fetch(input,{...init,headers});}
-  async function carregar(){setMensagem("");try{const r=await apiFetch("/api/convites",{cache:"no-store"});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"Não foi possível carregar os convites.");setConvites(j.convites||[]);setSocios(j.socios||[]);setContas(j.contas||[]);try{const rp=await fetch("/api/configuracao-pix",{cache:"no-store"});const jp=await rp.json().catch(()=>({}));if(rp.ok)setPixConfig(jp.config||null)}catch{}}catch(e){setMensagem(e instanceof Error?e.message:"Não foi possível carregar os convites.")}}
- useEffect(()=>{const agendamento=window.setTimeout(()=>{void carregar()},0);return()=>window.clearTimeout(agendamento)},[]);
+ const apiFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Sessão não encontrada. Faça login novamente.");
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+ }, []);
+
+ const carregar = useCallback(async () => {
+  setMensagem("");
+  try {
+   const resposta = await apiFetch("/api/convites", { cache: "no-store" });
+   const dados = await resposta.json().catch(() => ({}));
+   if (!resposta.ok) throw new Error(dados.error || "Não foi possível carregar os convites.");
+   setConvites(dados.convites || []);
+   setSocios(dados.socios || []);
+   setContas(dados.contas || []);
+   try {
+    const respostaPix = await fetch("/api/configuracao-pix", { cache: "no-store" });
+    const dadosPix = await respostaPix.json().catch(() => ({}));
+    if (respostaPix.ok) setPixConfig(dadosPix.config || null);
+   } catch {
+    // A listagem de convites continua disponível mesmo sem a configuração PIX.
+   }
+  } catch (erro) {
+   setMensagem(erro instanceof Error ? erro.message : "Não foi possível carregar os convites.");
+  }
+ }, [apiFetch]);
+
+ useEffect(() => {
+  const agendamento = window.setTimeout(() => { void carregar(); }, 0);
+  return () => window.clearTimeout(agendamento);
+ }, [carregar]);
  function atualizarCidade(v:string){const valor=form.tipo==="semanal"?(v.trim().toLowerCase()==="augusto pestana"?"30":"120"):"30";setForm(f=>({...f,cidade:v,valor}))}
  function atualizarTipo(tipo:string){setForm(f=>({...f,tipo,fim:tipo==="diario"?"":f.fim,valor:tipo==="semanal"?(f.cidade.trim().toLowerCase()==="augusto pestana"?"30":"120"):"30"}))}
  function operadorAtual(){try{const s=supabase.auth.getSession();return s.then(x=>x.data.session?.user?.user_metadata?.nome_exibicao||x.data.session?.user?.email||"Funcionário da portaria")}catch{return Promise.resolve("Funcionário da portaria")}}
