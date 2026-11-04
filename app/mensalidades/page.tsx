@@ -493,6 +493,40 @@ export default function Page() {
     }
   }
 
+  async function marcarCompetenciaVirtualSemSaldo() {
+    if (!socioSelecionado || !mesHistoricoSelecionado || processandoBaixaHistorico) return;
+
+    const competencia = `${anoHistoricoSocio}-${String(mesHistoricoSelecionado).padStart(2, "0")}-01`;
+    const nome = socioSelecionado.socio?.nome || "este associado";
+    if (!window.confirm(`Registrar ${String(mesHistoricoSelecionado).padStart(2, "0")}/${anoHistoricoSocio} de ${nome} como S.S — Sem saldo?\\n\\nSerá criado somente o lançamento desta competência, sem movimentação financeira.`)) {
+      return;
+    }
+
+    setProcessandoBaixaHistorico(true);
+    setErro("");
+    setMsg("");
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({
+          acao: "marcar_sem_saldo",
+          socio_id: String(socioSelecionado.socio_id),
+          competencia,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível marcar a competência como S.S.");
+      setMsg(d.message || "Competência marcada como S.S. — Sem saldo.");
+      await carregar();
+      await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio, mesHistoricoSelecionado);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível marcar a competência como S.S.");
+    } finally {
+      setProcessandoBaixaHistorico(false);
+    }
+  }
+
   async function carregar() {
     setCarregandoMensalidades(true);
     try {
@@ -1958,9 +1992,34 @@ const selecionadasBaixa = useMemo(
                       </div>
                       </>
                     ) : (
-                      <p className="mt-3 rounded-xl bg-white p-3 text-sm text-gray-500">
-                        Essa competência ainda não possui lançamento para este associado.
-                      </p>
+                      <div className="mt-3 rounded-xl bg-white p-3">
+                        <p className="text-sm text-gray-500">
+                          Essa competência ainda não possui lançamento para este associado.
+                        </p>
+                        {socioSelecionado && podeMarcarSemSaldo({
+                          id: `virtual-${anoHistoricoSocio}-${String(mesHistoricoSelecionado || 1).padStart(2, "0")}-${socioSelecionado.socio_id}`,
+                          socio_id: String(socioSelecionado.socio_id),
+                          competencia: `${anoHistoricoSocio}-${String(mesHistoricoSelecionado || 1).padStart(2, "0")}-01`,
+                          valor: 0,
+                          data_vencimento: null,
+                          situacao: "nao_gerada",
+                          data_pagamento: null,
+                          tipo_pagamento: socioSelecionado.socio?.tipo_pagamento || null,
+                          observacoes: null,
+                          motivo: "Mensalidade ainda não gerada",
+                          conta_pagadora_id: socioSelecionado.socio?.conta_bancaria_id || null,
+                          socio: socioSelecionado.socio,
+                        }) && (
+                          <button
+                            type="button"
+                            disabled={processandoBaixaHistorico}
+                            onClick={() => void marcarCompetenciaVirtualSemSaldo()}
+                            className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                          >
+                            {processandoBaixaHistorico ? "Processando..." : "SS — Registrar sem saldo"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </section>
                 );
@@ -2647,4 +2706,3 @@ const selecionadasBaixa = useMemo(
     </div>
   );
 }
-
