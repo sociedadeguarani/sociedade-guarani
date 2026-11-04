@@ -222,7 +222,6 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
-    const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     const possuiMensalidadeTitular = body.possui_mensalidade === true || String(body.possui_mensalidade || "").toLowerCase() === "true";
     const responsavelId = String(body.responsavel_id || "").trim();
     if (!matricula && !responsavelId) {
@@ -268,7 +267,6 @@ export async function PUT(request: Request) {
     if (!id) return NextResponse.json({ error: "Sócio não informado." }, { status: 400 });
     const matricula = String(body.matricula ?? "").trim().toUpperCase();
     const nome = String(body.nome ?? "").trim();
-    const cpf = String(body.cpf ?? "").replace(/\D/g, "");
     if (!matricula || !nome) return NextResponse.json({ error: "Matrícula-base e nome são obrigatórios para este cadastro." }, { status: 400 });
     const { data: atual } = await auth.supabase.from("socios").select("responsavel_id,possui_mensalidade,categoria,tipo_socio").eq("id", id).maybeSingle();
     const responsavelId = body.responsavel_id !== undefined
