@@ -54,3 +54,31 @@ test('lotes de mensalidades são consultados em paralelo para reduzir a lentidã
   assert.match(sociosApi, /Promise\.all\(lotes\.map\(async \(lote\)/);
   assert.match(carteirinhasApi, /Promise\.all\(lotes\.map\(async \(lote\)/);
 });
+
+test('relatório de inadimplência reconhece pagamentos de histórico dependente migrado para sócio', () => {
+  const relatorio = readFileSync(new URL('../app/relatorios/inadimplencia/page.tsx', import.meta.url), 'utf8');
+  assert.match(relatorio, /const socioPorCpf = useMemo/);
+  assert.match(relatorio, /cpfDependente === cpfSocio/);
+  assert.match(relatorio, /statusPago\(m\)/);
+  assert.match(relatorio, /"paga"/);
+  assert.doesNotMatch(relatorio, /&& !m\.dependente_id/);
+});
+
+test('relatório de inadimplência usa regex válidas para normalizar texto e competência', () => {
+  const relatorio = readFileSync(new URL('../app/relatorios/inadimplencia/page.tsx', import.meta.url), 'utf8');
+  assert.ok(relatorio.includes('.replace(/[\\u0300-\\u036f]/g, "")'));
+  assert.ok(relatorio.includes('/^\\d{4}-\\d{2}$/'));
+});
+
+test('relatório completo pagina o histórico de mensalidades para não perder pagamentos antigos', () => {
+  const relatorio = readFileSync(new URL('../app/relatorios/inadimplencia/page.tsx', import.meta.url), 'utf8');
+  assert.match(relatorio, /async function buscarMensalidadesPaginadas/);
+  assert.match(relatorio, /\.range\(offset, offset \+ tamanhoLote - 1\)/);
+  assert.match(relatorio, /if \(lote\.length < tamanhoLote\) return todas/);
+});
+
+test('histórico preso ao socio_id atual não é descartado quando o dependente legado já não existe', () => {
+  const relatorio = readFileSync(new URL('../app/relatorios/inadimplencia/page.tsx', import.meta.url), 'utf8');
+  assert.match(relatorio, /: !dependente && socio && socioElegivel\(socio\)/);
+  assert.match(relatorio, /if \(!dependente\) return true/);
+});
