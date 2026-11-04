@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import type { JSX } from "react";
 import { IdCard, Printer, Search, ShieldCheck, Smartphone, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -494,7 +495,7 @@ export default function CarteirinhasPage(): JSX.Element {
                               <div className="text-[10px] font-black uppercase tracking-wide text-orange-800">Carteirinhas individuais</div>
                               {t.participantes!.map((p) => (
                                 <button key={p.id} onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className={`flex w-full items-center gap-3 rounded-lg border bg-white p-2 text-left ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "hover:border-orange-300"}`}>
-                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Foto do participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <Image src={p.foto_url} alt={p.nome || "Foto do participante"} width={90} height={100} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
                                   <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
                                   <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : p.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : p.status_carteirinha === "ativa" ? "ATIVA" : "INATIVA"}</span>
                                 </button>
@@ -557,7 +558,7 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="card-top p-5" style={{ background: "#e87511", color: "#ffffff" }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="card-logo h-10 w-10 rounded-lg object-contain" />
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" />
                         <div>
                           <div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
                           <div className="card-title mt-1 text-lg font-black">CARTEIRA DE TEMPORADA</div>
@@ -569,7 +570,7 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="p-6">
                     <div className="flex gap-4">
                       <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">
-                        {participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                        {participanteTemporadaAtual?.foto_url ? <Image src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div>
                       <div className="min-w-0">
                         <h2 className="card-name text-xl font-black leading-tight">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
@@ -597,7 +598,7 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="overflow-hidden rounded-[26px] border-4 border-orange-700 bg-white shadow-2xl">
                     <div className="p-5" style={{ background: "#e87511", color: "#ffffff" }}>
                       <div className="flex items-center gap-3">
-                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
                         <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div></div>
                       </div>
                     </div>
@@ -618,12 +619,12 @@ export default function CarteirinhasPage(): JSX.Element {
                 <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl`}>
                   <div className="card-top p-5" style={{ background: "#005a3c", color: "#ffffff" }}>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="card-logo h-10 w-10 rounded-lg object-contain" /><div><div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="card-title mt-1 text-lg font-black">CARTEIRA DE ASSOCIADO</div></div></div><IdCard />
+                      <div className="flex items-center gap-3"><Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" /><div><div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="card-title mt-1 text-lg font-black">CARTEIRA DE ASSOCIADO</div></div></div><IdCard />
                     </div>
                   </div>
                   <div className="p-6">
                     <div className="flex gap-4"><div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                        {dependenteSelecionado.foto_url ? <img src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                        {dependenteSelecionado.foto_url ? <Image src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
                     <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div>{camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div></div>}</div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
                   </div>
@@ -640,7 +641,7 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="card-top p-5" style={{ background: v.bg, color: v.text }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="card-logo h-10 w-10 rounded-lg object-contain" />
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" />
                         <div>
                           <div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
                           <div className="card-title mt-1 text-lg font-black">CARTEIRA DE ASSOCIADO</div>
@@ -653,7 +654,7 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="p-6">
                     <div className="flex gap-4">
                       <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                        {selecionado.foto_url ? <img src={selecionado.foto_url} alt={selecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                        {selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
                       </div>
                       <div className="min-w-0">
                         <h2 className="card-name text-xl font-black leading-tight">{selecionado.nome}</h2>
@@ -685,13 +686,13 @@ export default function CarteirinhasPage(): JSX.Element {
                   <div className="overflow-hidden rounded-[26px] border-4 border-[#17382c] bg-white shadow-2xl">
                     <div className="p-5" style={{ background: v.bg, color: v.text }}>
                       <div className="flex items-center gap-3">
-                        <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
                         <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div>
                       </div>
                     </div>
                     <div className="p-6">
                       <div className="flex items-center gap-4">
-                        <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <img src={selecionado.foto_url} alt={selecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                        <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
                         <div className="min-w-0"><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
                       </div>
                       {camposVisiveis.financeiro && <div className="mt-5 rounded-2xl bg-[#f4f7f5] p-4">
@@ -719,7 +720,7 @@ export default function CarteirinhasPage(): JSX.Element {
                 <div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div>
               </div>
               <div className="p-6">
-                <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <img src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
+                <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <Image src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
                 <p className="mt-3 text-sm text-gray-500">Situação: <b className={statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}>{statusTemporadaTexto}</b></p>
                 <p className="text-sm text-gray-500">Validade da temporada: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
                 {camposVisiveis.exameMedico && <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 p-3"><span className={`h-3 w-3 shrink-0 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`text-sm font-black ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
@@ -737,13 +738,13 @@ export default function CarteirinhasPage(): JSX.Element {
             <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white">
               <div className="p-5" style={{ background: v.bg, color: v.text }}>
                 <div className="flex items-center gap-3">
-                  <img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" />
+                  <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
                   <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div>
                 </div>
               </div>
               <div className="p-6">
                 <div className="flex items-center gap-4">
-                  <div className="h-24 w-20 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <img src={selecionado.foto_url} alt={selecionado.nome} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                  <div className="h-24 w-20 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
                   <div><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">CPF: <b>{formatarCpf(selecionado.cpf)}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
                 </div>
                 <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação</div><div className="text-lg font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div><div className="mt-2 text-sm">Validade: <b>{validade ? formatarData(validade) : "Conforme cadastro"}</b></div></div>
@@ -758,7 +759,7 @@ export default function CarteirinhasPage(): JSX.Element {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
           <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
             <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
-            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><img src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
           </div>
         </div>
       )}
