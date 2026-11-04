@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import { supabase } from "@/lib/supabaseClient";
@@ -53,6 +54,58 @@ type Dependente = {
   source_socio_id?: string | null;
   financeiro_status?: string | null;
   meses_atraso?: number | null;
+};
+
+// Formato bruto retornado pela API. Campos opcionais são normalizados antes de
+// entrar no estado da tela, evitando casts permissivos e mantendo compatibilidade
+// com registros legados que podem trazer números como texto.
+type SocioApi = {
+  id: string | number;
+  matricula?: string | number | null;
+  nome?: string | null;
+  situacao?: string | null;
+  responsavel_id?: string | number | null;
+  tipo_socio?: string | null;
+  categoria?: string | null;
+  cpf?: string | null;
+  data_nascimento?: string | null;
+  exame_medico_validade?: string | null;
+  telefone?: string | null;
+  whatsapp?: string | null;
+  foto_url?: string | null;
+  possui_mensalidade?: boolean | string | null;
+  valor_mensalidade?: number | string | null;
+  dia_vencimento?: number | string | null;
+  tipo_pagamento?: string | null;
+  situacao_financeira?: string | null;
+  data_ultimo_pagamento?: string | null;
+  financeiro_status?: string | null;
+  meses_atraso?: number | string | null;
+};
+
+type DependenteApi = {
+  id: string | number;
+  socio_id: string | number;
+  matricula?: string | number | null;
+  foto_url?: string | null;
+  nome?: string | null;
+  cpf?: string | null;
+  data_nascimento?: string | null;
+  exame_medico_validade?: string | null;
+  parentesco?: string | null;
+  telefone?: string | null;
+  whatsapp?: string | null;
+  ativo?: boolean | string | null;
+  created_at?: string | null;
+  possui_mensalidade?: boolean | string | null;
+  valor_mensalidade?: number | string | null;
+  dia_vencimento?: number | string | null;
+  tipo_pagamento?: string | null;
+  situacao_financeira?: string | null;
+  data_ultimo_pagamento?: string | null;
+  financeiro_status?: string | null;
+  meses_atraso?: number | string | null;
+  migrado_para_socio_id?: string | null;
 };
 
 
@@ -125,7 +178,7 @@ function normalizarTexto(valor: unknown) {
     .toLowerCase();
 }
 
-function ehDependenteFamiliarSocio(s: any) {
+function ehDependenteFamiliarSocio(s: SocioApi) {
   if (!s?.responsavel_id) return false;
   const tipo = normalizarTexto(s.tipo_socio);
   const categoria = normalizarTexto(s.categoria);
@@ -140,6 +193,7 @@ function ehDependenteFamiliarSocio(s: any) {
 }
 
 export default function DependentesPage() {
+  const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, string>>({});
@@ -240,7 +294,7 @@ export default function DependentesPage() {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      window.location.href = "/login";
+      router.replace("/login");
       return;
     }
 
@@ -258,8 +312,8 @@ export default function DependentesPage() {
         throw new Error(dados?.error || "Não foi possível carregar os dependentes.");
       }
 
-      const sociosData = Array.isArray(dados?.socios) ? dados.socios : [];
-      const sociosNormalizados: Socio[] = sociosData.map((s: any) => ({
+      const sociosData: SocioApi[] = Array.isArray(dados?.socios) ? dados.socios as SocioApi[] : [];
+      const sociosNormalizados: Socio[] = sociosData.map((s) => ({
         id: String(s.id),
         matricula: s.matricula == null ? null : String(s.matricula),
         nome: s.nome ?? "",
@@ -282,13 +336,16 @@ export default function DependentesPage() {
         meses_atraso: Number(s.meses_atraso || 0),
       }));
 
-      const dependentesData: Dependente[] = (Array.isArray(dados?.dependentes) ? dados.dependentes : [])
+      const dependentesApi: DependenteApi[] = Array.isArray(dados?.dependentes)
+        ? dados.dependentes as DependenteApi[]
+        : [];
+      const dependentesData: Dependente[] = dependentesApi
         // Registros promovidos para Sócios ficam preservados para histórico, mas não
         // podem continuar aparecendo na listagem de Dependentes.
-        .filter((d: any) => !dependenteFoiPromovidoParaSocio(d))
+        .filter((d) => !dependenteFoiPromovidoParaSocio(d))
         // Matrícula terminada em A é titular e deve ser exibida em Sócios, nunca como dependente.
-        .filter((d: any) => !String(d.matricula || "").trim().toUpperCase().endsWith("A"))
-        .map((d: any) => ({
+        .filter((d) => !String(d.matricula || "").trim().toUpperCase().endsWith("A"))
+        .map((d) => ({
           id: String(d.id),
           socio_id: String(d.socio_id),
           matricula: d.matricula == null ? null : String(d.matricula),
@@ -349,7 +406,7 @@ export default function DependentesPage() {
           financeiro_status: s.financeiro_status ?? null,
           meses_atraso: Number(s.meses_atraso || 0),
           source: "socios",
-          source_socio_id: s.id,
+          source_socio_id: String(s.id),
         }));
 
       setSocios(sociosNormalizados);
@@ -366,7 +423,7 @@ export default function DependentesPage() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     // Adia a execução para fora do corpo síncrono do efeito: carregarDados
