@@ -4,7 +4,7 @@ import {
   exigirAdministrador,
   getServiceClient,
 } from "@/lib/guaraniAuth";
-import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
+import { socioElegivelParaMensalidade, type CadastroMensalidade } from "@/lib/regrasMensalidade";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,110 @@ const MOTIVOS = [
   "Isento",
   "Outro",
 ];
+
+// Tipos locais das linhas consultadas no Supabase. Mantêm os campos opcionais
+// porque cadastros históricos podem não possuir todos os dados preenchidos.
+type ValorNumerico = number | string | null | undefined;
+
+type SocioMensalidadeRow = CadastroMensalidade & {
+  id: string;
+  nome?: string | null;
+  matricula?: string | number | null;
+  cpf?: string | null;
+  categoria?: string | null;
+  tipo_socio?: string | null;
+  responsavel_id?: string | null;
+  possui_mensalidade?: boolean | null;
+  valor_mensalidade?: ValorNumerico;
+  dia_vencimento?: ValorNumerico;
+  tipo_pagamento?: string | null;
+  conta_bancaria_id?: string | null;
+  situacao?: string | null;
+  situacao_financeira?: string | null;
+  ativo?: boolean | null;
+};
+
+type ConfiguracaoMensalidadeRow = {
+  tipo_socio?: string | null;
+  ativo?: boolean | null;
+  vigencia_inicio?: string | null;
+  valor?: ValorNumerico;
+  dia_vencimento?: ValorNumerico;
+  tipo_pagamento?: string | null;
+};
+
+type ConfiguracaoTarifaRow = {
+  tipo_pagamento?: string | null;
+  ativo?: boolean | null;
+  valor_tarifa?: ValorNumerico;
+};
+
+type ContaBancariaResumo = {
+  id: string;
+  nome?: string | null;
+  banco?: string | null;
+};
+
+type RegraCobrancaRow = {
+  dias_tolerancia?: ValorNumerico;
+  multa_tipo?: string | null;
+  multa_valor?: ValorNumerico;
+  juros_tipo?: string | null;
+  juros_valor?: ValorNumerico;
+  desconto_tipo?: string | null;
+  desconto_valor?: ValorNumerico;
+  ativo?: boolean | null;
+};
+
+type MensalidadeRow = {
+  id: string;
+  socio_id: string;
+  dependente_id?: string | null;
+  competencia?: string | null;
+  situacao?: string | null;
+  data_vencimento?: string | null;
+  data_pagamento?: string | null;
+  valor?: ValorNumerico;
+  valor_base?: ValorNumerico;
+  total_cobrado?: ValorNumerico;
+  tarifa_pagamento?: ValorNumerico;
+  multa?: ValorNumerico;
+  juros?: ValorNumerico;
+  desconto?: ValorNumerico;
+  dias_atraso?: ValorNumerico;
+  tipo_pagamento?: string | null;
+  conta_pagadora_id?: string | null;
+  comprovante_url?: string | null;
+  motivo?: string | null;
+  observacoes?: string | null;
+};
+
+type MovimentoMensalidadeRow = {
+  id: string;
+  origem_id?: string | null;
+  conciliado?: boolean | null;
+  conta_bancaria_id?: string | null;
+  valor?: ValorNumerico;
+};
+
+type ItemPreviaMensalidade = Record<string, string | number | null>;
+
+type NovaMensalidadeRow = {
+  socio_id: string;
+  competencia: string;
+  valor: number;
+  valor_base: number;
+  tarifa_pagamento: number;
+  multa: number;
+  juros: number;
+  desconto: number;
+  total_cobrado: number;
+  dias_atraso: number;
+  data_vencimento: string;
+  situacao: string;
+  tipo_pagamento: string | null;
+  conta_pagadora_id: string | null;
+};
 
 function normalizarTexto(valor: unknown) {
   return String(valor || "")
@@ -31,7 +135,7 @@ function normalizarTexto(valor: unknown) {
  * Associado dependente com cobrança individual usa o valor próprio do cadastro.
  * A configuração geral por tipo_socio não deve sobrescrever esse valor.
  */
-function usaValorIndividual(socio: any) {
+function usaValorIndividual(socio: SocioMensalidadeRow) {
   const categoria = normalizarTexto(socio?.categoria || "");
   return (
     categoria.includes("individual") &&
@@ -42,7 +146,7 @@ function usaValorIndividual(socio: any) {
   );
 }
 
-function valorMensalidadeEfetivo(socio: any, configuracao: any) {
+function valorMensalidadeEfetivo(socio: SocioMensalidadeRow, configuracao: ConfiguracaoMensalidadeRow | null | undefined) {
   if (usaValorIndividual(socio)) {
     return Number(socio.valor_mensalidade || 0);
   }
@@ -92,7 +196,7 @@ function dataVencimento(competencia: string, dia: unknown) {
   return `${competencia.slice(0, 8)}${String(d).padStart(2, "0")}`;
 }
 
-function atualizarSituacaoAtraso(mensalidade: any) {
+function atualizarSituacaoAtraso(mensalidade: MensalidadeRow) {
   if (mensalidade?.situacao !== "em_aberto" || !mensalidade?.data_vencimento) {
     return mensalidade;
   }
@@ -117,18 +221,18 @@ function atualizarSituacaoAtraso(mensalidade: any) {
 }
 
 function escolherConfiguracao(
-  configuracoes: any[],
-  tipoSocio: string,
+  configuracoes: ConfiguracaoMensalidadeRow[],
+  tipoSocio: string | null | undefined,
   competencia: string
 ) {
   return (configuracoes || [])
     .filter(
-      (c: any) =>
+      (c: ConfiguracaoMensalidadeRow) =>
         String(c.tipo_socio || "") === String(tipoSocio || "") &&
         c.ativo !== false &&
         String(c.vigencia_inicio || "0000-00-00") <= competencia
     )
-    .sort((a: any, b: any) =>
+    .sort((a: ConfiguracaoMensalidadeRow, b: ConfiguracaoMensalidadeRow) =>
       String(b.vigencia_inicio || "").localeCompare(
         String(a.vigencia_inicio || "")
       )
@@ -144,7 +248,7 @@ function normalizarBanco(valor: unknown) {
 
 function chaveTarifa(
   tipoPagamento: unknown,
-  contaBancaria: any | null
+  contaBancaria: ContaBancariaResumo | null
 ) {
   const tipo = normalizarTexto(tipoPagamento);
 
@@ -197,15 +301,15 @@ function chaveTarifa(
 }
 
 function valorTarifa(
-  tarifas: any[],
+  tarifas: ConfiguracaoTarifaRow[],
   tipoPagamento: unknown,
-  contaBancaria: any | null
+  contaBancaria: ContaBancariaResumo | null
 ) {
   const chave = chaveTarifa(tipoPagamento, contaBancaria);
   if (!chave) return 0;
 
   const tarifa = (tarifas || []).find(
-    (t: any) =>
+    (t: ConfiguracaoTarifaRow) =>
       normalizarTexto(t.tipo_pagamento) === chave &&
       t.ativo !== false
   );
@@ -238,7 +342,7 @@ function calcularCobranca(
   dataVencimentoAtual: string | null,
   dataReferencia: string,
   tarifa: number,
-  regra: any
+  regra: RegraCobrancaRow | null
 ) {
   const dias = diasDeAtraso(dataVencimentoAtual, dataReferencia);
   const tolerancia = Number(regra?.dias_tolerancia || 0);
@@ -388,11 +492,11 @@ export async function GET(request: Request) {
     if (erroTarifas) throw erroTarifas;
     if (erroCobrancas) throw erroCobrancas;
 
-    const mapaSocios = new Map<string, any>(
-      (socios || []).map((s: any) => [String(s.id), s])
+    const mapaSocios = new Map<string, SocioMensalidadeRow>(
+      (socios || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
     );
 
-    const mensalidadesComSocio = (mensalidades || []).map((m: any) => ({
+    const mensalidadesComSocio = (mensalidades || []).map((m: MensalidadeRow) => ({
       ...atualizarSituacaoAtraso(m),
       socio: mapaSocios.get(String(m.socio_id)) || null,
     }));
@@ -472,7 +576,7 @@ export async function POST(request: Request) {
         : [];
       if (socioIdsSelecionados.length > 0) {
         const permitidos = new Set(socioIdsSelecionados);
-        cobraveis = cobraveis.filter((s: any) => permitidos.has(String(s.id)));
+        cobraveis = cobraveis.filter((s: SocioMensalidadeRow) => permitidos.has(String(s.id)));
       }
 
       const { data: configuracoes, error: erroConfiguracoes } =
@@ -496,8 +600,8 @@ export async function POST(request: Request) {
 
       if (erroContas) throw erroContas;
 
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      const mapaContas = new Map<string, ContaBancariaResumo>(
+        (contasBancarias || []).map((c: ContaBancariaResumo): [string, ContaBancariaResumo] => [String(c.id), c])
       );
 
       if (erroTarifas) throw erroTarifas;
@@ -521,12 +625,12 @@ export async function POST(request: Request) {
       if (erroExistentes) throw erroExistentes;
 
       const idsExistentes = new Set<string>(
-        (existentes || []).map((x: any) => String(x.socio_id))
+        (existentes || []).map((x: { socio_id: string }) => String(x.socio_id))
       );
 
-      const novos = cobraveis
-        .filter((s: any) => !idsExistentes.has(String(s.id)))
-        .map((s: any) => {
+      const novos: ItemPreviaMensalidade[] = cobraveis
+        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)))
+        .map((s: SocioMensalidadeRow) => {
           const config = escolherConfiguracao(
             configuracoes || [],
             s.tipo_socio,
@@ -553,9 +657,9 @@ export async function POST(request: Request) {
 
           return {
             id: s.id,
-            nome: s.nome,
-            matricula: s.matricula,
-            categoria: s.categoria,
+            nome: s.nome || null,
+            matricula: s.matricula ?? null,
+            categoria: s.categoria ?? null,
             valor_base: Number(valor.toFixed(2)),
             tarifa_pagamento: calculado.tarifa_pagamento,
             multa: calculado.multa,
@@ -572,7 +676,7 @@ export async function POST(request: Request) {
         Number(
           novos
             .reduce(
-              (total: number, item: any) =>
+              (total: number, item: ItemPreviaMensalidade) =>
                 total + Number(item[campo] || 0),
               0
             )
@@ -583,7 +687,7 @@ export async function POST(request: Request) {
         ok: true,
         competencia,
         total_cobraveis: cobraveis.length,
-        ja_existentes: cobraveis.filter((s: any) =>
+        ja_existentes: cobraveis.filter((s: SocioMensalidadeRow) =>
           idsExistentes.has(String(s.id))
         ).length,
         quantidade_nova: novos.length,
@@ -661,7 +765,7 @@ export async function POST(request: Request) {
 
       if (socioIdsSelecionados.length > 0) {
         const permitidos = new Set(socioIdsSelecionados);
-        cobraveis = cobraveis.filter((s: any) =>
+        cobraveis = cobraveis.filter((s: SocioMensalidadeRow) =>
           permitidos.has(String(s.id))
         );
       }
@@ -687,8 +791,8 @@ export async function POST(request: Request) {
 
       if (erroContas) throw erroContas;
 
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      const mapaContas = new Map<string, ContaBancariaResumo>(
+        (contasBancarias || []).map((c: ContaBancariaResumo): [string, ContaBancariaResumo] => [String(c.id), c])
       );
 
       if (erroTarifas) throw erroTarifas;
@@ -712,7 +816,7 @@ export async function POST(request: Request) {
       if (erroExistentes) throw erroExistentes;
 
       const idsExistentes = new Set<string>(
-        (existentes || []).map((x: any) => String(x.socio_id))
+        (existentes || []).map((x: { socio_id: string }) => String(x.socio_id))
       );
 
       // Corrige lançamentos já existentes de dependentes com cobrança individual,
@@ -720,8 +824,8 @@ export async function POST(request: Request) {
       // demais estados históricos ficam intocados.
       const sociosIndividuais = (socios || []).filter(usaValorIndividual);
       if (sociosIndividuais.length > 0) {
-        const mapaIndividual = new Map<string, any>(
-          sociosIndividuais.map((s: any) => [String(s.id), s])
+        const mapaIndividual = new Map<string, SocioMensalidadeRow>(
+          sociosIndividuais.map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
         );
         const { data: lancamentosAbertos, error: erroAbertos } = await db
           .from("mensalidades")
@@ -761,9 +865,9 @@ export async function POST(request: Request) {
        * competência. O gerador apenas cria o lançamento financeiro;
        * ele não modifica o cadastro do sócio.
        */
-      const novos = cobraveis
-        .filter((s: any) => !idsExistentes.has(String(s.id)))
-        .map((s: any) => {
+      const novos: NovaMensalidadeRow[] = cobraveis
+        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)))
+        .map((s: SocioMensalidadeRow) => {
           const config = escolherConfiguracao(
             configuracoes || [],
             s.tipo_socio,
@@ -901,8 +1005,8 @@ export async function POST(request: Request) {
       if (erroBusca) throw erroBusca;
 
       const idsJaPagos: string[] = (registros || [])
-        .filter((x: any) => x.situacao === "pago")
-        .map((x: any) => String(x.id));
+        .filter((x: MensalidadeRow) => x.situacao === "pago")
+        .map((x: MensalidadeRow) => String(x.id));
 
       const idsParaBaixar = ids.filter(
         (id: string) => !idsJaPagos.includes(id)
@@ -928,8 +1032,8 @@ export async function POST(request: Request) {
 
       if (erroContas) throw erroContas;
 
-      const mapaContas = new Map<string, any>(
-        (contasBancarias || []).map((c: any) => [String(c.id), c])
+      const mapaContas = new Map<string, ContaBancariaResumo>(
+        (contasBancarias || []).map((c: ContaBancariaResumo): [string, ContaBancariaResumo] => [String(c.id), c])
       );
 
       if (erroTarifas) throw erroTarifas;
@@ -948,7 +1052,7 @@ export async function POST(request: Request) {
       // Recupera a conta vinculada ao associado para que a baixa também
       // gere automaticamente a entrada correspondente no fluxo financeiro.
       const socioIds = Array.from(
-        new Set((registros || []).map((r: any) => String(r.socio_id)))
+        new Set((registros || []).map((r: MensalidadeRow) => String(r.socio_id)))
       );
 
       const { data: sociosBaixa, error: erroSociosBaixa } = await db
@@ -958,11 +1062,11 @@ export async function POST(request: Request) {
 
       if (erroSociosBaixa) throw erroSociosBaixa;
 
-      const mapaSociosBaixa = new Map<string, any>(
-        (sociosBaixa || []).map((s: any) => [String(s.id), s])
+      const mapaSociosBaixa = new Map<string, SocioMensalidadeRow>(
+        (sociosBaixa || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
       );
 
-      const registrosParaBaixar = (registros || []).filter((r: any) =>
+      const registrosParaBaixar = (registros || []).filter((r: MensalidadeRow) =>
         idsParaBaixar.includes(String(r.id))
       );
 
@@ -978,14 +1082,14 @@ export async function POST(request: Request) {
         );
       }
 
-      const semConta = registrosParaBaixar.filter((r: any) => {
+      const semConta = registrosParaBaixar.filter((r: MensalidadeRow) => {
         const socio = mapaSociosBaixa.get(String(r.socio_id));
         return !contaRecebimentoSelecionada && !r.conta_pagadora_id && !socio?.conta_bancaria_id;
       });
 
       if (semConta.length > 0) {
         const nomes = semConta
-          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
+          .map((r: MensalidadeRow) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
           .join(", ");
 
         return NextResponse.json(
@@ -1008,16 +1112,16 @@ export async function POST(request: Request) {
       if (erroMovimentosExistentes) throw erroMovimentosExistentes;
 
       const idsComEntrada = new Set(
-        (movimentosExistentes || []).map((m: any) => String(m.origem_id))
+        (movimentosExistentes || []).map((m: MovimentoMensalidadeRow) => String(m.origem_id))
       );
 
-      const registrosComEntrada = registrosParaBaixar.filter((r: any) =>
+      const registrosComEntrada = registrosParaBaixar.filter((r: MensalidadeRow) =>
         idsComEntrada.has(String(r.id))
       );
 
       if (registrosComEntrada.length > 0) {
         const nomes = registrosComEntrada
-          .map((r: any) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
+          .map((r: MensalidadeRow) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
           .join(", ");
 
         return NextResponse.json(
@@ -1030,7 +1134,7 @@ export async function POST(request: Request) {
 
       // Validar todo o lote antes de alterar qualquer registro evita uma
       // baixa parcial quando uma das mensalidades está com valor inválido.
-      const mensalidadeComValorInvalido = registrosParaBaixar.find((registro: any) => {
+      const mensalidadeComValorInvalido = registrosParaBaixar.find((registro: MensalidadeRow) => {
         const valor = Number(registro.valor_base ?? registro.valor ?? 0);
         return !Number.isFinite(valor) || valor <= 0;
       });
@@ -1291,10 +1395,10 @@ export async function POST(request: Request) {
       }
 
       const pendentes = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado !== true
+        (movimento: MovimentoMensalidadeRow) => movimento.conciliado !== true
       );
       const conciliados = (movimentos || []).filter(
-        (movimento: any) => movimento.conciliado === true
+        (movimento: MovimentoMensalidadeRow) => movimento.conciliado === true
       );
 
       // Entradas ainda pendentes podem ser removidas sem perder
@@ -1547,7 +1651,7 @@ export async function POST(request: Request) {
 
       const registrosEncontrados = registros || [];
       const socioIds = Array.from(
-        new Set(registrosEncontrados.map((r: any) => String(r.socio_id)).filter(Boolean))
+        new Set(registrosEncontrados.map((r: MensalidadeRow) => String(r.socio_id)).filter(Boolean))
       );
 
       const { data: sociosSS, error: erroSociosSS } = await db
@@ -1557,11 +1661,11 @@ export async function POST(request: Request) {
 
       if (erroSociosSS) throw erroSociosSS;
 
-      const mapaSociosSS = new Map<string, any>(
-        (sociosSS || []).map((s: any) => [String(s.id), s])
+      const mapaSociosSS = new Map<string, SocioMensalidadeRow>(
+        (sociosSS || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
       );
 
-      function cobrancaPermiteSS(registro: any) {
+      function cobrancaPermiteSS(registro: MensalidadeRow) {
         const socio = mapaSociosSS.get(String(registro.socio_id));
         const pagamentoAssociado = normalizarTexto(socio?.tipo_pagamento || "").replace(/[\s-]+/g, "_");
         const pagamentoRegistro = normalizarTexto(registro.tipo_pagamento || "").replace(/[\s-]+/g, "_");
@@ -1588,12 +1692,12 @@ export async function POST(request: Request) {
       }
 
       const inelegiveis = registrosEncontrados.filter(
-        (r: any) => !cobrancaPermiteSS(r)
+        (r: MensalidadeRow) => !cobrancaPermiteSS(r)
       );
 
       if (inelegiveis.length > 0) {
         const nomes = inelegiveis
-          .map((r: any) => {
+          .map((r: MensalidadeRow) => {
             const socio = mapaSociosSS.get(String(r.socio_id));
             return socio?.nome || r.id;
           })
@@ -1609,8 +1713,8 @@ export async function POST(request: Request) {
       }
 
       const idsElegiveis = registrosEncontrados
-        .filter((r: any) => r.situacao !== "pago" && r.situacao !== "isento")
-        .map((r: any) => String(r.id));
+        .filter((r: MensalidadeRow) => r.situacao !== "pago" && r.situacao !== "isento")
+        .map((r: MensalidadeRow) => String(r.id));
 
       if (idsElegiveis.length === 0) {
         return NextResponse.json({
