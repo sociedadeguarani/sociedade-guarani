@@ -1,6 +1,6 @@
 /* app/api/temporadas/route.ts */
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +70,7 @@ async function autenticar(request: NextRequest) {
   return { db, user };
 }
 
-async function proximoCodigo(db: any) {
+async function proximoCodigo(db: SupabaseClient) {
   const { data, error } = await db
     .from("temporadas")
     .select("codigo")
