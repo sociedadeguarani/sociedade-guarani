@@ -124,7 +124,7 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
   // Garante os perfis padrão sem apagar ou recriar os que já existem.
   // Isso também recupera instalações em que a tabela de perfis ficou sem
   // os registros usados pela tela de Usuários.
-  const perfisAtuais = [...(p.data || [])] as any[];
+  const perfisAtuais = [...(p.data || [])] as Array<{ id: string; nome: string; codigo: string; ativo: boolean }>;
   const perfisPadrao = [
     { codigo: "administrador_master", nome: "Administrador Master" },
     { codigo: "administrador", nome: "Administrador" },
@@ -134,7 +134,7 @@ async function carregarDados(db: ReturnType<typeof getServiceClient>) {
   ];
 
   for (const padrao of perfisPadrao) {
-    const existe = perfisAtuais.some((x: any) =>
+    const existe = perfisAtuais.some((x) =>
       String(x.codigo || "").trim().toLowerCase() === padrao.codigo ||
       String(x.nome || "").trim().toLowerCase() === padrao.nome.toLowerCase()
     );
@@ -247,7 +247,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ ok: true, id: authData.user.id, message: "Usuário criado com sucesso." });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Não foi possível concluir a operação de usuário." }, { status: 500 });
   }
 }
@@ -296,7 +296,7 @@ export async function PATCH(request: Request) {
       if (error) throw new Error(error.message);
     }
     return NextResponse.json({ ok: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Não foi possível atualizar o usuário." }, { status: 500 });
   }
 }
@@ -320,7 +320,7 @@ export async function DELETE(request: Request) {
     const { error: authError } = await db.auth.admin.deleteUser(id);
     if (authError) return NextResponse.json({ error: `Cadastro do sistema excluído, mas o acesso Auth não foi excluído: ${authError.message}` }, { status: 500 });
     return NextResponse.json({ ok: true, message: "Usuário excluído definitivamente." });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Não foi possível excluir o usuário." }, { status: 500 });
   }
 }
