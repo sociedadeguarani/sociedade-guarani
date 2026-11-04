@@ -1374,6 +1374,159 @@ export async function POST(request: Request) {
      * PIX, dinheiro, transferência e demais formas permanecem em aberto/atraso.
      */
     if (acao === "marcar_sem_saldo") {
+      // Permite registrar S.S. diretamente no histórico individual quando a
+      // competência ainda não foi gerada. Cria apenas o lançamento desse sócio.
+      const socioVirtualId = String(body.socio_id || "").trim();
+      const competenciaVirtual = String(body.competencia || "").slice(0, 10);
+
+      if (socioVirtualId && /^\d{4}-\d{2}-01$/.test(competenciaVirtual)) {
+        const { data: socioVirtual, error: erroSocioVirtual } = await db
+          .from("socios")
+          .select("id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo")
+          .eq("id", socioVirtualId)
+          .maybeSingle();
+
+        if (erroSocioVirtual) throw erroSocioVirtual;
+        if (!socioVirtual || !socioElegivelParaMensalidade(socioVirtual)) {
+          return NextResponse.json(
+            { error: "Este associado não está elegível para cobrança de mensalidade." },
+            { status: 400 }
+          );
+        }
+
+        const pagamentoAssociado = normalizarTexto(socioVirtual.tipo_pagamento || "").replace(/[\s-]+/g, "_");
+        const contaIdVirtual = String(socioVirtual.conta_bancaria_id || "").trim();
+        const permiteSSVirtual =
+          pagamentoAssociado === "boleto" ||
+          (Boolean(contaIdVirtual) && [
+            "debito_em_conta",
+            "debito",
+            "debito_em_conta_bancaria",
+            "banrisul",
+            "sicredi",
+            "bb",
+            "banco_do_brasil",
+          ].includes(pagamentoAssociado));
+
+        if (!permiteSSVirtual) {
+          return NextResponse.json(
+            { error: "S.S. é permitido somente para débito em conta com banco vinculado ou boleto." },
+            { status: 400 }
+          );
+        }
+
+        const { data: existenteVirtual, error: erroExistenteVirtual } = await db
+          .from("mensalidades")
+          .select("id,situacao")
+          .eq("socio_id", socioVirtualId)
+          .eq("competencia", competenciaVirtual)
+          .maybeSingle();
+
+        if (erroExistenteVirtual) throw erroExistenteVirtual;
+
+        if (existenteVirtual?.situacao === "pago" || existenteVirtual?.situacao === "isento") {
+          return NextResponse.json(
+            { error: "Esta competência já está paga ou isenta e não pode ser marcada como S.S." },
+            { status: 400 }
+          );
+        }
+
+        if (existenteVirtual?.id) {
+          const { error: erroUpdateVirtual } = await db
+            .from("mensalidades")
+            .update({
+              situacao: "em_aberto",
+              data_pagamento: null,
+              motivo: "S.S",
+              observacoes: "S.S — Sem saldo",
+            })
+            .eq("id", existenteVirtual.id);
+
+          if (erroUpdateVirtual) throw erroUpdateVirtual;
+        } else {
+          const { data: configuracoesVirtual, error: erroConfigsVirtual } = await db
+            .from("configuracoes_mensalidades")
+            .select("*")
+            .eq("ativo", true)
+            .order("vigencia_inicio", { ascending: false });
+          if (erroConfigsVirtual) throw erroConfigsVirtual;
+
+          const { data: tarifasVirtual, error: erroTarifasVirtual } = await db
+            .from("configuracoes_tarifas_mensalidades")
+            .select("*")
+            .eq("ativo", true);
+          if (erroTarifasVirtual) throw erroTarifasVirtual;
+
+          const { data: contaVirtual, error: erroContaVirtual } = await db
+            .from("contas_bancarias")
+            .select("id,nome,banco")
+            .eq("id", contaIdVirtual)
+            .maybeSingle();
+          if (erroContaVirtual) throw erroContaVirtual;
+
+          const { data: cobrancasVirtual, error: erroCobrancasVirtual } = await db
+            .from("configuracoes_cobranca_mensalidades")
+            .select("*")
+            .eq("ativo", true)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          if (erroCobrancasVirtual) throw erroCobrancasVirtual;
+
+          const configVirtual = escolherConfiguracao(
+            configuracoesVirtual || [],
+            socioVirtual.tipo_socio,
+            competenciaVirtual
+          );
+          const valorVirtual = valorMensalidadeEfetivo(socioVirtual, configVirtual);
+          const diaVirtual = configVirtual?.dia_vencimento
+            ? Number(configVirtual.dia_vencimento)
+            : Number(socioVirtual.dia_vencimento || 10);
+          const vencimentoVirtual = dataVencimento(competenciaVirtual, diaVirtual);
+          const tipoPagamentoOriginalVirtual = socioVirtual.tipo_pagamento || null;
+          const tipoPagamentoVirtual = tipoPagamentoPersistivel(tipoPagamentoOriginalVirtual);
+          const tarifaVirtual = valorTarifa(
+            tarifasVirtual || [],
+            tipoPagamentoOriginalVirtual,
+            contaVirtual || null
+          );
+          const calculadoVirtual = calcularCobranca(
+            valorVirtual,
+            vencimentoVirtual,
+            competenciaVirtual,
+            tarifaVirtual,
+            cobrancasVirtual?.[0] || null
+          );
+
+          const { error: erroInsertVirtual } = await db
+            .from("mensalidades")
+            .insert({
+              socio_id: socioVirtualId,
+              competencia: competenciaVirtual,
+              valor: valorVirtual,
+              valor_base: valorVirtual,
+              tarifa_pagamento: calculadoVirtual.tarifa_pagamento,
+              multa: calculadoVirtual.multa,
+              juros: calculadoVirtual.juros,
+              desconto: calculadoVirtual.desconto,
+              total_cobrado: calculadoVirtual.total_cobrado,
+              dias_atraso: calculadoVirtual.dias_atraso,
+              data_vencimento: vencimentoVirtual,
+              situacao: "em_aberto",
+              tipo_pagamento: tipoPagamentoVirtual,
+              conta_pagadora_id: socioVirtual.conta_bancaria_id || null,
+              motivo: "S.S",
+              observacoes: "S.S — Sem saldo",
+            });
+          if (erroInsertVirtual) throw erroInsertVirtual;
+        }
+
+        return NextResponse.json({
+          ok: true,
+          marcadas: 1,
+          message: "Competência registrada como S.S. — Sem saldo.",
+        });
+      }
+
       const ids: string[] = Array.isArray(body.ids)
         ? body.ids.map((id: unknown) => String(id)).filter(Boolean)
         : [];
