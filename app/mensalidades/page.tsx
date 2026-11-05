@@ -772,7 +772,8 @@ export default function Page() {
       // A grade principal mostra somente associados com cobrança própria.
       // Lançamentos antigos de dependentes sem mensalidade ficam preservados
       // no banco e no histórico individual, mas não aparecem nesta lista.
-      return Boolean(socio) && socioElegivelParaMensalidade(socio);
+      if (!socio) return false;
+      return socioElegivelParaMensalidade(socio);
     }),
     [lista, socioPorId]
   );
@@ -1424,7 +1425,7 @@ export default function Page() {
                           </button>
                           <p className="mt-1 break-words text-xs text-gray-500">Matrícula: {x.socio?.matricula || "—"}</p>
                           <p className="mt-1 break-words text-xs font-bold text-[#005a3c]">Competência: {String(x.competencia || "").slice(5, 7)}/{String(x.competencia || "").slice(0, 4)}</p>
-                          <p className="mt-1 break-words text-sm text-gray-700">{nomes[x.socio?.tipo_socio] || x.socio?.tipo_socio || "Tipo não informado"}</p>
+                          <p className="mt-1 break-words text-sm text-gray-700">{nomes[x.socio?.tipo_socio ?? ""] || x.socio?.tipo_socio || "Tipo não informado"}</p>
                         </div>
                         <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${st[1]}`}>{st[0]}</span>
                       </div>
@@ -1533,7 +1534,7 @@ export default function Page() {
                         <td className="p-3">{x.socio?.matricula || "—"}</td>
 
                         <td className="p-3">
-                          {nomes[x.socio?.tipo_socio] ||
+                          {nomes[x.socio?.tipo_socio ?? ""] ||
                             x.socio?.tipo_socio ||
                             "—"}
                         </td>
@@ -1718,7 +1719,7 @@ export default function Page() {
                   ["Categoria", socioSelecionado.socio?.categoria],
                   [
                     "Tipo de sócio",
-                    nomes[socioSelecionado.socio?.tipo_socio] ||
+                    nomes[socioSelecionado.socio?.tipo_socio ?? ""] ||
                       socioSelecionado.socio?.tipo_socio,
                   ],
                 ].map(([label, valor]) => (
