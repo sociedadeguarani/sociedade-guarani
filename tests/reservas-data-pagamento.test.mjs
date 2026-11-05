@@ -20,7 +20,7 @@ test("recebimento em dinheiro registra a data brasileira do pagamento e aguarda 
 });
 
 test("PIX só é lançado após confirmação administrativa do crédito e usa a data do recebimento", () => {
-  assert.match(reservas, /const dataRecebimento = dataHojeBrasil\(\);[\s\S]{0,380}data_pagamento: dataRecebimento/);
+  assert.match(reservas, /const dataRecebimento = dataHojeBrasil\(\);[\s\S]{0,380}data_pagamento:\s*dataRecebimento/);
   assert.match(reservas, /registrarFinanceiro\(db, atualizada, contaBancariaId, auth\.usuario\.id, "pix", dataRecebimento\)/);
 });
 
