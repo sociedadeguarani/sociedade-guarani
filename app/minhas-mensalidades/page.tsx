@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, Clock, QrCode, Wallet, Upload, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -48,6 +49,7 @@ function situacaoInfo(situacao: string | null) {
 }
 
 export default function MinhasMensalidadesPage() {
+  const router = useRouter();
   const [nome, setNome] = useState("");
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
   const [pix, setPix] = useState<ConfigPix>(null);
@@ -66,7 +68,7 @@ export default function MinhasMensalidadesPage() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          window.location.href = "/login?redirect=/minhas-mensalidades";
+          router.replace("/login?redirect=/minhas-mensalidades");
           return;
         }
         const r = await fetch("/api/mensalidades/minhas", {
@@ -88,15 +90,11 @@ export default function MinhasMensalidadesPage() {
       }
     }
     void carregar();
-  }, []);
+  }, [router]);
 
   const pendentes = useMemo(
     () => mensalidades.filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso"),
     [mensalidades]
-  );
-  const selecionaveis = useMemo(
-    () => pendentes.filter((m) => m.comprovante_status !== "pendente"),
-    [pendentes]
   );
   const totalPendente = pendentes.reduce((soma, m) => soma + Number(m.valor || 0), 0);
   const totalSelecionado = pendentes
