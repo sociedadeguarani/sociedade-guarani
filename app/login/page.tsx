@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { CalendarDays, LogIn, ShieldCheck, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -106,9 +107,11 @@ export default function LoginPage() {
         <div className="grid w-full overflow-hidden rounded-3xl border border-[#dfe7e2] bg-white shadow-xl md:grid-cols-2">
           
           <div className="hidden bg-[#003d2b] p-10 text-white md:flex md:flex-col md:justify-center">
-            <img
+            <Image
               src="/logo-guarani.png"
               alt="Sociedade Guarani"
+              width={64}
+              height={64}
               className="mb-6 h-16 w-16 rounded-2xl bg-white p-2 object-contain"
             />
 
@@ -139,9 +142,11 @@ export default function LoginPage() {
 
           <div className="p-7 sm:p-10">
             <div className="mb-8 text-center">
-              <img
+              <Image
                 src="/logo-guarani.png"
                 alt="Sociedade Guarani"
+                width={64}
+                height={64}
                 className="mx-auto mb-4 h-16 w-16 rounded-2xl bg-[#005a3c] p-2 object-contain md:hidden"
               />
 
