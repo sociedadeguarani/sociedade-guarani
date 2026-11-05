@@ -17,7 +17,6 @@ if (!supabaseKey) {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __guaraniSupabase: SupabaseClient | undefined;
 }
 
