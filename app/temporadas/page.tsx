@@ -1,7 +1,9 @@
 /* app/temporadas/page.tsx */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -9,7 +11,6 @@ import {
   CheckCircle2,
   CreditCard,
   DollarSign,
-  FileText,
   Pencil,
   Plus,
   Printer,
@@ -170,6 +171,7 @@ function statusCarteirinhaTemporada(temporada: Temporada) {
 }
 
 export default function TemporadasPage() {
+  const router = useRouter();
   const [temporadas, setTemporadas] = useState<Temporada[]>([]);
   const [contas, setContas] = useState<Conta[]>([]);
   const [busca, setBusca] = useState("");
@@ -212,17 +214,17 @@ export default function TemporadasPage() {
   const [chequeNumero, setChequeNumero] = useState("");
   const [pagamentoComprovante, setPagamentoComprovante] = useState<File | null>(null);
 
-  async function token() {
+  const token = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.access_token || "";
-  }
+  }, []);
 
-  async function carregar() {
+  const carregar = useCallback(async () => {
     setCarregando(true);
     try {
       const accessToken = await token();
       if (!accessToken) {
-        window.location.href = "/login";
+        router.replace("/login");
         return;
       }
 
@@ -251,12 +253,11 @@ export default function TemporadasPage() {
     } finally {
       setCarregando(false);
     }
-  }
+  }, [router, token]);
 
   useEffect(() => {
-    const agendamento = window.setTimeout(() => { void carregar(); }, 0);
-    return () => window.clearTimeout(agendamento);
-  }, []);
+    void carregar();
+  }, [carregar]);
 
   useEffect(() => {
     let ativo = true;
@@ -1047,7 +1048,7 @@ export default function TemporadasPage() {
                 {(() => {
                   const titular = (abrirParticipantes.participantes || []).find((p) => p.papel === "titular");
                   return titular?.id ? <div className="mt-3 flex items-center gap-3">
-                    <div className="h-16 w-12 overflow-hidden rounded-lg bg-orange-50">{titular.foto_url ? <img src={titular.foto_url} alt={titular.nome || "Titular"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                    <div className="h-16 w-12 overflow-hidden rounded-lg bg-orange-50">{titular.foto_url ? <Image src={titular.foto_url} alt={titular.nome || "Titular"} width={48} height={64} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
                     <label className="cursor-pointer rounded-lg border border-[#d5e0da] px-3 py-2 text-xs font-bold hover:bg-white">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(titular.id!, file); e.currentTarget.value = ""; }} /></label>
                     <div className="block text-xs font-bold text-[#718078]">Validade do exame médico
                       <input type="date" value={validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? ""} disabled={salvando} onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [titular.id!]: e.target.value }))} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-2 text-sm text-[#17382c]" />
@@ -1066,7 +1067,7 @@ export default function TemporadasPage() {
                     (abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").map((p) => (
                       <div key={p.id || `${p.nome}-${p.matricula}`} className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe9e3] p-3">
                         <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <div className="h-14 w-11 shrink-0 overflow-hidden rounded-lg bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Dependente"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                          <div className="h-14 w-11 shrink-0 overflow-hidden rounded-lg bg-orange-50">{p.foto_url ? <Image src={p.foto_url} alt={p.nome || "Dependente"} width={44} height={56} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
                           <div className="min-w-0"><p className="font-bold">{p.nome}</p><p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
                             {p.id && <div className="mt-2 flex flex-wrap items-end gap-2">
                               <label className="inline-block cursor-pointer rounded-lg border px-2 py-1 text-xs font-bold hover:bg-[#f9fbfa]">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(p.id!, file); e.currentTarget.value = ""; }} /></label>
@@ -1146,7 +1147,7 @@ export default function TemporadasPage() {
                   </div>
                   <div className="p-5">
                     <div className="flex gap-3">
-                      <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">{p.foto_url ? <img src={p.foto_url} alt={p.nome || "Participante"} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                      <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">{p.foto_url ? <Image src={p.foto_url} alt={p.nome || "Participante"} width={80} height={96} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
                       <div className="min-w-0"><p className="text-lg font-black text-[#17382c]">{p.nome || "Participante"}</p><p className="mt-1 text-sm font-black text-[#005a3c]">{p.matricula || "Matrícula pendente"}</p><p className="mt-1 text-xs text-[#718078]">{p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</p><p className="mt-1 text-xs text-[#718078]">Validade: {dataBr(abrirCarteirinhas.inicio)} até {dataBr(abrirCarteirinhas.fim)}</p></div>
                     </div>
                     <div className={`mt-4 rounded-lg p-2 text-center text-xs font-black ${statusCartao.bloqueada ? "bg-red-100 text-red-700" : statusCartao.ativa ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>{statusCartao.texto}</div>
