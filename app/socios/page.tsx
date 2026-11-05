@@ -332,7 +332,7 @@ function tipoSocioClasse(tipo?: string | null) {
 }
 
 export default function Home() {
-  const [menu, setMenu] = useState("Sócios");
+  const [menu] = useState("Sócios");
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [usuarioEmail, setUsuarioEmail] = useState("");
 
