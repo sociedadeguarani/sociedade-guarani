@@ -354,7 +354,7 @@ export default function ImprimirCarteirinhasPage() {
       pessoa.fotoUrl ? imagemParaDataUri(pessoa.fotoUrl) : Promise.resolve(""),
     ]);
     const cor = corTipo(pessoa.tipo);
-    const qrSvg = qr.outerHTML.replace(/<svg\b([^>]*)>/, (_tag, atributos: string) => `<svg${atributos.replace(/\s(width|height)="[^"]*"/g, "")} x="690" y="360" width="135" height="135">`);
+    const qrSvg = qr.outerHTML.replace(/<svg\b([^>]*)>/, (_tag, atributos: string) => `<svg${atributos.replace(/\s(width|height)="[^"]*"/g, "")} x="675" y="345" width="155" height="155">`);
     const foto = fotoHref
       ? `<image href="${xml(fotoHref)}" x="55" y="175" width="155" height="190" preserveAspectRatio="xMidYMid slice" />`
       : `<rect x="55" y="175" width="155" height="190" rx="12" fill="#edf2ef"/><text x="132" y="278" text-anchor="middle" font-size="54">👤</text>`;
@@ -362,7 +362,7 @@ export default function ImprimirCarteirinhasPage() {
     const textoNome = pessoa.nome.length > 25
       ? `<text x="245" y="210" font-family="Arial,sans-serif" font-size="${fonteNome}" font-weight="900" fill="#17382c" textLength="420" lengthAdjust="spacingAndGlyphs">${xml(pessoa.nome)}</text>`
       : `<text x="245" y="210" font-family="Arial,sans-serif" font-size="${fonteNome}" font-weight="900" fill="#17382c">${xml(pessoa.nome)}</text>`;
-    const documento = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="856" height="540" viewBox="0 0 856 540"><rect width="856" height="540" rx="30" fill="#ffffff" stroke="#17382c" stroke-width="10"/><path d="M25 35 Q25 25 40 25 H816 Q831 25 831 40 V145 H25 Z" fill="${cor}"/><image href="${xml(logoHref)}" x="52" y="48" width="72" height="72" preserveAspectRatio="xMidYMid meet"/><text x="145" y="76" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#ffffff">SOCIEDADE RECREATIVA GUARANI</text><text x="145" y="116" font-family="Arial,sans-serif" font-size="26" font-weight="900" fill="#ffffff">CARTEIRA DE ASSOCIADO</text>${foto}${textoNome}<text x="245" y="265" font-family="Arial,sans-serif" font-size="22" font-weight="600" fill="#222222">Matrícula: ${xml(pessoa.matricula)}</text><text x="245" y="305" font-family="Arial,sans-serif" font-size="20" font-weight="600" fill="#222222">CPF: ${xml(pessoa.cpf || "—")}</text><rect x="245" y="335" width="400" height="48" rx="12" fill="#edf3ef" stroke="#17382c" stroke-width="3"/><text x="445" y="366" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="900" fill="#10261e" textLength="360" lengthAdjust="spacingAndGlyphs">${xml(pessoa.tipo)}</text><text x="245" y="414" font-family="Arial,sans-serif" font-size="17" font-weight="600" fill="#222222">${xml(pessoa.detalhe)}</text>${qrSvg}</svg>`;
+    const documento = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="856" height="540" viewBox="0 0 856 540"><rect width="856" height="540" rx="30" fill="#ffffff" stroke="#17382c" stroke-width="10"/><path d="M25 35 Q25 25 40 25 H816 Q831 25 831 40 V145 H25 Z" fill="${cor}"/><image href="${xml(logoHref)}" x="45" y="40" width="88" height="88" preserveAspectRatio="xMidYMid meet"/><text x="145" y="76" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#ffffff">SOCIEDADE RECREATIVA GUARANI</text><text x="145" y="116" font-family="Arial,sans-serif" font-size="26" font-weight="900" fill="#ffffff">CARTEIRA DE ASSOCIADO</text>${foto}${textoNome}<text x="245" y="268" font-family="Arial,sans-serif" font-size="28" font-weight="900" fill="#10261e">Matrícula: ${xml(pessoa.matricula)}</text><text x="245" y="305" font-family="Arial,sans-serif" font-size="20" font-weight="600" fill="#222222">CPF: ${xml(pessoa.cpf || "—")}</text><rect x="245" y="335" width="400" height="48" rx="12" fill="#edf3ef" stroke="#17382c" stroke-width="3"/><text x="445" y="366" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="900" fill="#10261e" textLength="360" lengthAdjust="spacingAndGlyphs">${xml(pessoa.tipo)}</text><text x="245" y="414" font-family="Arial,sans-serif" font-size="17" font-weight="600" fill="#222222">${xml(pessoa.detalhe)}</text>${qrSvg}</svg>`;
     const blob = new Blob([documento], { type: "image/svg+xml;charset=utf-8" });
     return { blob, nomeBase: `carteirinha-${pessoa.matricula.replace(/[^a-zA-Z0-9_-]/g, "") || pessoa.id}` };
   }, []);
@@ -479,15 +479,16 @@ export default function ImprimirCarteirinhasPage() {
           .print-page:last-child { page-break-after: auto !important; break-after: auto !important; }
           .print-card { width: 85.6mm !important; height: 53.98mm !important; border: .5mm solid #17382c !important; border-radius: 3mm !important; box-shadow: none !important; overflow: hidden !important; break-inside: avoid !important; page-break-inside: avoid !important; }
           .print-card-header { height: 13mm !important; padding: 2mm 3mm !important; }
-          .print-card-logo { width: 7mm !important; height: 7mm !important; }
+          .print-card-logo { width: 9mm !important; height: 9mm !important; }
           .print-card-title { font-size: 7.2pt !important; color: #ffffff !important; }
           .print-card-subtitle { font-size: 5.2pt !important; color: #ffffff !important; }
           .print-card-content { height: 40.98mm !important; padding: 2.5mm !important; }
           .print-card-photo { width: 16mm !important; height: 21mm !important; }
           .print-card-name { font-size: 9pt !important; line-height: 1.1 !important; color: #111111 !important; }
           .print-card-info { font-size: 6.8pt !important; line-height: 1.35 !important; color: #222222 !important; }
+          .print-card-matricula { font-size: 8.2pt !important; line-height: 1.2 !important; color: #10261e !important; font-weight: 900 !important; white-space: nowrap !important; }
           .print-card-type { display: inline-block !important; max-width: 100% !important; padding: 1mm 2mm !important; border: .25mm solid #17382c !important; border-radius: 1.5mm !important; background: #edf3ef !important; color: #10261e !important; font-size: 8pt !important; font-weight: 900 !important; line-height: 1.15 !important; white-space: normal !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          .print-card-qr { width: 20mm !important; height: 20mm !important; }
+          .print-card-qr { width: 24mm !important; height: 24mm !important; }
           .print-list-page { width: 190mm !important; color: #111 !important; background: white !important; }
           .print-list-page h2 { font-size: 15pt !important; }
           .print-list-page .list-family { break-inside: avoid !important; page-break-inside: avoid !important; }
@@ -606,7 +607,7 @@ export default function ImprimirCarteirinhasPage() {
                       </div>
                       <div className="min-w-0 flex-1 pt-1">
                         <div className="print-card-name break-words text-sm font-black leading-tight text-[#17382c]">{pessoa.nome}</div>
-                        <div className="print-card-info mt-2 text-[10px] text-gray-600">Matrícula: <b>{pessoa.matricula}</b></div>
+                        <div className="print-card-info print-card-matricula mt-2 text-[10px] font-black text-[#10261e]">Matrícula: <b>{pessoa.matricula}</b></div>
                         {pessoa.cpf && <div className="print-card-info mt-1 text-[10px] text-gray-600">CPF: <b>{pessoa.cpf}</b></div>}
                         <div className="print-card-info print-card-type mt-2 inline-block max-w-full rounded px-2 py-1 text-[10px] font-extrabold text-[#10261e]" style={{ background: "#edf3ef", border: "1px solid #17382c", color: "#10261e" }}>{pessoa.tipo}</div>
                       </div>
