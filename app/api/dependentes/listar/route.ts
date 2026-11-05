@@ -33,6 +33,10 @@ type Socio = {
   tipo_pagamento: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  // Campos calculados pela API após o resumo de inadimplência.
+  financeiro_status?: string;
+  meses_atraso?: number;
+  dias_atraso?: number;
 };
 
 type DependenteDb = {
