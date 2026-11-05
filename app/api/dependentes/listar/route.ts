@@ -58,12 +58,11 @@ type DependenteDb = {
   migrado_para_socio_id?: string | null;
 };
 
-type Mensalidade = {
+type ResumoMensalidade = {
   socio_id: string | null;
-  competencia: string | null;
-  data_vencimento: string | null;
-  situacao: string | null;
-  valor: number | string | null;
+  quantidade_atraso: number | string | null;
+  dias_atraso: number | string | null;
+  possui_lancamentos: boolean | null;
 };
 
 function normalizar(valor: unknown): string {
@@ -84,31 +83,6 @@ function ehDependenteFamiliarSocio(socio: Socio): boolean {
 
 function ehTitular(matricula: unknown): boolean {
   return String(matricula ?? "").trim().toUpperCase().endsWith("A");
-}
-
-function isPago(situacao: unknown): boolean {
-  const status = normalizar(situacao);
-  return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada", "isento", "isenta", "cancelado", "cancelada"].includes(status);
-}
-
-function statusPorMensalidades(mensalidades: Mensalidade[], hoje: string) {
-  const mapa = new Map<string, { competencias: Set<string>; dias: number }>();
-  for (const mensalidade of mensalidades) {
-    const socioId = String(mensalidade.socio_id || "");
-    const competencia = String(mensalidade.competencia || "").slice(0, 7);
-    const vencimentoInformado = String(mensalidade.data_vencimento || "").slice(0, 10);
-    const vencimento = vencimentoInformado || (/^\d{4}-\d{2}$/.test(competencia) && competencia < hoje.slice(0, 7) ? `${competencia}-01` : "");
-    if (!socioId || !vencimento || vencimento >= hoje || isPago(mensalidade.situacao)) continue;
-    const referencia = String(mensalidade.competencia || vencimento).slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(referencia)) continue;
-    const atual = mapa.get(socioId) || { competencias: new Set<string>(), dias: 0 };
-    atual.competencias.add(referencia);
-    const venc = new Date(`${vencimento}T00:00:00`);
-    const dataHoje = new Date(`${hoje}T00:00:00`);
-    if (!Number.isNaN(venc.getTime())) atual.dias = Math.max(atual.dias, Math.max(0, Math.floor((dataHoje.getTime() - venc.getTime()) / 86400000)));
-    mapa.set(socioId, atual);
-  }
-  return new Map(Array.from(mapa, ([id, item]) => [id, { quantidade: item.competencias.size, dias: item.dias }]));
 }
 
 async function consultarTodas<T>(consulta: (inicio: number, fim: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -179,6 +153,8 @@ export async function GET(request: Request) {
 
     const dependentesBase = dependentesDb.filter((d) => !ehTitular(d.matricula) && !d.migrado_para_socio_id);
     const chaves = new Set(dependentesBase.flatMap((d) => [normalizar(d.nome), normalizar(d.matricula)]).filter(Boolean));
+    const dependentesSocios = socios.filter(ehDependenteFamiliarSocio).filter((s) => !ehTitular(s.matricula))
+      .filter((s) => !chaves.has(normalizar(s.nome)) && !chaves.has(normalizar(s.matricula)));
 
     const idsComCobranca = podeVerFinanceiro
       ? Array.from(new Set([
@@ -186,27 +162,26 @@ export async function GET(request: Request) {
           ...dependentesBase.map((d) => String(d.socio_id)),
         ].filter((id) => socios.some((s) => String(s.id) === id))))
       : [];
-    const lotesMensalidades = Array.from({ length: Math.ceil(idsComCobranca.length / TAMANHO_LOTE_SOCIOS) }, (_, indice) =>
-      idsComCobranca.slice(indice * TAMANHO_LOTE_SOCIOS, (indice + 1) * TAMANHO_LOTE_SOCIOS)
-    );
-    const resultadosMensalidades = await Promise.all(lotesMensalidades.map(async (lote) => {
-      const registros: Mensalidade[] = [];
-      for (let offset = 0; ; offset += TAMANHO_PAGINA) {
-        const { data, error } = await db.from("mensalidades")
-          .select("socio_id,competencia,data_vencimento,situacao,valor")
-          .in("socio_id", lote)
-          .order("data_vencimento", { ascending: true })
-          .range(offset, offset + TAMANHO_PAGINA - 1);
-        if (error) throw error;
-        const pagina = (data || []) as Mensalidade[];
-        registros.push(...pagina);
-        if (pagina.length < TAMANHO_PAGINA) break;
-      }
-      return registros;
-    }));
-    const mensalidades = resultadosMensalidades.flat();
-    const atrasos = statusPorMensalidades(mensalidades, hoje);
-    const historicoIds = new Set(mensalidades.map((m) => String(m.socio_id || "")).filter(Boolean));
+    // O PostgreSQL agrega o histórico de mensalidades por sócio. A API recebe
+    // somente a quantidade de competências em atraso, os dias e a existência
+    // de histórico; evita transferir centenas/milhares de linhas ao servidor Next.
+    const resumoMensalidades: ResumoMensalidade[] = [];
+    for (let inicio = 0; inicio < idsComCobranca.length; inicio += TAMANHO_LOTE_SOCIOS) {
+      const lote = idsComCobranca.slice(inicio, inicio + TAMANHO_LOTE_SOCIOS);
+      const { data, error } = await db.rpc("dependentes_resumo_inadimplencia", {
+        p_socio_ids: lote,
+        p_hoje: hoje,
+      });
+      if (error) throw new Error(`Falha ao resumir mensalidades: ${error.message}`);
+      resumoMensalidades.push(...((data || []) as ResumoMensalidade[]));
+    }
+    const atrasos = new Map(resumoMensalidades.map((item) => [String(item.socio_id || ""), {
+      quantidade: Number(item.quantidade_atraso || 0),
+      dias: Number(item.dias_atraso || 0),
+    }]));
+    const historicoIds = new Set(resumoMensalidades
+      .filter((item) => item.possui_lancamentos === true)
+      .map((item) => String(item.socio_id || "")));
     const sociosPorMatricula = new Map(socios.map((s) => [String(s.matricula || "").trim().toUpperCase(), s]));
     const sociosComStatus = socios.map((s) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito", meses_atraso: 0 };
@@ -224,8 +199,6 @@ export async function GET(request: Request) {
       };
     });
     const sociosPorId = new Map(sociosComStatus.map((s) => [String(s.id), s]));
-    const dependentesSocios = sociosComStatus.filter(ehDependenteFamiliarSocio).filter((s) => !ehTitular(s.matricula))
-      .filter((s) => !chaves.has(normalizar(s.nome)) && !chaves.has(normalizar(s.matricula)));
 
     const dependentes = dependentesBase.map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
