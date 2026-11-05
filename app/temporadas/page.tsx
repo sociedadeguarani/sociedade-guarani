@@ -256,7 +256,10 @@ export default function TemporadasPage() {
   }, [router, token]);
 
   useEffect(() => {
-    void carregar();
+    const agendamento = window.setTimeout(() => {
+      void carregar();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
   }, [carregar]);
 
   useEffect(() => {
