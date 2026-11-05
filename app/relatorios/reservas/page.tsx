@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
-import { CalendarDays, Download, Printer, RefreshCw } from "lucide-react";
+import { CalendarDays, Download, Printer } from "lucide-react";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
@@ -37,6 +37,11 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
+
+async function tokenAtual() {
+  const { data: sessao } = await supabase.auth.getSession();
+  return sessao.session?.access_token || "";
+}
 
 function moeda(valor: number) {
   return Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -180,12 +185,7 @@ export default function RelatorioReservasPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  async function tokenAtual() {
-    const { data: sessao } = await supabase.auth.getSession();
-    return sessao.session?.access_token || "";
-  }
-
-  async function carregar(opcoes: { status?: "todos" | Status; pagamento?: string; tipoPessoa?: string; dataInicial?: string; dataFinal?: string } = {}) {
+  const carregar = useCallback(async (opcoes: { status?: "todos" | Status; pagamento?: string; tipoPessoa?: string; dataInicial?: string; dataFinal?: string } = {}) => {
     const inicioConsulta = opcoes.dataInicial ?? dataInicial;
     const fimConsulta = opcoes.dataFinal ?? dataFinal;
     const statusConsulta = opcoes.status ?? status;
@@ -216,7 +216,7 @@ export default function RelatorioReservasPage() {
     } finally {
       setCarregando(false);
     }
-  }
+  }, [dataInicial, dataFinal, status, espacoId, pagamento, tipoPessoa]);
 
   // Recarrega automaticamente quando o período ou qualquer filtro mudar.
   // O pequeno debounce evita várias consultas enquanto o usuário ajusta os filtros.
@@ -233,7 +233,7 @@ export default function RelatorioReservasPage() {
       cancelado = true;
       window.clearTimeout(agendamento);
     };
-  }, [dataInicial, dataFinal, status, espacoId, pagamento, tipoPessoa, visualizacao]);
+  }, [carregar, dataInicial, dataFinal, status, espacoId, pagamento, tipoPessoa, visualizacao]);
 
   // Mantém uma barra de rolagem horizontal sempre visível acima da grade,
   // sincronizada com a tabela para facilitar a navegação entre todos os espaços.
@@ -381,15 +381,6 @@ export default function RelatorioReservasPage() {
         setDataFinal(datas.fim);
       }
     }
-  }
-
-  function abrirAgendaLimpeza() {
-    // A mudança de visualização dispara a atualização automática pelo efeito.
-    setVisualizacao("limpeza");
-  }
-
-  function abrirRelatorioAdministrativo() {
-    setVisualizacao("administrativo");
   }
 
   function obterEspacosGrade(): EspacoFiltro[] {
