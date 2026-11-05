@@ -179,8 +179,6 @@ export async function GET(request: Request) {
 
     const dependentesBase = dependentesDb.filter((d) => !ehTitular(d.matricula) && !d.migrado_para_socio_id);
     const chaves = new Set(dependentesBase.flatMap((d) => [normalizar(d.nome), normalizar(d.matricula)]).filter(Boolean));
-    const dependentesSocios = socios.filter(ehDependenteFamiliarSocio).filter((s) => !ehTitular(s.matricula))
-      .filter((s) => !chaves.has(normalizar(s.nome)) && !chaves.has(normalizar(s.matricula)));
 
     const idsComCobranca = podeVerFinanceiro
       ? Array.from(new Set([
@@ -226,6 +224,8 @@ export async function GET(request: Request) {
       };
     });
     const sociosPorId = new Map(sociosComStatus.map((s) => [String(s.id), s]));
+    const dependentesSocios = sociosComStatus.filter(ehDependenteFamiliarSocio).filter((s) => !ehTitular(s.matricula))
+      .filter((s) => !chaves.has(normalizar(s.nome)) && !chaves.has(normalizar(s.matricula)));
 
     const dependentes = dependentesBase.map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
