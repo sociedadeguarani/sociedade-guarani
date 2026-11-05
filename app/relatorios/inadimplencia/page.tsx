@@ -471,7 +471,7 @@ export default function InadimplenciaPage() {
         };
       })
       .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
-  }, [mensalidades, socios, dependentes, socioMap, dependenteMap, responsaveis, hoje, politicaInadimplencia]);
+  }, [mensalidades, socios, dependentes, socioMap, socioPorCpf, dependenteMap, responsaveis, hoje, politicaInadimplencia]);
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
