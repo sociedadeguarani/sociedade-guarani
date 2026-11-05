@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -206,17 +207,6 @@ export default function PainelPage() {
           ? atalhosFuncionario
           : atalhosAssociado;
 
-  const nomeDoPerfil =
-    master
-      ? "Administrador Master"
-      : admin
-        ? "Administrador"
-        : p === "funcionario_inventario"
-          ? "Funcionário - Inventário"
-          : p === "funcionario"
-            ? "Funcionário"
-            : "Associado";
-
   return (
     <main className="min-h-screen bg-[#f8faf9] text-[#173d2e]">
 
@@ -230,9 +220,12 @@ export default function PainelPage() {
           aria-hidden="true"
           className="pointer-events-none absolute right-[-120px] top-[180px] z-0 h-[720px] w-[720px] opacity-[0.075] sm:right-[-70px]"
         >
-          <img
+          <Image
             src="/logo-guarani.png"
             alt=""
+            width={720}
+            height={720}
+            unoptimized
             className="h-full w-full object-contain"
           />
         </div>
