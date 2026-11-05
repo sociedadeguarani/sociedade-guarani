@@ -303,7 +303,7 @@ export default function DependentesPage() {
       // A página não consulta mais a tabela dependentes diretamente pelo cliente.
       // O endpoint usa o usuário autenticado + service role, evitando que uma
       // política RLS antiga esconda os 412 dependentes do Administrador Master.
-      const resposta = await fetch("/api/carteirinhas?modo=dependentes", {
+      const resposta = await fetch("/api/dependentes/listar", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
