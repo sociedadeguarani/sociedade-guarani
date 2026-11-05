@@ -787,12 +787,12 @@ export default function FinanceiroPage() {
   const transferenciasPeriodo = movimentosFluxo
     .filter((m) => m.tipo === "transferencia")
     .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const conciliacoesPendentes = movimentosFinanceiros.filter((m) => !m.conciliado).length;
+  const conciliacoesPendentes = movimentosFluxo.filter((m) => !m.conciliado).length;
   const idsPendentesVisiveis = movimentosVisiveis.filter((m) => !m.conciliado).map((m) => m.id);
   const todosPendentesVisiveisSelecionados =
     idsPendentesVisiveis.length > 0 &&
     idsPendentesVisiveis.every((id) => idsMovimentosSelecionadosConciliacao.includes(id));
-  const movimentosSelecionadosParaConciliar = movimentosFinanceiros.filter(
+  const movimentosSelecionadosParaConciliar = movimentosFluxo.filter(
     (m) => idsMovimentosSelecionadosConciliacao.includes(m.id) && !m.conciliado,
   );
   const totalSelecionadoConciliacao = movimentosSelecionadosParaConciliar.reduce(
