@@ -8,160 +8,119 @@ export async function GET(request: Request) {
   try {
     const supabase = getServiceClient();
     const { searchParams } = new URL(request.url);
-    const competencia = searchParams.get("competencia");
+    const competencia = String(searchParams.get("competencia") || "").trim();
+    const page = Math.max(1, Number(searchParams.get("page") || 1));
+    const pageSize = Math.max(1, Math.min(100, Number(searchParams.get("page_size") || 50)));
+    const dataInicio = searchParams.get("data_inicio") || null;
+    const dataFim = searchParams.get("data_fim") || null;
+    const contaId = searchParams.get("conta_id") || null;
+    const tipo = searchParams.get("tipo") || "todos";
+    const forma = searchParams.get("forma") || "todos";
+    const conciliacao = searchParams.get("conciliacao") || "todos";
+    const aba = searchParams.get("aba") || "fluxo";
 
-    const filtro = String(competencia || "").trim();
-    let inicioCompetencia: string | null = null;
-    let inicioProximaCompetencia: string | null = null;
-    if (/^\d{4}-\d{2}$/.test(filtro)) {
-      const [ano, mes] = filtro.split("-").map(Number);
-      const proximoAno = mes === 12 ? ano + 1 : ano;
-      const proximoMes = mes === 12 ? 1 : mes + 1;
-      inicioCompetencia = `${filtro}-01`;
-      inicioProximaCompetencia = `${proximoAno}-${String(proximoMes).padStart(2, "0")}-01`;
+    let competenciaInicio: string | null = null;
+    let competenciaFim: string | null = null;
+    if (/^\d{4}-\d{2}$/.test(competencia)) {
+      const [ano, mes] = competencia.split("-").map(Number);
+      const proxAno = mes === 12 ? ano + 1 : ano;
+      const proxMes = mes === 12 ? 1 : mes + 1;
+      competenciaInicio = `${competencia}-01`;
+      competenciaFim = `${proxAno}-${String(proxMes).padStart(2, "0")}-01`;
     }
 
-    const carregarTodosMovimentos = async () => {
-      const tamanhoLote = 1000;
-      const todos = [];
-      for (let inicio = 0; ; inicio += tamanhoLote) {
-        let consulta = supabase
-          .from("movimentacoes_financeiras")
-          .select("id,conta_bancaria_id,conta_destino_id,grupo_transferencia,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,origem_id,socio_id,dependente_id,comprovante_url,conciliado,data_conciliacao,observacoes,created_at,created_by")
-          .order("data_movimentacao", { ascending: false })
-          .order("created_at", { ascending: false })
-          .order("id", { ascending: false })
-          .range(inicio, inicio + tamanhoLote - 1);
-        if (inicioCompetencia && inicioProximaCompetencia) {
-          consulta = consulta.gte("data_movimentacao", inicioCompetencia).lt("data_movimentacao", inicioProximaCompetencia);
-        }
-        const { data, error } = await consulta;
-        if (error) throw error;
-        const lote = data || [];
-        todos.push(...lote);
-        if (lote.length < tamanhoLote) break;
-      }
-      return todos;
-    };
+    const { data: resumo, error: resumoError } = await supabase.rpc("financeiro_listar_paginado", {
+      p_page: page,
+      p_page_size: pageSize,
+      p_data_inicio: dataInicio,
+      p_data_fim: dataFim,
+      p_conta_id: contaId,
+      p_tipo: tipo,
+      p_forma: forma,
+      p_conciliacao: conciliacao,
+      p_aba: aba,
+      p_competencia_inicio: competenciaInicio,
+      p_competencia_fim: competenciaFim,
+    });
+    if (resumoError) throw resumoError;
 
-    const [{ data: contas, error: contasError }, movimentosData] = await Promise.all([
-      supabase.from("contas_bancarias").select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").eq("ativo", true).order("nome", { ascending: true }),
-      carregarTodosMovimentos(),
+    const [{ data: contas, error: contasError }] = await Promise.all([
+      supabase.from("contas_bancarias")
+        .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
+        .eq("ativo", true).order("nome", { ascending: true }),
     ]);
-
     if (contasError) throw contasError;
 
-    // Resolve o responsável no servidor com service role. A consulta feita
-    // pelo navegador pode ser filtrada por RLS e deixar o nome em branco.
-    const listaMovimentos = movimentosData || [];
-
-    // Enriquecer lançamentos de temporada usando primeiro a parcela referenciada,
-    // depois o vínculo parcela.movimentacao_id. O fallback legado procura também
-    // uma temporada diretamente pelo origem_id. Não alteramos dados persistidos.
+    const listaMovimentos = Array.isArray(resumo?.movimentos) ? resumo.movimentos : [];
     const movimentosTemporada = listaMovimentos.filter(
-      (movimento) => String(movimento.origem_tipo || "").toLowerCase() === "temporada_parcela"
+      (movimento: { origem_tipo?: string | null }) => String(movimento.origem_tipo || "").toLowerCase() === "temporada_parcela"
     );
     const idsParcelasTemporada = Array.from(new Set(
-      movimentosTemporada.map((movimento) => String(movimento.origem_id || "").trim()).filter(Boolean)
+      movimentosTemporada.map((movimento: { origem_id?: string | null }) => String(movimento.origem_id || "").trim()).filter(Boolean)
     ));
-    const idsMovimentosTemporada = movimentosTemporada.map((movimento) => String(movimento.id));
+    const idsMovimentosTemporada = movimentosTemporada.map((movimento: { id: string }) => String(movimento.id));
 
     let parcelasPorId: { id: string; numero: number | null; temporada_id: string | null; movimentacao_id: string | null }[] = [];
     let parcelasPorMovimento: { id: string; numero: number | null; temporada_id: string | null; movimentacao_id: string | null }[] = [];
     if (idsParcelasTemporada.length) {
-      const resultadoParcelasId = await supabase
-        .from("temporadas_parcelas")
-        .select("id,numero,temporada_id,movimentacao_id")
-        .in("id", idsParcelasTemporada);
-      if (resultadoParcelasId.error) throw resultadoParcelasId.error;
-      parcelasPorId = resultadoParcelasId.data || [];
+      const resultado = await supabase.from("temporadas_parcelas")
+        .select("id,numero,temporada_id,movimentacao_id").in("id", idsParcelasTemporada);
+      if (resultado.error) throw resultado.error;
+      parcelasPorId = resultado.data || [];
     }
     if (idsMovimentosTemporada.length) {
-      const resultadoParcelasMovimento = await supabase
-        .from("temporadas_parcelas")
-        .select("id,numero,temporada_id,movimentacao_id")
-        .in("movimentacao_id", idsMovimentosTemporada);
-      if (resultadoParcelasMovimento.error) throw resultadoParcelasMovimento.error;
-      parcelasPorMovimento = resultadoParcelasMovimento.data || [];
+      const resultado = await supabase.from("temporadas_parcelas")
+        .select("id,numero,temporada_id,movimentacao_id").in("movimentacao_id", idsMovimentosTemporada);
+      if (resultado.error) throw resultado.error;
+      parcelasPorMovimento = resultado.data || [];
     }
-
-    const parcelas = [...(parcelasPorId || []), ...(parcelasPorMovimento || [])];
+    const parcelas = [...parcelasPorId, ...parcelasPorMovimento];
     const parcelaPorId = new Map(parcelas.map((parcela) => [String(parcela.id), parcela]));
-    const parcelaPorMovimento = new Map(
-      parcelas.filter((parcela) => parcela.movimentacao_id).map((parcela) => [String(parcela.movimentacao_id), parcela])
-    );
-    const idsTemporadas = Array.from(new Set(
-      parcelas.map((parcela) => String(parcela.temporada_id || "")).filter(Boolean)
-    ));
-    const idsTemporadasLegadas = Array.from(new Set(
-      movimentosTemporada.map((movimento) => String(movimento.origem_id || "").trim()).filter(Boolean)
-    ));
-    const todosIdsTemporadas = Array.from(new Set([...idsTemporadas, ...idsTemporadasLegadas]));
-    const { data: temporadas, error: erroTemporadas } = todosIdsTemporadas.length
-      ? await supabase.from("temporadas").select("id,responsavel_nome,codigo,matricula").in("id", todosIdsTemporadas)
+    const parcelaPorMovimento = new Map(parcelas.filter((parcela) => parcela.movimentacao_id).map((parcela) => [String(parcela.movimentacao_id), parcela]));
+    const idsTemporadas = Array.from(new Set(parcelas.map((parcela) => String(parcela.temporada_id || "")).filter(Boolean)));
+    const idsTemporadasLegadas = Array.from(new Set(movimentosTemporada.map((movimento: { origem_id?: string | null }) => String(movimento.origem_id || "").trim()).filter(Boolean)));
+    const idsTodasTemporadas = Array.from(new Set([...idsTemporadas, ...idsTemporadasLegadas]));
+    const { data: temporadas, error: temporadasError } = idsTodasTemporadas.length
+      ? await supabase.from("temporadas").select("id,responsavel_nome,codigo,matricula").in("id", idsTodasTemporadas)
       : { data: [], error: null };
-    if (erroTemporadas) throw erroTemporadas;
+    if (temporadasError) throw temporadasError;
     const temporadaPorId = new Map((temporadas || []).map((temporada) => [String(temporada.id), temporada]));
-
     for (const movimento of movimentosTemporada) {
       const parcela = parcelaPorId.get(String(movimento.origem_id || "")) || parcelaPorMovimento.get(String(movimento.id));
-      const temporada = parcela
-        ? temporadaPorId.get(String(parcela.temporada_id || ""))
-        : temporadaPorId.get(String(movimento.origem_id || ""));
+      const temporada = parcela ? temporadaPorId.get(String(parcela.temporada_id || "")) : temporadaPorId.get(String(movimento.origem_id || ""));
       const nome = String(temporada?.responsavel_nome || "").trim();
-      if (nome) {
-        const numeroParcela = parcela?.numero;
-        movimento.descricao = numeroParcela
-          ? `Temporada — ${nome} — Parcela ${numeroParcela}`
-          : `Temporada — ${nome}`;
-      } else if (/temporada/i.test(String(movimento.descricao || "")) && /[0-9a-f]{8}-[0-9a-f-]{27,}/i.test(String(movimento.descricao || ""))) {
-        // Não expor UUID cru como descrição contábil quando o vínculo legado não é resolvido.
+      if (nome) movimento.descricao = parcela?.numero ? `Temporada — ${nome} — Parcela ${parcela.numero}` : `Temporada — ${nome}`;
+      else if (/temporada/i.test(String(movimento.descricao || "")) && /[0-9a-f]{8}-[0-9a-f-]{27,}/i.test(String(movimento.descricao || ""))) {
         movimento.descricao = "Temporada — Responsável não identificado — Parcela a identificar";
       }
     }
 
-    const usuarioIds = Array.from(new Set(
-      listaMovimentos
-        .map((movimento) => movimento.created_by)
-        .filter((id): id is string => Boolean(id))
-    ));
-    const usuariosPorId = new Map<string, { nome: string | null }>();
-
-    if (usuarioIds.length > 0) {
-      const { data: usuarios, error: usuariosError } = await supabase
-        .from("usuarios_sistema")
-        .select("id,nome_exibicao")
-        .in("id", usuarioIds);
-      // A falha ao consultar os perfis não pode impedir o carregamento
-      // das contas e movimentações financeiras. A identificação é complementar.
-      if (usuariosError) {
-        console.error("[api/financeiro][GET] Não foi possível resolver nomes dos responsáveis:", usuariosError);
-      }
-      for (const usuario of usuarios || []) {
-        usuariosPorId.set(String(usuario.id), {
-          nome: usuario.nome_exibicao || null,
-        });
-      }
+    const usuarioIds = Array.from(new Set(listaMovimentos.map((movimento: { created_by?: string | null }) => movimento.created_by).filter(Boolean))) as string[];
+    const usuariosPorId = new Map<string, string | null>();
+    if (usuarioIds.length) {
+      const { data: usuarios, error: usuariosError } = await supabase.from("usuarios_sistema")
+        .select("id,nome_exibicao").in("id", usuarioIds);
+      if (usuariosError) console.error("[api/financeiro][GET] Falha ao resolver responsáveis:", usuariosError);
+      for (const usuario of usuarios || []) usuariosPorId.set(String(usuario.id), usuario.nome_exibicao || null);
     }
+    const movimentosComResponsavel = listaMovimentos.map((movimento: { created_by?: string | null }) => ({
+      ...movimento,
+      created_by_nome: movimento.created_by ? usuariosPorId.get(String(movimento.created_by)) || null : null,
+      created_by_email: null,
+    }));
 
-    const movimentosComResponsavel = listaMovimentos.map((movimento) => {
-      const usuario = movimento.created_by
-        ? usuariosPorId.get(String(movimento.created_by))
-        : null;
-      return {
-        ...movimento,
-        created_by_nome: usuario?.nome || null,
-        created_by_email: null,
-      };
+    return NextResponse.json({
+      contas: contas || [],
+      movimentos: movimentosComResponsavel,
+      page,
+      page_size: pageSize,
+      total_count: Number(resumo?.total_count || 0),
+      totais: resumo?.totais || { entradas: 0, saidas: 0, transferencias: 0, pendentes: 0 },
+      saldos_por_conta: resumo?.saldos_por_conta || {},
     });
-
-    return NextResponse.json({ contas: contas || [], movimentos: movimentosComResponsavel });
   } catch (error) {
     console.error("[api/financeiro][GET]", error);
-    return NextResponse.json(
-      { error: "Não foi possível carregar o financeiro." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Não foi possível carregar o financeiro." }, { status: 500 });
   }
 }
 
