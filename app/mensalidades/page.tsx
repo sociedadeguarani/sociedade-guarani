@@ -927,15 +927,29 @@ export default function Page() {
     tipoCobranca,
   ]);
 
+  // A seleção em massa respeita exatamente os filtros visíveis na tela.
+  // Mensalidades pagas ou ainda não geradas não podem ser selecionadas.
+  const linhasSelecionaveis = filtrada.filter(
+    (item) => item.situacao !== "pago" && item.situacao !== "nao_gerada"
+  );
+  const todosSelecionaveisMarcados =
+    linhasSelecionaveis.length > 0 &&
+    linhasSelecionaveis.every((item) => sel.includes(item.id));
+
+  function alternarSelecaoTodosFiltrados() {
+    if (linhasSelecionaveis.length === 0) return;
+    setSel(todosSelecionaveisMarcados ? [] : linhasSelecionaveis.map((item) => item.id));
+  }
+
   const selecionadasBaixa = useMemo(
     () =>
-      linhasExibicao.filter(
+      filtrada.filter(
         (item) =>
           sel.includes(item.id) &&
           item.situacao !== "pago" &&
           item.situacao !== "nao_gerada"
       ),
-    [linhasExibicao, sel]
+    [filtrada, sel]
   );
 
   const resumoBaixa = useMemo(() => {
@@ -1370,17 +1384,28 @@ export default function Page() {
                 </div>
 
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
-                <button
-                  type="button"
-                  disabled={!selecionadasBaixa.length}
-                  onClick={() => {
-                    setTipoBaixaSelecionada("pago");
-                    setAbrirConfirmacaoBaixa(true);
-                  }}
-                  className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
-                >
-                  💰 Baixar selecionadas ({selecionadasBaixa.length})
-                </button>
+                  <button
+                    type="button"
+                    disabled={linhasSelecionaveis.length === 0}
+                    onClick={alternarSelecaoTodosFiltrados}
+                    aria-pressed={todosSelecionaveisMarcados}
+                    className="w-full rounded-xl border border-[#005a3c] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] hover:bg-[#eef7f2] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                  >
+                    {todosSelecionaveisMarcados
+                      ? "Desmarcar todos"
+                      : `Selecionar todos (${linhasSelecionaveis.length})`}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selecionadasBaixa.length}
+                    onClick={() => {
+                      setTipoBaixaSelecionada("pago");
+                      setAbrirConfirmacaoBaixa(true);
+                    }}
+                    className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
+                  >
+                    💰 Baixar selecionadas ({selecionadasBaixa.length})
+                  </button>
                 </div>
               </div>
             </div>
@@ -1477,7 +1502,17 @@ export default function Page() {
               <table className="w-full min-w-[1200px] text-sm">
                 <thead className="bg-[#e8f3ee]">
                   <tr>
-                    <th className="p-3">✓</th>
+                    <th className="p-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Selecionar todas as mensalidades filtradas"
+                        title="Selecionar todos os registros filtrados que permitem baixa"
+                        disabled={linhasSelecionaveis.length === 0}
+                        checked={todosSelecionaveisMarcados}
+                        onChange={alternarSelecaoTodosFiltrados}
+                        className="h-4 w-4 accent-[#005a3c]"
+                      />
+                    </th>
                     <th className="p-3 text-left">Competência</th>
                     <th className="p-3 text-left">Associado</th>
                     <th className="p-3 text-left">Matrícula</th>
