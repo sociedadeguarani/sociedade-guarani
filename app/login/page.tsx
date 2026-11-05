@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { CalendarDays, LogIn, ShieldCheck, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [identificador, setIdentificador] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -226,9 +228,7 @@ export default function LoginPage() {
 
             <button
               type="button"
-              onClick={() =>
-                (window.location.href = "/reservas?publico=1")
-              }
+              onClick={() => router.push("/reservas?publico=1")}
               className="w-full rounded-xl border-2 border-[#005a3c] bg-white px-4 py-3.5 font-extrabold text-[#005a3c] hover:bg-[#e8f3ee]"
             >
               <CalendarDays className="mr-2 inline h-5 w-5" />
