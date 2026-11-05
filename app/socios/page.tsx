@@ -2003,11 +2003,12 @@ function Socios({
 
                     <td className="px-3 py-3 sm:px-5 sm:py-4">
                       {socio.foto_url ? (
-                        <img
+                        <Image
                           src={socio.foto_url}
                           alt={`Foto de ${socio.nome}`}
-                          loading="lazy"
-                          decoding="async"
+                          width={44}
+                          height={44}
+                          unoptimized
                           className="h-11 w-11 rounded-full object-cover ring-2 ring-[#eef3ef]"
                         />
                       ) : (
@@ -2377,9 +2378,12 @@ function Financeiro({
                       <td className="px-3 py-3 sm:px-5 sm:py-4">
                         <div className="flex items-center gap-3">
                           {socio?.foto_url ? (
-                            <img
+                            <Image
                               src={socio.foto_url}
                               alt={`Foto de ${socio.nome}`}
+                              width={44}
+                              height={44}
+                              unoptimized
                               className="h-11 w-11 rounded-full object-cover ring-2 ring-[#e8f3ee]"
                             />
                           ) : (
@@ -2729,7 +2733,7 @@ function ReciboPagamentoGuarani({
           <div className="p-8 sm:p-10">
             <div className="flex items-start justify-between gap-6 border-b-2 border-[#005a3c] pb-6">
               <div className="flex items-center gap-4">
-                <img src="/logo-guarani.png" alt="Sociedade Guarani" className="h-20 w-20 object-contain" />
+                <Image src="/logo-guarani.png" alt="Sociedade Guarani" width={80} height={80} unoptimized className="h-20 w-20 object-contain" />
                 <div>
                   <h1 className="text-xl font-extrabold uppercase text-[#005a3c]">Sociedade Guarani</h1>
                   <p className="text-sm text-gray-600">Sociedade Recreativa Guarani — S.R.G.</p>
@@ -2979,9 +2983,12 @@ function Dependentes({
         >
           <div className="flex min-w-0 flex-1 items-center gap-4">
             {pessoa.foto_url ? (
-              <img
+              <Image
                 src={pessoa.foto_url}
                 alt={`Foto de ${pessoa.nome}`}
+                width={56}
+                height={56}
+                unoptimized
                 className="h-14 w-14 shrink-0 rounded-full object-cover ring-2 ring-[#e8f3ee]"
               />
             ) : (
@@ -3266,9 +3273,12 @@ function ModalSocio({
               <div className="flex flex-col items-center gap-5 rounded-2xl border border-dashed border-gray-300 bg-[#fafcfb] p-6 sm:flex-row">
                 <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-white shadow-sm">
                   {form.foto_url ? (
-                    <img
+                    <Image
                       src={form.foto_url}
                       alt={`Foto de ${form.nome || "associado"}`}
+                      width={128}
+                      height={128}
+                      unoptimized
                       className="h-full w-full object-cover"
                     />
                   ) : (
