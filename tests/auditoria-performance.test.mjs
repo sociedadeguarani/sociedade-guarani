@@ -34,3 +34,17 @@ test('resumo de dependentes exclui registros promovidos e mantém compatibilidad
   assert.match(resumoDependentes, /dependentesResult\.error/);
   assert.match(resumoDependentes, /!dependente\.migrado_para_socio_id/);
 });
+
+
+test('tela de dependentes usa API específica e não carrega temporadas/carteirinhas', () => {
+  assert.match(paginaDependentes, /fetch\("\/api\/dependentes\/listar"/);
+  assert.doesNotMatch(paginaDependentes, /fetch\("\/api\/carteirinhas\?modo=dependentes"/);
+});
+
+test('API de dependentes seleciona colunas necessárias e limita consulta de mensalidades a sócios com cobrança', () => {
+  const listarDependentes = readFileSync(new URL('../app/api/dependentes/listar/route.ts', import.meta.url), 'utf8');
+  assert.match(listarDependentes, /TAMANHO_PAGINA = 1000/);
+  assert.match(listarDependentes, /socios\.filter\(\(s\) => s\.possui_mensalidade === true\)/);
+  assert.match(listarDependentes, /Cache-Control.*private, no-store/);
+  assert.doesNotMatch(listarDependentes, /temporadas_participantes/);
+});
