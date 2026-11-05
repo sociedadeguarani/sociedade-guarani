@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { Clock3, Settings, UserRound, UserRoundCheck, Users } from "lucide-react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -844,8 +846,8 @@ export default function ReservasPage() {
         <div className="mx-auto max-w-[1400px] space-y-6">
           {publico && (
             <div className="flex items-center justify-between rounded-2xl border bg-white px-5 py-4 shadow-sm">
-              <div className="flex items-center gap-3"><img src="/logo-guarani.png" className="h-12 w-12 object-contain" alt="Sociedade Guarani" /><div><b className="text-[#005a3c]">SOCIEDADE GUARANI</b><div className="text-xs text-gray-500">Reserva de espaços</div></div></div>
-              <button onClick={() => (window.location.href = "/login")} className="rounded-xl border px-4 py-2 text-sm font-bold">Voltar ao login</button>
+              <div className="flex items-center gap-3"><Image src="/logo-guarani.png" width={48} height={48} className="h-12 w-12 object-contain" alt="Sociedade Guarani" /><div><b className="text-[#005a3c]">SOCIEDADE GUARANI</b><div className="text-xs text-gray-500">Reserva de espaços</div></div></div>
+              <Link href="/login" className="rounded-xl border px-4 py-2 text-sm font-bold">Voltar ao login</Link>
             </div>
           )}
 
