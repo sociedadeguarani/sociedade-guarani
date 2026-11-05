@@ -41,10 +41,15 @@ test('tela de dependentes usa API específica e não carrega temporadas/carteiri
   assert.doesNotMatch(paginaDependentes, /fetch\("\/api\/carteirinhas\?modo=dependentes"/);
 });
 
-test('API de dependentes seleciona colunas necessárias e limita consulta de mensalidades a sócios com cobrança', () => {
+test('API de dependentes usa resumo agregado no banco para evitar carregar histórico de mensalidades', () => {
   const listarDependentes = readFileSync(new URL('../app/api/dependentes/listar/route.ts', import.meta.url), 'utf8');
   assert.match(listarDependentes, /TAMANHO_PAGINA = 1000/);
   assert.match(listarDependentes, /socios\.filter\(\(s\) => s\.possui_mensalidade === true\)/);
+  assert.match(listarDependentes, /db\.rpc\(\"dependentes_resumo_inadimplencia\"/);
+  assert.doesNotMatch(listarDependentes, /from\(\"mensalidades\"\)[\s\S]{0,300}\.range\(offset/);
+  const sqlResumo = readFileSync(new URL('../docs/sql/07_dependentes_resumo_inadimplencia.sql', import.meta.url), 'utf8');
+  assert.match(sqlResumo, /count\(distinct l\.competencia_ref\)/);
+  assert.match(sqlResumo, /grant execute on function public\.dependentes_resumo_inadimplencia/);
   assert.match(listarDependentes, /Cache-Control.*private, no-store/);
   assert.doesNotMatch(listarDependentes, /temporadas_participantes/);
 });
