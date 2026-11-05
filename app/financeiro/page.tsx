@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -138,11 +139,6 @@ function formatarHora(data: string | null | undefined) {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatarCompetencia(valor: string) {
-  const p = valor.slice(0, 7).split("-");
-  return p.length === 2 ? `${p[1]}/${p[0]}` : valor;
-}
-
 function ehUrlAbsoluta(valor: string) {
   return /^https?:\/\//i.test(valor);
 }
@@ -249,6 +245,7 @@ function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
 }
 
 export default function FinanceiroPage() {
+  const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
   const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
@@ -555,7 +552,7 @@ export default function FinanceiroPage() {
   const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
   const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
 
-  async function apiFinanceiro(input: string, init: RequestInit = {}) {
+  const apiFinanceiro = useCallback(async (input: string, init: RequestInit = {}) => {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) throw new Error("Sessão expirada.");
@@ -566,9 +563,9 @@ export default function FinanceiroPage() {
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result?.error || "Operação financeira não concluída.");
     return result;
-  }
+  }, []);
 
-  async function carregarFinanceiro() {
+  const carregarFinanceiro = useCallback(async () => {
     setCarregandoFinanceiro(true);
     try {
       const result = await apiFinanceiro("/api/financeiro", { method: "GET" });
@@ -616,7 +613,7 @@ export default function FinanceiroPage() {
     } finally {
       setCarregandoFinanceiro(false);
     }
-  }
+  }, [apiFinanceiro]);
 
   async function abrirComprovante(path: string | null) {
     if (!path) return;
@@ -671,7 +668,7 @@ export default function FinanceiroPage() {
       void carregarFinanceiro();
     }, 0);
     return () => window.clearTimeout(agendamento);
-  }, []);
+  }, [carregarFinanceiro]);
 
   const saldosPorConta = useMemo(() => {
     const saldos = new Map<string, number>(
@@ -1262,9 +1259,7 @@ export default function FinanceiroPage() {
                     </p>
                   </div>
                   <button
-                    onClick={() =>
-                      (window.location.href = "/relatorios/inadimplencia")
-                    }
+                    onClick={() => router.push("/relatorios/inadimplencia")}
                     className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white"
                   >
                     📊 Relatório completo
@@ -1377,9 +1372,7 @@ export default function FinanceiroPage() {
                             </td>
                             <td className="px-4 py-4 text-right">
                               <button
-                                onClick={() => {
-                                  window.location.href = "/socios";
-                                }}
+                                onClick={() => router.push("/socios")}
                                 className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]"
                               >
                                 Abrir cadastro
