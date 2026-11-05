@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Boxes, Crown, Search, ShieldCheck, UserRound, UsersRound, X } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { PERMISSOES_ACOES, PERMISSOES_TELAS, codigoPerfilPermissoes, permissoesPadraoPerfil } from "@/lib/permissoes";
@@ -54,31 +54,31 @@ export default function UsuariosPage() {
   const [form, setForm] = useState({ nome: "", email: "", senha: "", perfil_id: "", socio_id: "", ativo: true });
   const [permissoesSelecionadas, setPermissoesSelecionadas] = useState<string[]>([]);
 
-  async function api(path = "/api/usuarios", init: RequestInit = {}) {
+  const api = useCallback(async (path = "/api/usuarios", init: RequestInit = {}) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error("Sessão expirada. Faça login novamente.");
     return fetch(path, { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${session.access_token}` }, cache: "no-store" });
-  }
+  }, []);
 
-  async function carregar() {
+  const carregar = useCallback(async () => {
     setCarregando(true); setErro("");
     try {
       const response = await api();
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Não foi possível carregar os usuários.");
       setPerfis(data.perfis || []); setSocios(data.socios || []); setUsuarios(data.usuarios || []);
-      if (!form.perfil_id && data.perfis?.length) {
+      if (data.perfis?.length) {
         const inicial = data.perfis.find((p: Perfil) => ["administrador"].includes(p.nome));
-        setForm((f) => ({ ...f, perfil_id: inicial?.id || data.perfis[0].id }));
+        setForm((f) => f.perfil_id ? f : ({ ...f, perfil_id: inicial?.id || data.perfis[0].id }));
       }
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao carregar."); }
     finally { setCarregando(false); }
-  }
+  }, [api]);
 
   useEffect(() => {
     const agendamento = window.setTimeout(() => { void carregar(); }, 0);
     return () => window.clearTimeout(agendamento);
-  }, []);
+  }, [carregar]);
 
   const usuariosFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
