@@ -9,16 +9,19 @@ const dependentes = readFileSync(new URL('app/dependentes/page.tsx', root), 'utf
 
 test('Financeiro pagina a lista sem reduzir a base usada nos cálculos', () => {
   assert.match(page, /const movimentosPorPagina = 50/);
-  assert.match(page, /movimentosFluxo\.slice\(inicio, inicio \+ movimentosPorPagina\)/);
-  assert.match(page, /Os totais e saldos continuam calculados sobre todos os lançamentos/);
-  assert.match(page, /movimentosFluxo\s*\.filter\(\(m\) => m\.tipo === "entrada"\)/);
+  assert.match(page, /setTotalMovimentosFiltrados\(Number\(result\.total_count \|\| 0\)\)/);
+  assert.match(page, /setTotaisFinanceiroServidor/);
+  assert.match(page, /setSaldosFinanceiroServidor/);
+  assert.match(page, /page_size: String\(movimentosPorPagina\)/);
+  assert.match(page, /const movimentosVisiveis = movimentosFluxo/);
 });
 
-test('API Financeiro percorre lotes para não truncar histórico acima de 1.000 registros', () => {
-  assert.match(route, /const tamanhoLote = 1000/);
-  assert.match(route, /\.range\(inicio, inicio \+ tamanhoLote - 1\)/);
-  assert.match(route, /if \(lote\.length < tamanhoLote\) break/);
-  assert.match(route, /\.order\("id", \{ ascending: false \}\)/);
+test('API Financeiro consulta página e agregados no PostgreSQL sem baixar o histórico completo', () => {
+  assert.match(route, /supabase\.rpc\(\"financeiro_listar_paginado\"/);
+  assert.match(route, /p_page_size: pageSize/);
+  assert.match(route, /total_count: Number\(resumo\?\.total_count/);
+  assert.match(route, /saldos_por_conta: resumo\?\.saldos_por_conta/);
+  assert.doesNotMatch(route, /const tamanhoLote = 1000/);
 });
 
 test('botão de migração manual de cadastros antigos não aparece mais na tela Dependentes', () => {
