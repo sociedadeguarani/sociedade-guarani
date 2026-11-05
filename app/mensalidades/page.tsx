@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -15,6 +15,22 @@ const INSTANTE_REFERENCIA_MS = Date.now();
 type Socio = {
   id: string;
   nome: string;
+  matricula?: string | number | null;
+  cpf?: string | null;
+  categoria?: string | null;
+  tipo_socio?: string | null;
+  responsavel_id?: string | null;
+  possui_mensalidade?: boolean | null;
+  situacao?: string | null;
+  ativo?: boolean | null;
+  tipo_pagamento?: string | null;
+  conta_bancaria_id?: string | null;
+  dia_vencimento?: number | null;
+};
+
+type SocioResumo = {
+  id?: string | null;
+  nome?: string | null;
   matricula?: string | number | null;
   cpf?: string | null;
   categoria?: string | null;
@@ -46,7 +62,7 @@ type M = {
   observacoes: string | null;
   motivo: string | null;
   conta_pagadora_id?: string | null;
-  socio?: any;
+  socio?: SocioResumo | null;
   updated_at?: string | null;
 };
 
@@ -196,6 +212,34 @@ function competenciaNaoGeradaAtrasada(item: Pick<M, "situacao" | "competencia" |
   return vencimento.getTime() < Date.now();
 }
 
+function normalizarPagamento(valor: unknown): string {
+  return String(valor || "")
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
+}
+
+function normalizarBanco(valor: unknown): string {
+  return String(valor || "")
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_-]+/g, " ");
+}
+
+function situacaoVisual(item: M) {
+  if (item.situacao === "em_aberto" && item.data_vencimento) {
+    const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
+    if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < INSTANTE_REFERENCIA_MS) {
+      return "em_atraso";
+    }
+  }
+  return item.situacao;
+}
+
 function statusMensalidade(item: M, semSaldoPermitido = false) {
   if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
   if (competenciaNaoGeradaAtrasada(item)) {
@@ -279,7 +323,7 @@ export default function Page() {
     [contas]
   );
 
-  async function h() {
+  const h = useCallback(async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -290,7 +334,7 @@ export default function Page() {
       Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json",
     };
-  }
+  }, []);
 
   async function carregarHistoricoSocio(item: M | null, anoConsulta = anoHistoricoSocio, mesInicial = mes) {
     if (!item?.socio_id) {
@@ -349,38 +393,6 @@ export default function Page() {
         ? atuais.filter((m) => m !== numeroMes)
         : [...atuais, numeroMes].sort((a, b) => a - b)
     );
-  }
-
-  async function gerarCompetenciaAtualDoHistorico() {
-    if (!socioSelecionado || processandoBaixaHistorico) return;
-    const anoAtual = hoje.getFullYear();
-    const mesAtual = hoje.getMonth() + 1;
-    if (anoHistoricoSocio !== anoAtual || mesHistoricoSelecionado !== mesAtual || historicoPorMes.has(mesAtual)) return;
-
-    setProcessandoBaixaHistorico(true);
-    setErro("");
-    setMsg("");
-    try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({
-          acao: "gerar",
-          ano: anoAtual,
-          mes: mesAtual,
-          socio_ids: [String(socioSelecionado.socio_id)],
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Não foi possível gerar a mensalidade do mês vigente.");
-      await carregar();
-      await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio, mesAtual);
-      setMsg(d.message || `Mensalidade de ${String(mesAtual).padStart(2, "0")}/${anoAtual} gerada. Agora você pode registrar o pagamento.`);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Não foi possível gerar a mensalidade do mês vigente.");
-    } finally {
-      setProcessandoBaixaHistorico(false);
-    }
   }
 
   async function baixarMesesDoHistorico() {
@@ -527,7 +539,7 @@ export default function Page() {
     }
   }
 
-  async function carregar() {
+  const carregar = useCallback(async () => {
     setCarregandoMensalidades(true);
     try {
       setErro("");
@@ -572,11 +584,11 @@ export default function Page() {
     } finally {
       setCarregandoMensalidades(false);
     }
-  }
+  }, [ano, mesesSelecionados, h]);
 
   useEffect(() => {
     void carregar();
-  }, [ano, mesesSelecionados]);
+  }, [carregar]);
 
   // As mensalidades são criadas automaticamente para todas as competências
   // selecionadas, inclusive futuras. O administrador não precisa executar
@@ -621,7 +633,7 @@ export default function Page() {
         setPreparandoMensalidadesAutomaticamente(false);
       }
     })();
-  }, [ano, mesesSelecionados, lista, socios]);
+  }, [ano, mesesSelecionados, lista, socios, h, carregar]);
 
   function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
     const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
@@ -664,25 +676,7 @@ export default function Page() {
     });
   }, [socios]);
 
-  function normalizarPagamento(valor: unknown) {
-    return String(valor || "")
-      .toLowerCase()
-      .trim()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_");
-  }
-
-  function normalizarBanco(valor: unknown) {
-    return String(valor || "")
-      .toLowerCase()
-      .trim()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s_-]+/g, " ");
-  }
-
-  function tipoCobranca(m: M) {
+  const tipoCobranca = useCallback((m: M) => {
     const pagamento = normalizarPagamento(m.tipo_pagamento || m.socio?.tipo_pagamento);
 
     // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
@@ -734,9 +728,9 @@ export default function Page() {
     }
 
     return "sem_pagamento";
-  }
+  }, [contasPorId]);
 
-  function podeMarcarSemSaldo(item: M) {
+  const podeMarcarSemSaldo = useCallback((item: M) => {
     // S.S. é uma característica da cobrança DESTE associado.
     // Só é permitido para boleto ou débito em conta com banco vinculado.
     const pagamentoAssociado = normalizarPagamento(item.socio?.tipo_pagamento);
@@ -761,17 +755,7 @@ export default function Page() {
     }
 
     return false;
-  }
-
-  function situacaoVisual(item: M) {
-    if (item.situacao === "em_aberto" && item.data_vencimento) {
-      const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
-      if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < INSTANTE_REFERENCIA_MS) {
-        return "em_atraso";
-      }
-    }
-    return item.situacao;
-  }
+  }, []);
 
   const socioPorId = useMemo(() => {
     const mapa = new Map<string, Socio>();
@@ -897,8 +881,10 @@ export default function Page() {
     contasPorId,
     filtroTipoSocio,
     filtroSituacaoMensalidade,
+    tipoCobranca,
   ]);
-const selecionadasBaixa = useMemo(
+
+  const selecionadasBaixa = useMemo(
     () =>
       linhasExibicao.filter(
         (item) =>
@@ -993,7 +979,7 @@ const selecionadasBaixa = useMemo(
     }
   }
 
-  async function post(body: any) {
+  async function post(body: Record<string, unknown>) {
     setErro("");
     setMsg("");
 
@@ -1090,7 +1076,7 @@ const selecionadasBaixa = useMemo(
     }
 
     return mapa;
-  }, [historicoSocio, anoHistoricoSocio, contas]);
+  }, [historicoSocio, anoHistoricoSocio, podeMarcarSemSaldo]);
 
   function abrirConfiguracao() {
     setAbaConfig("mensalidades");
