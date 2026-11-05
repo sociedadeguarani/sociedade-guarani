@@ -248,6 +248,49 @@ function statusMensalidade(item: M, semSaldoPermitido = false) {
   return status(item.situacao);
 }
 
+function construirHistoricoPorMes(
+  historicoSocio: M[],
+  anoHistoricoSocio: number,
+  podeMarcarSemSaldo: (item: M) => boolean
+): Map<number, M> {
+  const prioridade = (item: M): number => {
+    if (ehSemSaldo(item) && podeMarcarSemSaldo(item)) return 50;
+    if (item.situacao === "isento") return 40;
+    if (item.situacao === "pago") return 30;
+    if (situacaoVisual(item) === "em_atraso") return 20;
+    if (item.situacao === "em_aberto") return 10;
+    return 0;
+  };
+
+  const mapa = new Map<number, M>();
+
+  for (const item of historicoSocio) {
+    const competencia = String(item.competencia || "").slice(0, 10);
+    const partes = competencia.split("-");
+    const anoItem = Number(partes[0]);
+    const mesItem = Number(partes[1]);
+
+    if (anoItem !== Number(anoHistoricoSocio) || mesItem < 1 || mesItem > 12) continue;
+
+    const atual = mapa.get(mesItem);
+    if (!atual) {
+      mapa.set(mesItem, item);
+      continue;
+    }
+
+    const prioridadeAtual = prioridade(atual);
+    const prioridadeNovo = prioridade(item);
+    const dataAtual = String(atual.updated_at || atual.data_pagamento || "");
+    const dataNovo = String(item.updated_at || item.data_pagamento || "");
+
+    if (prioridadeNovo > prioridadeAtual || (prioridadeNovo === prioridadeAtual && dataNovo > dataAtual)) {
+      mapa.set(mesItem, item);
+    }
+  }
+
+  return mapa;
+}
+
 const cobrancaInicial: Cobranca = {
   nome: "Configuração padrão",
   multa_tipo: "percentual",
@@ -879,7 +922,6 @@ export default function Page() {
     linhasExibicao,
     busca,
     cobrancasSelecionadas,
-    contasPorId,
     filtroTipoSocio,
     filtroSituacaoMensalidade,
     tipoCobranca,
@@ -1037,47 +1079,14 @@ export default function Page() {
     }
   }
 
-  // Uma única fonte de verdade para o histórico anual.
-  // Se houver mais de um lançamento na mesma competência, S.S. tem
-  // prioridade visual, depois Isento, Pago, Atrasada e Em aberto.
-  const historicoPorMes = useMemo(() => {
-    const prioridade = (item: M) => {
-      if (ehSemSaldo(item) && podeMarcarSemSaldo(item)) return 50;
-      if (item.situacao === "isento") return 40;
-      if (item.situacao === "pago") return 30;
-      if (situacaoVisual(item) === "em_atraso") return 20;
-      if (item.situacao === "em_aberto") return 10;
-      return 0;
-    };
-
-    const mapa = new Map<number, M>();
-
-    for (const item of historicoSocio) {
-      const competencia = String(item.competencia || "").slice(0, 10);
-      const partes = competencia.split("-");
-      const anoItem = Number(partes[0]);
-      const mesItem = Number(partes[1]);
-
-      if (anoItem !== Number(anoHistoricoSocio) || mesItem < 1 || mesItem > 12) continue;
-
-      const atual = mapa.get(mesItem);
-      if (!atual) {
-        mapa.set(mesItem, item);
-        continue;
-      }
-
-      const prioridadeAtual = prioridade(atual);
-      const prioridadeNovo = prioridade(item);
-      const dataAtual = String(atual.updated_at || atual.data_pagamento || "");
-      const dataNovo = String(item.updated_at || item.data_pagamento || "");
-
-      if (prioridadeNovo > prioridadeAtual || (prioridadeNovo === prioridadeAtual && dataNovo > dataAtual)) {
-        mapa.set(mesItem, item);
-      }
-    }
-
-    return mapa;
-  }, [historicoSocio, anoHistoricoSocio, podeMarcarSemSaldo]);
+  // O histórico anual contém poucos registros. Calculá-lo diretamente evita
+  // uma memoização manual que o React Compiler não consegue preservar.
+  // A prioridade permanece: S.S., Isento, Pago, Atrasada e Em aberto.
+  const historicoPorMes = construirHistoricoPorMes(
+    historicoSocio,
+    anoHistoricoSocio,
+    podeMarcarSemSaldo
+  );
 
   function abrirConfiguracao() {
     setAbaConfig("mensalidades");
