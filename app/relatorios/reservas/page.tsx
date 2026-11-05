@@ -175,7 +175,7 @@ export default function RelatorioReservasPage() {
   const periodoInicial = datasDoPeriodo("mes", String(anoAtual), String(new Date().getMonth() + 1), hoje)!;
   const [dataInicial, setDataInicial] = useState(periodoInicial.inicio);
   const [dataFinal, setDataFinal] = useState(periodoInicial.fim);
-  const [visualizacao, setVisualizacao] = useState<Visualizacao>("administrativo");
+  const visualizacao: Visualizacao = "administrativo";
   const [status, setStatus] = useState<"todos" | Status>("todos");
   const [espacoId, setEspacoId] = useState("todos");
   const [pagamento, setPagamento] = useState("todos");
