@@ -255,6 +255,9 @@ export default function FinanceiroPage() {
   const [filtroInadimplencia, setFiltroInadimplencia] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([]);
   const [movimentosFinanceiros, setMovimentosFinanceiros] = useState<MovimentoFinanceiro[]>([]);
+  const [totalMovimentosFiltrados, setTotalMovimentosFiltrados] = useState(0);
+  const [totaisFinanceiroServidor, setTotaisFinanceiroServidor] = useState({ entradas: 0, saidas: 0, transferencias: 0, pendentes: 0 });
+  const [saldosFinanceiroServidor, setSaldosFinanceiroServidor] = useState<Record<string, number>>({});
   const [paginaMovimentos, setPaginaMovimentos] = useState(1);
   const movimentosPorPagina = 50;
   const [pessoasMovimentos, setPessoasMovimentos] = useState<Map<string, { nome: string; matricula: string | number | null; tipo: "socio" | "dependente"; responsavelNome?: string | null }>>(new Map());
@@ -568,22 +571,39 @@ export default function FinanceiroPage() {
   const carregarFinanceiro = useCallback(async () => {
     setCarregandoFinanceiro(true);
     try {
-      const result = await apiFinanceiro("/api/financeiro", { method: "GET" });
+      const parametros = new URLSearchParams({
+        page: String(paginaMovimentos),
+        page_size: String(movimentosPorPagina),
+        data_inicio: fluxoInicio,
+        data_fim: fluxoFim,
+        conta_id: fluxoConta,
+        tipo: abaFinanceira === "entradas" ? "entrada" : abaFinanceira === "saidas" ? "saida" : fluxoTipo,
+        forma: fluxoForma,
+        conciliacao: fluxoConciliacao,
+        aba: abaFinanceira,
+      });
+      const result = await apiFinanceiro(`/api/financeiro?${parametros.toString()}`, { method: "GET" });
       const movimentos = (result.movimentos || []) as MovimentoFinanceiro[];
       const contas = (result.contas || []) as ContaBancaria[];
       setContasBancarias(contas);
       setMovimentosFinanceiros(movimentos);
+      setTotalMovimentosFiltrados(Number(result.total_count || 0));
+      setTotaisFinanceiroServidor({
+        entradas: Number(result.totais?.entradas || 0),
+        saidas: Number(result.totais?.saidas || 0),
+        transferencias: Number(result.totais?.transferencias || 0),
+        pendentes: Number(result.totais?.pendentes || 0),
+      });
+      setSaldosFinanceiroServidor((result.saldos_por_conta || {}) as Record<string, number>);
 
       const socioIds = Array.from(new Set(movimentos.map((m) => m.socio_id).filter(Boolean))) as string[];
       const dependenteIds = Array.from(new Set(movimentos.map((m) => m.dependente_id).filter(Boolean))) as string[];
       const usuarioIds = Array.from(new Set(movimentos.map((m) => m.created_by).filter(Boolean))) as string[];
-
       if (!socioIds.length && !dependenteIds.length && !usuarioIds.length) {
         setPessoasMovimentos(new Map());
         setUsuariosMovimentos(new Map());
         return;
       }
-
       const [{ data: socios, error: sociosError }, { data: dependentes, error: dependentesError }, { data: usuarios, error: usuariosError }] = await Promise.all([
         socioIds.length ? supabase.from("socios").select("id,nome,matricula").in("id", socioIds) : Promise.resolve({ data: [], error: null }),
         dependenteIds.length ? supabase.from("dependentes").select("id,nome,socio_id").in("id", dependenteIds) : Promise.resolve({ data: [], error: null }),
@@ -592,7 +612,6 @@ export default function FinanceiroPage() {
       if (sociosError) throw sociosError;
       if (dependentesError) throw dependentesError;
       if (usuariosError) throw usuariosError;
-
       const socioRows = (socios || []) as Array<{ id: string; nome: string; matricula: string | number | null }>;
       const dependenteRows = (dependentes || []) as Array<{ id: string; nome: string; socio_id: string | null }>;
       const socioMap = new Map(socioRows.map((socio) => [socio.id, socio]));
@@ -604,16 +623,14 @@ export default function FinanceiroPage() {
       }
       setPessoasMovimentos(mapa);
       const usuarioMap = new Map<string, { nome: string; email: string | null }>();
-      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null }>) {
-        usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: null });
-      }
+      for (const usuario of (usuarios || []) as Array<{ id: string; nome_exibicao: string | null }>) usuarioMap.set(String(usuario.id), { nome: usuario.nome_exibicao || "Usuário sem nome", email: null });
       setUsuariosMovimentos(usuarioMap);
     } catch (error) {
       setMensagem(`Não foi possível carregar o Financeiro. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
     } finally {
       setCarregandoFinanceiro(false);
     }
-  }, [apiFinanceiro]);
+  }, [apiFinanceiro, paginaMovimentos, movimentosPorPagina, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
 
   async function abrirComprovante(path: string | null) {
     if (!path) return;
@@ -664,45 +681,13 @@ export default function FinanceiroPage() {
   }
 
   useEffect(() => {
-    const agendamento = window.setTimeout(() => {
-      void carregarFinanceiro();
-    }, 0);
+    const agendamento = window.setTimeout(() => { void carregarFinanceiro(); }, 0);
     return () => window.clearTimeout(agendamento);
   }, [carregarFinanceiro]);
 
-  const saldosPorConta = useMemo(() => {
-    const saldos = new Map<string, number>(
-      contasBancarias.map((c) => [c.id, Number(c.saldo_inicial || 0)])
-    );
-
-    for (const m of movimentosFinanceiros) {
-      const valor = Number(m.valor || 0);
-      if (m.tipo === "transferencia") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
-        if (m.conta_destino_id) {
-          saldos.set(
-            m.conta_destino_id,
-            (saldos.get(m.conta_destino_id) || 0) + valor
-          );
-        }
-      } else if (m.tipo === "entrada") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) + valor
-        );
-      } else if (m.tipo === "saida") {
-        saldos.set(
-          m.conta_bancaria_id,
-          (saldos.get(m.conta_bancaria_id) || 0) - valor
-        );
-      }
-    }
-
-    return saldos;
-  }, [contasBancarias, movimentosFinanceiros]);
+  const saldosPorConta = useMemo(() => new Map(
+    contasBancarias.map((conta) => [conta.id, Number(saldosFinanceiroServidor[conta.id] ?? conta.saldo_inicial ?? 0)])
+  ), [contasBancarias, saldosFinanceiroServidor]);
 
   const saldoConta = (conta: ContaBancaria) => saldosPorConta.get(conta.id) || 0;
   const contasPorId = useMemo(() => new Map(contasBancarias.map((conta) => [conta.id, conta])), [contasBancarias]);
@@ -737,30 +722,9 @@ export default function FinanceiroPage() {
       .map((m) => String(m.origem_id))
   ), [movimentosFinanceiros]);
 
-  const movimentosFluxo = useMemo(() => {
-    return movimentosFinanceiros.filter((m) => {
-      const data = String(m.data_movimentacao || "").slice(0, 10);
-      if (fluxoInicio && data < fluxoInicio) return false;
-      if (fluxoFim && data > fluxoFim) return false;
-      if (fluxoConta && m.conta_bancaria_id !== fluxoConta) return false;
-
-      if (abaFinanceira === "entradas" && m.tipo !== "entrada") return false;
-      if (abaFinanceira === "saidas" && m.tipo !== "saida") return false;
-      if (abaFinanceira === "aluguéis" && !ehMovimentoDeAluguel(m)) return false;
-
-      if (abaFinanceira === "fluxo" && fluxoTipo !== "todos" && m.tipo !== fluxoTipo) return false;
-      if (fluxoForma !== "todos" && String(m.forma_pagamento || "") !== fluxoForma) return false;
-      if (fluxoConciliacao === "pendente" && m.conciliado) return false;
-      if (fluxoConciliacao === "conciliado" && !m.conciliado) return false;
-      return true;
-    });
-  }, [movimentosFinanceiros, fluxoInicio, fluxoFim, fluxoConta, fluxoTipo, fluxoForma, fluxoConciliacao, abaFinanceira]);
-
-  const totalPaginasMovimentos = Math.max(1, Math.ceil(movimentosFluxo.length / movimentosPorPagina));
-  const movimentosVisiveis = useMemo(() => {
-    const inicio = (paginaMovimentos - 1) * movimentosPorPagina;
-    return movimentosFluxo.slice(inicio, inicio + movimentosPorPagina);
-  }, [movimentosFluxo, paginaMovimentos]);
+  const movimentosFluxo = movimentosFinanceiros;
+  const totalPaginasMovimentos = Math.max(1, Math.ceil(totalMovimentosFiltrados / movimentosPorPagina));
+  const movimentosVisiveis = movimentosFluxo;
 
   useEffect(() => {
     // Redefine a paginação após a atualização dos filtros, fora da fase síncrona do efeito.
@@ -778,16 +742,11 @@ export default function FinanceiroPage() {
     return () => window.clearTimeout(temporizador);
   }, [paginaMovimentos, totalPaginasMovimentos]);
 
-  const entradasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "entrada")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const saidasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "saida")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const transferenciasPeriodo = movimentosFluxo
-    .filter((m) => m.tipo === "transferencia")
-    .reduce((sum, m) => sum + Number(m.valor || 0), 0);
-  const conciliacoesPendentes = movimentosFluxo.filter((m) => !m.conciliado).length;
+  const entradasPeriodo = totaisFinanceiroServidor.entradas;
+  const saidasPeriodo = totaisFinanceiroServidor.saidas;
+  const transferenciasPeriodo = totaisFinanceiroServidor.transferencias;
+  const conciliacoesPendentes = totaisFinanceiroServidor.pendentes;
+
   const idsPendentesVisiveis = movimentosVisiveis.filter((m) => !m.conciliado).map((m) => m.id);
   const todosPendentesVisiveisSelecionados =
     idsPendentesVisiveis.length > 0 &&
@@ -822,6 +781,7 @@ export default function FinanceiroPage() {
       const movimentoAtualizado = result.movimento as MovimentoFinanceiro;
       setMovimentosFinanceiros((lista) => lista.map((m) => m.id === movimentoAtualizado.id ? movimentoAtualizado : m));
       setMovimentoConferindo(null);
+      await carregarFinanceiro();
       setMensagem(result.message || "Conciliação registrada com sucesso.");
     } catch (error) {
       setMensagem(error instanceof Error ? error.message : "Não foi possível registrar a conciliação.");
@@ -856,6 +816,7 @@ export default function FinanceiroPage() {
       );
       setIdsMovimentosSelecionadosConciliacao([]);
       setMostrarConciliacaoEmLote(false);
+      await carregarFinanceiro();
 
       const detalhesFalhas = Array.isArray(result.falhas) && result.falhas.length > 0
         ? ` ${result.falhas.length} lançamento(s) precisam ser conferidos novamente.`
@@ -998,6 +959,7 @@ export default function FinanceiroPage() {
       setMostrarContaModal(false);
       setContaEditando(null);
       setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaObservacoes("");
+      await carregarFinanceiro();
       setMensagem("Conta bancária salva com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível salvar a conta. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
@@ -1066,6 +1028,7 @@ export default function FinanceiroPage() {
       setMovimentosFinanceiros((lista) => [movimento, ...lista]);
       setMostrarMovimentoModal(false);
       setMovDescricao(""); setMovValor(""); setMovCategoria(""); setMovObservacoes(""); setMovArquivo(null);
+      await carregarFinanceiro();
       setMensagem("Movimentação registrada com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível registrar a movimentação. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
@@ -1096,6 +1059,7 @@ export default function FinanceiroPage() {
       setMovimentosFinanceiros((lista) => [movimento, ...lista]);
       setMostrarTransferenciaModal(false);
       setTransValor(""); setTransDescricao("Transferência entre contas"); setTransObservacoes("");
+      await carregarFinanceiro();
       setMensagem("Transferência registrada com sucesso.");
     } catch (error) {
       setMensagem(`Não foi possível registrar a transferência. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
@@ -1718,10 +1682,10 @@ export default function FinanceiroPage() {
                       </tbody>
                     </table>
                   </div>
-                  {movimentosFluxo.length > movimentosPorPagina && (
+                  {totalMovimentosFiltrados > movimentosPorPagina && (
                     <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm text-gray-600">
-                        Exibindo {((paginaMovimentos - 1) * movimentosPorPagina) + 1}–{Math.min(paginaMovimentos * movimentosPorPagina, movimentosFluxo.length)} de {movimentosFluxo.length} lançamentos filtrados. Os totais e saldos continuam calculados sobre todos os lançamentos.
+                        Exibindo {((paginaMovimentos - 1) * movimentosPorPagina) + 1}–{Math.min(paginaMovimentos * movimentosPorPagina, totalMovimentosFiltrados)} de {totalMovimentosFiltrados} lançamentos filtrados. Os totais e saldos continuam calculados sobre todos os lançamentos.
                       </p>
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => setPaginaMovimentos((pagina) => Math.max(1, pagina - 1))} disabled={paginaMovimentos <= 1} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
