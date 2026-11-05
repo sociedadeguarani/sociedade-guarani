@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import Image from "next/image";
 import { createClient } from "@supabase/supabase-js";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import { dependenteTemMensalidade, socioElegivelParaMensalidade, tipoDependenteComMensalidade, tipoDependenteSemMensalidade } from "@/lib/regrasMensalidade";
@@ -437,7 +438,7 @@ export default function Home() {
     window.location.replace("/login");
   }
 
-  async function carregarMensalidades(referencia = competenciaFinanceiro) {
+  const carregarMensalidades = useCallback(async (referencia: string) => {
     setCarregandoFinanceiro(true);
 
     const inicio = primeiroDiaDoMes(referencia);
@@ -479,7 +480,7 @@ export default function Home() {
     }
 
     setCarregandoFinanceiro(false);
-  }
+  }, []);
 
   async function gerarMensalidadesCompetencia(referencia = competenciaFinanceiro) {
     setGerandoMensalidades(true);
@@ -554,14 +555,8 @@ export default function Home() {
     }
   }
 
-  async function abrirFinanceiro() {
-    setMenu("Financeiro");
-    await carregarMensalidades(competenciaFinanceiro);
-  }
-
   function alterarCompetenciaFinanceiro(valor: string) {
     setCompetenciaFinanceiro(valor);
-    void carregarMensalidades(valor);
   }
 
   function editarMensalidade(item: Mensalidade) {
@@ -595,7 +590,7 @@ export default function Home() {
 
     setMensagem("Mensalidade atualizada com sucesso.");
     setMensalidadeEditando(null);
-    await carregarMensalidades();
+    await carregarMensalidades(competenciaFinanceiro);
   }
 
   async function excluirMensalidade(item: Mensalidade) {
@@ -613,7 +608,7 @@ export default function Home() {
     }
 
     setMensagem("Mensalidade excluída.");
-    await carregarMensalidades();
+    await carregarMensalidades(competenciaFinanceiro);
   }
 
   function abrirRegistroPagamento(item: Mensalidade) {
@@ -704,7 +699,7 @@ export default function Home() {
       setMensalidadePagamento(null);
       setArquivoComprovante(null);
       setMensagem("Pagamento registrado com sucesso.");
-      await carregarMensalidades();
+      await carregarMensalidades(competenciaFinanceiro);
       await carregarSocios();
     } catch (error) {
       console.error(error);
@@ -767,12 +762,7 @@ export default function Home() {
     setCarregandoRelatorio(false);
   }
 
-  function abrirRelatorios() {
-    setMenu("Relatórios");
-    void carregarRelatorioFinanceiro(relatorioCompetencia);
-  }
-
-  async function carregarContasBancarias() {
+  const carregarContasBancarias = useCallback(async () => {
     const { data, error } = await supabase
       .from("contas_bancarias")
       .select("id,nome,banco,agencia,conta,ativo")
@@ -786,9 +776,9 @@ export default function Home() {
     }
 
     setContasBancarias((data || []) as ContaBancaria[]);
-  }
+  }, []);
 
-  async function carregarSocios() {
+  const carregarSocios = useCallback(async () => {
     setCarregando(true);
 
     try {
@@ -847,16 +837,22 @@ export default function Home() {
     }
 
     setCarregando(false);
-  }
+  }, []);
 
   useEffect(() => {
     const agendamento = window.setTimeout(() => {
       void carregarSocios();
       void carregarContasBancarias();
+    }, 0);
+    return () => window.clearTimeout(agendamento);
+  }, [carregarSocios, carregarContasBancarias]);
+
+  useEffect(() => {
+    const agendamento = window.setTimeout(() => {
       void carregarMensalidades(competenciaFinanceiro);
     }, 0);
     return () => window.clearTimeout(agendamento);
-  }, []);
+  }, [carregarMensalidades, competenciaFinanceiro]);
 
   function novoSocio() {
     if (somenteConsulta) return;
@@ -1202,7 +1198,6 @@ export default function Home() {
 
     return socios.filter((socio) => {
       const remido = socioEhRemido(socio);
-      const remidoTitular = remido && !socio.responsavel_id;
       // A tela Sócios inclui quem possui mensalidade e os titulares patrimoniais remidos.
       // Dependentes sem mensalidade permanecem na tela Dependentes/Famílias.
       if (!socioDeveAparecerNaLista(socio)) return false;
@@ -1266,9 +1261,11 @@ export default function Home() {
           <div className="flex items-center gap-4">
 
             <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#003d2b] p-1.5 shadow-sm">
-              <img
+              <Image
                 src="/logo-guarani.png"
                 alt="Sociedade Guarani"
+                width={48}
+                height={48}
                 className="h-full w-full object-contain"
               />
             </div>
@@ -1585,38 +1582,6 @@ function Inicio({
 
 
 /* =========================
-   CORES DAS CATEGORIAS
-========================= */
-
-function categoriaClasse(categoria?: string | null) {
-  const valor = (categoria || "").toLowerCase();
-
-  if (valor.includes("patrimonial") && valor.includes("depend")) {
-    return "bg-[#e8f3ee] text-[#2d8061] ring-1 ring-[#b9ddcc]";
-  }
-  if (valor.includes("patrimonial")) {
-    return "bg-[#dceee6] text-[#003d2b] ring-1 ring-[#9fcdb9]";
-  }
-  if (valor.includes("contribuinte") && valor.includes("depend")) {
-    return "bg-[#e8f0fb] text-[#376aa6] ring-1 ring-[#bdd0ea]";
-  }
-  if (valor.includes("contribuinte")) {
-    return "bg-[#dce8f7] text-[#064b9b] ring-1 ring-[#aac4e4]";
-  }
-  if (valor.includes("temporário") || valor.includes("temporario") ||
-      valor.includes("transitório") || valor.includes("transitorio")) {
-    return "bg-[#fff4cc] text-[#8a6700] ring-1 ring-[#f1d879]";
-  }
-  if (valor.includes("temporada")) {
-    return "bg-[#ffead9] text-[#b65308] ring-1 ring-[#f2bb91]";
-  }
-  if (valor.includes("benemérito") || valor.includes("benemerito")) {
-    return "bg-[#f0e9f8] text-[#6d4b91] ring-1 ring-[#d5c5e6]";
-  }
-  return "bg-[#eef3ef] text-[#50625a] ring-1 ring-[#d7e1dc]";
-}
-
-/* =========================
    SÓCIOS
 ========================= */
 
@@ -1638,7 +1603,6 @@ function Socios({
   excluirSocio,
   carregando,
   mostrarSomenteDependentes,
-  setMostrarSomenteDependentes,
   somenteConsulta,
   camposVisiveis,
 }: {
