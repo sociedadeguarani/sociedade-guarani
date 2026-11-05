@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { Clock3, Settings, UserRound, UserRoundCheck, Users } from "lucide-react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
@@ -27,6 +27,11 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
+
+async function tokenAtual() {
+  const { data: sessao } = await supabase.auth.getSession();
+  return sessao.session?.access_token || "";
+}
 
 type Aba = "reservar" | "reservas" | "admin";
 type Perfil = "funcionario" | "administrador" | "administrador_master" | "funcionario_inventario" | "associado" | "";
@@ -140,12 +145,7 @@ export default function ReservasPage() {
 
   const podeConfigurar = perfil === "administrador" || perfil === "administrador_master";
 
-  async function tokenAtual() {
-    const { data: sessao } = await supabase.auth.getSession();
-    return sessao.session?.access_token || "";
-  }
-
-  async function recarregarDados(modoPublico = publico) {
+  const recarregarDados = useCallback(async (modoPublico = false) => {
     setCarregando(true);
     setErro("");
     try {
@@ -192,9 +192,9 @@ export default function ReservasPage() {
     } finally {
       setCarregando(false);
     }
-  }
+  }, []);
 
-  async function carregarReservas(opcoes?: { data?: string; espacoId?: string; todas?: boolean }) {
+  const carregarReservas = useCallback(async (opcoes?: { data?: string; espacoId?: string; todas?: boolean }) => {
     if (publico) return;
     setCarregandoReservas(true);
     try {
@@ -217,7 +217,7 @@ export default function ReservasPage() {
     } finally {
       setCarregandoReservas(false);
     }
-  }
+  }, [publico]);
 
   async function carregarPessoas() {
     if (publico || pessoasCarregadas || carregandoPessoas) return;
@@ -289,19 +289,19 @@ export default function ReservasPage() {
       void recarregarDados(modoPublico);
     }, 0);
     return () => window.clearTimeout(agendamento);
-  }, []);
+  }, [recarregarDados]);
 
   useEffect(() => {
     if (publico || aba !== "reservas") return;
     const agendamento = window.setTimeout(() => { void carregarReservas({ todas: true }); }, 0);
     return () => window.clearTimeout(agendamento);
-  }, [aba, publico]);
+  }, [aba, publico, carregarReservas]);
 
   useEffect(() => {
     if (publico || aba !== "reservar" || !data || !espacoId) return;
     const agendamento = window.setTimeout(() => { void carregarReservas({ data, espacoId }); }, 0);
     return () => window.clearTimeout(agendamento);
-  }, [aba, publico, data, espacoId]);
+  }, [aba, publico, data, espacoId, carregarReservas]);
 
   useEffect(() => {
     if (espacos.length === 0 || espacos.some((item) => item.id === espacoId)) return;
@@ -861,7 +861,7 @@ export default function ReservasPage() {
             )}
           </div>
 
-          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{erro}<button className="ml-3 font-bold underline" onClick={() => void recarregarDados()}>Tentar novamente</button></div>}
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{erro}<button className="ml-3 font-bold underline" onClick={() => void recarregarDados(publico)}>Tentar novamente</button></div>}
 
           {carregando ? (
             <div className="grid gap-4 lg:grid-cols-2">
