@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { assinarArquivosEmLote } from "@/lib/storageSignedUrls";
+import { dataHojeBrasil } from "@/lib/politicaInadimplencia";
 
 export const dynamic = "force-dynamic";
 
@@ -252,6 +253,7 @@ async function registrarFinanceiro(
   contaBancariaId: string,
   usuarioId: string,
   formaPagamento: "pix" | "dinheiro",
+  dataRecebimento: string,
 ) {
   if (!contaBancariaId) throw new Error("Informe a conta bancária/caixa que recebeu o pagamento.");
 
@@ -268,7 +270,9 @@ async function registrarFinanceiro(
   if (existente) return existente;
 
   const normalizada = normalizarReserva(reserva);
-  const conciliado = true;
+  // PIX entra aqui somente depois da conferência administrativa do crédito.
+  // Dinheiro recebido na portaria aguarda a conciliação do caixa/extrato.
+  const conciliado = formaPagamento === "pix";
   const { data: movimento, error } = await db
     .from("movimentacoes_financeiras")
     .insert({
@@ -279,7 +283,7 @@ async function registrarFinanceiro(
       categoria: "Reserva",
       descricao: `Reserva - ${String(normalizada.nome || "Responsável")}${normalizada.data ? ` - ${String(normalizada.data)}` : ""}`,
       valor: Number(normalizada.valor || 0),
-      data_movimentacao: typeof normalizada.data === "string" ? normalizada.data : new Date().toISOString().slice(0, 10),
+      data_movimentacao: dataRecebimento,
       forma_pagamento: formaPagamento,
       origem_tipo: "reserva",
       origem_id: String(reserva.id),
@@ -586,11 +590,12 @@ export async function POST(request: Request) {
     try {
       if (pagamento === "dinheiro") {
         if (!contaBancariaId) throw new Error("Selecione a conta/caixa que recebeu o dinheiro.");
-        const movimento = await registrarFinanceiro(db, reserva, contaBancariaId, auth.usuario.id, "dinheiro");
+        const dataRecebimento = dataHojeBrasil();
+        const movimento = await registrarFinanceiro(db, reserva, contaBancariaId, auth.usuario.id, "dinheiro", dataRecebimento);
         try {
           const { data: atualizada, error: updateError } = await db
             .from("reservas")
-            .update({ data_pagamento: new Date().toISOString().slice(0, 10) })
+            .update({ data_pagamento: dataRecebimento })
             .eq("id", reserva.id)
             .select("*")
             .single();
@@ -660,6 +665,7 @@ export async function PATCH(request: Request) {
       const contaBancariaId = String(body.conta_bancaria_id || "").trim();
       if (!contaBancariaId) return NextResponse.json({ error: "Informe a conta bancária que recebeu o PIX." }, { status: 400 });
 
+      const dataRecebimento = dataHojeBrasil();
       const agora = new Date().toISOString();
 
       // Primeiro "assumimos" a confirmação da reserva de forma condicional.
@@ -669,7 +675,7 @@ export async function PATCH(request: Request) {
         .update({
           situacao: "confirmada",
           tipo_pagamento: "pix",
-          data_pagamento: agora.slice(0, 10),
+          data_pagamento: dataRecebimento,
           comprovante_status: semComprovante ? "confirmado_sem_comprovante" : "aprovado",
           comprovante_aprovado_por: auth.usuario.id,
           comprovante_aprovado_em: agora,
@@ -698,7 +704,7 @@ export async function PATCH(request: Request) {
       }
 
       try {
-        await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "pix");
+        await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "pix", dataRecebimento);
         return NextResponse.json({
           reserva: normalizarReserva(atualizada),
           message: semComprovante
@@ -922,9 +928,10 @@ export async function PATCH(request: Request) {
 
       try {
         if (pagamento === "dinheiro") {
-          const movimento = await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "dinheiro");
+          const dataRecebimento = dataHojeBrasil();
+          const movimento = await registrarFinanceiro(db, atualizada, contaBancariaId, auth.usuario.id, "dinheiro", dataRecebimento);
           try {
-            const { error: pagamentoError } = await db.from("reservas").update({ data_pagamento: new Date().toISOString().slice(0, 10) }).eq("id", id);
+            const { error: pagamentoError } = await db.from("reservas").update({ data_pagamento: dataRecebimento }).eq("id", id);
             if (pagamentoError) throw pagamentoError;
           } catch (pagamentoError) {
             if (movimento?.id) await db.from("movimentacoes_financeiras").delete().eq("id", movimento.id);
