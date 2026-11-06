@@ -143,19 +143,6 @@ function ehUrlAbsoluta(valor: string) {
   return /^https?:\/\//i.test(valor);
 }
 
-function ehMovimentoDeAluguel(movimento: MovimentoFinanceiro) {
-  if (movimento.tipo !== "entrada") return false;
-  const texto = normalizarStatusMensalidade(
-    `${movimento.categoria || ""} ${movimento.descricao || ""} ${movimento.origem_tipo || ""} ${movimento.observacoes || ""}`
-  );
-  return (
-    String(movimento.origem_tipo || "").toLowerCase() === "reserva" ||
-    texto.includes("alug") ||
-    texto.includes("locac") ||
-    texto.includes("arrendamento")
-  );
-}
-
 function normalizarStatusMensalidade(valor: unknown) {
   return String(valor || "")
     .normalize("NFD")
