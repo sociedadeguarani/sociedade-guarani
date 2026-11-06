@@ -396,13 +396,20 @@ export async function GET(request: Request) {
     const cpfsSocios = new Set(
       resultado.map((s) => String(s.cpf || "").replace(/\D/g, "")).filter((cpf) => cpf.length === 11)
     );
-    const dependentesSemDuplicidade = ((dependentesDb || []) as unknown as DependenteCarteirinha[]).filter((d) => {
-      const matricula = String(d.matricula || "").trim().toUpperCase();
-      const cpf = String(d.cpf || "").replace(/\D/g, "");
-      if (matricula && matriculasSocios.has(matricula)) return false;
-      if (cpf.length === 11 && cpfsSocios.has(cpf)) return false;
-      return true;
-    });
+    const dependentesAtivosParaCarteirinha = ((dependentesDb || []) as unknown as DependenteCarteirinha[])
+      // Cadastros promovidos para sócio permanecem no banco para histórico,
+      // mas a carteirinha deve ser emitida somente pelo registro em socios.
+      .filter((d) => !d.migrado_para_socio_id)
+      .filter((d) => {
+        const matricula = String(d.matricula || "").trim().toUpperCase();
+        const cpf = String(d.cpf || "").replace(/\D/g, "");
+        if (matricula && matriculasSocios.has(matricula)) return false;
+        if (cpf.length === 11 && cpfsSocios.has(cpf)) return false;
+        return true;
+      });
+    // Alias com nome histórico mantido para os testes de regressão e clareza
+    // na etapa de deduplicação por matrícula/CPF.
+    const dependentesSemDuplicidade = dependentesAtivosParaCarteirinha;
 
     const dependentes = dependentesSemDuplicidade.map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
