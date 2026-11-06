@@ -195,6 +195,13 @@ function ehDependenteFamiliarSocio(s: SocioApi) {
   );
 }
 
+function normalizarIdSocio(valor: unknown): string {
+  const id = String(valor ?? "").trim();
+  // IDs sintéticos da interface podem chegar de registros antigos como `socio:<uuid>`.
+  // As colunas socio_id/responsavel_id no Supabase aceitam somente o UUID de origem.
+  return id.startsWith("socio:") ? id.slice("socio:".length).trim() : id;
+}
+
 export default function DependentesPage() {
   const router = useRouter();
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -464,7 +471,7 @@ export default function DependentesPage() {
     setEditando(d);
     setFotoArquivo(null);
     setForm({
-      socio_id: d.socio_id,
+      socio_id: normalizarIdSocio(d.socio_id),
       nome: d.nome || "",
       cpf: d.cpf || "",
       data_nascimento: d.data_nascimento || "",
@@ -499,13 +506,14 @@ export default function DependentesPage() {
     setErro("");
     setSucesso("");
 
-    if (!form.socio_id) return setErro("Selecione o sócio responsável.");
+    const socioIdNormalizado = normalizarIdSocio(form.socio_id);
+    if (!socioIdNormalizado) return setErro("Selecione o sócio responsável.");
     if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
 
     setSalvando(true);
 
     const dados = {
-      socio_id: form.socio_id,
+      socio_id: socioIdNormalizado,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
@@ -521,7 +529,7 @@ export default function DependentesPage() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
-    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
+    const socioResponsavel = socios.find((s) => normalizarIdSocio(s.id) === socioIdNormalizado);
     if (!socioResponsavel) {
       setErro("Selecione um sócio responsável válido.");
       setSalvando(false);
