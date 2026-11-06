@@ -143,6 +143,19 @@ function ehUrlAbsoluta(valor: string) {
   return /^https?:\/\//i.test(valor);
 }
 
+function ehMovimentoDeAluguel(movimento: MovimentoFinanceiro) {
+  if (movimento.tipo !== "entrada") return false;
+  const texto = normalizarStatusMensalidade(
+    `${movimento.categoria || ""} ${movimento.descricao || ""} ${movimento.origem_tipo || ""} ${movimento.observacoes || ""}`
+  );
+  return (
+    String(movimento.origem_tipo || "").toLowerCase() === "reserva" ||
+    texto.includes("alug") ||
+    texto.includes("locac") ||
+    texto.includes("arrendamento")
+  );
+}
+
 function normalizarStatusMensalidade(valor: unknown) {
   return String(valor || "")
     .normalize("NFD")
@@ -709,7 +722,9 @@ export default function FinanceiroPage() {
       .map((m) => String(m.origem_id))
   ), [movimentosFinanceiros]);
 
-  const movimentosFluxo = movimentosFinanceiros;
+  const movimentosFluxo = abaFinanceira === "aluguéis"
+    ? movimentosFinanceiros.filter(ehMovimentoDeAluguel)
+    : movimentosFinanceiros;
   const totalPaginasMovimentos = Math.max(1, Math.ceil(totalMovimentosFiltrados / movimentosPorPagina));
   const movimentosVisiveis = movimentosFluxo;
 
@@ -966,7 +981,7 @@ export default function FinanceiroPage() {
   }
 
   async function salvarConferenciaSaldo() {
-    if (!contaConferindo) return;
+    if (!contaConferindo || salvandoConferencia) return;
     const saldoInformado = Number(String(saldoConferido).replace(",", "."));
     if (!Number.isFinite(saldoInformado) || saldoInformado < 0) { setMensagem("Informe um saldo bancário válido."); return; }
     setSalvandoConferencia(true);
