@@ -21,6 +21,7 @@ type Socio = {
   responsavel_id: string | null;
   tipo_socio: string | null;
   categoria: string | null;
+  parentesco: string | null;
   cpf: string | null;
   data_nascimento: string | null;
   exame_medico_validade: string | null;
@@ -124,7 +125,7 @@ export async function GET(request: Request) {
     const politica = podeVerFinanceiro ? await carregarPolitica(db) : POLITICA_INADIMPLENCIA_PADRAO;
     const hoje = dataHojeBrasil();
 
-    const colunasSocio = ["id", "matricula", "nome", "situacao", "responsavel_id", "tipo_socio", "categoria", "cpf", "data_nascimento", "telefone", "whatsapp", "foto_url"];
+    const colunasSocio = ["id", "matricula", "nome", "situacao", "responsavel_id", "tipo_socio", "categoria", "parentesco", "cpf", "data_nascimento", "telefone", "whatsapp", "foto_url"];
     if (podeVerExameMedico) colunasSocio.push("exame_medico_validade");
     if (podeVerFinanceiro) colunasSocio.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento");
 
@@ -235,7 +236,7 @@ export async function GET(request: Request) {
       cpf: s.cpf,
       data_nascimento: s.data_nascimento,
       exame_medico_validade: s.exame_medico_validade,
-      parentesco: null,
+      parentesco: s.parentesco || null,
       telefone: s.telefone || s.whatsapp || null,
       ativo: normalizar(s.situacao) !== "inativo",
       created_at: null,
