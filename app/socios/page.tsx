@@ -342,8 +342,6 @@ export default function Home() {
   const [filtroTipoSocio, setFiltroTipoSocio] = useState<string[]>([]);
   const [filtroRemissao, setFiltroRemissao] = useState("todas");
   const [filtroSituacaoSocio, setFiltroSituacaoSocio] = useState("todas");
-  const [paginaSocios, setPaginaSocios] = useState(1);
-  const tamanhoPaginaSocios = 50;
   const [buscaResponsavel, setBuscaResponsavel] = useState("");
   const [abrirCadastro, setAbrirCadastro] = useState(false);
   const [socioEditando, setSocioEditando] = useState<Socio | null>(null);
@@ -1240,16 +1238,6 @@ export default function Home() {
     });
   }, [socios, busca, mostrarSomenteDependentes, filtroTipoSocio, filtroRemissao, filtroSituacaoSocio]);
 
-  useEffect(() => {
-    setPaginaSocios(1);
-  }, [busca, mostrarSomenteDependentes, filtroTipoSocio, filtroRemissao, filtroSituacaoSocio]);
-
-  const totalPaginasSocios = Math.max(1, Math.ceil(sociosFiltrados.length / tamanhoPaginaSocios));
-  const sociosPagina = useMemo(() => {
-    const inicio = (paginaSocios - 1) * tamanhoPaginaSocios;
-    return sociosFiltrados.slice(inicio, inicio + tamanhoPaginaSocios);
-  }, [sociosFiltrados, paginaSocios]);
-
   if (verificandoLogin) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f8faf9]">
@@ -1639,6 +1627,18 @@ function Socios({
   somenteConsulta: boolean;
   camposVisiveis: { financeiro: boolean; exameMedico: boolean };
 }) {
+  const tamanhoPaginaSocios = 50;
+  const [paginaSocios, setPaginaSocios] = useState(1);
+  const totalPaginasSocios = Math.max(1, Math.ceil(socios.length / tamanhoPaginaSocios));
+  const sociosPagina = useMemo(() => {
+    const inicio = (paginaSocios - 1) * tamanhoPaginaSocios;
+    return socios.slice(inicio, inicio + tamanhoPaginaSocios);
+  }, [socios, paginaSocios]);
+
+  useEffect(() => {
+    setPaginaSocios(1);
+  }, [busca, filtroTipoSocio, filtroRemissao, filtroSituacaoSocio, mostrarSomenteDependentes]);
+
   const filtrosRelatorio = [
     busca.trim() ? `Busca: ${busca.trim()}` : null,
     filtroTipoSocio.length
@@ -1970,7 +1970,7 @@ function Socios({
                 </tr>
               )}
 
-              {!carregando && sociosFiltrados.length === 0 && (
+              {!carregando && socios.length === 0 && (
                 <tr>
                   <td
                     colSpan={camposVisiveis.financeiro ? 11 : 9}
@@ -2148,10 +2148,10 @@ function Socios({
 
         </div>
 
-        {!carregando && sociosFiltrados.length > 0 && (
+        {!carregando && socios.length > 0 && (
           <div className="flex flex-col gap-3 border-t border-[#e2ebe6] bg-[#fbfdfc] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-gray-500">
-              Exibindo {(paginaSocios - 1) * tamanhoPaginaSocios + 1}–{Math.min(paginaSocios * tamanhoPaginaSocios, sociosFiltrados.length)} de {sociosFiltrados.length} sócios filtrados (total disponível: {socios.length}).
+              Exibindo {(paginaSocios - 1) * tamanhoPaginaSocios + 1}–{Math.min(paginaSocios * tamanhoPaginaSocios, socios.length)} de {socios.length} sócios filtrados (total disponível: {socios.length}).
             </p>
             <div className="flex items-center justify-end gap-2">
               <button type="button" onClick={() => setPaginaSocios((pagina) => Math.max(1, pagina - 1))} disabled={paginaSocios <= 1} className="rounded-lg border border-[#d5e0da] bg-white px-3 py-2 text-xs font-bold text-[#005a3c] disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
