@@ -17,6 +17,7 @@ type Socio = {
   responsavel_id?: string | null;
   tipo_socio?: string | null;
   categoria?: string | null;
+  parentesco?: string | null;
   cpf?: string | null;
   data_nascimento?: string | null;
   exame_medico_validade?: string | null;
@@ -68,6 +69,7 @@ type SocioApi = {
   responsavel_id?: string | number | null;
   tipo_socio?: string | null;
   categoria?: string | null;
+  parentesco?: string | null;
   cpf?: string | null;
   data_nascimento?: string | null;
   exame_medico_validade?: string | null;
@@ -324,6 +326,7 @@ export default function DependentesPage() {
         responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
         tipo_socio: s.tipo_socio ?? null,
         categoria: s.categoria ?? null,
+        parentesco: s.parentesco ?? null,
         cpf: s.cpf ?? null,
         data_nascimento: s.data_nascimento ?? null,
         exame_medico_validade: s.exame_medico_validade ?? null,
@@ -396,7 +399,7 @@ export default function DependentesPage() {
           cpf: s.cpf ?? null,
           data_nascimento: s.data_nascimento ?? null,
           exame_medico_validade: s.exame_medico_validade ?? null,
-          parentesco: null,
+          parentesco: s.parentesco ?? null,
           telefone: s.telefone ?? null,
           ativo: s.situacao !== "inativo",
           created_at: null,
