@@ -267,12 +267,61 @@ export async function POST(request: Request) {
       const { data: conta, error: contaError } = await db.from("contas_bancarias").select("id,ativo,saldo_inicial,data_saldo_inicial").eq("id", contaId).maybeSingle();
       if (contaError) throw contaError;
       if (!conta || conta.ativo !== true) return NextResponse.json({ error: "Conta bancária não encontrada ou inativa." }, { status: 404 });
-      const { data: movimentos, error: movimentosError } = await db.from("movimentacoes_financeiras").select("tipo,valor").eq("conta_bancaria_id", contaId);
-      if (movimentosError) throw movimentosError;
-      const saldoSistema = Number((Number(conta.saldo_inicial || 0) + (movimentos || []).reduce((sum, m) => sum + (String(m.tipo) === "entrada" ? Number(m.valor || 0) : String(m.tipo) === "saida" ? -Number(m.valor || 0) : 0), 0)).toFixed(2));
+      // Reutiliza o agregado calculado no PostgreSQL sobre o histórico completo.
+      // Assim a conferência respeita o saldo de abertura e transferências entre contas,
+      // sem baixar centenas/milhares de movimentações para o servidor Next.js.
+      const { data: resumoSaldo, error: resumoSaldoError } = await db.rpc("financeiro_listar_paginado", {
+        p_page: 1,
+        p_page_size: 1,
+        p_data_inicio: null,
+        p_data_fim: null,
+        p_conta_id: null,
+        p_tipo: "todos",
+        p_forma: "todos",
+        p_conciliacao: "todos",
+        p_aba: "fluxo",
+        p_competencia_inicio: null,
+        p_competencia_fim: null,
+      });
+      if (resumoSaldoError) throw resumoSaldoError;
+
+      const resumo = (Array.isArray(resumoSaldo) ? resumoSaldo[0] : resumoSaldo) as
+        | { saldos_por_conta?: Record<string, number | string | null> }
+        | null;
+      const saldosPorConta = resumo?.saldos_por_conta || {};
+      const saldoBruto = Object.prototype.hasOwnProperty.call(saldosPorConta, contaId)
+        ? saldosPorConta[contaId]
+        : conta.saldo_inicial;
+      const saldoSistema = Number(Number(saldoBruto || 0).toFixed(2));
+      if (!Number.isFinite(saldoSistema)) {
+        throw new Error("O banco não retornou um saldo válido para esta conta.");
+      }
+
       const diferenca = Number((saldoBanco - saldoSistema).toFixed(2));
-      const { data: conferencia, error } = await db.from("conferencias_bancarias").insert({ conta_bancaria_id: contaId, saldo_sistema: saldoSistema, saldo_banco: Number(saldoBanco.toFixed(2)), diferenca, data_conferencia: data, observacao: observacao || "Conferência do saldo bancário" }).select().single();
-      if (error) throw error;
+      const { data: conferencia, error: conferenciaError } = await db
+        .from("conferencias_bancarias")
+        .insert({
+          conta_bancaria_id: contaId,
+          saldo_sistema: saldoSistema,
+          saldo_banco: Number(saldoBanco.toFixed(2)),
+          diferenca,
+          data_conferencia: data,
+          observacao: observacao || "Conferência do saldo bancário",
+          created_by: auth.usuario.id,
+          created_by_nome: auth.usuario.nome_exibicao || "Administrador",
+        })
+        .select("id,conta_bancaria_id,saldo_sistema,saldo_banco,diferenca,data_conferencia,observacao,created_by,created_by_nome,created_at")
+        .single();
+      if (conferenciaError) {
+        console.error("[api/financeiro][POST][conferir_saldo]", conferenciaError);
+        const detalhe = conferenciaError.code === "42P01"
+          ? "A tabela de histórico não existe. Execute docs/sql/08_conferencias_bancarias.sql no Supabase."
+          : conferenciaError.message;
+        return NextResponse.json(
+          { error: `Não foi possível gravar a conferência bancária. ${detalhe}` },
+          { status: 500 },
+        );
+      }
       return NextResponse.json({ ok: true, conferencia });
     }
 
