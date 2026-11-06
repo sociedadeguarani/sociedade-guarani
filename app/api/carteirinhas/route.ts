@@ -386,13 +386,24 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
-    // Registros antigos que foram promovidos para socios permanecem na tabela
-    // dependentes para preservar histórico e relações. Não devem gerar uma
-    // segunda carteirinha: a matrícula atual é emitida pelo cadastro em socios.
-    const dependentesAtivosParaCarteirinha = ((dependentesDb || []) as unknown as DependenteCarteirinha[])
-      .filter((d) => !d.migrado_para_socio_id);
+    // Evita imprimir duas carteirinhas para a mesma pessoa quando um cadastro
+    // legado existe simultaneamente em socios e dependentes. A matrícula própria
+    // é a chave mais confiável; CPF normalizado serve como segunda proteção.
+    const matriculasSocios = new Set(
+      resultado.map((s) => String(s.matricula || "").trim().toUpperCase()).filter(Boolean)
+    );
+    const cpfsSocios = new Set(
+      resultado.map((s) => String(s.cpf || "").replace(/\D/g, "")).filter((cpf) => cpf.length === 11)
+    );
+    const dependentesSemDuplicidade = ((dependentesDb || []) as unknown as DependenteCarteirinha[]).filter((d) => {
+      const matricula = String(d.matricula || "").trim().toUpperCase();
+      const cpf = String(d.cpf || "").replace(/\D/g, "");
+      if (matricula && matriculasSocios.has(matricula)) return false;
+      if (cpf.length === 11 && cpfsSocios.has(cpf)) return false;
+      return true;
+    });
 
-    const dependentes = dependentesAtivosParaCarteirinha.map((d) => {
+    const dependentes = dependentesSemDuplicidade.map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
       const status: { financeiro_status: string; dias_atraso?: number; meses_atraso?: number; meses_atencao?: number; meses_bloqueio?: number } = !podeVerFinanceiro
