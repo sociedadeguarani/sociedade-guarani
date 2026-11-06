@@ -183,6 +183,11 @@ function normalizarTexto(valor: unknown) {
     .toLowerCase();
 }
 
+function normalizarIdSocio(valor: unknown): string {
+  const id = String(valor ?? "").trim();
+  return id.startsWith("socio:") ? id.slice("socio:".length).trim() : id;
+}
+
 function ehDependenteFamiliarSocio(s: SocioApi) {
   if (!s?.responsavel_id) return false;
   const tipo = normalizarTexto(s.tipo_socio);
@@ -353,7 +358,7 @@ export default function DependentesPage() {
         .filter((d) => !String(d.matricula || "").trim().toUpperCase().endsWith("A"))
         .map((d) => ({
           id: String(d.id),
-          socio_id: String(d.socio_id),
+          socio_id: normalizarIdSocio(d.socio_id),
           matricula: d.matricula == null ? null : String(d.matricula),
           foto_url: d.foto_url ?? null,
           nome: d.nome ?? "",
@@ -502,14 +507,14 @@ export default function DependentesPage() {
     setErro("");
     setSucesso("");
 
-    const socioIdFormulario = String(form.socio_id || "").trim().replace(/^socio:/, "");
-    if (!socioIdFormulario) return setErro("Selecione o sócio responsável.");
+    const socioIdNormalizado = normalizarIdSocio(form.socio_id);
+    if (!socioIdNormalizado) return setErro("Selecione o sócio responsável.");
     if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
 
     setSalvando(true);
 
     const dados = {
-      socio_id: socioIdFormulario,
+      socio_id: socioIdNormalizado,
       nome: form.nome.trim(),
       cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
       data_nascimento: form.data_nascimento || null,
