@@ -386,7 +386,13 @@ export async function GET(request: Request) {
     if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
-    const dependentes = ((dependentesDb || []) as unknown as DependenteCarteirinha[]).map((d) => {
+    // Registros antigos que foram promovidos para socios permanecem na tabela
+    // dependentes para preservar histórico e relações. Não devem gerar uma
+    // segunda carteirinha: a matrícula atual é emitida pelo cadastro em socios.
+    const dependentesAtivosParaCarteirinha = ((dependentesDb || []) as unknown as DependenteCarteirinha[])
+      .filter((d) => !d.migrado_para_socio_id);
+
+    const dependentes = dependentesAtivosParaCarteirinha.map((d) => {
       const titular = sociosPorId.get(String(d.socio_id));
       const titularId = String(d.socio_id || "");
       const status: { financeiro_status: string; dias_atraso?: number; meses_atraso?: number; meses_atencao?: number; meses_bloqueio?: number } = !podeVerFinanceiro
