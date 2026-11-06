@@ -19,3 +19,12 @@ test('API de carteirinhas descarta duplicata com matrícula ou CPF já listado e
   assert.match(carteirinhasApi, /if \(cpf\.length === 11 && cpfsSocios\.has\(cpf\)\) return false/);
   assert.match(carteirinhasApi, /const dependentes = dependentesSemDuplicidade\.map/);
 });
+
+
+test('edição de dependente normaliza IDs sintéticos socio:<uuid> antes de gravar socio_id', () => {
+  assert.match(dependentesPage, /function normalizarIdSocio\(valor: unknown\): string/);
+  assert.match(dependentesPage, /return id\.startsWith\("socio:"\) \? id\.slice\("socio:"\.length\)\.trim\(\) : id/);
+  assert.match(dependentesPage, /socio_id: normalizarIdSocio\(d\.socio_id\)/);
+  assert.match(dependentesPage, /const socioIdNormalizado = normalizarIdSocio\(form\.socio_id\)/);
+  assert.match(dependentesPage, /socio_id: socioIdNormalizado/);
+});
