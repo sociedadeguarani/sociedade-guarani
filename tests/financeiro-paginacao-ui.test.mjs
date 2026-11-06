@@ -71,3 +71,15 @@ test('primeira competência de referência usa pagamento efetivo, não isenção
   assert.match(page, /function mensalidadePaga/);
   assert.match(page, /\.filter\(mensalidadePaga\)/);
 });
+
+
+test('conferência bancária usa o saldo agregado do PostgreSQL e registra histórico separado', () => {
+  assert.match(route, /rpc\("financeiro_listar_paginado"/);
+  assert.match(route, /from\("conferencias_bancarias"\)[\s\S]*?\.insert\(/);
+  assert.match(route, /created_by_nome/);
+  assert.doesNotMatch(route, /from\("movimentacoes_financeiras"\)\.select\("tipo,valor"\)/);
+  const migration = readFileSync(new URL('docs/sql/08_conferencias_bancarias.sql', root), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.conferencias_bancarias/);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(migration, /GRANT ALL ON TABLE public\.conferencias_bancarias TO service_role/);
+});
