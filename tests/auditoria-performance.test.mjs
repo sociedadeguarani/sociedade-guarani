@@ -53,3 +53,11 @@ test('API de dependentes usa resumo agregado no banco para evitar carregar hist�
   assert.match(listarDependentes, /Cache-Control.*private, no-store/);
   assert.doesNotMatch(listarDependentes, /temporadas_participantes/);
 });
+
+
+test('API de carteirinhas não emite carteira duplicada para dependente promovido a sócio', () => {
+  const carteirinhas = readFileSync(new URL('../app/api/carteirinhas/route.ts', import.meta.url), 'utf8');
+  assert.match(carteirinhas, /dependentesAtivosParaCarteirinha/);
+  assert.match(carteirinhas, /\.filter\(\(d\) => !d\.migrado_para_socio_id\)/);
+  assert.match(carteirinhas, /migrado_para_socio_id/);
+});
