@@ -531,9 +531,17 @@ export default function DependentesPage() {
       error: { message: string } | null;
     };
     let resultado: ResultadoPersistencia;
-    const editandoSocio = editando?.source === "socios" && editando.source_socio_id;
+    // Registros oriundos da tabela socios podem ter ID sintético `socio:<uuid>`
+    // na lista de dependentes. Nunca usar esse ID sintético na tabela dependentes.
+    // Prioriza o ID de origem e mantém compatibilidade com registros antigos.
+    const idSocioOrigem = editando?.source_socio_id || (
+      editando?.source === "socios" && String(editando.id || "").startsWith("socio:")
+        ? String(editando.id).slice("socio:".length)
+        : null
+    );
+    const editandoSocio = Boolean(idSocioOrigem);
 
-    if (editandoSocio) {
+    if (editandoSocio && idSocioOrigem) {
       resultado = await supabase
         .from("socios")
         .update({
@@ -551,7 +559,7 @@ export default function DependentesPage() {
           data_ultimo_pagamento: dados.data_ultimo_pagamento,
           situacao: dados.ativo ? "ativo" : "inativo",
         })
-        .eq("id", editando.source_socio_id);
+        .eq("id", idSocioOrigem);
     } else if (editando) {
       resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
     } else {
@@ -566,7 +574,7 @@ export default function DependentesPage() {
 
     const dadosResultado = Array.isArray(resultado.data) ? resultado.data[0] : resultado.data;
     const dependenteId = editandoSocio
-      ? editando.source_socio_id
+      ? idSocioOrigem
       : editando?.id || dadosResultado?.id;
     if (fotoArquivo && dependenteId) {
       try {
