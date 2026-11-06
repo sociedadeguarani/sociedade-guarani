@@ -107,6 +107,8 @@ type DependenteApi = {
   financeiro_status?: string | null;
   meses_atraso?: number | string | null;
   migrado_para_socio_id?: string | null;
+  source?: "socios" | "dependentes";
+  source_socio_id?: string | null;
 };
 
 
@@ -367,8 +369,8 @@ export default function DependentesPage() {
           data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
           financeiro_status: d.financeiro_status ?? null,
           meses_atraso: Number(d.meses_atraso || 0),
-          source: "dependentes",
-          source_socio_id: null,
+          source: d.source === "socios" ? "socios" : "dependentes",
+          source_socio_id: d.source_socio_id == null ? null : String(d.source_socio_id),
         }));
 
       // Alguns dependentes familiares são associados oficiais da tabela socios.
