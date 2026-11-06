@@ -191,10 +191,14 @@ export async function GET(request: Request) {
     const sociosComStatus = socios.map((s) => {
       if (!podeVerFinanceiro) return { ...s, financeiro_status: "restrito", meses_atraso: 0 };
       const matricula = String(s.matricula || "").trim().toUpperCase();
-      const titularPorMatricula = matricula.endsWith("B") ? sociosPorMatricula.get(`${matricula.slice(0, -1)}A`) : null;
+      // Dependentes familiares (B, C, D...) devem usar a situação financeira
+      // do titular A. Antes, somente a matrícula B encontrava o titular por matrícula.
+      const titularPorMatricula = matricula && !matricula.endsWith("A")
+        ? sociosPorMatricula.get(`${matricula.slice(0, -1)}A`)
+        : null;
       const responsavelId = s.responsavel_id || titularPorMatricula?.id || null;
-      const herdaStatus = matricula.endsWith("B") || (Boolean(responsavelId) && s.possui_mensalidade !== true);
-      const alvoId = String(herdaStatus ? responsavelId : s.id);
+      const herdaStatus = ehDependenteFamiliarSocio(s) || matricula.endsWith("B") || (Boolean(responsavelId) && s.possui_mensalidade !== true);
+      const alvoId = String(herdaStatus && responsavelId ? responsavelId : s.id);
       const atraso = atrasos.get(alvoId) || { quantidade: 0, dias: 0 };
       return {
         ...s,
@@ -227,7 +231,11 @@ export async function GET(request: Request) {
       };
     });
 
-    const dependentesFamiliares = dependentesSocios.map((s) => ({
+    const dependentesFamiliares = dependentesSocios.map((s) => {
+      // Resolve o titular diretamente para que o status da linha familiar
+      // não dependa de um status calculado para o próprio dependente.
+      const titular = sociosPorId.get(String(s.responsavel_id));
+      return ({
       id: `socio:${s.id}`,
       socio_id: String(s.responsavel_id),
       matricula: s.matricula,
@@ -246,11 +254,12 @@ export async function GET(request: Request) {
       tipo_pagamento: s.tipo_pagamento,
       situacao_financeira: s.situacao_financeira,
       data_ultimo_pagamento: s.data_ultimo_pagamento,
-      financeiro_status: s.financeiro_status || "restrito",
-      meses_atraso: Number(s.meses_atraso || 0),
+      financeiro_status: titular?.financeiro_status || s.financeiro_status || "restrito",
+      meses_atraso: Number(titular?.meses_atraso ?? s.meses_atraso ?? 0),
       source: "socios",
       source_socio_id: String(s.id),
-    }));
+    });
+    });
 
     return NextResponse.json({
       socios: sociosComStatus,
