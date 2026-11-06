@@ -23,6 +23,7 @@ type SocioCarteirinha = {
   id: string;
   matricula?: string | null;
   nome?: string | null;
+  cpf?: string | null;
   situacao?: string | null;
   responsavel_id?: string | null;
   possui_mensalidade?: boolean | null;
