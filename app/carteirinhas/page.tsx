@@ -1,924 +1,769 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import type { JSX } from "react";
+import { IdCard, Printer, Search, ShieldCheck, Smartphone, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
-import { supabase } from "@/lib/supabaseClient";
-import { dependenteFoiPromovidoParaSocio } from "@/lib/regrasMensalidade";
 import { normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
-
-type Socio = {
-  id: string;
-  matricula: string | null;
-  nome: string;
-  situacao: string | null;
-  responsavel_id?: string | null;
-  tipo_socio?: string | null;
-  categoria?: string | null;
-  cpf?: string | null;
-  data_nascimento?: string | null;
-  exame_medico_validade?: string | null;
-  telefone?: string | null;
-  foto_url?: string | null;
-  possui_mensalidade?: boolean | null;
-  valor_mensalidade?: number | null;
-  dia_vencimento?: number | null;
-  tipo_pagamento?: string | null;
-  situacao_financeira?: string | null;
-  data_ultimo_pagamento?: string | null;
-  financeiro_status?: string | null;
-  meses_atraso?: number | null;
-};
 
 type Dependente = {
   id: string;
   socio_id: string;
-  matricula?: string | null;
-  foto_url?: string | null;
   nome: string;
-  cpf: string | null;
-  data_nascimento: string | null;
-  exame_medico_validade?: string | null;
-  parentesco: string | null;
-  telefone: string | null;
-  ativo: boolean | null;
-  created_at: string | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
-  situacao_financeira: string | null;
-  data_ultimo_pagamento: string | null;
-  source?: "socios" | "dependentes";
-  source_socio_id?: string | null;
-  financeiro_status?: string | null;
-  meses_atraso?: number | null;
-};
-
-// Formato bruto retornado pela API. Campos opcionais são normalizados antes de
-// entrar no estado da tela, evitando casts permissivos e mantendo compatibilidade
-// com registros legados que podem trazer números como texto.
-type SocioApi = {
-  id: string | number;
-  matricula?: string | number | null;
-  nome?: string | null;
-  situacao?: string | null;
-  responsavel_id?: string | number | null;
-  tipo_socio?: string | null;
-  categoria?: string | null;
   cpf?: string | null;
-  data_nascimento?: string | null;
-  exame_medico_validade?: string | null;
-  telefone?: string | null;
-  whatsapp?: string | null;
-  foto_url?: string | null;
-  possui_mensalidade?: boolean | string | null;
-  valor_mensalidade?: number | string | null;
-  dia_vencimento?: number | string | null;
-  tipo_pagamento?: string | null;
-  situacao_financeira?: string | null;
-  data_ultimo_pagamento?: string | null;
-  financeiro_status?: string | null;
-  meses_atraso?: number | string | null;
-};
-
-type DependenteApi = {
-  id: string | number;
-  socio_id: string | number;
-  matricula?: string | number | null;
-  foto_url?: string | null;
-  nome?: string | null;
-  cpf?: string | null;
-  data_nascimento?: string | null;
-  exame_medico_validade?: string | null;
   parentesco?: string | null;
-  telefone?: string | null;
-  whatsapp?: string | null;
-  ativo?: boolean | string | null;
-  created_at?: string | null;
-  possui_mensalidade?: boolean | string | null;
-  valor_mensalidade?: number | string | null;
-  dia_vencimento?: number | string | null;
-  tipo_pagamento?: string | null;
-  situacao_financeira?: string | null;
-  data_ultimo_pagamento?: string | null;
-  financeiro_status?: string | null;
-  meses_atraso?: number | string | null;
-  migrado_para_socio_id?: string | null;
+  ativo?: boolean | null;
+  titular_nome?: string | null;
+  titular_matricula?: number | string | null;
+  matricula?: number | string | null;
+  foto_url?: string | null;
+  situacao?: string | null;
+  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado" | "restrito";
+  dias_atraso?: number;
+  meses_atraso?: number;
+  meses_atencao?: number;
+  meses_bloqueio?: number;
 };
 
+type Temporada = {
+  id: string;
+  matricula?: string | null;
+  codigo?: string | null;
+  tipo?: string | null;
+  modalidade?: string | null;
+  inicio?: string | null;
+  fim?: string | null;
+  valor_total?: number | null;
+  situacao?: string | null;
+  responsavel_nome?: string | null;
+  responsavel_cpf?: string | null;
+  status_carteirinha?: "ativa" | "bloqueada" | "inativa" | string;
+  status_carteirinha_texto?: string;
+  parcelas_atrasadas?: number;
+  valor_parcelas_atrasadas?: number;
+  participantes?: Array<{
+    id: string;
+    temporada_id?: string;
+    matricula?: string | null;
+    nome?: string | null;
+    cpf?: string | null;
+    foto_url?: string | null;
+    papel?: string | null;
+    parentesco?: string | null;
+    status_carteirinha?: "ativa" | "bloqueada" | "inativa" | string;
+    status_carteirinha_texto?: string;
+    exame_medico_validade?: string | null;
+  }>;
+};
 
-const CHAVE_PERFIL_USUARIO = "guarani_usuario_perfil";
+type Socio = {
+  id: string;
+  matricula: number | string | null;
+  nome: string;
+  cpf?: string | null;
+  categoria: string | null;
+  tipo_socio: string | null;
+  situacao: string | null;
+  data_associacao: string | null;
+  foto_url: string | null;
+  inicio_temporada: string | null;
+  fim_temporada: string | null;
+  exame_medico_validade?: string | null;
+  responsavel_id?: string | null;
+  parentesco?: string | null;
+  possui_mensalidade?: boolean | null;
+  financeiro_status?: "em_dia" | "atrasado" | "muito_atrasado" | "restrito";
+  dias_atraso?: number;
+  meses_atraso?: number;
+  meses_atencao?: number;
+  meses_bloqueio?: number;
+};
 
-/** Lê o perfil salvo somente no cliente, preservando renderização/hidratação do Next.js. */
-function obterPerfilUsuario(): string {
-  if (typeof window === "undefined") return "";
+function visual(tipo: string | null) {
+  const t = String(tipo || "").toLowerCase();
+  if (t.startsWith("patrimonial")) return { nome: "Patrimonial", bg: "#1769aa", text: "#ffffff" };
+  if (t.startsWith("contribuinte")) return { nome: "Contribuinte", bg: "#18864b", text: "#ffffff" };
+  if (t.startsWith("temporada")) return { nome: "Temporada", bg: "#e87511", text: "#ffffff" };
+  if (t.includes("transitorio") || t.includes("temporario")) return { nome: "Temporário", bg: "#eab308", text: "#17382c" };
+  if (t.startsWith("convite")) return { nome: "Convite", bg: "#6b7280", text: "#ffffff" };
+  return { nome: "Associado", bg: "#005a3c", text: "#ffffff" };
+}
 
-  try {
-    const perfil = (window.localStorage.getItem(CHAVE_PERFIL_USUARIO) || "")
-      .trim()
-      .toLowerCase();
-    return perfil === "master"
-      ? "administrador_master"
-      : perfil === "admin"
-        ? "administrador"
-        : perfil;
-  } catch {
-    return "";
+function formatarData(valor: string | null) {
+  if (!valor) return "—";
+  const texto = String(valor).slice(0, 10);
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(texto) ? new Date(`${texto}T12:00:00`) : new Date(valor);
+  if (Number.isNaN(data.getTime())) return valor;
+  return data.toLocaleDateString("pt-BR");
+}
+
+function statusExame(valor: string | null | undefined) {
+  if (!valor) {
+    return { texto: "NÃO INFORMADO", ponto: "bg-gray-400", textoClasse: "text-gray-600" };
   }
+  const data = new Date(`${String(valor).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(data.getTime())) {
+    return { texto: "DATA INVÁLIDA", ponto: "bg-gray-400", textoClasse: "text-gray-600" };
+  }
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  if (data < hoje) {
+    return { texto: `VENCIDO EM ${formatarData(valor)}`, ponto: "bg-red-500", textoClasse: "text-red-700" };
+  }
+  return { texto: `VÁLIDO ATÉ ${formatarData(valor)}`, ponto: "bg-emerald-500", textoClasse: "text-emerald-700" };
 }
 
-/** Permite atualizar o perfil caso outra aba altere a sessão armazenada. */
-function assinarAlteracoesPerfil(notificar: () => void): () => void {
-  if (typeof window === "undefined") return () => {};
-
-  const aoAlterarStorage = (evento: StorageEvent) => {
-    if (evento.key === null || evento.key === CHAVE_PERFIL_USUARIO) {
-      notificar();
-    }
-  };
-
-  window.addEventListener("storage", aoAlterarStorage);
-  return () => window.removeEventListener("storage", aoAlterarStorage);
-}
-
-const parentescos = [
-  "Filho(a)", "Esposo(a)", "Companheiro(a)", "Pai", "Mãe",
-  "Irmão(ã)", "Neto(a)", "Avô(ó)", "Outro",
-];
-
-function formatarData(data: string | null) {
-  if (!data) return "—";
-  const [ano, mes, dia] = data.split("-");
-  return ano && mes && dia ? `${dia}/${mes}/${ano}` : data;
-}
-
-function formatarCpf(valor: string | null) {
+function formatarCpf(valor: string | null | undefined) {
   if (!valor) return "—";
-  const n = valor.replace(/\D/g, "");
-  return n.length === 11
-    ? `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}`
-    : valor;
+  const digits = valor.replace(/\D/g, "");
+  if (digits.length !== 11) return valor;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
-function formatarTelefone(valor: string | null) {
-  if (!valor) return "—";
-  const n = valor.replace(/\D/g, "");
-  if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
-  if (n.length === 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
-  return valor;
-}
-
-function normalizarTexto(valor: unknown) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-function ehDependenteFamiliarSocio(s: SocioApi) {
-  if (!s?.responsavel_id) return false;
-  const tipo = normalizarTexto(s.tipo_socio);
-  const categoria = normalizarTexto(s.categoria);
-  return (
-    tipo === "dependente_patrimonial_familiar" ||
-    tipo === "dependente_patrimonial_familiar_mensalidade" ||
-    tipo === "dependente_contribuinte_familiar" ||
-    tipo === "dependente_contribuinte_familiar_mensalidade" ||
-    categoria.includes("dependente patrimonial familiar") ||
-    categoria.includes("dependente contribuinte familiar")
-  );
-}
-
-export default function DependentesPage() {
-  const router = useRouter();
+export default function CarteirinhasPage(): JSX.Element {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [dependentes, setDependentes] = useState<Dependente[]>([]);
-  const [statusResponsaveis, setStatusResponsaveis] = useState<Record<string, string>>({});
-  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
+  const [temporadas, setTemporadas] = useState<Temporada[]>([]);
+  const [temporadaSelecionada, setTemporadaSelecionada] = useState<Temporada | null>(null);
+  const [participanteTemporadaSelecionado, setParticipanteTemporadaSelecionado] = useState<NonNullable<Temporada["participantes"]>[number] | null>(null);
   const [busca, setBusca] = useState("");
-  const [filtroSocio, setFiltroSocio] = useState("");
-  const [filtroStatus, setFiltroStatus] = useState("todos");
-  const [carregando, setCarregando] = useState(true);
-  const [salvando, setSalvando] = useState(false);
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | "ativos" | "inativos" | "exame_vencido">("todos");
+  const [selecionado, setSelecionado] = useState<Socio | null>(null);
+  const [dependenteSelecionado, setDependenteSelecionado] = useState<Dependente | null>(null);
   const [erro, setErro] = useState("");
-  const [sucesso, setSucesso] = useState("");
-  const [modalAberto, setModalAberto] = useState(false);
-  const [editando, setEditando] = useState<Dependente | null>(null);
-  const perfilUsuario = useSyncExternalStore(
-    assinarAlteracoesPerfil,
-    obterPerfilUsuario,
-    () => ""
-  );
-  const [fotoArquivo, setFotoArquivo] = useState<File | null>(null);
+  const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
+  const [camposVisiveis, setCamposVisiveis] = useState({ financeiro: true, exameMedico: true });
+  const [digitalAberta, setDigitalAberta] = useState(false);
+  const [modoQr, setModoQr] = useState(false);
 
-  const somenteConsulta = perfilUsuario === "funcionario";
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      const { supabase } = await import("@/lib/supabaseClient");
+      const { data: { session } } = await supabase.auth.getSession();
+      const params = new URLSearchParams(window.location.search);
+      const idQr = params.get("id") || "";
+      const dependenteQr = params.get("dependente_id") || "";
+      const temporadaQr = params.get("temporada_id") || "";
 
-  type FormDependente = {
-    socio_id: string;
-    nome: string;
-    cpf: string;
-    data_nascimento: string;
-    exame_medico_validade: string;
-    parentesco: string;
-    telefone: string;
-    ativo: boolean;
-    possui_mensalidade: boolean;
-    valor_mensalidade: number;
-    dia_vencimento: number;
-    tipo_pagamento: string;
-    situacao_financeira: string;
-    data_ultimo_pagamento: string;
-  };
+      if (!session) {
+        const destino = `/carteirinhas?id=${encodeURIComponent(idQr)}`;
+        location.replace(`/login?redirect=${encodeURIComponent(destino)}`);
+        return;
+      }
 
-  const [form, setForm] = useState<FormDependente>({
-    socio_id: "",
-    nome: "",
-    cpf: "",
-    data_nascimento: "",
-    exame_medico_validade: "",
-    parentesco: "",
-    telefone: "",
-    ativo: true,
-    possui_mensalidade: false,
-    valor_mensalidade: 0,
-    dia_vencimento: 10,
-    tipo_pagamento: "pix",
-    situacao_financeira: "isento",
-    data_ultimo_pagamento: "",
-  });
-
-  const socioPorId = useMemo(() => {
-    const mapa: Record<string, Socio> = {};
-    socios.forEach((socio) => { mapa[socio.id] = socio; });
-    return mapa;
-  }, [socios]);
-
-  const dependentesFiltrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    return dependentes.filter((d) => {
-      const socio = socioPorId[d.socio_id];
-      const texto = [d.nome, d.cpf || "", d.parentesco || "", d.telefone || "",
-        socio?.nome || "", socio?.matricula || ""].join(" ").toLowerCase();
-      const bateBusca = !termo || texto.includes(termo);
-      const bateSocio = !filtroSocio || d.socio_id === filtroSocio;
-      const bateStatus =
-        filtroStatus === "todos" ||
-        (filtroStatus === "ativos" && d.ativo === true) ||
-        (filtroStatus === "inativos" && d.ativo !== true);
-      return bateBusca && bateSocio && bateStatus;
-    });
-  }, [dependentes, socioPorId, busca, filtroSocio, filtroStatus]);
-
-  // Calcula os totais apenas quando a lista de dependentes muda,
-  // evitando percorrer a lista novamente a cada alteração de filtro ou modal.
-  const { totalAtivos, totalInativos } = useMemo(() => {
-    let ativos = 0;
-    let inativos = 0;
-
-    for (const dependente of dependentes) {
-      const titular = socioPorId[String(dependente.socio_id)];
-      const titularInativo = normalizarTexto(titular?.situacao || "") === "inativo";
-      if (dependente.ativo === true && !titularInativo) ativos += 1;
-      else inativos += 1;
-    }
-
-    return { totalAtivos: ativos, totalInativos: inativos };
-  }, [dependentes, socioPorId]);
-
-  const carregarDados = useCallback(async () => {
-    setCarregando(true);
-    setErro("");
-
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      router.replace("/login");
-      return;
-    }
-
-    try {
-      // A página não consulta mais a tabela dependentes diretamente pelo cliente.
-      // O endpoint usa o usuário autenticado + service role, evitando que uma
-      // política RLS antiga esconda os 412 dependentes do Administrador Master.
-      const resposta = await fetch("/api/dependentes/listar", {
+      const r = await fetch("/api/carteirinhas", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
-
-      const dados = await resposta.json().catch(() => ({}));
-      if (!resposta.ok) {
-        throw new Error(dados?.error || "Não foi possível carregar os dependentes.");
+      const d = await r.json();
+      if (!r.ok) {
+        if (ativo) setErro(d.error || "Erro ao carregar carteirinhas.");
+        return;
       }
 
-      const sociosData: SocioApi[] = Array.isArray(dados?.socios) ? dados.socios as SocioApi[] : [];
-      const sociosNormalizados: Socio[] = sociosData.map((s) => ({
-        id: String(s.id),
-        matricula: s.matricula == null ? null : String(s.matricula),
-        nome: s.nome ?? "",
-        situacao: s.situacao ?? null,
-        responsavel_id: s.responsavel_id == null ? null : String(s.responsavel_id),
-        tipo_socio: s.tipo_socio ?? null,
-        categoria: s.categoria ?? null,
-        cpf: s.cpf ?? null,
-        data_nascimento: s.data_nascimento ?? null,
-        exame_medico_validade: s.exame_medico_validade ?? null,
-        telefone: s.telefone ?? s.whatsapp ?? null,
-        foto_url: s.foto_url ?? null,
-        possui_mensalidade: s.possui_mensalidade === true,
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: s.dia_vencimento == null ? null : Number(s.dia_vencimento),
-        tipo_pagamento: s.tipo_pagamento ?? null,
-        situacao_financeira: s.situacao_financeira ?? null,
-        data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
-        financeiro_status: s.financeiro_status ?? null,
-        meses_atraso: Number(s.meses_atraso || 0),
-      }));
+      const listaSocios: Socio[] = d.socios || [];
+      const listaTemporadas: Temporada[] = d.temporadas || [];
+      if (ativo) {
+        setSocios(listaSocios);
+        setDependentes(d.dependentes || []);
+        setTemporadas(listaTemporadas);
+        setCamposVisiveis({
+          financeiro: d.camposVisiveis?.financeiro !== false,
+          exameMedico: d.camposVisiveis?.exameMedico !== false,
+        });
+        setPoliticaInadimplencia(normalizarPoliticaInadimplencia(d.politicaInadimplencia));
+        const socioQr = idQr ? listaSocios.find((s) => String(s.id) === String(idQr)) : null;
+        const dependenteQrObj = dependenteQr ? (d.dependentes || []).find((dep: Dependente) => String(dep.id) === String(dependenteQr)) : null;
+        const temporadaQrObj = temporadaQr ? listaTemporadas.find((t: Temporada) => String(t.id) === String(temporadaQr)) : null;
+        if (temporadaQrObj) {
+          setTemporadaSelecionada(temporadaQrObj);
+          setParticipanteTemporadaSelecionado(temporadaQrObj.participantes?.find((p) => p.papel === "titular") || temporadaQrObj.participantes?.[0] || null);
+          setSelecionado(null);
+          setDependenteSelecionado(null);
+          setModoQr(true);
+        } else if (socioQr) {
+          setSelecionado(socioQr);
+          setDependenteSelecionado(null);
+          setModoQr(true);
+        } else if (dependenteQrObj) {
+          setSelecionado(null);
+          setDependenteSelecionado(dependenteQrObj);
+          setModoQr(true);
+        } else if (listaSocios.length === 1) setSelecionado(listaSocios[0]);
+      }
 
-      const dependentesApi: DependenteApi[] = Array.isArray(dados?.dependentes)
-        ? dados.dependentes as DependenteApi[]
-        : [];
-      const dependentesData: Dependente[] = dependentesApi
-        // Registros promovidos para Sócios ficam preservados para histórico, mas não
-        // podem continuar aparecendo na listagem de Dependentes.
-        .filter((d) => !dependenteFoiPromovidoParaSocio(d))
-        // Matrícula terminada em A é titular e deve ser exibida em Sócios, nunca como dependente.
-        .filter((d) => !String(d.matricula || "").trim().toUpperCase().endsWith("A"))
-        .map((d) => ({
-          id: String(d.id),
-          socio_id: String(d.socio_id),
-          matricula: d.matricula == null ? null : String(d.matricula),
-          foto_url: d.foto_url ?? null,
-          nome: d.nome ?? "",
-          cpf: d.cpf ?? null,
-          data_nascimento: d.data_nascimento ?? null,
-          exame_medico_validade: d.exame_medico_validade ?? null,
-          parentesco: d.parentesco ?? null,
-          telefone: d.telefone ?? d.whatsapp ?? null,
-          ativo: d.ativo !== false,
-          created_at: d.created_at ?? null,
-          possui_mensalidade: String(d.matricula || "").trim().toUpperCase().endsWith("B") ? false : Boolean(d.possui_mensalidade),
-          valor_mensalidade: String(d.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(d.valor_mensalidade || 0),
-          dia_vencimento: d.dia_vencimento == null ? null : Number(d.dia_vencimento),
-          tipo_pagamento: d.tipo_pagamento ?? null,
-          situacao_financeira: d.situacao_financeira ?? null,
-          data_ultimo_pagamento: d.data_ultimo_pagamento ?? null,
-          financeiro_status: d.financeiro_status ?? null,
-          meses_atraso: Number(d.meses_atraso || 0),
-          source: "dependentes",
-          source_socio_id: null,
-        }));
+    })();
+    return () => { ativo = false; };
+  }, []);
 
-      // Alguns dependentes familiares são associados oficiais da tabela socios.
-      // Eles precisam aparecer aqui também, mas sem criar uma segunda pessoa.
-      const chavesExistentes = new Set(
-        dependentesData.flatMap((d) => [
-          normalizarTexto(d.nome),
-          normalizarTexto(d.matricula),
-        ]).filter(Boolean)
-      );
+  const normalizarBusca = (valor: unknown) =>
+    String(valor ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
 
-      const dependentesSocios: Dependente[] = sociosNormalizados
-        .filter((s) => ehDependenteFamiliarSocio(s))
-        // Titulares com matrícula A permanecem exclusivamente na listagem de Sócios.
-        .filter((s) => !String(s.matricula || "").trim().toUpperCase().endsWith("A"))
-        .filter((s) => !chavesExistentes.has(normalizarTexto(s.nome)) && !chavesExistentes.has(normalizarTexto(s.matricula)))
-        .map((s) => ({
-          id: `socio:${s.id}`,
-          socio_id: String(s.responsavel_id),
-          matricula: s.matricula,
-          foto_url: s.foto_url ?? null,
-          nome: s.nome,
-          cpf: s.cpf ?? null,
-          data_nascimento: s.data_nascimento ?? null,
-          exame_medico_validade: s.exame_medico_validade ?? null,
-          parentesco: null,
-          telefone: s.telefone ?? null,
-          ativo: s.situacao !== "inativo",
-          created_at: null,
-          possui_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? false : s.possui_mensalidade === true,
-          valor_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(s.valor_mensalidade || 0),
-          dia_vencimento: s.dia_vencimento ?? 10,
-          tipo_pagamento: s.tipo_pagamento ?? null,
-          situacao_financeira: s.situacao_financeira ?? null,
-          data_ultimo_pagamento: s.data_ultimo_pagamento ?? null,
-          financeiro_status: s.financeiro_status ?? null,
-          meses_atraso: Number(s.meses_atraso || 0),
-          source: "socios",
-          source_socio_id: String(s.id),
-        }));
+  const buscaNormalizada = useMemo(() => normalizarBusca(busca), [busca]);
+  const buscaCpf = useMemo(() => buscaNormalizada.replace(/\D/g, ""), [buscaNormalizada]);
 
-      setSocios(sociosNormalizados);
-      setDependentes([...dependentesData, ...dependentesSocios]);
-      setStatusResponsaveis(dados?.statusResponsaveis || {});
-      setPoliticaInadimplencia(normalizarPoliticaInadimplencia(dados?.politicaInadimplencia));
-    } catch (error) {
-      console.error(error);
-      setErro(error instanceof Error ? error.message : "Erro ao carregar dependentes.");
-      setSocios([]);
-      setDependentes([]);
-      setStatusResponsaveis({});
-      setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
-    } finally {
-      setCarregando(false);
-    }
-  }, [router]);
+  const lista = useMemo(() => socios.filter((s) => {
+    const q = buscaNormalizada;
+    const qCpf = buscaCpf;
+    const nome = normalizarBusca(s.nome);
+    const matricula = normalizarBusca(s.matricula);
+    const cpf = String(s.cpf || "").replace(/\D/g, "");
+    const correspondeBusca = !q || nome.includes(q) || matricula.includes(q) || (qCpf.length > 0 && cpf.includes(qCpf));
+    if (!correspondeBusca) return false;
+    const ativo = String(s.situacao || "").toLowerCase() !== "inativo";
+    if (filtroStatus === "ativos") return ativo;
+    if (filtroStatus === "inativos") return !ativo;
+    if (filtroStatus === "exame_vencido") return Boolean(s.exame_medico_validade) && new Date(`${String(s.exame_medico_validade).slice(0,10)}T00:00:00`) < new Date(new Date().toISOString().slice(0,10) + "T00:00:00");
+    return true;
+  }), [socios, buscaNormalizada, buscaCpf, filtroStatus]);
 
-  useEffect(() => {
-    // Adia a execução para fora do corpo síncrono do efeito: carregarDados
-    // atualiza o estado antes da primeira consulta assíncrona.
-    void Promise.resolve().then(carregarDados);
-  }, [carregarDados]);
+  const dependentesLista = useMemo(() => dependentes.filter((d) => {
+    const q = buscaNormalizada;
+    const matricula = normalizarBusca(d.matricula);
+    return !q || d.nome.toLowerCase().includes(q) || matricula.includes(q) || String(d.titular_matricula || "").includes(q) || String(d.titular_nome || "").toLowerCase().includes(q);
+  }), [dependentes, buscaNormalizada]);
 
-  function abrirNovo() {
-    if (somenteConsulta) return;
-    setEditando(null);
-    setFotoArquivo(null);
-    setForm({
-      socio_id: filtroSocio,
-      nome: "",
-      cpf: "",
-      data_nascimento: "",
-      exame_medico_validade: "",
-      parentesco: "",
-      telefone: "",
-      ativo: true,
-      possui_mensalidade: false,
-      valor_mensalidade: 0,
-      dia_vencimento: 10,
-      tipo_pagamento: "pix",
-      situacao_financeira: "isento",
-      data_ultimo_pagamento: "",
-    });
-    setErro("");
-    setSucesso("");
-    setModalAberto(true);
-  }
+  // Quando um associado é selecionado, mostra somente o grupo familiar dele.
+  // A árvore é tratada como uma rede: responsável -> dependente e também
+  // dependente -> responsável, permitindo abrir a mesma família ao clicar
+  // no titular, no cônjuge ou em qualquer filho.
+  const familiaSelecionada = useMemo(() => {
+    if (!selecionado) return [] as Socio[];
 
-  function abrirEdicao(d: Dependente) {
-    if (somenteConsulta) return;
-    setEditando(d);
-    setFotoArquivo(null);
-    setForm({
-      socio_id: d.socio_id,
-      nome: d.nome || "",
-      cpf: d.cpf || "",
-      data_nascimento: d.data_nascimento || "",
-      exame_medico_validade: d.exame_medico_validade || "",
-      parentesco: d.parentesco || "",
-      telefone: d.telefone || "",
-      ativo: d.ativo !== false,
-      possui_mensalidade: d.possui_mensalidade === true,
-      valor_mensalidade: Number(d.valor_mensalidade || 0),
-      dia_vencimento: Number(d.dia_vencimento || 10),
-      tipo_pagamento: d.tipo_pagamento || "pix",
-      situacao_financeira: d.situacao_financeira || (d.possui_mensalidade ? "em_dia" : "isento"),
-      data_ultimo_pagamento: d.data_ultimo_pagamento || "",
-    });
-    setErro("");
-    setSucesso("");
-    setModalAberto(true);
-  }
+    const familia = new Set<string>([String(selecionado.id)]);
+    let mudou = true;
 
+    while (mudou) {
+      mudou = false;
+      for (const membro of socios) {
+        const id = String(membro.id);
+        const responsavel = membro.responsavel_id ? String(membro.responsavel_id) : "";
+        const estaNaFamilia = familia.has(id) || (responsavel && familia.has(responsavel));
 
-  function fecharModal() {
-    if (salvando) return;
-    setModalAberto(false);
-    setEditando(null);
-    setErro("");
-  }
+        if (estaNaFamilia && !familia.has(id)) {
+          familia.add(id);
+          mudou = true;
+        }
 
-  async function salvarDependente(e: React.FormEvent) {
-    e.preventDefault();
-    if (somenteConsulta) return;
-
-    setErro("");
-    setSucesso("");
-
-    if (!form.socio_id) return setErro("Selecione o sócio responsável.");
-    if (!form.nome.trim()) return setErro("Informe o nome do dependente.");
-
-    setSalvando(true);
-
-    const dados = {
-      socio_id: form.socio_id,
-      nome: form.nome.trim(),
-      cpf: form.cpf.trim() ? form.cpf.replace(/\D/g, "").slice(0, 11) : null,
-      data_nascimento: form.data_nascimento || null,
-      exame_medico_validade: form.exame_medico_validade || null,
-      parentesco: form.parentesco || null,
-      telefone: form.telefone.trim() || null,
-      ativo: form.ativo,
-      possui_mensalidade: Boolean(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) ? false : form.possui_mensalidade,
-      valor_mensalidade: Boolean(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) ? 0 : form.possui_mensalidade ? Number(form.valor_mensalidade || 0) : 0,
-      dia_vencimento: Number(form.dia_vencimento || 10),
-      tipo_pagamento: !(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) && form.possui_mensalidade ? form.tipo_pagamento : "pix",
-      situacao_financeira: !(editando?.matricula && editando.matricula.trim().toUpperCase().endsWith("B")) && form.possui_mensalidade ? form.situacao_financeira : "isento",
-      data_ultimo_pagamento: form.data_ultimo_pagamento || null,
-    };
-
-    const socioResponsavel = socios.find((s) => String(s.id) === String(form.socio_id));
-    if (!socioResponsavel) {
-      setErro("Selecione um sócio responsável válido.");
-      setSalvando(false);
-      return;
-    }
-
-    type ResultadoPersistencia = {
-      data: { id?: string } | { id?: string }[] | null;
-      error: { message: string } | null;
-    };
-    let resultado: ResultadoPersistencia;
-    // Registros oriundos da tabela socios podem ter ID sintético `socio:<uuid>`
-    // na lista de dependentes. Nunca usar esse ID sintético na tabela dependentes.
-    // Prioriza o ID de origem e mantém compatibilidade com registros antigos.
-    const idSocioOrigem = editando?.source_socio_id || (
-      editando?.source === "socios" && String(editando.id || "").startsWith("socio:")
-        ? String(editando.id).slice("socio:".length)
-        : null
-    );
-    const editandoSocio = Boolean(idSocioOrigem);
-
-    if (editandoSocio && idSocioOrigem) {
-      resultado = await supabase
-        .from("socios")
-        .update({
-          nome: dados.nome,
-          cpf: dados.cpf,
-          data_nascimento: dados.data_nascimento,
-          exame_medico_validade: dados.exame_medico_validade,
-          telefone: dados.telefone,
-          parentesco: dados.parentesco,
-          possui_mensalidade: dados.possui_mensalidade,
-          valor_mensalidade: dados.valor_mensalidade,
-          dia_vencimento: dados.dia_vencimento,
-          tipo_pagamento: dados.tipo_pagamento,
-          situacao_financeira: dados.situacao_financeira,
-          data_ultimo_pagamento: dados.data_ultimo_pagamento,
-          situacao: dados.ativo ? "ativo" : "inativo",
-        })
-        .eq("id", idSocioOrigem);
-    } else if (editando) {
-      resultado = await supabase.from("dependentes").update(dados).eq("id", editando.id);
-    } else {
-      resultado = await supabase.from("dependentes").insert(dados).select("id").single();
-    }
-
-    if (resultado.error) {
-      setErro(`Não foi possível salvar: ${resultado.error.message}`);
-      setSalvando(false);
-      return;
-    }
-
-    const dadosResultado = Array.isArray(resultado.data) ? resultado.data[0] : resultado.data;
-    const dependenteId = editandoSocio
-      ? idSocioOrigem
-      : editando?.id || dadosResultado?.id;
-    if (fotoArquivo && dependenteId) {
-      try {
-        const extensao = fotoArquivo.name.split(".").pop()?.toLowerCase() || "jpg";
-        const pasta = editandoSocio ? "socios" : "dependentes";
-        const caminho = `${pasta}/${dependenteId}.${extensao}`;
-        const upload = await supabase.storage
-          .from("fotos-associados")
-          .upload(caminho, fotoArquivo, {
-            upsert: true,
-            contentType: fotoArquivo.type || "image/jpeg",
-          });
-        if (upload.error) throw upload.error;
-
-        const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
-        const fotoUpdate = await supabase
-          .from(editandoSocio ? "socios" : "dependentes")
-          .update({ foto_url: urlData.publicUrl })
-          .eq("id", dependenteId);
-        if (fotoUpdate.error) throw fotoUpdate.error;
-      } catch (fotoError) {
-        setErro(`Dependente salvo, mas a foto não pôde ser enviada: ${fotoError instanceof Error ? fotoError.message : "erro no upload"}`);
+        if (responsavel && familia.has(id) && !familia.has(responsavel)) {
+          familia.add(responsavel);
+          mudou = true;
+        }
       }
     }
 
-    setSucesso(editandoSocio ? "Cadastro do sócio atualizado com sucesso." : editando ? "Dependente atualizado com sucesso." : "Dependente cadastrado com sucesso.");
-    setFotoArquivo(null);
-    await carregarDados();
-    setSalvando(false);
+    return socios
+      .filter((s) => familia.has(String(s.id)) && String(s.id) !== String(selecionado.id))
+      .filter((s) => String(s.situacao || "").toLowerCase() !== "inativo")
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+  }, [socios, selecionado]);
 
-    setTimeout(() => {
-      setModalAberto(false);
-      setSucesso("");
-    }, 700);
-  }
+  const dependentesFamiliaSelecionada = useMemo(() => {
+    if (!selecionado) return [] as Dependente[];
+    return dependentes
+      .filter((d) => String(d.socio_id) === String(selecionado.id) && d.ativo !== false)
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+  }, [dependentes, selecionado]);
 
-  async function excluirDependente(d: Dependente) {
-    if (somenteConsulta || d.source === "socios") return;
-    if (!window.confirm(`Excluir o dependente "${d.nome}"?\n\nEssa ação não poderá ser desfeita.`)) return;
-    setErro("");
-    const { error } = await supabase.from("dependentes").delete().eq("id", d.id);
-    if (error) {
-      setErro(`Não foi possível excluir: ${error.message}`);
-      return;
+  const temporadasLista = useMemo(() => {
+    const q = buscaNormalizada;
+    return temporadas.filter((t) => {
+      if (!q) return true;
+      return normalizarBusca(t.responsavel_nome).includes(q)
+        || normalizarBusca(t.matricula).includes(q)
+        || normalizarBusca(t.codigo).includes(q)
+        || (t.participantes || []).some((p) => normalizarBusca(p.nome).includes(q) || normalizarBusca(p.matricula).includes(q));
+    });
+  }, [temporadas, buscaNormalizada]);
+
+  const contadores = useMemo(() => {
+    let ativos = 0;
+    let inativos = 0;
+    let examesVencidos = 0;
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    for (const socio of socios) {
+      const ativo = String(socio.situacao || "").toLowerCase() !== "inativo";
+      if (ativo) ativos += 1;
+      else inativos += 1;
+
+      if (socio.exame_medico_validade) {
+        const data = new Date(`${String(socio.exame_medico_validade).slice(0, 10)}T00:00:00`);
+        if (!Number.isNaN(data.getTime()) && data < hoje) examesVencidos += 1;
+      }
     }
-    setSucesso("Dependente excluído com sucesso.");
-    await carregarDados();
-    setTimeout(() => setSucesso(""), 1800);
-  }
 
-  async function alternarStatus(d: Dependente) {
-    if (somenteConsulta) return;
-    setErro("");
-    const tabela = d.source === "socios" ? "socios" : "dependentes";
-    const id = d.source === "socios" ? d.source_socio_id : d.id;
-    if (!id) return;
-    const atualizacao = d.source === "socios"
-      ? { situacao: d.ativo !== true ? "ativo" : "inativo" }
-      : { ativo: d.ativo !== true };
-    const { error } = await supabase.from(tabela).update(atualizacao).eq("id", id);
-    if (error) {
-      setErro(`Não foi possível alterar a situação: ${error.message}`);
-      return;
-    }
-    await carregarDados();
-  }
+    return { ativos, inativos, examesVencidos };
+  }, [socios]);
+
+  const v = selecionado ? visual(selecionado.tipo_socio) : visual(null);
+  const validade = selecionado?.fim_temporada || null;
+  const statusFinanceiro = selecionado?.financeiro_status || "em_dia";
+  const statusFinanceiroLabel = statusFinanceiro === "em_dia" ? "EM DIA" : statusFinanceiro === "atrasado" ? "ATENÇÃO" : statusFinanceiro === "restrito" ? "RESTRITO" : "BLOQUEIO";
+  const statusFinanceiroClass = statusFinanceiro === "em_dia" ? "bg-emerald-500" : statusFinanceiro === "atrasado" ? "bg-yellow-400" : statusFinanceiro === "restrito" ? "bg-gray-400" : "bg-red-500";
+  const mesesSelecionado = Number(selecionado?.meses_atraso || 0);
+  const statusFinanceiroText = statusFinanceiro === "atrasado"
+    ? `${mesesSelecionado} competência(s) vencida(s) — atenção; entrada liberada`
+    : statusFinanceiro === "muito_atrasado"
+      ? `${mesesSelecionado} competência(s) vencida(s) — bloqueio a partir de ${politicaInadimplencia.meses_bloqueio}`
+      : mesesSelecionado > 0
+        ? `${mesesSelecionado} competência(s) vencida(s) — dentro da tolerância (verde até ${politicaInadimplencia.meses_atencao - 1})`
+        : "Nenhuma competência vencida";
+  const qrValue = selecionado ? `${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(selecionado.id)}` : "";
+  const participanteTemporadaAtual = participanteTemporadaSelecionado || temporadaSelecionada?.participantes?.find((p) => p.papel === "titular") || temporadaSelecionada?.participantes?.[0] || null;
+  const temporadaQrValue = temporadaSelecionada
+    ? participanteTemporadaAtual?.id
+      ? `guarani:temporada-participante:${participanteTemporadaAtual.id}`
+      : `guarani:temporada:${temporadaSelecionada.id}`
+    : "";
+  const temporadaValidade = temporadaSelecionada?.fim || null;
+  const statusTemporadaTexto = participanteTemporadaAtual?.status_carteirinha_texto || temporadaSelecionada?.status_carteirinha_texto || (temporadaSelecionada?.situacao || "Situação não informada");
+  const statusTemporadaAtiva = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "ativa";
+  const statusTemporadaBloqueada = (participanteTemporadaAtual?.status_carteirinha || temporadaSelecionada?.status_carteirinha) === "bloqueada";
+  const exame = statusExame(selecionado?.exame_medico_validade);
+  const exameTemporada = statusExame(participanteTemporadaAtual?.exame_medico_validade);
 
   return (
-    <main className="min-h-screen bg-[#F8FAF9] text-slate-800">
-      <CabecalhoPadrao />
+    <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: auto;
+            margin: 0;
+          }
 
-      <div className="flex min-h-[calc(100vh-76px)] min-w-0">
-        <MenuLateralPadrao />
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
 
-        <section className="min-w-0 flex-1 p-3 sm:p-5 lg:ml-[220px] lg:p-7">
-          <div className="mx-auto w-full max-w-[1500px] min-w-0">
-            <div className="mb-5 flex flex-col justify-between gap-3 sm:mb-7 md:flex-row md:items-end">
-              <div>
-                <div className="mb-1 text-sm font-medium text-slate-500">Administração</div>
-                <h1 className="text-2xl font-black tracking-tight text-[#005A3C] sm:text-3xl">Dependentes</h1>
-                <p className="mt-1 text-slate-500">Cadastro e gerenciamento dos dependentes dos associados.</p>
+          body * {
+            visibility: hidden !important;
+          }
+
+          .print-carteirinha,
+          .print-carteirinha * {
+            visibility: visible !important;
+          }
+
+          .print-carteirinha {
+            position: absolute !important;
+            left: 50% !important;
+            top: 12mm !important;
+            transform: translateX(-50%) !important;
+            width: 85.60mm !important;
+            height: 53.98mm !important;
+            margin: 0 !important;
+            border-width: 0.6mm !important;
+            border-radius: 4mm !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            font-size: 7px !important;
+          }
+
+          .print-carteirinha .card-top {
+            padding: 3mm !important;
+          }
+
+          .print-carteirinha .card-logo {
+            width: 8mm !important;
+            height: 8mm !important;
+          }
+
+          .print-carteirinha .card-title {
+            font-size: 7px !important;
+          }
+
+          .print-carteirinha .card-subtitle {
+            margin-top: 0.5mm !important;
+            font-size: 5px !important;
+          }
+
+          .print-carteirinha .card-body {
+            padding: 3mm !important;
+          }
+
+          .print-carteirinha .card-photo {
+            width: 16mm !important;
+            height: 20mm !important;
+          }
+
+          .print-carteirinha .card-name {
+            font-size: 9px !important;
+          }
+
+          .print-carteirinha .card-info {
+            font-size: 5.5px !important;
+          }
+
+          .print-carteirinha .card-badge {
+            margin-top: 1mm !important;
+            padding: 1mm 2mm !important;
+            font-size: 5px !important;
+          }
+
+          .print-carteirinha .card-bottom {
+            margin-top: 2mm !important;
+          }
+
+          .print-carteirinha .card-qr {
+            width: 22mm !important;
+            height: 22mm !important;
+          }
+
+          .print-hide {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      <div className="print-hide"><CabecalhoPadrao /><MenuLateralPadrao /></div>
+
+      <main className={`${modoQr ? "min-h-screen px-3 py-4" : "min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8"}`}>
+        <div className={`${modoQr ? "mx-auto max-w-md" : "mx-auto max-w-7xl space-y-6"}`}>
+          {!modoQr && <div>
+            <p className="text-sm text-gray-500">Identificação</p>
+            <h1 className="text-3xl font-extrabold text-[#005a3c]">Carteirinhas</h1>
+            <p className="mt-1 text-sm text-gray-500">Consulta de associados, dependentes e QR Codes de acesso. A impressão e as listas ficam em uma guia separada para manter esta tela leve.</p>
+            <a href="/carteirinhas/imprimir" target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white shadow-sm hover:bg-[#00442f]">
+              <Printer className="h-4 w-4" /> Impressão e listas em nova guia
+            </a>
+          </div>}
+
+          {!modoQr && erro && <div className="rounded-xl border border-red-200 bg-red-50 p-4 font-semibold text-red-700">{erro}</div>}
+
+          <div className={`${modoQr ? "" : "grid gap-6 lg:grid-cols-[1fr_430px]"}`}>
+            {!modoQr && <section className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2 rounded-xl border px-3">
+                <Search className="h-4 w-4 text-gray-400" />
+                <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, matrícula ou CPF..." className="w-full py-3 outline-none" />
               </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                {!somenteConsulta && (
-                  <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([
+                  ["todos", `Todos (${socios.length})`],
+                  ["ativos", `Ativos (${contadores.ativos})`],
+                  ["inativos", `Inativos (${contadores.inativos})`],
+                  ...(camposVisiveis.exameMedico ? [["exame_vencido", `Exame vencido (${contadores.examesVencidos})`] as [string, string]] : []),
+                ] as [string, string][]).map(([valor, rotulo]) => (
+                  <button key={valor} type="button" onClick={() => setFiltroStatus(valor as typeof filtroStatus)} className={`rounded-lg border px-2 py-2 text-xs font-bold ${filtroStatus === valor ? "border-[#005a3c] bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 text-xs font-semibold text-gray-500">{lista.length} associado(s) encontrado(s)</div>
+              <div className="mt-4 space-y-2">
+                {lista.map((s) => (
+                  <button key={s.id} onClick={() => { setSelecionado(s); setDependenteSelecionado(null); }} className={`w-full rounded-xl border p-4 text-left ${selecionado?.id === s.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
+                    <b>{s.nome}</b>
+                    <div className="text-xs text-gray-500">Matrícula: {s.matricula || "—"} · {visual(s.tipo_socio).nome}</div>
+                  </button>
+                ))}
+
+                {temporadasLista.length > 0 && (
+                  <div className="pt-4">
+                    <div className="mb-2 text-xs font-black uppercase tracking-wide text-orange-600">🏖️ Temporadas</div>
+                    <div className="space-y-2">
+                      {temporadasLista.map((t) => (
+                        <div key={t.id} className={`rounded-xl border p-3 ${temporadaSelecionada?.id === t.id ? "border-orange-500 bg-orange-50" : ""}`}>
+                          <button
+                            onClick={() => {
+                              setTemporadaSelecionada(t);
+                              setParticipanteTemporadaSelecionado(t.participantes?.find((p) => p.papel === "titular") || t.participantes?.[0] || null);
+                              setSelecionado(null);
+                              setDependenteSelecionado(null);
+                              setModoQr(false);
+                            }}
+                            className="w-full text-left"
+                          >
+                            <b>{t.responsavel_nome || "Responsável da temporada"}</b>
+                            <div className="text-xs text-gray-500">Matrícula: {t.matricula || "—"} · {t.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}</div>
+                            <div className={`mt-1 text-xs font-black ${t.status_carteirinha === "bloqueada" ? "text-red-700" : t.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{t.status_carteirinha_texto || t.situacao || "Situação não informada"}</div>
+                          </button>
+                          {temporadaSelecionada?.id === t.id && (t.participantes || []).length > 0 && (
+                            <div className="mt-3 space-y-2 border-t border-orange-200 pt-3">
+                              <div className="text-[10px] font-black uppercase tracking-wide text-orange-800">Carteirinhas individuais</div>
+                              {t.participantes!.map((p) => (
+                                <button key={p.id} onClick={() => { setParticipanteTemporadaSelecionado(p); setModoQr(false); }} className={`flex w-full items-center gap-3 rounded-lg border bg-white p-2 text-left ${participanteTemporadaAtual?.id === p.id ? "border-orange-500 ring-1 ring-orange-300" : "hover:border-orange-300"}`}>
+                                  <div className="h-10 w-9 shrink-0 overflow-hidden rounded bg-orange-50">{p.foto_url ? <Image src={p.foto_url} alt={p.nome || "Foto do participante"} width={90} height={100} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
+                                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{p.nome || "Participante"}</div><div className="text-xs text-gray-500">{p.matricula || "Sem matrícula"} · {p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</div></div>
+                                  <span className={`text-[10px] font-black ${p.status_carteirinha === "bloqueada" ? "text-red-700" : p.status_carteirinha === "ativa" ? "text-emerald-700" : "text-gray-600"}`}>{p.status_carteirinha === "bloqueada" ? "BLOQUEADA" : p.status_carteirinha === "ativa" ? "ATIVA" : "INATIVA"}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selecionado && (familiaSelecionada.length > 0 || dependentesFamiliaSelecionada.length > 0) && (
+                  <div className="pt-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-black uppercase tracking-wide text-gray-400">Grupo familiar</div>
+                      <div className="text-xs font-semibold text-gray-400">{familiaSelecionada.length + dependentesFamiliaSelecionada.length + 1} pessoa(s)</div>
+                    </div>
+                    <div className="rounded-xl bg-[#f4f7f5] p-3 text-xs text-gray-600">
+                      Selecionado: <b>{selecionado.nome}</b>. Abaixo aparecem cônjuge, filhos e demais integrantes vinculados à mesma família.
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      {familiaSelecionada.map((membro) => (
+                        <button key={membro.id} onClick={() => setSelecionado(membro)} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{membro.nome}</b>
+                          <div className="text-xs text-gray-500">
+                            Matrícula: {membro.matricula || "—"} · {membro.parentesco || visual(membro.tipo_socio).nome}
+                          </div>
+                        </button>
+                      ))}
+                      {dependentesFamiliaSelecionada.map((d) => (
+                        <button key={`dep-${d.id}`} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); }} className="w-full rounded-xl border p-4 text-left hover:border-[#005a3c] hover:bg-gray-50">
+                          <b>{d.nome}</b>
+                          <div className="text-xs text-gray-500">Matrícula: {d.matricula || "—"} · {d.parentesco || "Família"}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!selecionado && dependentesLista.length > 0 && (
+                  <div className="pt-3">
+                    <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-400">Dependentes da família</div>
+                    <div className="space-y-2">
+                      {dependentesLista.map((d) => (
+                        <button key={d.id} onClick={() => { setSelecionado(null); setDependenteSelecionado(d); }} className={`w-full rounded-xl border p-4 text-left ${dependenteSelecionado?.id === d.id ? "border-[#005a3c] bg-[#e8f3ee]" : "hover:bg-gray-50"}`}>
+                          <b>{d.nome}</b>
+                          <div className="text-xs text-gray-500">Dependente · {d.parentesco || "Família"} · Titular: {d.titular_nome || "—"}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
+            </section>}
 
-            {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
-            {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
-
-            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 sm:gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Total de dependentes</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{dependentes.length}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes ativos</div><div className="mt-1 text-3xl font-black text-[#005A3C]">{totalAtivos}</div></div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="text-sm text-slate-500">Dependentes inativos</div><div className="mt-1 text-3xl font-black text-slate-600">{totalInativos}</div></div>
-            </div>
-
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-              <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[1fr_300px_180px]">
-                <div className="flex items-center rounded-xl border border-slate-200 px-4">
-                  <span className="mr-3 text-xl">🔎</span>
-                  <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CPF, parentesco ou sócio..." className="w-full min-w-0 bg-transparent py-3 text-sm outline-none" />
-                </div>
-                <select value={filtroSocio} onChange={(e) => setFiltroSocio(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
-                  <option value="">Todos os responsáveis</option>
-                  {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — ${s.matricula}` : ""}</option>)}
-                </select>
-                <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#005A3C]">
-                  <option value="todos">Todos</option><option value="ativos">Ativos</option><option value="inativos">Inativos</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              {carregando ? (
-                <div className="p-8 text-center text-sm text-slate-500 sm:p-10">Carregando dependentes...</div>
-              ) : dependentesFiltrados.length === 0 ? (
-                <div className="p-8 text-center sm:p-12"><div className="text-4xl">👨‍👩‍👧</div><div className="mt-3 text-lg font-black text-[#003D2B]">Nenhum dependente encontrado</div><p className="mt-1 text-sm text-slate-500">Cadastre o primeiro dependente ou ajuste os filtros.</p></div>
-              ) : (
-                <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
-                    <colgroup>
-                      <col className="w-[90px]" />
-                      <col className="w-[190px]" />
-                      <col className="w-[105px]" />
-                      <col className="w-[105px]" />
-                      <col className="w-[125px]" />
-                      <col className="w-[185px]" />
-                      <col className="w-[115px]" />
-                      <col className="w-[100px]" />
-                      <col className="w-[120px]" />
-                      <col className="w-[85px]" />
-                      <col className="w-[150px]" />
-                    </colgroup>
-                    <thead className="bg-[#E8F3EE] text-[11px] uppercase tracking-wide text-[#315B4C]">
-                      <tr>
-                        <th className="px-3 py-3 sm:px-5 sm:py-4">Matrícula</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nome</th><th className="px-3 py-3 sm:px-5 sm:py-4">Parentesco</th><th className="px-3 py-3 sm:px-5 sm:py-4">Nascimento</th><th className="px-3 py-3 sm:px-5 sm:py-4">CPF</th><th className="px-3 py-3 sm:px-5 sm:py-4">Responsável</th><th className="px-3 py-3 sm:px-5 sm:py-4">Telefone</th><th className="px-3 py-3 sm:px-5 sm:py-4">Mensalidade</th><th className="px-3 py-3 sm:px-5 sm:py-4">Financeiro</th><th className="px-3 py-3 sm:px-5 sm:py-4">Situação</th><th className="px-3 py-3 text-center sm:px-4 sm:py-4">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dependentesFiltrados.map((d) => {
-                        const socio = socioPorId[d.socio_id];
-                        const statusResponsavel = d.financeiro_status || statusResponsaveis[d.socio_id] || "restrito";
-                        const mesesAtraso = Number(d.meses_atraso || 0);
-                        const statusLabel = statusResponsavel === "muito_atrasado"
-                          ? `🔴 ${mesesAtraso || politicaInadimplencia.meses_bloqueio}+ meses — bloqueio`
-                          : statusResponsavel === "atrasado"
-                            ? `🟡 ${mesesAtraso || politicaInadimplencia.meses_atencao} meses — atenção`
-                            : statusResponsavel === "em_dia"
-                              ? "🟢 0 meses — em dia"
-                              : statusResponsavel === "sem_lancamentos"
-                                ? "⚪ Sem mensalidades lançadas"
-                                : "⚪ Situação não identificada — conferir titular";
-                        const statusClasse = statusResponsavel === "muito_atrasado" ? "bg-red-100 text-red-700" : statusResponsavel === "atrasado" ? "bg-amber-100 text-amber-700" : statusResponsavel === "em_dia" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700";
-                        const titularInativo = normalizarTexto(socio?.situacao || "") === "inativo";
-                        const dependenteAtivoEfetivo = d.ativo !== false && !titularInativo;
-                        return (
-                          <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className="font-extrabold text-[#005A3C]">{d.matricula || "—"}</span></td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4">
-                              <div className="flex items-center gap-3">
-                                {d.foto_url ? (
-                                  <Image src={d.foto_url} alt={`Foto de ${d.nome}`} width={40} height={40} unoptimized className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
-                                ) : (
-                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E8F3EE] text-sm font-black text-[#005A3C]">
-                                    {d.nome.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("").toUpperCase()}
-                                  </div>
-                                )}
-                                <div className="font-extrabold text-[#003D2B]">{d.nome}</div>
-                              </div>
-                            </td>
-                            <td className="px-5 py-4 text-sm text-slate-600">{d.parentesco || "—"}</td>
-                            <td className="px-5 py-4 text-sm text-slate-600">{formatarData(d.data_nascimento)}</td>
-                            <td className="px-5 py-4 text-sm text-slate-600">{formatarCpf(d.cpf)}</td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><div className="font-semibold text-slate-700">{socio?.nome || "Sócio não encontrado"}</div>{socio?.matricula && <div className="text-xs text-slate-400">Matrícula {socio.matricula}</div>}</td>
-                            <td className="px-5 py-4 text-sm text-slate-600">{formatarTelefone(d.telefone)}</td>
-                            <td className="px-5 py-4 text-sm font-bold text-slate-700">{d.possui_mensalidade ? `R$ ${Number(d.valor_mensalidade || 0).toFixed(2).replace(".", ",")}` : "Familiar"}</td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${statusClasse}`}>{statusLabel}</span></td>
-                            <td className="px-3 py-3 sm:px-5 sm:py-4"><button onClick={() => { if (!titularInativo) void alternarStatus(d); }} disabled={titularInativo} title={titularInativo ? "Titular inativo: dependente considerado inativo" : undefined} className={`rounded-full px-3 py-1 text-xs font-black ${dependenteAtivoEfetivo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"} ${titularInativo ? "cursor-not-allowed opacity-80" : ""}`}>{dependenteAtivoEfetivo ? "Ativo" : "Inativo"}</button></td>
-                            <td className="px-3 py-3 sm:px-4 sm:py-4">
-                              {!somenteConsulta && (
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => abrirEdicao(d)}
-                                    className="inline-flex h-9 w-[78px] items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 transition hover:bg-[#E8F3EE] hover:text-[#005A3C]"
-                                  >
-                                    ✏️ Editar
-                                  </button>
-                                  {d.source === "socios" ? (
-                                    <button
-                                      type="button"
-                                      disabled
-                                      title="Este cadastro pertence a Sócios. A exclusão deve ser feita pelo cadastro do sócio."
-                                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-300 opacity-70 cursor-not-allowed"
-                                    >
-                                      🗑️
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => excluirDependente(d)}
-                                      title="Excluir dependente"
-                                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-red-600 transition hover:bg-red-100"
-                                    >
-                                      🗑️
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            <div className="mt-5 text-sm text-slate-400">Exibindo {dependentesFiltrados.length} de {dependentes.length} dependentes.</div>
-          </div>
-        </section>
-      </div>
-
-      {modalAberto && !somenteConsulta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-              <div><div className="text-xs font-semibold text-slate-500">Sociedade Recreativa Guarani</div><h2 className="text-2xl font-black text-[#005A3C]">{editando ? "Editar Dependente" : "Novo Dependente"}</h2></div>
-              <button onClick={fecharModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200">×</button>
-            </div>
-
-            <form onSubmit={salvarDependente} className="overflow-y-auto p-6">
-              {erro && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{erro}</div>}
-              {sucesso && <div className="mb-5 rounded-xl border border-emerald-200 bg-[#E8F3EE] px-4 py-3 text-sm font-semibold text-[#005A3C]">{sucesso}</div>}
-
-              <div className="rounded-2xl border border-[#D9E9E2] bg-[#F8FAF9] p-5">
-                <div className="mb-4 text-base font-black text-[#005A3C]">👤 Dados do dependente</div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Sócio responsável *</span>
-                    <select required value={form.socio_id} onChange={(e) => setForm({ ...form, socio_id: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
-                      <option value="">Selecione o sócio responsável</option>
-                      {socios.map((s) => <option key={s.id} value={s.id}>{s.nome}{s.matricula ? ` — Matrícula ${s.matricula}` : ""}</option>)}
-                    </select>
-                  </label>
-                  <label className="md:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Nome completo *</span><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome completo do dependente" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">CPF</span><input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} inputMode="numeric" placeholder="Somente números" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Data de nascimento</span><input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Validade do exame médico</span><input type="date" value={form.exame_medico_validade} onChange={(e) => setForm({ ...form, exame_medico_validade: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /><span className="mt-1 block text-xs text-slate-500">Exame individual do dependente.</span></label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Parentesco</span><select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]"><option value="">Selecione</option>{parentescos.map((p) => <option key={p}>{p}</option>)}</select></label>
-                  <label><span className="mb-1 block text-sm font-bold text-slate-700">Telefone / WhatsApp</span><input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(55) 99999-9999" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" /></label>
-                  <div className="md:col-span-2 rounded-xl border border-dashed border-[#9fc8b5] bg-white p-4">
-                    <div className="mb-3 text-sm font-bold text-[#005A3C]">📷 Foto do dependente</div>
-                    <div className="flex flex-wrap items-center gap-4">
-                      {(fotoArquivo || editando?.foto_url) && (
-                        <div className="h-20 w-20 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                          <Image
-                            src={fotoArquivo ? URL.createObjectURL(fotoArquivo) : editando?.foto_url || ""}
-                            alt="Prévia"
-                            width={80}
-                            height={80}
-                            unoptimized
-                            className="h-full w-full object-cover"
-                          />
+            {temporadaSelecionada && (
+              <section className={modoQr ? "space-y-3" : "space-y-4"}>
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-orange-700 bg-white shadow-xl`}>
+                  <div className="card-top p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" />
+                        <div>
+                          <div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                          <div className="card-title mt-1 text-lg font-black">CARTEIRA DE TEMPORADA</div>
                         </div>
-                      )}
-                      <div>
-                        <label className="inline-flex cursor-pointer items-center rounded-xl border border-[#cfe3d8] bg-[#E8F3EE] px-4 py-2.5 text-sm font-extrabold text-[#005A3C] hover:bg-[#d9eee4]">
-                          📷 {fotoArquivo ? "Trocar foto" : "Escolher foto"}
-                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setFotoArquivo(e.target.files?.[0] || null)} />
-                        </label>
-                        {fotoArquivo && <p className="mt-2 text-xs text-slate-500">{fotoArquivo.name}</p>}
                       </div>
+                      <IdCard />
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <div className="flex gap-4">
+                      <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-orange-50">
+                        {participanteTemporadaAtual?.foto_url ? <Image src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="card-name text-xl font-black leading-tight">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                        <p className="card-info mt-1 text-sm text-gray-500">Matrícula <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p>
+                        <p className="card-info text-sm text-gray-500">CPF <b>{formatarCpf(participanteTemporadaAtual?.cpf || temporadaSelecionada.responsavel_cpf)}</b></p>
+                        <span className="card-badge mt-2 inline-block rounded-full bg-orange-600 px-3 py-1 text-xs font-black text-white">
+                          {temporadaSelecionada.tipo === "temporada_familiar" ? "Temporada Familiar" : "Temporada Individual"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4">
+                      <div className="space-y-2 text-sm">
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className={`font-black ${statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}`}>{statusTemporadaTexto}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade da temporada</div><div className="font-bold">{temporadaValidade ? formatarData(temporadaValidade) : "—"}</div></div>
+                        {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
+                      </div>
+                      <QRCodeSVG className="card-qr" value={temporadaQrValue} size={112} includeMargin />
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-[#F8FAF9] p-5">
-                <div className="mb-4 text-base font-black text-[#005A3C]">💰 Financeiro do dependente</div>
-                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4">
-                  <div>
-                    <div className="font-bold text-slate-700">Possui mensalidade própria?</div>
-                    <div className="text-sm text-slate-500">A mensalidade do dependente será controlada separadamente do responsável.</div>
-                  </div>
-                  <button type="button" onClick={() => setForm({ ...form, possui_mensalidade: !form.possui_mensalidade, situacao_financeira: !form.possui_mensalidade ? "em_dia" : "isento" })} className={`relative h-7 w-12 rounded-full transition ${form.possui_mensalidade ? "bg-[#005A3C]" : "bg-slate-300"}`}>
-                    <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${form.possui_mensalidade ? "left-6" : "left-1"}`} />
-                  </button>
-                </label>
 
-                {form.possui_mensalidade && (
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <label>
-                      <span className="mb-1 block text-sm font-bold text-slate-700">Valor da mensalidade</span>
-                      <input type="number" min="0" step="0.01" value={form.valor_mensalidade} onChange={(e) => setForm({ ...form, valor_mensalidade: Number(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" placeholder="0,00" />
-                    </label>
-                    <label>
-                      <span className="mb-1 block text-sm font-bold text-slate-700">Dia do vencimento</span>
-                      <input type="number" min="1" max="31" value={form.dia_vencimento} onChange={(e) => setForm({ ...form, dia_vencimento: Math.min(31, Math.max(1, Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
-                    </label>
-                    <label>
-                      <span className="mb-1 block text-sm font-bold text-slate-700">Forma de pagamento</span>
-                      <select value={form.tipo_pagamento} onChange={(e) => setForm({ ...form, tipo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
-                        <option value="pix">PIX</option>
-                        <option value="debito_em_conta">Débito em conta</option>
-                        <option value="boleto">Boleto</option>
-                        <option value="dinheiro">Dinheiro</option>
-                        <option value="transferencia">Transferência</option>
-                        <option value="outro">Outro</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span className="mb-1 block text-sm font-bold text-slate-700">Situação financeira</span>
-                      <select value={form.situacao_financeira} onChange={(e) => setForm({ ...form, situacao_financeira: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]">
-                        <option value="em_dia">🟢 Em dia</option>
-                        <option value="em_atraso">🔴 Em atraso</option>
-                        <option value="isento">⚪ Isento</option>
-                      </select>
-                    </label>
-                    <label className="md:col-span-2">
-                      <span className="mb-1 block text-sm font-bold text-slate-700">Data do último pagamento</span>
-                      <input type="date" value={form.data_ultimo_pagamento} onChange={(e) => setForm({ ...form, data_ultimo_pagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#005A3C]" />
-                    </label>
+
+                {modoQr && (
+                  <div className="overflow-hidden rounded-[26px] border-4 border-orange-700 bg-white shadow-2xl">
+                    <div className="p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                      <div className="flex items-center gap-3">
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
+                        <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div></div>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <h2 className="text-xl font-black">{temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2>
+                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{temporadaSelecionada.matricula || "—"}</b></p>
+                      <p className="text-sm text-gray-500">Validade: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                      <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
+                      <div className="mt-4 rounded-xl bg-orange-50 p-3 text-center text-xs font-semibold text-orange-800">Apresente este QR Code para identificação na portaria.</div>
+                    </div>
                   </div>
                 )}
-              </div>
+              </section>
+            )}
 
-              <div className="mt-5 rounded-2xl border border-[#D9E9E2] bg-white p-5">
-                <div className="mb-4 text-base font-black text-[#005A3C]">🟢 Situação</div>
-                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4">
-                  <div><div className="font-bold text-slate-700">Dependente ativo</div><div className="text-sm text-slate-500">Dependentes inativos permanecem no histórico.</div></div>
-                  <button type="button" onClick={() => setForm({ ...form, ativo: !form.ativo })} className={`relative h-7 w-12 rounded-full transition ${form.ativo ? "bg-[#005A3C]" : "bg-slate-300"}`}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${form.ativo ? "left-6" : "left-1"}`} /></button>
-                </label>
-              </div>
+            {dependenteSelecionado && (
+              <section className={modoQr ? "space-y-3" : "space-y-4"}>
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl`}>
+                  <div className="card-top p-5" style={{ background: "#005a3c", color: "#ffffff" }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3"><Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" /><div><div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="card-title mt-1 text-lg font-black">CARTEIRA DE ASSOCIADO</div></div></div><IdCard />
+                    </div>
+                  </div>
+                  <div className="p-6">
+                    <div className="flex gap-4"><div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                        {dependenteSelecionado.foto_url ? <Image src={dependenteSelecionado.foto_url} alt={dependenteSelecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                      </div><div className="min-w-0"><h2 className="card-name text-xl font-black leading-tight">{dependenteSelecionado.nome}</h2><p className="card-info mt-1 text-sm text-gray-500">Dependente · <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="card-info text-sm text-gray-500">Titular <b>{dependenteSelecionado.titular_nome || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="card-info text-sm text-gray-500">Matrícula do titular <b>{dependenteSelecionado.titular_matricula || "—"}</b></p><span className="card-badge mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4"><div className="space-y-2 text-sm"><div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{dependenteSelecionado.situacao || "Não informada"}</div></div>{camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${dependenteSelecionado.financeiro_status === "em_dia" ? "bg-emerald-500" : dependenteSelecionado.financeiro_status === "atrasado" ? "bg-yellow-400" : "bg-red-500"}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div></div>}</div><QRCodeSVG className="card-qr" value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={112} includeMargin /></div>
+                  </div>
+                </div>
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-1 gap-2"}`}><button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button></div>
+                <div className={`${modoQr ? "hidden" : "rounded-xl bg-[#e8f3ee] p-4 text-sm"}`}><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
+                {modoQr && <div className="rounded-xl bg-[#e8f3ee] p-4 text-center text-sm font-semibold text-[#005a3c]">Carteira digital do dependente · titular: {dependenteSelecionado.titular_nome || "—"}</div>}
+              </section>
+            )}
 
-              <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-5">
-                <button type="button" onClick={fecharModal} disabled={salvando} className="rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
-                <button type="submit" disabled={salvando} className="rounded-xl bg-[#005A3C] px-6 py-3 font-extrabold text-white hover:bg-[#003D2B] disabled:opacity-60">{salvando ? "Salvando..." : editando ? "💾 Salvar alterações" : "📋 Cadastrar dependente"}</button>
+            {selecionado && (
+              <section className={modoQr ? "space-y-3" : "space-y-4"}>
+                <div className={`${modoQr ? "hidden" : ""} print-carteirinha overflow-hidden rounded-3xl border-4 border-[#17382c] bg-white shadow-xl`}>
+                  <div className="card-top p-5" style={{ background: v.bg, color: v.text }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={40} height={40} unoptimized className="card-logo h-10 w-10 rounded-lg object-contain" />
+                        <div>
+                          <div className="card-subtitle text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                          <div className="card-title mt-1 text-lg font-black">CARTEIRA DE ASSOCIADO</div>
+                        </div>
+                      </div>
+                      <IdCard />
+                    </div>
+                  </div>
+
+                  <div className="p-6">
+                    <div className="flex gap-4">
+                      <div className="card-photo h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                        {selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="card-name text-xl font-black leading-tight">{selecionado.nome}</h2>
+                        <p className="card-info mt-1 text-sm text-gray-500">Matrícula <b>{selecionado.matricula || "—"}</b></p>
+                        <p className="card-info text-sm text-gray-500">CPF <b>{formatarCpf(selecionado.cpf)}</b></p>
+                        <span className="card-badge mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span>
+                      </div>
+                    </div>
+
+                    <div className="card-bottom mt-6 flex items-end justify-between gap-4">
+                      <div className="space-y-2 text-sm">
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><div className="font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><div className="font-bold">{validade ? formatarData(validade) : "Conforme cadastro"}</div></div>
+                        {camposVisiveis.financeiro && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${statusFinanceiroClass}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Mensalidade</div><div className="font-black">{statusFinanceiroLabel}</div></div></div>}
+                        {camposVisiveis.exameMedico && <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${exame.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`font-black text-xs ${exame.textoClasse}`}>{exame.texto}</div></div></div>}
+                      </div>
+                      <QRCodeSVG className="card-qr" value={qrValue} size={112} includeMargin />
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`${modoQr ? "hidden" : "grid grid-cols-1 gap-2"}`}>
+                  <button onClick={() => setDigitalAberta(true)} className="flex items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold hover:bg-gray-50"><Smartphone className="h-4 w-4" /> Carteira digital</button>
+                </div>
+
+                <div className={`${modoQr ? "hidden" : "rounded-xl bg-[#e8f3ee] p-4 text-sm"}`}><ShieldCheck className="mr-2 inline h-4 w-4 text-[#005a3c]" /><b>QR Code exclusivo.</b> O funcionário pode escanear este código para registrar a entrada.</div>
+
+                {modoQr && (
+                  <div className="overflow-hidden rounded-[26px] border-4 border-[#17382c] bg-white shadow-2xl">
+                    <div className="p-5" style={{ background: v.bg, color: v.text }}>
+                      <div className="flex items-center gap-3">
+                        <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
+                        <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                        <div className="min-w-0"><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
+                      </div>
+                      {camposVisiveis.financeiro && <div className="mt-5 rounded-2xl bg-[#f4f7f5] p-4">
+                        <div className="flex items-center gap-3"><span className={`h-5 w-5 rounded-full ${statusFinanceiroClass} ring-4 ring-white shadow`} /><div><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black">{statusFinanceiroLabel}</div><div className="text-xs text-gray-500">{statusFinanceiroText}</div></div></div>
+                      </div>}
+                      <div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Situação</div><b>{selecionado.situacao || "Não informada"}</b></div><div className="rounded-xl border p-3"><div className="text-[10px] font-bold uppercase text-gray-400">Validade</div><b>{validade ? formatarData(validade) : "Conforme cadastro"}</b></div></div>
+                      {erro && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{erro}</div>}
+                      <div className="mt-5 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Acesso contabilizado automaticamente na leitura do QR Code.</div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {digitalAberta && temporadaSelecionada && !modoQr && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
+          <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
+            <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white p-2 shadow" aria-label="Fechar"><X className="h-5 w-5" /></button>
+            <div className="overflow-hidden rounded-[22px] border-4 border-orange-700 bg-white">
+              <div className="p-5" style={{ background: "#e87511", color: "#ffffff" }}>
+                <div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div>
+                <div className="text-xl font-black">CARTEIRA DIGITAL · TEMPORADA</div>
               </div>
-            </form>
+              <div className="p-6">
+                <div className="flex items-center gap-3"><div className="h-20 w-16 overflow-hidden rounded-lg bg-orange-50">{participanteTemporadaAtual?.foto_url ? <Image src={participanteTemporadaAtual.foto_url} alt={participanteTemporadaAtual.nome || "Participante"} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-2xl">👤</div>}</div><div><h2 className="text-xl font-black">{participanteTemporadaAtual?.nome || temporadaSelecionada.responsavel_nome || "Responsável da temporada"}</h2><p className="mt-1 text-sm text-gray-500">Matrícula: <b>{participanteTemporadaAtual?.matricula || temporadaSelecionada.matricula || "—"}</b></p></div></div>
+                <p className="mt-3 text-sm text-gray-500">Situação: <b className={statusTemporadaBloqueada ? "text-red-700" : statusTemporadaAtiva ? "text-emerald-700" : "text-gray-700"}>{statusTemporadaTexto}</b></p>
+                <p className="text-sm text-gray-500">Validade da temporada: <b>{temporadaValidade ? formatarData(temporadaValidade) : "—"}</b></p>
+                {camposVisiveis.exameMedico && <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 p-3"><span className={`h-3 w-3 shrink-0 rounded-full ${exameTemporada.ponto}`} /><div><div className="text-[10px] font-bold uppercase text-gray-400">Exame médico</div><div className={`text-sm font-black ${exameTemporada.textoClasse}`}>{exameTemporada.texto}</div></div></div>}
+                <div className="mt-5 flex justify-center"><QRCodeSVG value={temporadaQrValue} size={210} includeMargin /></div>
+              </div>
+            </div>
           </div>
         </div>
       )}
-    </main>
+
+      {digitalAberta && selecionado && !modoQr && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
+          <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
+            <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white">
+              <div className="p-5" style={{ background: v.bg, color: v.text }}>
+                <div className="flex items-center gap-3">
+                  <Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" />
+                  <div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-24 w-20 overflow-hidden rounded-xl bg-gray-100">{selecionado.foto_url ? <Image src={selecionado.foto_url} alt={selecionado.nome} width={320} height={384} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-3xl">👤</div>}</div>
+                  <div><h2 className="text-xl font-black">{selecionado.nome}</h2><p className="text-sm text-gray-500">Matrícula: <b>{selecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">CPF: <b>{formatarCpf(selecionado.cpf)}</b></p><span className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-black" style={{ background: v.bg, color: v.text }}>{v.nome}</span></div>
+                </div>
+                <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação</div><div className="text-lg font-black text-[#005a3c]">{selecionado.situacao || "Não informada"}</div><div className="mt-2 text-sm">Validade: <b>{validade ? formatarData(validade) : "Conforme cadastro"}</b></div></div>
+                <div className="mt-6 flex justify-center"><QRCodeSVG value={qrValue} size={210} includeMargin /></div>
+                <div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {digitalAberta && dependenteSelecionado && !modoQr && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#001f16]/85 p-4">
+          <div className="relative w-full max-w-md rounded-[28px] bg-white p-4 shadow-2xl">
+            <button onClick={() => setDigitalAberta(false)} className="absolute right-4 top-4 z-10 rounded-full bg-white/90 p-2 shadow" aria-label="Fechar carteira digital"><X className="h-5 w-5" /></button>
+            <div className="overflow-hidden rounded-[22px] border-4 border-[#17382c] bg-white"><div className="p-5" style={{ background: "#005a3c", color: "#ffffff" }}><div className="flex items-center gap-3"><Image src="/logo-guarani.png" alt="Sociedade Recreativa Guarani" width={48} height={48} unoptimized className="h-12 w-12 rounded-xl object-contain" /><div><div className="text-[10px] font-bold tracking-widest">SOCIEDADE RECREATIVA GUARANI</div><div className="text-xl font-black">CARTEIRA DIGITAL</div></div></div></div><div className="p-6"><div className="flex items-center gap-4"><div className="grid h-24 w-20 place-items-center rounded-xl bg-gray-100 text-3xl">👤</div><div><h2 className="text-xl font-black">{dependenteSelecionado.nome}</h2><p className="text-sm text-gray-500">Dependente: <b>{dependenteSelecionado.parentesco || "Família"}</b></p><p className="text-sm text-gray-500">Matrícula: <b>{dependenteSelecionado.matricula || "—"}</b></p><p className="text-sm text-gray-500">Titular: <b>{dependenteSelecionado.titular_nome || "—"}</b></p><span className="mt-2 inline-block rounded-full bg-[#005a3c] px-3 py-1 text-xs font-black text-white">Dependente</span></div></div>{camposVisiveis.financeiro && <div className="mt-6 rounded-2xl bg-[#f4f7f5] p-4"><div className="text-xs font-bold uppercase text-gray-400">Situação financeira</div><div className="text-lg font-black text-[#005a3c]">{dependenteSelecionado.financeiro_status === "em_dia" ? "EM DIA" : dependenteSelecionado.financeiro_status === "atrasado" ? "ATENÇÃO" : dependenteSelecionado.financeiro_status === "restrito" ? "RESTRITO" : "BLOQUEIO"}</div></div>}<div className="mt-6 flex justify-center"><QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/acessos/validar?id=${encodeURIComponent(dependenteSelecionado.id)}`} size={210} includeMargin /></div><div className="mt-4 rounded-xl bg-[#e8f3ee] p-3 text-center text-xs font-semibold text-[#005a3c]">Apresente este QR Code para identificação na portaria.</div></div></div>
+          </div>
+        </div>
+      )}
+
+    </div>
   );
 }
