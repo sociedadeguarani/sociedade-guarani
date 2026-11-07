@@ -44,9 +44,17 @@ export async function GET(request: Request) {
     });
     if (resumoError) throw resumoError;
 
+    // O saldo atual passa a considerar o saldo-base implantado por conta.
+    // O RPC mantém o histórico completo para filtros e totais, mas evita somar
+    // novamente os lançamentos anteriores ao instante da implantação.
+    const { data: saldosImplantados, error: saldosImplantadosError } = await supabase.rpc(
+      "financeiro_saldos_por_conta_implantados"
+    );
+    if (saldosImplantadosError) throw saldosImplantadosError;
+
     const [{ data: contas, error: contasError }] = await Promise.all([
       supabase.from("contas_bancarias")
-        .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
+        .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes")
         .eq("ativo", true).order("nome", { ascending: true }),
     ]);
     if (contasError) throw contasError;
@@ -116,7 +124,7 @@ export async function GET(request: Request) {
       page_size: pageSize,
       total_count: Number(resumo?.total_count || 0),
       totais: resumo?.totais || { entradas: 0, saidas: 0, transferencias: 0, pendentes: 0 },
-      saldos_por_conta: resumo?.saldos_por_conta || {},
+      saldos_por_conta: (saldosImplantados || resumo?.saldos_por_conta || {}) as Record<string, number>,
     });
   } catch (error) {
     console.error("[api/financeiro][GET]", error);
@@ -236,6 +244,37 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const acao = String(body.acao || "").trim().toLowerCase();
 
+    if (acao === "implantar_saldo_atual") {
+      const contaId = String(body.conta_bancaria_id || "").trim();
+      const saldoContaCorrente = Number(String(body.saldo_conta_corrente ?? "").replace(",", "."));
+      const saldoAplicado = Number(String(body.saldo_aplicado ?? "0").replace(",", "."));
+      const observacao = String(body.observacao || "Implantação do saldo existente").trim().slice(0, 500);
+
+      if (
+        !contaId ||
+        !Number.isFinite(saldoContaCorrente) || saldoContaCorrente < 0 ||
+        !Number.isFinite(saldoAplicado) || saldoAplicado < 0 ||
+        saldoContaCorrente + saldoAplicado <= 0
+      ) {
+        return NextResponse.json({ error: "Informe valores válidos e um saldo total maior que zero." }, { status: 400 });
+      }
+
+      const { data: implantacao, error: implantacaoError } = await db.rpc("financeiro_implantar_saldo_atual", {
+        p_conta_bancaria_id: contaId,
+        p_saldo_conta_corrente: Number(saldoContaCorrente.toFixed(2)),
+        p_saldo_aplicado: Number(saldoAplicado.toFixed(2)),
+        p_observacao: observacao || "Implantação do saldo existente",
+        p_usuario_id: auth.usuario.id,
+        p_usuario_nome: auth.usuario.nome_exibicao || "Administrador",
+      });
+      if (implantacaoError) {
+        console.error("[api/financeiro][POST][implantar_saldo_atual]", implantacaoError);
+        throw implantacaoError;
+      }
+
+      return NextResponse.json({ ok: true, implantacao });
+    }
+
     if (acao === "salvar_conta") {
       const id = String(body.id || "").trim();
       const nome = String(body.nome || "").trim();
@@ -250,8 +289,8 @@ export async function POST(request: Request) {
       }
       const payload = { nome, banco, agencia, conta, saldo_inicial: Number(saldoInicial.toFixed(2)), data_saldo_inicial: dataSaldoInicial, ativo: true, observacoes };
       const result = id
-        ? await db.from("contas_bancarias").update(payload).eq("id", id).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single()
-        : await db.from("contas_bancarias").insert(payload).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single();
+        ? await db.from("contas_bancarias").update(payload).eq("id", id).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes").single()
+        : await db.from("contas_bancarias").insert(payload).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes").single();
       if (result.error) throw result.error;
       return NextResponse.json({ ok: true, conta: result.data });
     }
