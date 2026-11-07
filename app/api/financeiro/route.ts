@@ -44,17 +44,9 @@ export async function GET(request: Request) {
     });
     if (resumoError) throw resumoError;
 
-    // O saldo atual passa a considerar o saldo-base implantado por conta.
-    // O RPC mantém o histórico completo para filtros e totais, mas evita somar
-    // novamente os lançamentos anteriores ao instante da implantação.
-    const { data: saldosImplantados, error: saldosImplantadosError } = await supabase.rpc(
-      "financeiro_saldos_por_conta_implantados"
-    );
-    if (saldosImplantadosError) throw saldosImplantadosError;
-
     const [{ data: contas, error: contasError }] = await Promise.all([
       supabase.from("contas_bancarias")
-        .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes")
+        .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes")
         .eq("ativo", true).order("nome", { ascending: true }),
     ]);
     if (contasError) throw contasError;
@@ -124,7 +116,7 @@ export async function GET(request: Request) {
       page_size: pageSize,
       total_count: Number(resumo?.total_count || 0),
       totais: resumo?.totais || { entradas: 0, saidas: 0, transferencias: 0, pendentes: 0 },
-      saldos_por_conta: (saldosImplantados || resumo?.saldos_por_conta || {}) as Record<string, number>,
+      saldos_por_conta: resumo?.saldos_por_conta || {},
     });
   } catch (error) {
     console.error("[api/financeiro][GET]", error);
@@ -135,7 +127,7 @@ export async function GET(request: Request) {
 export const dynamic = "force-dynamic";
 
 const TIPOS_MOVIMENTO = new Set(["entrada", "saida"]);
-const FORMAS_PAGAMENTO = new Set(["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "outro"]);
+const FORMAS_PAGAMENTO = new Set(["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "cheque", "outro"]);
 const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const BUCKET_COMPROVANTES = "comprovantes-financeiro";
 
@@ -244,37 +236,6 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const acao = String(body.acao || "").trim().toLowerCase();
 
-    if (acao === "implantar_saldo_atual") {
-      const contaId = String(body.conta_bancaria_id || "").trim();
-      const saldoContaCorrente = Number(String(body.saldo_conta_corrente ?? "").replace(",", "."));
-      const saldoAplicado = Number(String(body.saldo_aplicado ?? "0").replace(",", "."));
-      const observacao = String(body.observacao || "Implantação do saldo existente").trim().slice(0, 500);
-
-      if (
-        !contaId ||
-        !Number.isFinite(saldoContaCorrente) || saldoContaCorrente < 0 ||
-        !Number.isFinite(saldoAplicado) || saldoAplicado < 0 ||
-        saldoContaCorrente + saldoAplicado <= 0
-      ) {
-        return NextResponse.json({ error: "Informe valores válidos e um saldo total maior que zero." }, { status: 400 });
-      }
-
-      const { data: implantacao, error: implantacaoError } = await db.rpc("financeiro_implantar_saldo_atual", {
-        p_conta_bancaria_id: contaId,
-        p_saldo_conta_corrente: Number(saldoContaCorrente.toFixed(2)),
-        p_saldo_aplicado: Number(saldoAplicado.toFixed(2)),
-        p_observacao: observacao || "Implantação do saldo existente",
-        p_usuario_id: auth.usuario.id,
-        p_usuario_nome: auth.usuario.nome_exibicao || "Administrador",
-      });
-      if (implantacaoError) {
-        console.error("[api/financeiro][POST][implantar_saldo_atual]", implantacaoError);
-        throw implantacaoError;
-      }
-
-      return NextResponse.json({ ok: true, implantacao });
-    }
-
     if (acao === "salvar_conta") {
       const id = String(body.id || "").trim();
       const nome = String(body.nome || "").trim();
@@ -289,8 +250,8 @@ export async function POST(request: Request) {
       }
       const payload = { nome, banco, agencia, conta, saldo_inicial: Number(saldoInicial.toFixed(2)), data_saldo_inicial: dataSaldoInicial, ativo: true, observacoes };
       const result = id
-        ? await db.from("contas_bancarias").update(payload).eq("id", id).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes").single()
-        : await db.from("contas_bancarias").insert(payload).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,ativo,observacoes").single();
+        ? await db.from("contas_bancarias").update(payload).eq("id", id).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single()
+        : await db.from("contas_bancarias").insert(payload).select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo,observacoes").single();
       if (result.error) throw result.error;
       return NextResponse.json({ ok: true, conta: result.data });
     }
@@ -306,61 +267,12 @@ export async function POST(request: Request) {
       const { data: conta, error: contaError } = await db.from("contas_bancarias").select("id,ativo,saldo_inicial,data_saldo_inicial").eq("id", contaId).maybeSingle();
       if (contaError) throw contaError;
       if (!conta || conta.ativo !== true) return NextResponse.json({ error: "Conta bancária não encontrada ou inativa." }, { status: 404 });
-      // Reutiliza o agregado calculado no PostgreSQL sobre o histórico completo.
-      // Assim a conferência respeita o saldo de abertura e transferências entre contas,
-      // sem baixar centenas/milhares de movimentações para o servidor Next.js.
-      const { data: resumoSaldo, error: resumoSaldoError } = await db.rpc("financeiro_listar_paginado", {
-        p_page: 1,
-        p_page_size: 1,
-        p_data_inicio: null,
-        p_data_fim: null,
-        p_conta_id: null,
-        p_tipo: "todos",
-        p_forma: "todos",
-        p_conciliacao: "todos",
-        p_aba: "fluxo",
-        p_competencia_inicio: null,
-        p_competencia_fim: null,
-      });
-      if (resumoSaldoError) throw resumoSaldoError;
-
-      const resumo = (Array.isArray(resumoSaldo) ? resumoSaldo[0] : resumoSaldo) as
-        | { saldos_por_conta?: Record<string, number | string | null> }
-        | null;
-      const saldosPorConta = resumo?.saldos_por_conta || {};
-      const saldoBruto = Object.prototype.hasOwnProperty.call(saldosPorConta, contaId)
-        ? saldosPorConta[contaId]
-        : conta.saldo_inicial;
-      const saldoSistema = Number(Number(saldoBruto || 0).toFixed(2));
-      if (!Number.isFinite(saldoSistema)) {
-        throw new Error("O banco não retornou um saldo válido para esta conta.");
-      }
-
+      const { data: movimentos, error: movimentosError } = await db.from("movimentacoes_financeiras").select("tipo,valor").eq("conta_bancaria_id", contaId);
+      if (movimentosError) throw movimentosError;
+      const saldoSistema = Number((Number(conta.saldo_inicial || 0) + (movimentos || []).reduce((sum, m) => sum + (String(m.tipo) === "entrada" ? Number(m.valor || 0) : String(m.tipo) === "saida" ? -Number(m.valor || 0) : 0), 0)).toFixed(2));
       const diferenca = Number((saldoBanco - saldoSistema).toFixed(2));
-      const { data: conferencia, error: conferenciaError } = await db
-        .from("conferencias_bancarias")
-        .insert({
-          conta_bancaria_id: contaId,
-          saldo_sistema: saldoSistema,
-          saldo_banco: Number(saldoBanco.toFixed(2)),
-          diferenca,
-          data_conferencia: data,
-          observacao: observacao || "Conferência do saldo bancário",
-          created_by: auth.usuario.id,
-          created_by_nome: auth.usuario.nome_exibicao || "Administrador",
-        })
-        .select("id,conta_bancaria_id,saldo_sistema,saldo_banco,diferenca,data_conferencia,observacao,created_by,created_by_nome,created_at")
-        .single();
-      if (conferenciaError) {
-        console.error("[api/financeiro][POST][conferir_saldo]", conferenciaError);
-        const detalhe = conferenciaError.code === "42P01"
-          ? "A tabela de histórico não existe. Execute docs/sql/08_conferencias_bancarias.sql no Supabase."
-          : conferenciaError.message;
-        return NextResponse.json(
-          { error: `Não foi possível gravar a conferência bancária. ${detalhe}` },
-          { status: 500 },
-        );
-      }
+      const { data: conferencia, error } = await db.from("conferencias_bancarias").insert({ conta_bancaria_id: contaId, saldo_sistema: saldoSistema, saldo_banco: Number(saldoBanco.toFixed(2)), diferenca, data_conferencia: data, observacao: observacao || "Conferência do saldo bancário" }).select().single();
+      if (error) throw error;
       return NextResponse.json({ ok: true, conferencia });
     }
 
