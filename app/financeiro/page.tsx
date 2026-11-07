@@ -79,6 +79,11 @@ type ContaBancaria = {
   conta: string | null;
   saldo_inicial: number;
   data_saldo_inicial: string | null;
+  saldo_base_conta_corrente: number | null;
+  saldo_base_aplicado: number | null;
+  data_implantacao_saldo: string | null;
+  saldo_base_observacao: string | null;
+  saldo_base_atualizado_por_nome: string | null;
   ativo: boolean;
   observacoes: string | null;
 };
@@ -265,6 +270,11 @@ export default function FinanceiroPage() {
   const [usuariosMovimentos, setUsuariosMovimentos] = useState<Map<string, { nome: string; email: string | null }>>(new Map());
   const [abaFinanceira, setAbaFinanceira] = useState<"aluguéis" | "entradas" | "saidas" | "inadimplencia" | "contas" | "fluxo">("contas");
   const [mostrarContaModal, setMostrarContaModal] = useState(false);
+  const [contaImplantando, setContaImplantando] = useState<ContaBancaria | null>(null);
+  const [saldoBaseContaCorrente, setSaldoBaseContaCorrente] = useState("");
+  const [saldoBaseAplicado, setSaldoBaseAplicado] = useState("0");
+  const [observacaoSaldoBase, setObservacaoSaldoBase] = useState("Implantação do saldo existente");
+  const [salvandoSaldoBase, setSalvandoSaldoBase] = useState(false);
   const [mostrarMovimentoModal, setMostrarMovimentoModal] = useState(false);
   const [mostrarTransferenciaModal, setMostrarTransferenciaModal] = useState(false);
   const [contaEditando, setContaEditando] = useState<ContaBancaria | null>(null);
@@ -969,6 +979,45 @@ export default function FinanceiroPage() {
     }
   }
 
+  function abrirImplantacaoSaldo(conta: ContaBancaria) {
+    setContaImplantando(conta);
+    setSaldoBaseContaCorrente(String(conta.saldo_base_conta_corrente ?? ""));
+    setSaldoBaseAplicado(String(conta.saldo_base_aplicado ?? 0));
+    setObservacaoSaldoBase(conta.saldo_base_observacao || "Implantação do saldo existente");
+  }
+
+  async function salvarImplantacaoSaldo() {
+    if (!contaImplantando || salvandoSaldoBase) return;
+    const saldoCorrente = Number(String(saldoBaseContaCorrente || "0").replace(",", "."));
+    const saldoAplicado = Number(String(saldoBaseAplicado || "0").replace(",", "."));
+    if (!Number.isFinite(saldoCorrente) || saldoCorrente < 0 || !Number.isFinite(saldoAplicado) || saldoAplicado < 0 || saldoCorrente + saldoAplicado <= 0) {
+      setMensagem("Informe valores válidos para conta corrente e aplicações. O saldo total deve ser maior que zero.");
+      return;
+    }
+
+    setSalvandoSaldoBase(true);
+    try {
+      await apiFinanceiro("/api/financeiro", {
+        method: "POST",
+        body: JSON.stringify({
+          acao: "implantar_saldo_atual",
+          conta_bancaria_id: contaImplantando.id,
+          saldo_conta_corrente: Number(saldoCorrente.toFixed(2)),
+          saldo_aplicado: Number(saldoAplicado.toFixed(2)),
+          observacao: observacaoSaldoBase,
+        }),
+      });
+      const nomeConta = contaImplantando.nome;
+      setContaImplantando(null);
+      await carregarFinanceiro();
+      setMensagem(`Saldo-base de ${nomeConta} implantado com sucesso. O histórico anterior foi preservado e não foi lançado como receita.`);
+    } catch (error) {
+      setMensagem(`Não foi possível implantar o saldo. ${error instanceof Error ? error.message : "Erro desconhecido."}`);
+    } finally {
+      setSalvandoSaldoBase(false);
+    }
+  }
+
   function abrirNovaConta() { setContaEditando(null); setContaNome(""); setContaBanco(""); setContaAgencia(""); setContaNumero(""); setContaSaldoInicial("0"); setContaDataSaldo(new Date().toISOString().slice(0,10)); setContaObservacoes(""); setMostrarContaModal(true); }
   function editarConta(c: ContaBancaria) { setContaEditando(c); setContaNome(c.nome); setContaBanco(c.banco || ""); setContaAgencia(c.agencia || ""); setContaNumero(c.conta || ""); setContaSaldoInicial(String(c.saldo_inicial || 0)); setContaDataSaldo(c.data_saldo_inicial || new Date().toISOString().slice(0,10)); setContaObservacoes(c.observacoes || ""); setMostrarContaModal(true); }
 
@@ -1367,7 +1416,7 @@ export default function FinanceiroPage() {
                     <div><h3 className="text-lg font-extrabold text-[#003d2b]">Contas bancárias</h3><p className="text-sm text-gray-500">Cadastre os bancos e acompanhe o saldo real de cada conta.</p></div>
                     <div className="flex gap-2"><button onClick={() => abrirNovaMovimentacao("saida")} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">＋ Movimentação</button><button onClick={abrirNovaTransferencia} className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c]">↔ Transferência</button><button onClick={abrirNovaConta} className="rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white">＋ Nova conta</button></div>
                   </div>
-                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p><p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)}</p><div className="mt-4 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
+                  {contasBancarias.length === 0 ? <div className="rounded-xl bg-[#f7faf8] p-8 text-center text-sm text-gray-500">Nenhuma conta cadastrada. Clique em “Nova conta”.</div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{contasBancarias.map((c) => <div key={c.id} className="rounded-2xl border border-[#dfe9e3] bg-[#fafcfb] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Conta</p><h4 className="mt-1 font-extrabold text-[#003d2b]">{c.nome}</h4><p className="text-sm text-gray-500">{c.banco || "Banco não informado"}</p></div><button onClick={() => editarConta(c)} className="rounded-lg bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">✏️</button></div><p className="mt-4 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda(saldoConta(c))}</p><p className="mt-1 text-xs text-gray-500">Ag. {c.agencia || "—"} · Conta {c.conta || "—"}</p>{c.data_implantacao_saldo ? <div className="mt-3 rounded-lg bg-[#e8f3ee] p-3 text-xs text-[#315b49]"><p className="font-bold">Saldo-base em {formatarData(c.data_implantacao_saldo)}</p><p>Conta/corrente: {formatarMoeda(c.saldo_base_conta_corrente)} · Aplicações: {formatarMoeda(c.saldo_base_aplicado)}</p>{c.saldo_base_atualizado_por_nome ? <p className="mt-1">Registrado por {c.saldo_base_atualizado_por_nome}</p> : null}</div> : <p className="mt-3 text-xs text-gray-400">Saldo de abertura: {formatarMoeda(c.saldo_inicial)} · ainda não implantado</p>}<button onClick={() => abrirImplantacaoSaldo(c)} className="mt-4 w-full rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">＋ {c.data_implantacao_saldo ? "Atualizar saldo implantado" : "Implantar saldo atual"}</button><div className="mt-2 flex gap-2"><button onClick={() => abrirConferenciaSaldo(c)} className="flex-1 rounded-xl border border-[#cfe3d8] bg-white px-3 py-2 text-xs font-bold text-[#005a3c]">✓ Conferir saldo</button><button onClick={() => { setAbaFinanceira("fluxo"); }} className="rounded-xl bg-[#e8f3ee] px-3 py-2 text-xs font-bold text-[#005a3c]">Extrato</button></div></div>)}</div>}
                 </div>
               )}
 
@@ -1716,6 +1765,30 @@ export default function FinanceiroPage() {
             <Campo label="Data do saldo inicial" type="date" value={contaDataSaldo} onChange={setContaDataSaldo} />
             <div className="md:col-span-2"><label className="mb-2 block text-sm font-semibold text-gray-700">Observações</label><textarea rows={3} value={contaObservacoes} onChange={(e)=>setContaObservacoes(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" /></div>
             <div className="flex justify-end gap-3 md:col-span-2"><button onClick={()=>setMostrarContaModal(false)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button><button disabled={salvandoConta} onClick={()=>void salvarContaBancaria()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-60">{salvandoConta ? "Salvando..." : "Salvar conta"}</button></div>
+          </div>
+        </Modal>
+      )}
+
+      {contaImplantando && (
+        <Modal titulo={`Implantar saldo atual — ${contaImplantando.nome}`} fechar={() => setContaImplantando(null)}>
+          <div className="space-y-5">
+            <div className="rounded-xl bg-[#e8f3ee] p-4 text-sm text-[#315b49]">
+              Informe a composição do saldo existente nesta data. A implantação não cria receita, despesa nem movimentação fictícia; os lançamentos anteriores permanecem no histórico e não são somados novamente.
+            </div>
+            <Campo label="Saldo em conta corrente / disponível" type="number" value={saldoBaseContaCorrente} onChange={setSaldoBaseContaCorrente} />
+            <Campo label="Aplicações / investimentos" type="number" value={saldoBaseAplicado} onChange={setSaldoBaseAplicado} />
+            <div className="rounded-xl border border-[#dfe9e3] p-4">
+              <p className="text-sm text-gray-500">Total a implantar</p>
+              <p className="mt-1 text-2xl font-extrabold text-[#005a3c]">{formatarMoeda((Number(String(saldoBaseContaCorrente || "0").replace(",", ".")) || 0) + (Number(String(saldoBaseAplicado || "0").replace(",", ".")) || 0))}</p>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Observação</label>
+              <textarea rows={3} value={observacaoSaldoBase} onChange={(e) => setObservacaoSaldoBase(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-4 py-3" />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setContaImplantando(null)} className="rounded-xl border px-5 py-3 font-semibold">Cancelar</button>
+              <button disabled={salvandoSaldoBase} onClick={() => void salvarImplantacaoSaldo()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-bold text-white disabled:opacity-50">{salvandoSaldoBase ? "Salvando..." : "Implantar saldo"}</button>
+            </div>
           </div>
         </Modal>
       )}
