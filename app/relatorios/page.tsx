@@ -14,6 +14,11 @@ type Conta = {
   conta: string | null;
   saldo_inicial: number;
   data_saldo_inicial: string | null;
+  saldo_base_conta_corrente: number | null;
+  saldo_base_aplicado: number | null;
+  data_implantacao_saldo: string | null;
+  saldo_base_observacao: string | null;
+  saldo_base_atualizado_por_nome: string | null;
   ativo: boolean;
 };
 
@@ -26,6 +31,7 @@ type Movimento = {
   descricao: string;
   valor: number;
   data_movimentacao: string;
+  created_at: string | null;
   forma_pagamento: string | null;
   origem_tipo: string | null;
   socio_id: string | null;
@@ -99,6 +105,12 @@ function dataBR(valor: string | null | undefined) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function proximoDiaISO(valor: string) {
+  const [ano, mes, dia] = valor.slice(0, 10).split("-").map(Number);
+  const proximo = new Date(Date.UTC(ano, mes - 1, dia + 1));
+  return `${proximo.getUTCFullYear()}-${String(proximo.getUTCMonth() + 1).padStart(2, "0")}-${String(proximo.getUTCDate()).padStart(2, "0")}`;
+}
+
 function competenciaBR(valor: string | null | undefined) {
   if (!valor) return "—";
   const [ano, mes] = valor.slice(0, 7).split("-");
@@ -135,7 +147,7 @@ async function consultarMovimentosPaginados() {
   while (true) {
     const pagina = await supabase
       .from("movimentacoes_financeiras")
-      .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
+      .select("id,conta_bancaria_id,conta_destino_id,created_at,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
       .order("data_movimentacao", { ascending: false })
       .range(offset, offset + 999);
     if (pagina.error) return { data: null, error: pagina.error };
@@ -167,7 +179,7 @@ async function consultarDadosRelatorio() {
   return Promise.all([
     supabase
       .from("contas_bancarias")
-      .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo")
+      .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,saldo_base_observacao,saldo_base_atualizado_por_nome,ativo")
       .eq("ativo", true)
       .order("nome"),
     consultarMovimentosPaginados(),
@@ -326,41 +338,69 @@ export default function RelatoriosPage() {
     [movimentosPeriodo]
   );
 
+  // O corte é exclusivo: ao passar o dia seguinte à data final, o saldo inclui
+  // todos os movimentos daquele dia. Para contas implantadas, o snapshot já
+  // contém tudo que existia até o instante da implantação; por isso só somamos
+  // movimentos criados depois desse instante e retrocedemos os anteriores
+  // quando o relatório pede uma data histórica anterior ao snapshot.
   const saldoNaData = useCallback((conta: Conta, corte: string) => {
-    let saldo = Number(conta.saldo_inicial || 0);
-    const base = (conta.data_saldo_inicial || "").slice(0, 10);
+    const implantacao = conta.data_implantacao_saldo;
+    let saldo = implantacao
+      ? Number(conta.saldo_base_conta_corrente || 0) + Number(conta.saldo_base_aplicado || 0)
+      : Number(conta.saldo_inicial || 0);
+
+    const baseLegada = (conta.data_saldo_inicial || "").slice(0, 10);
+    const corteBaseLegado = baseLegada ? proximoDiaISO(baseLegada) : "";
+    const instanteImplantacao = implantacao ? new Date(implantacao).getTime() : 0;
+    const diaSeguinteImplantacao = implantacao ? proximoDiaISO(implantacao.slice(0, 10)) : "";
+
     for (const mov of movimentos) {
       const data = String(mov.data_movimentacao || "").slice(0, 10);
       const deltaConta = mov.tipo === "entrada"
         ? (mov.conta_bancaria_id === conta.id ? Number(mov.valor || 0) : 0)
         : mov.tipo === "saida"
           ? (mov.conta_bancaria_id === conta.id ? -Number(mov.valor || 0) : 0)
-          : (mov.conta_destino_id === conta.id ? Number(mov.valor || 0) : 0) - (mov.conta_bancaria_id === conta.id ? Number(mov.valor || 0) : 0);
+          : mov.tipo === "transferencia"
+            ? (mov.conta_destino_id === conta.id ? Number(mov.valor || 0) : 0) - (mov.conta_bancaria_id === conta.id ? Number(mov.valor || 0) : 0)
+            : 0;
       if (!deltaConta) continue;
-      if (base) {
-        if (corte > base && data > base && data < corte) saldo += deltaConta;
-        else if (corte <= base && data >= corte && data <= base) saldo -= deltaConta;
-      } else if (data < corte) saldo += deltaConta;
+
+      if (implantacao) {
+        const criadoEm = mov.created_at ? new Date(mov.created_at).getTime() : 0;
+        if (criadoEm <= instanteImplantacao) {
+          // A implantação já inclui estes movimentos. Para um corte histórico
+          // anterior ao fim do dia em que foram registrados, retiramos o delta.
+          if (data >= corte && data < diaSeguinteImplantacao) saldo -= deltaConta;
+        } else if (data < corte) {
+          saldo += deltaConta;
+        }
+        continue;
+      }
+
+      if (corteBaseLegado) {
+        if (corte >= corteBaseLegado) {
+          if (data >= corteBaseLegado && data < corte) saldo += deltaConta;
+        } else if (data >= corte && data < corteBaseLegado) {
+          saldo -= deltaConta;
+        }
+      } else if (data < corte) {
+        saldo += deltaConta;
+      }
     }
-    return saldo;
+    return Number(saldo.toFixed(2));
   }, [movimentos]);
 
   const saldoInicialSelecionado = useMemo(() => {
-    const dataCorte = dataInicioCalculo || dataInicial || primeiroDiaAno;
+    const corteInicial = dataInicioCalculo || dataInicial || primeiroDiaAno;
     const selecionadas = contas.filter((conta) => contaFiltro === "todas" || conta.id === contaFiltro);
-    return selecionadas.reduce((total, conta) => total + saldoNaData(conta, dataCorte), 0);
+    return selecionadas.reduce((total, conta) => total + saldoNaData(conta, corteInicial), 0);
   }, [contaFiltro, contas, saldoNaData, dataInicioCalculo, dataInicial]);
 
-  const variacaoSaldoPeriodo = useMemo(() => movimentosPeriodoSaldo.reduce((total, mov) => {
-    const valor = Number(mov.valor || 0);
-    if (mov.tipo === "entrada") return total + valor;
-    if (mov.tipo === "saida") return total - valor;
-    if (contaFiltro === "todas") return total;
-    if (mov.conta_bancaria_id === contaFiltro) return total - valor;
-    if (mov.conta_destino_id === contaFiltro) return total + valor;
-    return total;
-  }, 0), [movimentosPeriodoSaldo, contaFiltro]);
-  const saldoFinal = saldoInicialSelecionado + variacaoSaldoPeriodo;
+  const saldoFinal = useMemo(() => {
+    const corteFinal = proximoDiaISO(dataFimCalculo || dataFinal || hojeISO);
+    const selecionadas = contas.filter((conta) => contaFiltro === "todas" || conta.id === contaFiltro);
+    return selecionadas.reduce((total, conta) => total + saldoNaData(conta, corteFinal), 0);
+  }, [contaFiltro, contas, saldoNaData, dataFimCalculo, dataFinal]);
 
   const categoriasEntrada = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -434,8 +474,7 @@ export default function RelatoriosPage() {
           }
         });
 
-        const saldoInicialBanco = saldoNaData(conta, dataInicioCalculo || dataInicial || primeiroDiaAno);
-        const saldo = saldoInicialBanco + entradasBanco - saidasBanco + transferenciasEntrada - transferenciasSaida;
+        const saldo = saldoNaData(conta, proximoDiaISO(dataFimCalculo || dataFinal || hojeISO));
 
         return {
           conta,
@@ -446,7 +485,7 @@ export default function RelatoriosPage() {
           transferenciasSaida,
         };
       });
-  }, [contas, contaFiltro, movimentosPeriodoSaldo, saldoNaData, dataInicioCalculo, dataInicial]);
+  }, [contas, contaFiltro, movimentosPeriodoSaldo, saldoNaData, dataFimCalculo, dataFinal]);
 
   const conciliados = movimentosPeriodo.filter((m) => m.conciliado).length;
   const pendentesConciliacao = movimentosPeriodo.length - conciliados;
@@ -863,6 +902,12 @@ export default function RelatoriosPage() {
                         {moeda(linha.saldo)}
                       </p>
 
+                      {linha.conta.data_implantacao_saldo && (
+                        <div className="mt-3 rounded-lg bg-[#e8f3ee] p-3 text-xs text-[#315b49]">
+                          <p className="font-bold">Saldo-base implantado em {dataBR(linha.conta.data_implantacao_saldo)}</p>
+                          <p>Conta corrente: {moeda(Number(linha.conta.saldo_base_conta_corrente || 0))} · Aplicações: {moeda(Number(linha.conta.saldo_base_aplicado || 0))}</p>
+                        </div>
+                      )}
                       <div className="print-detalhe-banco mt-4 space-y-2 border-t border-[#dfe7e2] pt-3 text-xs">
                         <div className="flex justify-between">
                           <span className="text-gray-500">Entradas</span>
