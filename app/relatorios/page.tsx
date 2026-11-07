@@ -14,6 +14,9 @@ type Conta = {
   conta: string | null;
   saldo_inicial: number;
   data_saldo_inicial: string | null;
+  saldo_base_conta_corrente: number | null;
+  saldo_base_aplicado: number | null;
+  data_implantacao_saldo: string | null;
   ativo: boolean;
 };
 
@@ -21,6 +24,7 @@ type Movimento = {
   id: string;
   conta_bancaria_id: string;
   conta_destino_id: string | null;
+  created_at: string | null;
   tipo: "entrada" | "saida" | "transferencia";
   categoria: string | null;
   descricao: string;
@@ -99,6 +103,12 @@ function dataBR(valor: string | null | undefined) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function proximoDiaISO(valor: string) {
+  const [ano, mes, dia] = valor.slice(0, 10).split("-").map(Number);
+  const proximo = new Date(Date.UTC(ano, mes - 1, dia + 1));
+  return `${proximo.getUTCFullYear()}-${String(proximo.getUTCMonth() + 1).padStart(2, "0")}-${String(proximo.getUTCDate()).padStart(2, "0")}`;
+}
+
 function competenciaBR(valor: string | null | undefined) {
   if (!valor) return "—";
   const [ano, mes] = valor.slice(0, 7).split("-");
@@ -121,7 +131,7 @@ async function consultarMovimentosPaginados() {
   while (true) {
     const pagina = await supabase
       .from("movimentacoes_financeiras")
-      .select("id,conta_bancaria_id,conta_destino_id,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
+      .select("id,conta_bancaria_id,conta_destino_id,created_at,tipo,categoria,descricao,valor,data_movimentacao,forma_pagamento,origem_tipo,socio_id,dependente_id,comprovante_url,conciliado,observacoes")
       .order("data_movimentacao", { ascending: false })
       .range(offset, offset + 999);
     if (pagina.error) return { data: null, error: pagina.error };
@@ -153,7 +163,7 @@ async function consultarDadosRelatorio() {
   return Promise.all([
     supabase
       .from("contas_bancarias")
-      .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,ativo")
+      .select("id,nome,banco,agencia,conta,saldo_inicial,data_saldo_inicial,saldo_base_conta_corrente,saldo_base_aplicado,data_implantacao_saldo,ativo")
       .eq("ativo", true)
       .order("nome"),
     consultarMovimentosPaginados(),
@@ -312,7 +322,35 @@ export default function RelatoriosPage() {
     [movimentosPeriodo]
   );
 
+  // Retorna o saldo no início do dia informado. Se houver implantação, a partir
+  // do dia seguinte à implantação usa a conta corrente + aplicações e somente
+  // movimentos criados depois do instante da implantação, sem duplicar o passado.
   const saldoNaData = useCallback((conta: Conta, corte: string) => {
+    const implantacao = conta.data_implantacao_saldo;
+    const dataImplantacao = (implantacao || "").slice(0, 10);
+
+    if (implantacao && dataImplantacao && corte > dataImplantacao) {
+      const instanteImplantacao = new Date(implantacao).getTime();
+      let saldo = Number(conta.saldo_base_conta_corrente || 0) + Number(conta.saldo_base_aplicado || 0);
+
+      for (const mov of movimentos) {
+        const data = String(mov.data_movimentacao || "").slice(0, 10);
+        const criadoEm = mov.created_at ? new Date(mov.created_at).getTime() : Number.NaN;
+        if (!Number.isFinite(criadoEm) || criadoEm <= instanteImplantacao || data >= corte) continue;
+
+        const valor = Number(mov.valor || 0);
+        if (mov.tipo === "entrada" && mov.conta_bancaria_id === conta.id) saldo += valor;
+        else if (mov.tipo === "saida" && mov.conta_bancaria_id === conta.id) saldo -= valor;
+        else if (mov.tipo === "transferencia") {
+          if (mov.conta_destino_id === conta.id) saldo += valor;
+          if (mov.conta_bancaria_id === conta.id) saldo -= valor;
+        }
+      }
+      return saldo;
+    }
+
+    // Contas ainda não implantadas (e períodos anteriores à implantação)
+    // mantêm integralmente o cálculo histórico de saldo de abertura.
     let saldo = Number(conta.saldo_inicial || 0);
     const base = (conta.data_saldo_inicial || "").slice(0, 10);
     for (const mov of movimentos) {
@@ -337,16 +375,11 @@ export default function RelatoriosPage() {
     return selecionadas.reduce((total, conta) => total + saldoNaData(conta, dataCorte), 0);
   }, [contaFiltro, contas, saldoNaData, dataInicioCalculo, dataInicial]);
 
-  const variacaoSaldoPeriodo = useMemo(() => movimentosPeriodoSaldo.reduce((total, mov) => {
-    const valor = Number(mov.valor || 0);
-    if (mov.tipo === "entrada") return total + valor;
-    if (mov.tipo === "saida") return total - valor;
-    if (contaFiltro === "todas") return total;
-    if (mov.conta_bancaria_id === contaFiltro) return total - valor;
-    if (mov.conta_destino_id === contaFiltro) return total + valor;
-    return total;
-  }, 0), [movimentosPeriodoSaldo, contaFiltro]);
-  const saldoFinal = saldoInicialSelecionado + variacaoSaldoPeriodo;
+  const saldoFinal = useMemo(() => {
+    const dataCorteFinal = proximoDiaISO(dataFimCalculo || dataFinal || hojeISO);
+    const selecionadas = contas.filter((conta) => contaFiltro === "todas" || conta.id === contaFiltro);
+    return selecionadas.reduce((total, conta) => total + saldoNaData(conta, dataCorteFinal), 0);
+  }, [contaFiltro, contas, saldoNaData, dataFimCalculo, dataFinal]);
 
   const categoriasEntrada = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -420,8 +453,10 @@ export default function RelatoriosPage() {
           }
         });
 
-        const saldoInicialBanco = saldoNaData(conta, dataInicioCalculo || dataInicial || primeiroDiaAno);
-        const saldo = saldoInicialBanco + entradasBanco - saidasBanco + transferenciasEntrada - transferenciasSaida;
+        // O saldo exibido deve refletir a posição da conta ao fim do intervalo,
+        // incluindo saldo-base implantado quando aplicável. Os fluxos abaixo
+        // continuam mostrando todos os lançamentos efetivos do período.
+        const saldo = saldoNaData(conta, proximoDiaISO(dataFimCalculo || dataFinal || hojeISO));
 
         return {
           conta,
@@ -432,7 +467,7 @@ export default function RelatoriosPage() {
           transferenciasSaida,
         };
       });
-  }, [contas, contaFiltro, movimentosPeriodoSaldo, saldoNaData, dataInicioCalculo, dataInicial]);
+  }, [contas, contaFiltro, movimentosPeriodoSaldo, saldoNaData, dataFimCalculo, dataFinal]);
 
   const conciliados = movimentosPeriodo.filter((m) => m.conciliado).length;
   const pendentesConciliacao = movimentosPeriodo.length - conciliados;
@@ -817,7 +852,7 @@ export default function RelatoriosPage() {
                   Saldos por banco
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Saldo calculado até o fim do intervalo; transferências alteram o saldo da conta, mas não são receita/despesa. Em meses avulsos, usa o intervalo contínuo entre o primeiro e o último mês.
+                  Saldo calculado até o fim do intervalo. Contas implantadas usam o saldo-base (conta corrente + aplicações) e movimentos registrados após a implantação; entradas e saídas continuam mostrando todos os lançamentos do período. Transferências alteram o saldo das contas, mas não são receita/despesa.
                 </p>
               </div>
 
@@ -848,6 +883,12 @@ export default function RelatoriosPage() {
                       <p className="print-saldo-banco mt-4 text-2xl font-extrabold text-[#005a3c]">
                         {moeda(linha.saldo)}
                       </p>
+
+                      {linha.conta.data_implantacao_saldo && dataFimCalculo >= linha.conta.data_implantacao_saldo.slice(0, 10) && (
+                        <p className="mt-2 rounded-lg bg-[#e8f3ee] p-2 text-xs text-[#315b48]">
+                          Saldo-base implantado em {dataBR(linha.conta.data_implantacao_saldo)}: conta/caixa {moeda(linha.conta.saldo_base_conta_corrente)} + aplicações {moeda(linha.conta.saldo_base_aplicado)}.
+                        </p>
+                      )}
 
                       <div className="print-detalhe-banco mt-4 space-y-2 border-t border-[#dfe7e2] pt-3 text-xs">
                         <div className="flex justify-between">
@@ -1041,7 +1082,7 @@ export default function RelatoriosPage() {
               </div>
 
               <p className="mt-5 text-xs leading-5 text-gray-500">
-                Este relatório usa o livro de movimentações financeiras como fonte oficial para entradas e saídas. As cobranças de mensalidades são exibidas à parte para conferência e não são adicionadas novamente às entradas. Transferências entre contas alteram os saldos bancários, mas não são tratadas como receita ou despesa. Os saldos inicial e final por banco são estimados conforme a data-base cadastrada e os movimentos do período.
+                Este relatório usa o livro de movimentações financeiras como fonte oficial para entradas e saídas. As cobranças de mensalidades são exibidas à parte para conferência e não são adicionadas novamente às entradas. Transferências entre contas alteram os saldos bancários, mas não são tratadas como receita ou despesa. Para contas com saldo implantado, o saldo inicial/final considera a composição registrada na implantação e somente as movimentações criadas depois dela; contas sem implantação mantêm a regra histórica de saldo de abertura.
               </p>
             </section>
           </>
