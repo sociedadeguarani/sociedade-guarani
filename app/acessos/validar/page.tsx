@@ -7,7 +7,7 @@ import { CheckCircle2, Clock3, ShieldAlert, UserRound, XCircle } from "lucide-re
 import { supabase } from "@/lib/supabaseClient";
 
 type ResultadoValidacao = {
-  socio?: { id?: string; nome?: string; matricula?: string | number | null; situacao?: string | null; categoria?: string | null; foto_url?: string | null } | null;
+  socio?: { id?: string; nome?: string; matricula?: string | number | null; situacao?: string | null; categoria?: string | null; foto_url?: string | null; parentesco?: string | null } | null;
   dependente?: { id?: string; nome?: string; matricula?: string | number | null; parentesco?: string | null; foto_url?: string | null; situacao?: string | null } | null;
   pessoa?: { id?: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; situacao?: string | null; parentesco?: string | null } | null;
   liberado?: boolean;
