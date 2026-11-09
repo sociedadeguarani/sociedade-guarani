@@ -1514,6 +1514,7 @@ export default function Home() {
           setBuscaResponsavel={setBuscaResponsavel}
           salvando={salvando}
           mensagem={mensagem}
+          setMensagem={setMensagem}
           fechar={fecharCadastro}
           alterarCampo={alterarCampo}
           salvar={salvarSocio}
@@ -3260,6 +3261,7 @@ function ModalSocio({
   setBuscaResponsavel,
   salvando,
   mensagem,
+  setMensagem,
   fechar,
   alterarCampo,
   salvar,
@@ -3274,6 +3276,7 @@ function ModalSocio({
   setBuscaResponsavel: (valor: string) => void;
   salvando: boolean;
   mensagem: string;
+  setMensagem: (valor: string) => void;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
   salvar: (dependenteIds?: string[]) => void;
@@ -3289,7 +3292,7 @@ function ModalSocio({
     supabase.from("dependentes").select("id,nome,matricula,exame_medico_validade,ativo").eq("socio_id", socioEditando.id).eq("ativo", true).order("nome")
       .then(({ data, error }) => {
         if (!ativo) return;
-        if (error) { setMensagemExameFamilia("Não foi possível carregar os dependentes para seleção."); return; }
+        if (error) { setMensagem("Não foi possível carregar os dependentes para seleção."); return; }
         setDependentesExame((data || []) as typeof dependentesExame);
         setDependentesExameSelecionados([]);
       });
