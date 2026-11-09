@@ -20,7 +20,7 @@ type Acesso = {
   motivo_negacao?: string | null;
   observacao?: string | null;
   socio?: { nome: string; matricula: number | string | null; foto_url?: string | null } | null;
-  dependente?: { nome: string } | null;
+  dependente?: { nome: string; matricula?: string | number | null; foto_url?: string | null; parentesco?: string | null } | null;
   temporada?: {
     id: string;
     codigo?: string | null;
@@ -41,7 +41,10 @@ type Acesso = {
 };
 
 function nomePessoaDoAcesso(a: Acesso) {
-  return a.socio?.nome || a.temporada_participante?.nome || a.temporada?.responsavel_nome || a.dependente?.nome || "—";
+  if (a.temporada_participante?.nome) return a.temporada_participante.nome;
+  if (a.temporada?.responsavel_nome) return a.temporada.responsavel_nome;
+  if (a.dependente_id || a.dependente) return a.dependente?.nome || "Dependente não identificado";
+  return a.socio?.nome || "—";
 }
 
 function matriculaDoAcesso(a: Acesso) {
@@ -54,6 +57,7 @@ function matriculaDoAcesso(a: Acesso) {
   const codigoTemporada = String(a.temporada?.codigo || "").trim().toUpperCase();
   if (codigoTemporada) return /[A-Z]$/.test(codigoTemporada) ? codigoTemporada : `${codigoTemporada}A`;
 
+  if (a.dependente_id || a.dependente) return a.dependente?.matricula || "—";
   return a.socio?.matricula || "—";
 }
 
@@ -208,7 +212,7 @@ export default function RelatorioAcessosPage() {
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-100">
-                            {(a.socio?.foto_url || a.temporada_participante?.foto_url) ? <Image src={(a.socio?.foto_url || a.temporada_participante?.foto_url) as string} alt={nomePessoaDoAcesso(a)} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
+                            {((a.dependente_id || a.dependente) ? a.dependente?.foto_url : (a.socio?.foto_url || a.temporada_participante?.foto_url)) ? <Image src={(((a.dependente_id || a.dependente) ? a.dependente?.foto_url : (a.socio?.foto_url || a.temporada_participante?.foto_url)) as string)} alt={nomePessoaDoAcesso(a)} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-4 w-4 text-gray-400" /></div>}
                           </div>
                           <div>
                             <span className="font-semibold">{nomePessoaDoAcesso(a)}</span>
