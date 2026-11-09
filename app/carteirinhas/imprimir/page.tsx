@@ -263,7 +263,7 @@ export default function ImprimirCarteirinhasPage() {
         itens.push({
           id: String(dependente.id), nome: dependente.nome, matricula: String(dependente.matricula || "—"), cpf: formatarCpf(dependente.cpf),
           fotoUrl: dependente.foto_url || "", tipo: rotuloDependente(raiz), detalhe: dependente.parentesco || "Familiar",
-          qrValue: `${baseUrl}/acessos/validar?id=${encodeURIComponent(dependente.id)}`,
+          qrValue: `${baseUrl}/acessos/validar?dependente_id=${encodeURIComponent(dependente.id)}`,
         });
       }
     }
