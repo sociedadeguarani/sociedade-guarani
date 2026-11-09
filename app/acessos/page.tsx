@@ -19,6 +19,8 @@ type JanelaComDetector = Window & { BarcodeDetector?: new (options: { formats: s
 
 type Resultado = {
   socio?: { id: string; matricula: string | null; nome: string; situacao: string | null; categoria?: string | null; foto_url?: string | null };
+  pessoa?: { id: string; matricula: string | null; nome: string; situacao: string | null; foto_url?: string | null; parentesco?: string | null };
+  dependente?: { id: string; nome: string; matricula?: string | null; foto_url?: string | null; parentesco?: string | null } | null;
   perfil_operador?: string;
   alerta_diretoria_enviado?: boolean;
   temporada?: { id?: string; codigo?: string | null; inicio?: string | null; fim?: string | null } | null;
@@ -165,7 +167,7 @@ export default function AcessosPage() {
                 <div><h2 className="text-xl font-black">Consultar por matrícula</h2><p className="text-sm text-gray-500">Digite o número da carteirinha.</p></div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); if (matricula.trim()) validar({ matricula }); }} className="mt-5 flex gap-2">
-                <input value={matricula} onChange={(e) => setMatricula(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} placeholder="Ex.: SP0134A" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
+                <input value={matricula} onChange={(e) => { setMatricula(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setResultado(null); setErro(""); }} placeholder="Ex.: SP0134A" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
                 <button disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
               </form>
             </div>
@@ -201,9 +203,9 @@ export default function AcessosPage() {
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div className="h-20 w-16 overflow-hidden rounded-xl bg-white">
-                    {resultado.socio.foto_url ? <Image src={resultado.socio.foto_url} alt={resultado.socio.nome} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
+                    {(resultado.pessoa?.foto_url || resultado.socio.foto_url) ? <Image src={(resultado.pessoa?.foto_url || resultado.socio.foto_url)!} alt={resultado.pessoa?.nome || resultado.socio.nome} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
                   </div>
-                  <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.socio.situacao || "Não informada"}</b></p></div>
+                  <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.pessoa?.nome || resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.pessoa?.matricula || resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.pessoa?.situacao || resultado.socio.situacao || "Não informada"}</b></p>{resultado.dependente && <p className="mt-1 text-xs font-semibold text-gray-500">Dependente de {resultado.socio.nome}{resultado.pessoa?.parentesco ? ` · ${resultado.pessoa.parentesco}` : ""}</p>}</div>
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
