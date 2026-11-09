@@ -8,7 +8,8 @@ import { supabase } from "@/lib/supabaseClient";
 
 type ResultadoValidacao = {
   socio?: { id?: string; nome?: string; matricula?: string | number | null; situacao?: string | null; categoria?: string | null; foto_url?: string | null } | null;
-  dependente?: { nome?: string; parentesco?: string | null } | null;
+  dependente?: { id?: string; nome?: string; matricula?: string | number | null; parentesco?: string | null; foto_url?: string | null; situacao?: string | null } | null;
+  pessoa?: { id?: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; situacao?: string | null; parentesco?: string | null } | null;
   liberado?: boolean;
   perfil_operador?: string;
   alerta_diretoria_enviado?: boolean;
@@ -69,6 +70,11 @@ export default function ValidarCarteiraPage() {
   }, [router]);
 
   const exame = resultado?.exame;
+  // O sócio no retorno é o titular responsável. Para dependentes, os dados
+  // visuais devem vir de `pessoa`, nunca da foto/matrícula do titular.
+  const pessoaExibida = resultado?.pessoa || (resultado?.dependente
+    ? resultado.dependente
+    : resultado?.socio);
   const liberado = Boolean(resultado?.liberado);
   const bloqueioPorInadimplencia = Boolean(
     resultado?.inadimplencia?.bloqueiaEntrada ?? resultado?.status_temporada === "bloqueada"
@@ -114,13 +120,14 @@ export default function ValidarCarteiraPage() {
                 <div className="rounded-2xl border bg-white p-4">
                   <div className="flex gap-4">
                     <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
-                      {resultado.socio?.foto_url ? <Image src={resultado.socio.foto_url} alt={resultado.socio.nome || "Foto do associado"} width={80} height={96} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
+                      {pessoaExibida?.foto_url ? <Image src={pessoaExibida.foto_url} alt={pessoaExibida.nome || "Foto da pessoa"} width={80} height={96} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="h-8 w-8 text-gray-400" /></div>}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="text-xl font-black leading-tight">{resultado.dependente?.nome || resultado.socio?.nome}</h2>
-                      {resultado.dependente && <p className="mt-1 text-xs font-bold text-[#005a3c]">DEPENDENTE · {resultado.dependente.parentesco || "Família"}</p>}
-                      <p className="mt-1 text-sm text-gray-500">Titular / matrícula: <b>{resultado.socio?.nome} · {resultado.socio?.matricula || "—"}</b></p>
-                      <p className="text-sm text-gray-500">Situação: <b>{resultado.socio?.situacao || "Não informada"}</b></p>
+                      <h2 className="text-xl font-black leading-tight">{pessoaExibida?.nome || "Pessoa não identificada"}</h2>
+                      {resultado.dependente && <p className="mt-1 text-xs font-bold text-[#005a3c]">DEPENDENTE · {pessoaExibida?.parentesco || resultado.dependente.parentesco || "Família"}</p>}
+                      <p className="mt-1 text-sm text-gray-500">Matrícula: <b>{pessoaExibida?.matricula || "—"}</b></p>
+                      {resultado.dependente && <p className="text-sm text-gray-500">Titular: <b>{resultado.socio?.nome || "—"} · {resultado.socio?.matricula || "—"}</b></p>}
+                      <p className="text-sm text-gray-500">Situação: <b>{pessoaExibida?.situacao || "Não informada"}</b></p>
                     </div>
                   </div>
                 </div>
