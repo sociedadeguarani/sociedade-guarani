@@ -679,28 +679,43 @@ export async function POST(request: Request) {
     }
 
     if (!id && !dependenteId && matricula) {
-      etapa = "buscando sócio pela matrícula";
-      const { data: socioPorMatricula, error: matriculaError } = await supabase
-        .from("socios")
-        .select("id")
+      etapa = "buscando matrícula de associado ou dependente";
+      // Dependentes familiares possuem matrícula própria na tabela dependentes.
+      // Consultá-los antes de socios evita o falso 404 visto na portaria (ex.: SD0024B).
+      const { data: dependentePorMatricula, error: dependenteMatriculaError } = await supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo")
         .eq("matricula", matricula)
+        .eq("ativo", true)
         .maybeSingle();
-      if (matriculaError) throw matriculaError;
-      if (!socioPorMatricula) {
-        return NextResponse.json(
-          { error: `Nenhum associado encontrado com a matrícula ${matricula}.` },
-          { status: 404 }
-        );
+      if (dependenteMatriculaError) throw dependenteMatriculaError;
+      if (dependentePorMatricula) {
+        dependenteId = String(dependentePorMatricula.id);
+        dependente = dependentePorMatricula;
+        id = String(dependentePorMatricula.socio_id);
+      } else {
+        const { data: socioPorMatricula, error: matriculaError } = await supabase
+          .from("socios")
+          .select("id")
+          .eq("matricula", matricula)
+          .maybeSingle();
+        if (matriculaError) throw matriculaError;
+        if (!socioPorMatricula) {
+          return NextResponse.json(
+            { error: `Nenhum associado ou dependente ativo encontrado com a matrícula ${matricula}.` },
+            { status: 404 }
+          );
+        }
+        id = socioPorMatricula.id;
       }
-      id = socioPorMatricula.id;
     }
 
-    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; ativo: boolean | null } | null = null;
+    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
 
     if (dependenteId) {
       etapa = "buscando dependente";
       const { data: dep, error: depError } = await supabase
-        .from("dependentes").select("id,socio_id,nome,situacao_financeira,ativo").eq("id", dependenteId).maybeSingle();
+        .from("dependentes").select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
       if (depError) throw depError;
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
@@ -712,7 +727,7 @@ export async function POST(request: Request) {
     etapa = "buscando sócio";
     const { data: socio, error: socioError } = await supabase
       .from("socios")
-      .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url")
+      .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade")
       .eq("id", id).maybeSingle();
     if (socioError) throw socioError;
     if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
@@ -759,10 +774,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const validadeExameSocio = String(dependente?.exame_medico_validade || socio.exame_medico_validade || "").slice(0, 10) || null;
+    const hojeExame = dataHojeBrasil();
+    const exameEmDia = Boolean(validadeExameSocio && validadeExameSocio >= hojeExame);
     const exame = {
-      status: { texto: "Controle de exame médico ainda não configurado", cor: "cinza" },
-      validade: null,
-      verificado: false,
+      status: !validadeExameSocio
+        ? { texto: "Exame médico sem validade cadastrada", cor: "vermelho" }
+        : exameEmDia
+          ? { texto: "Exame médico válido", cor: "verde" }
+          : { texto: "Exame médico vencido", cor: "vermelho" },
+      validade: validadeExameSocio,
+      verificado: true,
     };
 
     const socioResposta = ehAdministracao
