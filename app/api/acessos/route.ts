@@ -678,20 +678,32 @@ export async function POST(request: Request) {
       });
     }
 
-    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
+    // A variável precisa existir antes da busca por matrícula, pois o primeiro
+    // resultado possível é justamente um dependente familiar.
+    let dependente: { id: string; socio_id: string; nome: string; matricula?: string | null; foto_url?: string | null; parentesco?: string | null; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
+
     if (!id && !dependenteId && matricula) {
       etapa = "buscando matrícula de associado ou dependente";
-      // Dependentes familiares possuem matrícula própria na tabela dependentes.
-      // Consultá-los antes de socios evita o falso 404 visto na portaria (ex.: SD0024B).
+      // A matrícula familiar é própria do dependente. Não filtrar por ativo=true:
+      // cadastros antigos podem ter ativo nulo. Só bloqueamos quando for false.
       const { data: dependentePorMatricula, error: dependenteMatriculaError } = await supabase
         .from("dependentes")
-        .select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo")
-        .eq("matricula", matricula)
+        .select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo")
+        .ilike("matricula", matricula)
         .maybeSingle();
       if (dependenteMatriculaError) throw dependenteMatriculaError;
       if (dependentePorMatricula) {
         if (dependentePorMatricula.ativo === false) {
-          return NextResponse.json({ error: `Dependente inativo: matrícula ${matricula}.` }, { status: 404 });
+          return NextResponse.json(
+            { error: `O dependente da matrícula ${matricula} está inativo.` },
+            { status: 403 }
+          );
+        }
+        if (!dependentePorMatricula.socio_id) {
+          return NextResponse.json(
+            { error: `O dependente ${matricula} está sem vínculo com o titular. Corrija o cadastro antes de registrar o acesso.` },
+            { status: 409 }
+          );
         }
         dependenteId = String(dependentePorMatricula.id);
         dependente = dependentePorMatricula;
@@ -699,13 +711,13 @@ export async function POST(request: Request) {
       } else {
         const { data: socioPorMatricula, error: matriculaError } = await supabase
           .from("socios")
-          .select("id")
-          .eq("matricula", matricula)
+          .select("id,matricula")
+          .ilike("matricula", matricula)
           .maybeSingle();
         if (matriculaError) throw matriculaError;
         if (!socioPorMatricula) {
           return NextResponse.json(
-            { error: `Nenhum associado ou dependente ativo encontrado com a matrícula ${matricula}.` },
+            { error: `Nenhum associado ou dependente encontrado com a matrícula ${matricula}.` },
             { status: 404 }
           );
         }
@@ -713,11 +725,10 @@ export async function POST(request: Request) {
       }
     }
 
-
     if (dependenteId) {
       etapa = "buscando dependente";
       const { data: dep, error: depError } = await supabase
-        .from("dependentes").select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
+        .from("dependentes").select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
       if (depError) throw depError;
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
@@ -776,7 +787,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const validadeExameSocio = String(dependente?.exame_medico_validade || socio.exame_medico_validade || "").slice(0, 10) || null;
+    // Cada pessoa possui validade própria. Se o dependente não fez exame,
+    // não herdar a validade do titular: isso liberaria indevidamente o uso da água.
+    const validadeExameSocio = String(dependente ? (dependente.exame_medico_validade || "") : (socio.exame_medico_validade || "")).slice(0, 10) || null;
     const hojeExame = dataHojeBrasil();
     const exameEmDia = Boolean(validadeExameSocio && validadeExameSocio >= hojeExame);
     const exame = {
@@ -825,9 +838,18 @@ export async function POST(request: Request) {
       },
       socio: socioResposta,
       dependente: dependenteResposta,
+      pessoa: dependente
+        ? { id: dependente.id, nome: dependente.nome, matricula: dependente.matricula || matricula, foto_url: dependente.foto_url || null, situacao: dependente.ativo === false ? "inativo" : "ativo", parentesco: dependente.parentesco || null }
+        : { id: socio.id, nome: socio.nome, matricula: socio.matricula, foto_url: socio.foto_url, situacao: socio.situacao, parentesco: null },
       liberado: autorizado,
       motivo_bloqueio: motivoNegacaoResposta,
       exame,
+      uso_agua: {
+        permitido: exameEmDia,
+        texto: exameEmDia ? "Exame médico válido — acesso à água liberado" : validadeExameSocio ? "Exame médico vencido — acesso à água restrito" : "Exame médico sem validade — acesso à água restrito",
+        validade: validadeExameSocio,
+        observacao: "O exame médico controla somente o uso da água; não bloqueia a entrada no parque."
+      },
       mensalidade: dependente ? statusMensalidadeDependente : statusMensalidadeSocio,
       inadimplencia: inadimplenciaResposta,
     });
