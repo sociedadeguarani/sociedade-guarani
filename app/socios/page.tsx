@@ -3241,21 +3241,50 @@ function ModalSocio({
     return () => { ativo = false; };
   }, [socioEditando?.id, socioEditando?.responsavel_id]);
 
-  async function salvarExameFamilia() {
-    if (!socioEditando?.id) return;
-    setSalvandoExameFamilia(true); setMensagemExameFamilia("");
+  async function atualizarExamesSelecionados(): Promise<boolean> {
+    if (!socioEditando?.id || dependentesExameSelecionados.length === 0) return true;
+    setSalvandoExameFamilia(true);
+    setMensagemExameFamilia("");
     try {
-      const { data: sessao } = await supabase.auth.getSession();
+      const { data: sessao, error: erroSessao } = await supabase.auth.getSession();
+      if (erroSessao) throw erroSessao;
       const token = sessao.session?.access_token;
       const response = await fetch("/api/socios/exame-familia", {
-        method: "PUT", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ titular_id: socioEditando.id, validade: form.exame_medico_validade || null, dependente_ids: dependentesExameSelecionados }),
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          titular_id: socioEditando.id,
+          validade: form.exame_medico_validade || null,
+          dependente_ids: dependentesExameSelecionados,
+        }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Falha ao atualizar exames.");
-      setMensagemExameFamilia(`Exame do titular atualizado e ${payload.dependentes_atualizados || 0} dependente(s) atualizado(s).`);
-    } catch (error) { setMensagemExameFamilia(error instanceof Error ? error.message : "Falha ao atualizar exames."); }
-    finally { setSalvandoExameFamilia(false); }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Falha ao atualizar exames dos dependentes.");
+
+      const validade = form.exame_medico_validade || null;
+      const idsAtualizados = new Set(dependentesExameSelecionados);
+      setDependentesExame((atuais) => atuais.map((item) =>
+        idsAtualizados.has(item.id) ? { ...item, exame_medico_validade: validade } : item
+      ));
+      setMensagemExameFamilia(`${payload.dependentes_atualizados || 0} dependente(s) atualizado(s) com validade ${validade ? new Date(`${validade}T12:00:00`).toLocaleDateString("pt-BR") : "sem validade"}.`);
+      return true;
+    } catch (error) {
+      setMensagemExameFamilia(error instanceof Error ? error.message : "Falha ao atualizar exames dos dependentes.");
+      return false;
+    } finally {
+      setSalvandoExameFamilia(false);
+    }
+  }
+
+  async function salvarCadastroComExames() {
+    // A seleção dos dependentes passa a ser aplicada também pelo botão principal
+    // "Salvar alterações", evitando que o usuário precise acionar dois botões.
+    const examesAtualizados = await atualizarExamesSelecionados();
+    if (!examesAtualizados) return;
+    salvar();
   }
 
   return (
@@ -3480,8 +3509,8 @@ function ModalSocio({
                 <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-[#005a3c]">Atualizar exame dos dependentes</h3><p className="text-xs text-slate-600">Marque somente quem também realizou o exame. Os demais cadastros não serão alterados.</p></div>
                   <button type="button" onClick={() => setDependentesExameSelecionados(dependentesExameSelecionados.length === dependentesExame.length ? [] : dependentesExame.map((d) => d.id))} className="rounded-lg border px-3 py-2 text-xs font-bold">{dependentesExameSelecionados.length === dependentesExame.length ? "Desmarcar todos" : "Selecionar todos"}</button></div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">{dependentesExame.map((d) => <label key={d.id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm"><input type="checkbox" checked={dependentesExameSelecionados.includes(d.id)} onChange={(e) => setDependentesExameSelecionados((old) => e.target.checked ? [...old, d.id] : old.filter((id) => id !== d.id))} /><span className="min-w-0"><b className="block">{d.nome}</b><span className="text-xs text-slate-500">{d.matricula || "Sem matrícula"} · Validade: {d.exame_medico_validade ? new Date(`${d.exame_medico_validade}T12:00:00`).toLocaleDateString("pt-BR") : "não cadastrada"}</span></span></label>)}</div>
-                <button type="button" disabled={salvandoExameFamilia} onClick={salvarExameFamilia} className="mt-3 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{salvandoExameFamilia ? "Atualizando..." : "Atualizar exame do titular e selecionados"}</button>
-                {mensagemExameFamilia && <p className="mt-2 text-sm font-semibold text-[#005a3c]">{mensagemExameFamilia}</p>}
+                <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#315b49]">A validade informada acima será aplicada ao titular e aos dependentes marcados quando você clicar em <b>Salvar alterações</b>.</p>
+                {mensagemExameFamilia && <p role="status" className="mt-2 text-sm font-semibold text-[#005a3c]">{mensagemExameFamilia}</p>}
               </div>
             )}
 
@@ -3725,15 +3754,17 @@ function ModalSocio({
           </button>
 
           <button
-            onClick={salvar}
-            disabled={salvando}
+            onClick={salvarCadastroComExames}
+            disabled={salvando || salvandoExameFamilia}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvando
-              ? "Salvando..."
-              : socioEditando
-                ? "💾 Salvar alterações"
-                : "💾 Cadastrar Sócio"}
+            {salvandoExameFamilia
+              ? "Atualizando exames..."
+              : salvando
+                ? "Salvando..."
+                : socioEditando
+                  ? "💾 Salvar alterações"
+                  : "💾 Cadastrar Sócio"}
           </button>
 
         </div>
