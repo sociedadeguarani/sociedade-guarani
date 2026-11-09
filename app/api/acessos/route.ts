@@ -678,6 +678,7 @@ export async function POST(request: Request) {
       });
     }
 
+    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
     if (!id && !dependenteId && matricula) {
       etapa = "buscando matrícula de associado ou dependente";
       // Dependentes familiares possuem matrícula própria na tabela dependentes.
@@ -686,10 +687,12 @@ export async function POST(request: Request) {
         .from("dependentes")
         .select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo")
         .eq("matricula", matricula)
-        .eq("ativo", true)
         .maybeSingle();
       if (dependenteMatriculaError) throw dependenteMatriculaError;
       if (dependentePorMatricula) {
+        if (dependentePorMatricula.ativo === false) {
+          return NextResponse.json({ error: `Dependente inativo: matrícula ${matricula}.` }, { status: 404 });
+        }
         dependenteId = String(dependentePorMatricula.id);
         dependente = dependentePorMatricula;
         id = String(dependentePorMatricula.socio_id);
@@ -710,7 +713,6 @@ export async function POST(request: Request) {
       }
     }
 
-    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
 
     if (dependenteId) {
       etapa = "buscando dependente";
