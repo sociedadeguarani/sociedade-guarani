@@ -446,7 +446,7 @@ export async function GET(request: Request) {
           tipo_pagamento: d.tipo_pagamento || null,
           data_ultimo_pagamento: d.data_ultimo_pagamento || null,
           possui_mensalidade: d.possui_mensalidade === true,
-          situacao: d.situacao_financeira || "isento",
+          situacao: d.ativo === false ? "Inativo" : "Ativo",
           ...status,
         } : {
           situacao: d.ativo === false ? "Inativo" : "Ativo",
@@ -457,6 +457,7 @@ export async function GET(request: Request) {
         // quando o titular está inativo, mesmo que a flag própria seja true.
         ativo: d.ativo !== false && String(titular?.situacao || "").trim().toLowerCase() !== "inativo",
         foto_url: d.foto_url || null,
+        exame_medico_validade: podeVerExameMedico ? (d.exame_medico_validade || null) : null,
         titular_nome: titular?.nome || null,
         titular_matricula: titular?.matricula || null,
         ...(!podeVerFinanceiro ? {} : {
