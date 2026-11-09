@@ -738,11 +738,50 @@ export async function POST(request: Request) {
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
 
     etapa = "buscando sócio";
-    const { data: socio, error: socioError } = await supabase
+    let { data: socio, error: socioError } = await supabase
       .from("socios")
       .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade")
       .eq("id", id).maybeSingle();
     if (socioError) throw socioError;
+
+    // QR Codes de dependentes emitidos por versões anteriores usavam
+    // ?id=<dependente.id>. A tela enviava esse valor como socio_id, por isso
+    // a busca em `socios` falhava. Mantemos compatibilidade identificando
+    // o UUID na tabela `dependentes` e seguindo com o titular responsável.
+    if (!socio && !dependente && !dependenteId) {
+      etapa = "localizando dependente por QR legado";
+      const { data: dependentePorQr, error: dependenteQrError } = await supabase
+        .from("dependentes")
+        .select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo")
+        .eq("id", id)
+        .maybeSingle();
+      if (dependenteQrError) throw dependenteQrError;
+
+      if (dependentePorQr) {
+        if (dependentePorQr.ativo === false) {
+          return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
+        }
+        if (!dependentePorQr.socio_id) {
+          return NextResponse.json(
+            { error: "Dependente sem vínculo com o titular. Corrija o cadastro antes de registrar o acesso." },
+            { status: 409 }
+          );
+        }
+        dependente = dependentePorQr;
+        dependenteId = String(dependentePorQr.id);
+        id = String(dependentePorQr.socio_id);
+
+        const resultadoTitular = await supabase
+          .from("socios")
+          .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade")
+          .eq("id", id)
+          .maybeSingle();
+        socio = resultadoTitular.data;
+        socioError = resultadoTitular.error;
+        if (socioError) throw socioError;
+      }
+    }
+
     if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
 
     const situacao = String(socio.situacao || "").toLowerCase();
