@@ -985,7 +985,7 @@ export default function Home() {
     });
   }
 
-  async function salvarSocio() {
+  async function salvarSocio(dependenteIds: string[] = []) {
     if (!form.nome?.trim()) {
       setMensagem("Informe o nome completo do sócio.");
       return;
@@ -1041,6 +1041,7 @@ export default function Home() {
       data_ultimo_pagamento: form.data_ultimo_pagamento || null,
     };
 
+    let cadastroPrincipalSalvo = false;
     try {
       if (matriculaDigitada) {
         let consultaMatricula = supabase
@@ -1072,11 +1073,28 @@ export default function Home() {
           .eq("id", socioEditando.id);
 
         if (resultado.error) throw resultado.error;
+        cadastroPrincipalSalvo = true;
 
-        // Sincroniza os lançamentos ainda não pagos com o valor atual do cadastro.
+        // Sincroniza os lançamentos ainda não pagos somente quando os dados
+        // financeiros realmente mudaram. Alterar exame, telefone ou endereço
+        // não deve disparar centenas de atualizações de mensalidades.
+        const dadosFinanceirosAlterados =
+          Number(form.valor_mensalidade || 0) !== Number(socioEditando.valor_mensalidade || 0) ||
+          Boolean(form.possui_mensalidade) !== Boolean(socioEditando.possui_mensalidade) ||
+          Number(form.dia_vencimento || 10) !== Number(socioEditando.dia_vencimento || 10) ||
+          (form.tipo_pagamento || "pix") !== (socioEditando.tipo_pagamento || "pix") ||
+          (form.conta_bancaria_id || null) !== (socioEditando.conta_bancaria_id || null) ||
+          (form.situacao_financeira || "isento") !== (socioEditando.situacao_financeira || "isento") ||
+          (form.tipo_socio || "") !== (socioEditando.tipo_socio || "") ||
+          Boolean(form.remido) !== Boolean(socioEditando.remido) ||
+          (form.responsavel_id || null) !== (socioEditando.responsavel_id || null);
+
+        // Mantém a regra financeira existente, mas não recalcula títulos em
+        // uma edição que alterou somente o exame médico.
+
         // Atualiza a base e recalcula o total mantendo tarifas, multa, juros e desconto
         // já registrados. Mensalidades pagas e canceladas ficam intactas.
-        if (form.possui_mensalidade) {
+        if (form.possui_mensalidade && dadosFinanceirosAlterados) {
           const valorAtualizado = Number(form.valor_mensalidade || 0);
           const { data: lancamentosAbertos, error: erroConsultaMensalidades } = await supabase
             .from("mensalidades")
@@ -1114,6 +1132,7 @@ export default function Home() {
 
         if (resultado.error) throw resultado.error;
         socioId = resultado.data.id;
+        cadastroPrincipalSalvo = true;
       }
 
       if (fotoArquivo && socioId) {
@@ -1142,14 +1161,48 @@ export default function Home() {
         if (atualizacaoFoto.error) throw atualizacaoFoto.error;
       }
 
+      // A atualização dos dependentes é feita dentro do mesmo fluxo do botão
+      // principal, depois de salvar o titular. Assim, a seleção não depende de
+      // um segundo clique nem fica concorrendo com o salvamento do cadastro.
+      let dependentesAtualizados = 0;
+      if (socioEditando && dependenteIds.length > 0) {
+        const { data: sessao, error: erroSessao } = await supabase.auth.getSession();
+        if (erroSessao) throw erroSessao;
+        const token = sessao.session?.access_token;
+        const respostaExames = await fetch("/api/socios/exame-familia", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            titular_id: socioEditando.id,
+            validade: form.exame_medico_validade || null,
+            dependente_ids: dependenteIds,
+          }),
+        });
+        const resultadoExames = await respostaExames.json().catch(() => ({}));
+        if (!respostaExames.ok) {
+          throw new Error(`Cadastro do titular salvo, mas os exames dos dependentes não foram atualizados: ${resultadoExames.error || "falha na API"}`);
+        }
+        dependentesAtualizados = Number(resultadoExames.dependentes_atualizados || 0);
+        if (dependentesAtualizados !== dependenteIds.length) {
+          throw new Error(`Cadastro do titular salvo, mas somente ${dependentesAtualizados} de ${dependenteIds.length} dependente(s) tiveram a atualização confirmada.`);
+        }
+      }
+
       setMensagem(
         socioEditando
-          ? "Sócio atualizado com sucesso!"
+          ? dependentesAtualizados > 0
+            ? `Sócio e exame médico de ${dependentesAtualizados} dependente(s) atualizados com sucesso!`
+            : "Sócio atualizado com sucesso!"
           : "Sócio cadastrado com sucesso!"
       );
 
       setFotoArquivo(null);
-      await carregarSocios();
+      // Não prende o salvamento aguardando recarregar a lista completa de sócios.
+      // A atualização da listagem ocorre em segundo plano após a gravação.
+      void carregarSocios();
 
       setTimeout(() => {
         setAbrirCadastro(false);
@@ -1158,9 +1211,13 @@ export default function Home() {
       }, 900);
     } catch (error) {
       console.error(error);
+      const detalhe = error instanceof Error ? error.message : "Erro desconhecido.";
       setMensagem(
-        "Não foi possível salvar. Verifique o Supabase e o bucket fotos-associados."
+        cadastroPrincipalSalvo
+          ? detalhe
+          : `Não foi possível salvar. ${detalhe}`
       );
+      if (cadastroPrincipalSalvo) void carregarSocios();
     } finally {
       setSalvando(false);
     }
@@ -3219,14 +3276,12 @@ function ModalSocio({
   mensagem: string;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
-  salvar: () => void;
+  salvar: (dependenteIds?: string[]) => void;
   selecionarFoto: (file: File | null) => void;
   removerFoto: () => void;
 }) {
   const [dependentesExame, setDependentesExame] = useState<Array<{ id: string; nome: string; matricula: string | null; exame_medico_validade: string | null; ativo: boolean | null }>>([]);
   const [dependentesExameSelecionados, setDependentesExameSelecionados] = useState<string[]>([]);
-  const [salvandoExameFamilia, setSalvandoExameFamilia] = useState(false);
-  const [mensagemExameFamilia, setMensagemExameFamilia] = useState("");
 
   useEffect(() => {
     let ativo = true;
@@ -3241,51 +3296,6 @@ function ModalSocio({
     return () => { ativo = false; };
   }, [socioEditando?.id, socioEditando?.responsavel_id]);
 
-  async function atualizarExamesSelecionados(): Promise<boolean> {
-    if (!socioEditando?.id || dependentesExameSelecionados.length === 0) return true;
-    setSalvandoExameFamilia(true);
-    setMensagemExameFamilia("");
-    try {
-      const { data: sessao, error: erroSessao } = await supabase.auth.getSession();
-      if (erroSessao) throw erroSessao;
-      const token = sessao.session?.access_token;
-      const response = await fetch("/api/socios/exame-familia", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          titular_id: socioEditando.id,
-          validade: form.exame_medico_validade || null,
-          dependente_ids: dependentesExameSelecionados,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Falha ao atualizar exames dos dependentes.");
-
-      const validade = form.exame_medico_validade || null;
-      const idsAtualizados = new Set(dependentesExameSelecionados);
-      setDependentesExame((atuais) => atuais.map((item) =>
-        idsAtualizados.has(item.id) ? { ...item, exame_medico_validade: validade } : item
-      ));
-      setMensagemExameFamilia(`${payload.dependentes_atualizados || 0} dependente(s) atualizado(s) com validade ${validade ? new Date(`${validade}T12:00:00`).toLocaleDateString("pt-BR") : "sem validade"}.`);
-      return true;
-    } catch (error) {
-      setMensagemExameFamilia(error instanceof Error ? error.message : "Falha ao atualizar exames dos dependentes.");
-      return false;
-    } finally {
-      setSalvandoExameFamilia(false);
-    }
-  }
-
-  async function salvarCadastroComExames() {
-    // A seleção dos dependentes passa a ser aplicada também pelo botão principal
-    // "Salvar alterações", evitando que o usuário precise acionar dois botões.
-    const examesAtualizados = await atualizarExamesSelecionados();
-    if (!examesAtualizados) return;
-    salvar();
-  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#001f16]/55 backdrop-blur-sm p-4">
@@ -3510,7 +3520,6 @@ function ModalSocio({
                   <button type="button" onClick={() => setDependentesExameSelecionados(dependentesExameSelecionados.length === dependentesExame.length ? [] : dependentesExame.map((d) => d.id))} className="rounded-lg border px-3 py-2 text-xs font-bold">{dependentesExameSelecionados.length === dependentesExame.length ? "Desmarcar todos" : "Selecionar todos"}</button></div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">{dependentesExame.map((d) => <label key={d.id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm"><input type="checkbox" checked={dependentesExameSelecionados.includes(d.id)} onChange={(e) => setDependentesExameSelecionados((old) => e.target.checked ? [...old, d.id] : old.filter((id) => id !== d.id))} /><span className="min-w-0"><b className="block">{d.nome}</b><span className="text-xs text-slate-500">{d.matricula || "Sem matrícula"} · Validade: {d.exame_medico_validade ? new Date(`${d.exame_medico_validade}T12:00:00`).toLocaleDateString("pt-BR") : "não cadastrada"}</span></span></label>)}</div>
                 <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#315b49]">A validade informada acima será aplicada ao titular e aos dependentes marcados quando você clicar em <b>Salvar alterações</b>.</p>
-                {mensagemExameFamilia && <p role="status" className="mt-2 text-sm font-semibold text-[#005a3c]">{mensagemExameFamilia}</p>}
               </div>
             )}
 
@@ -3754,17 +3763,15 @@ function ModalSocio({
           </button>
 
           <button
-            onClick={salvarCadastroComExames}
-            disabled={salvando || salvandoExameFamilia}
+            onClick={() => salvar(dependentesExameSelecionados)}
+            disabled={salvando}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
-            {salvandoExameFamilia
-              ? "Atualizando exames..."
-              : salvando
-                ? "Salvando..."
-                : socioEditando
-                  ? "💾 Salvar alterações"
-                  : "💾 Cadastrar Sócio"}
+            {salvando
+              ? "Salvando..."
+              : socioEditando
+                ? "💾 Salvar alterações"
+                : "💾 Cadastrar Sócio"}
           </button>
 
         </div>
