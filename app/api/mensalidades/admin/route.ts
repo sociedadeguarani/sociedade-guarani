@@ -9,15 +9,6 @@ import { competenciaPermitidaPelaAssociacao, mensalidadeRegistroAnteriorAAssocia
 
 export const dynamic = "force-dynamic";
 
-const MOTIVOS = [
-  "Não debitou — sem saldo",
-  "Não debitou — débito não autorizado",
-  "Não debitou — conta encerrada",
-  "Pagamento não identificado",
-  "Acordo",
-  "Isento",
-  "Outro",
-];
 
 // Tipos locais das linhas consultadas no Supabase. Mantêm os campos opcionais
 // porque cadastros históricos podem não possuir todos os dados preenchidos.
@@ -431,27 +422,48 @@ export async function GET(request: Request) {
 
     const db = getServiceClient();
 
-    let consultaMensalidades = db
-      .from("mensalidades")
-      .select("*")
-      .gte("competencia", `${ano}-01-01`)
-      .lt("competencia", `${ano + 1}-01-01`)
-      .order("competencia", { ascending: true });
-
-    if (mes >= 1 && mes <= 12) {
-      consultaMensalidades = consultaMensalidades.eq("competencia", primeiroDia(ano, mes));
+    const mesesParam = url.searchParams.get("meses");
+    const mesesInformados = mesesParam
+      ? mesesParam.split(",").map((valor) => Number(valor.trim()))
+      : [];
+    if (mesesParam && (
+      mesesInformados.length === 0 ||
+      mesesInformados.some((valor) => !Number.isInteger(valor) || valor < 1 || valor > 12)
+    )) {
+      return NextResponse.json({ error: "Lista de meses inválida." }, { status: 400 });
     }
+    const mesesSelecionados = [...new Set(mesesInformados)];
 
-    // Ao abrir o histórico de um associado, é obrigatório filtrar no banco
-    // pelo socio_id. Sem esse filtro, a tela recebia as mensalidades do ano
-    // de todos os associados e o mapa por mês acabava escolhendo o registro
-    // de outra pessoa, fazendo o controle interno parecer igual para todos.
-    if (socioId) {
-      consultaMensalidades = consultaMensalidades.eq("socio_id", socioId);
-    }
+    // A seleção de vários meses passa a usar uma única chamada HTTP. Como
+    // 12 competências podem ultrapassar o limite padrão de 1.000 linhas do
+    // Supabase, a rota pagina internamente sem truncar o histórico.
+    const TAMANHO_PAGINA = 1000;
+    const buscarPaginaMensalidades = (inicio: number) => {
+      let consulta = db
+        .from("mensalidades")
+        .select("*")
+        .gte("competencia", `${ano}-01-01`)
+        .lt("competencia", `${ano + 1}-01-01`)
+        .order("competencia", { ascending: true })
+        .order("id", { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
 
-    // Consultas independentes são feitas em paralelo para reduzir o tempo
-    // de abertura/atualização da tela de Mensalidades.
+      if (mesesSelecionados.length > 0) {
+        consulta = consulta.in(
+          "competencia",
+          mesesSelecionados.map((numeroMes) => primeiroDia(ano, numeroMes))
+        );
+      } else if (mes >= 1 && mes <= 12) {
+        consulta = consulta.eq("competencia", primeiroDia(ano, mes));
+      }
+
+      // Ao abrir o histórico de um associado, filtrar no banco pelo socio_id.
+      if (socioId) consulta = consulta.eq("socio_id", socioId);
+      return consulta;
+    };
+
+    // Consultas independentes são feitas em paralelo; só as páginas adicionais
+    // de mensalidades (quando necessárias) são buscadas em sequência.
     const [
       sociosResult,
       mensalidadesResult,
@@ -465,7 +477,7 @@ export async function GET(request: Request) {
           "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira,data_associacao"
         )
         .order("nome"),
-      consultaMensalidades,
+      buscarPaginaMensalidades(0),
       db
         .from("configuracoes_mensalidades")
         .select("*")
@@ -490,6 +502,15 @@ export async function GET(request: Request) {
 
     if (erroSocios) throw erroSocios;
     if (erroMensalidades) throw erroMensalidades;
+
+    const mensalidadesCompletas: MensalidadeRow[] = [...((mensalidades || []) as MensalidadeRow[])];
+    for (let inicio = TAMANHO_PAGINA; (mensalidades || []).length === TAMANHO_PAGINA; inicio += TAMANHO_PAGINA) {
+      const { data: pagina, error: erroPagina } = await buscarPaginaMensalidades(inicio);
+      if (erroPagina) throw erroPagina;
+      mensalidadesCompletas.push(...((pagina || []) as MensalidadeRow[]));
+      if ((pagina || []).length < TAMANHO_PAGINA) break;
+    }
+
     if (erroConfiguracoes) throw erroConfiguracoes;
     if (erroTarifas) throw erroTarifas;
     if (erroCobrancas) throw erroCobrancas;
@@ -498,7 +519,7 @@ export async function GET(request: Request) {
       (socios || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
     );
 
-    const mensalidadesComSocio = (mensalidades || []).map((m: MensalidadeRow) => ({
+    const mensalidadesComSocio = mensalidadesCompletas.map((m: MensalidadeRow) => ({
       ...atualizarSituacaoAtraso(m),
       socio: mapaSocios.get(String(m.socio_id)) || null,
     }));
@@ -509,7 +530,6 @@ export async function GET(request: Request) {
       configuracoes: configuracoes || [],
       tarifas: tarifas || [],
       cobranca: cobrancas?.[0] || null,
-      motivos: MOTIVOS,
     });
   } catch (e) {
     return NextResponse.json(
@@ -716,255 +736,298 @@ export async function POST(request: Request) {
      * GERAR COMPETÊNCIA
      * =====================================================
      */
-    if (acao === "gerar" || acao === "gerar_mes") {
+    if (acao === "gerar" || acao === "gerar_mes" || acao === "gerar_lote") {
       const ano = Number(body.ano);
-      const mes = Number(body.mes);
+      const mesesSolicitados: number[] = Array.isArray(body.meses)
+        ? body.meses.map((valor: unknown) => Number(valor))
+        : [Number(body.mes)];
+      const meses = [...new Set(mesesSolicitados)].sort((a, b) => a - b);
 
       if (
         !Number.isInteger(ano) ||
-        !Number.isInteger(mes) ||
-        mes < 1 ||
-        mes > 12
+        meses.length === 0 ||
+        meses.length > 12 ||
+        meses.some((numeroMes) => !Number.isInteger(numeroMes) || numeroMes < 1 || numeroMes > 12)
       ) {
         return NextResponse.json(
-          { error: "Ano ou competência inválidos." },
+          { error: "Ano ou competências inválidos." },
           { status: 400 }
         );
       }
 
-      const competencia = primeiroDia(ano, mes);
-      const { data: socios, error: erroSocios } = await db
-        .from("socios")
-        .select(
-          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo,data_associacao"
-        );
+      const competencias = meses.map((numeroMes) => primeiroDia(ano, numeroMes));
 
-      if (erroSocios) throw erroSocios;
-
-      /*
-       * REGRA OFICIAL DO GERADOR
-       *
-       * O gerador NÃO altera cadastro e NÃO usa o botão antigo
-       * de sincronização.
-       *
-       * Titulares:
-       *   possui_mensalidade = true => pode gerar.
-       *
-       * Dependentes:
-       *   usamos a categoria preservada da migração como referência
-       *   principal. Só entram automaticamente quando a categoria
-       *   informa "C/ Mensalidade" ou "Com Mensalidade".
-       *
-       * Isso é importante porque a sincronização anterior alterou
-       * muitos dependentes para possui_mensalidade=true apenas por
-       * causa do tipo_socio. A categoria antiga preserva a regra real
-       * da família e evita cobrar esposa/filhos automaticamente.
-       *
-       * A definição de casos excepcionais (por exemplo, dependente
-       * que passa a pagar individualmente) poderá ser ajustada no
-       * cadastro do associado antes da geração.
-       */
-      let cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
-
-      // Quando o administrador seleciona associados na tela, gerar somente
-      // aqueles registros. Sem socio_ids, mantém o comportamento atual:
-      // gerar todos os pagadores pendentes da competência.
-      const socioIdsSelecionados = Array.isArray(body.socio_ids)
-        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-
-      if (socioIdsSelecionados.length > 0) {
-        const permitidos = new Set(socioIdsSelecionados);
-        cobraveis = cobraveis.filter((s: SocioMensalidadeRow) =>
-          permitidos.has(String(s.id))
-        );
-      }
-
-      const { data: configuracoes, error: erroConfiguracoes } =
-        await db
+      // Dados comuns a todas as competências são carregados uma única vez.
+      // Isso evita repetir cinco consultas para cada mês selecionado.
+      const [
+        sociosResult,
+        configuracoesResult,
+        tarifasResult,
+        contasResult,
+        cobrancasResult,
+        existentesResult,
+      ] = await Promise.all([
+        db
+          .from("socios")
+          .select(
+            "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo,data_associacao"
+          ),
+        db
           .from("configuracoes_mensalidades")
           .select("*")
           .eq("ativo", true)
-          .order("vigencia_inicio", { ascending: false });
+          .order("vigencia_inicio", { ascending: false }),
+        db
+          .from("configuracoes_tarifas_mensalidades")
+          .select("*")
+          .eq("ativo", true),
+        db
+          .from("contas_bancarias")
+          .select("id,nome,banco")
+          .eq("ativo", true),
+        db
+          .from("configuracoes_cobranca_mensalidades")
+          .select("*")
+          .eq("ativo", true)
+          .order("created_at", { ascending: false })
+          .limit(1),
+        db
+          .from("mensalidades")
+          .select("socio_id,competencia")
+          .in("competencia", competencias)
+          .order("competencia", { ascending: true })
+          .order("socio_id", { ascending: true })
+          .range(0, 999),
+      ]);
 
-      if (erroConfiguracoes) throw erroConfiguracoes;
+      if (sociosResult.error) throw sociosResult.error;
+      if (configuracoesResult.error) throw configuracoesResult.error;
+      if (tarifasResult.error) throw tarifasResult.error;
+      if (contasResult.error) throw contasResult.error;
+      if (cobrancasResult.error) throw cobrancasResult.error;
+      if (existentesResult.error) throw existentesResult.error;
 
-      // Não gerar nem recalcular mensalidades em competências anteriores à
-      // data de associação. No mês de entrada, respeita o dia de vencimento
-      // configurado para o tipo de associado.
-      cobraveis = cobraveis.filter((s: SocioMensalidadeRow) => {
-        const config = escolherConfiguracao(configuracoes || [], s.tipo_socio, competencia);
-        const dia = config?.dia_vencimento ? Number(config.dia_vencimento) : Number(s.dia_vencimento || 10);
-        return competenciaPermitidaPelaAssociacao(s.data_associacao, competencia, dia);
+      const socios = (sociosResult.data || []) as SocioMensalidadeRow[];
+      const configuracoes = (configuracoesResult.data || []) as ConfiguracaoMensalidadeRow[];
+      const configuracoesPorTipo = new Map<string, ConfiguracaoMensalidadeRow[]>();
+      configuracoes.filter((item) => item.ativo !== false).forEach((item) => {
+        const tipo = String(item.tipo_socio || "");
+        const grupo = configuracoesPorTipo.get(tipo) || [];
+        grupo.push(item);
+        configuracoesPorTipo.set(tipo, grupo);
       });
+      configuracoesPorTipo.forEach((grupo) =>
+        grupo.sort((a, b) => String(b.vigencia_inicio || "").localeCompare(String(a.vigencia_inicio || "")))
+      );
+      const configuracaoParaCompetencia = (tipoSocio: string | null | undefined, competencia: string) =>
+        configuracoesPorTipo
+          .get(String(tipoSocio || ""))
+          ?.find((item) => String(item.vigencia_inicio || "0000-00-00") <= competencia);
+      const tarifas = (tarifasResult.data || []) as ConfiguracaoTarifaRow[];
+      const contasBancarias = (contasResult.data || []) as ContaBancariaResumo[];
+      const regraCobranca = cobrancasResult.data?.[0] || null;
+      const cobraveisBase = socios.filter(socioElegivelParaMensalidade);
 
-      const { data: tarifas, error: erroTarifas } = await db
-        .from("configuracoes_tarifas_mensalidades")
-        .select("*")
-        .eq("ativo", true);
-
-      const { data: contasBancarias, error: erroContas } = await db
-        .from("contas_bancarias")
-        .select("id,nome,banco")
-        .eq("ativo", true);
-
-      if (erroContas) throw erroContas;
+      // Quando o administrador seleciona associados, restringimos o lote aos
+      // mesmos IDs; sem seleção explícita, preservamos a geração global.
+      const socioIdsSelecionados = Array.isArray(body.socio_ids)
+        ? body.socio_ids.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+      const socioIdsPermitidos = socioIdsSelecionados.length > 0
+        ? new Set(socioIdsSelecionados)
+        : null;
+      const cobraveisFiltrados = socioIdsPermitidos
+        ? cobraveisBase.filter((socio) => socioIdsPermitidos.has(String(socio.id)))
+        : cobraveisBase;
 
       const mapaContas = new Map<string, ContaBancariaResumo>(
-        (contasBancarias || []).map((c: ContaBancariaResumo): [string, ContaBancariaResumo] => [String(c.id), c])
+        contasBancarias.map((conta): [string, ContaBancariaResumo] => [String(conta.id), conta])
       );
-
-      if (erroTarifas) throw erroTarifas;
-
-      const { data: cobrancas, error: erroCobrancas } = await db
-        .from("configuracoes_cobranca_mensalidades")
-        .select("*")
-        .eq("ativo", true)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (erroCobrancas) throw erroCobrancas;
-
-      const regraCobranca = cobrancas?.[0] || null;
-
-      const { data: existentes, error: erroExistentes } = await db
-        .from("mensalidades")
-        .select("socio_id")
-        .eq("competencia", competencia);
-
-      if (erroExistentes) throw erroExistentes;
-
-      const idsExistentes = new Set<string>(
-        (existentes || []).map((x: { socio_id: string }) => String(x.socio_id))
+      const sociosPorId = new Map<string, SocioMensalidadeRow>(
+        cobraveisFiltrados.map((socio): [string, SocioMensalidadeRow] => [String(socio.id), socio])
       );
-
-      // Corrige lançamentos já existentes de dependentes com cobrança individual,
-      // mas somente quando ainda estão em aberto/atraso. Pagamentos, isenções e
-      // demais estados históricos ficam intocados.
-      const sociosIndividuais = cobraveis.filter(usaValorIndividual);
-      if (sociosIndividuais.length > 0) {
-        const mapaIndividual = new Map<string, SocioMensalidadeRow>(
-          sociosIndividuais.map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
-        );
-        const { data: lancamentosAbertos, error: erroAbertos } = await db
+      const registrosExistentes: Array<{ socio_id: string; competencia: string }> = [
+        ...((existentesResult.data || []) as Array<{ socio_id: string; competencia: string }>),
+      ];
+      const TAMANHO_PAGINA_GERACAO = 1000;
+      for (
+        let inicio = TAMANHO_PAGINA_GERACAO;
+        (existentesResult.data || []).length === TAMANHO_PAGINA_GERACAO;
+        inicio += TAMANHO_PAGINA_GERACAO
+      ) {
+        const { data: pagina, error: erroPagina } = await db
           .from("mensalidades")
-          .select("id,socio_id,situacao,valor,valor_base,tarifa_pagamento,multa,juros,desconto,total_cobrado")
-          .eq("competencia", competencia)
-          .in("situacao", ["em_aberto", "em_atraso"]);
-        if (erroAbertos) throw erroAbertos;
+          .select("socio_id,competencia")
+          .in("competencia", competencias)
+          .order("competencia", { ascending: true })
+          .order("socio_id", { ascending: true })
+          .range(inicio, inicio + TAMANHO_PAGINA_GERACAO - 1);
+        if (erroPagina) throw erroPagina;
+        registrosExistentes.push(...((pagina || []) as Array<{ socio_id: string; competencia: string }>));
+        if ((pagina || []).length < TAMANHO_PAGINA_GERACAO) break;
+      }
 
-        for (const lancamento of lancamentosAbertos || []) {
-          const socioIndividual = mapaIndividual.get(String(lancamento.socio_id));
-          if (!socioIndividual) continue;
+      const existentes = new Set<string>(
+        registrosExistentes.map((registro) =>
+          `${String(registro.competencia).slice(0, 10)}|${String(registro.socio_id)}`
+        )
+      );
+
+      // A elegibilidade por data de associação é avaliada separadamente para
+      // cada competência, inclusive quando o lote contém vários meses.
+      const cobraveisPorCompetencia = new Map<string, SocioMensalidadeRow[]>();
+      const chavesCobraveis = new Set<string>();
+      for (const competencia of competencias) {
+        const cobraveisDoMes = cobraveisFiltrados.filter((socio) => {
+          const config = configuracaoParaCompetencia(socio.tipo_socio, competencia);
+          const dia = config?.dia_vencimento
+            ? Number(config.dia_vencimento)
+            : Number(socio.dia_vencimento || 10);
+          return competenciaPermitidaPelaAssociacao(socio.data_associacao, competencia, dia);
+        });
+        cobraveisPorCompetencia.set(competencia, cobraveisDoMes);
+        cobraveisDoMes.forEach((socio) => chavesCobraveis.add(`${competencia}|${String(socio.id)}`));
+      }
+
+      // Corrige os valores individuais existentes em aberto/atraso em uma
+      // única leitura. Pagamentos, isenções e históricos continuam intocados.
+      let atualizacoesIndividuais = 0;
+      const sociosIndividuais = [...sociosPorId.values()].filter(usaValorIndividual);
+      if (sociosIndividuais.length > 0) {
+        const consultaAbertos = (inicio: number) => db
+          .from("mensalidades")
+          .select("id,socio_id,competencia,situacao,valor,valor_base,tarifa_pagamento,multa,juros,desconto")
+          .in("competencia", competencias)
+          .in("situacao", ["em_aberto", "em_atraso"])
+          .order("competencia", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, inicio + TAMANHO_PAGINA_GERACAO - 1);
+        const { data: primeiraPaginaAbertos, error: erroAbertos } = await consultaAbertos(0);
+        if (erroAbertos) throw erroAbertos;
+        const lancamentosAbertos: MensalidadeRow[] = [
+          ...((primeiraPaginaAbertos || []) as MensalidadeRow[]),
+        ];
+        for (
+          let inicio = TAMANHO_PAGINA_GERACAO;
+          (primeiraPaginaAbertos || []).length === TAMANHO_PAGINA_GERACAO;
+          inicio += TAMANHO_PAGINA_GERACAO
+        ) {
+          const { data: pagina, error: erroPagina } = await consultaAbertos(inicio);
+          if (erroPagina) throw erroPagina;
+          lancamentosAbertos.push(...((pagina || []) as MensalidadeRow[]));
+          if ((pagina || []).length < TAMANHO_PAGINA_GERACAO) break;
+        }
+
+        const atualizacoes = lancamentosAbertos.flatMap((lancamento: MensalidadeRow) => {
+          const competencia = String(lancamento.competencia || "").slice(0, 10);
+          const chave = `${competencia}|${String(lancamento.socio_id)}`;
+          if (!chavesCobraveis.has(chave)) return [];
+          const socioIndividual = sociosPorId.get(String(lancamento.socio_id));
+          if (!socioIndividual || !usaValorIndividual(socioIndividual)) return [];
+
           const valorCorreto = Number(Number(socioIndividual.valor_mensalidade || 0).toFixed(2));
           const valorAtual = Number(lancamento.valor_base ?? lancamento.valor ?? 0);
-          if (Math.abs(valorAtual - valorCorreto) < 0.005) continue;
+          if (Math.abs(valorAtual - valorCorreto) < 0.005) return [];
 
           const tarifa = Number(lancamento.tarifa_pagamento || 0);
           const multa = Number(lancamento.multa || 0);
           const juros = Number(lancamento.juros || 0);
           const desconto = Number(lancamento.desconto || 0);
           const total = Math.max(0, valorCorreto + tarifa + multa + juros - desconto);
-
-          const { error: erroAtualizacao } = await db
-            .from("mensalidades")
-            .update({
+          return [{
+            id: lancamento.id,
+            patch: {
               valor: valorCorreto,
               valor_base: valorCorreto,
               total_cobrado: Number(total.toFixed(2)),
-            })
-            .eq("id", lancamento.id)
-            .in("situacao", ["em_aberto", "em_atraso"]);
-          if (erroAtualizacao) throw erroAtualizacao;
+            },
+          }];
+        });
+
+        // Atualizações são independentes; executamos em pequenos grupos para
+        // reduzir latência sem disparar centenas de requisições simultâneas.
+        const TAMANHO_CONCORRENCIA = 10;
+        for (let inicio = 0; inicio < atualizacoes.length; inicio += TAMANHO_CONCORRENCIA) {
+          const grupo = atualizacoes.slice(inicio, inicio + TAMANHO_CONCORRENCIA);
+          const resultados = await Promise.all(grupo.map((item) =>
+            db
+              .from("mensalidades")
+              .update(item.patch)
+              .eq("id", item.id)
+              .in("situacao", ["em_aberto", "em_atraso"])
+          ));
+          const falha = resultados.find((resultado) => resultado.error);
+          if (falha?.error) throw falha.error;
+          atualizacoesIndividuais += grupo.length;
         }
       }
 
-      /*
-       * A lista "cobraveis" acima já representa os pagadores desta
-       * competência. O gerador apenas cria o lançamento financeiro;
-       * ele não modifica o cadastro do sócio.
-       */
-      const novos: NovaMensalidadeRow[] = cobraveis
-        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)))
-        .map((s: SocioMensalidadeRow) => {
-          const config = escolherConfiguracao(
-            configuracoes || [],
-            s.tipo_socio,
-            competencia
-          );
+      const novos: NovaMensalidadeRow[] = [];
+      const quantidadePorCompetencia: Record<string, number> = {};
+      for (const competencia of competencias) {
+        const cobraveisDoMes = cobraveisPorCompetencia.get(competencia) || [];
+        const novosDoMes = cobraveisDoMes
+          .filter((socio) => !existentes.has(`${competencia}|${String(socio.id)}`))
+          .map((socio) => {
+            const config = configuracaoParaCompetencia(socio.tipo_socio, competencia);
+            const valor = valorMensalidadeEfetivo(socio, config);
+            const dia = config?.dia_vencimento
+              ? Number(config.dia_vencimento)
+              : Number(socio.dia_vencimento || 10);
+            const tipoPagamentoOriginal = socio.tipo_pagamento || null;
+            const tipoPagamento = tipoPagamentoPersistivel(tipoPagamentoOriginal);
+            const vencimento = dataVencimento(competencia, dia);
+            const contaBancaria = socio.conta_bancaria_id
+              ? mapaContas.get(String(socio.conta_bancaria_id)) || null
+              : null;
+            const tarifa = valorTarifa(tarifas, tipoPagamentoOriginal, contaBancaria);
+            const calculado = calcularCobranca(valor, vencimento, competencia, tarifa, regraCobranca);
 
-          const valor = valorMensalidadeEfetivo(s, config);
+            return {
+              socio_id: socio.id,
+              competencia,
+              valor,
+              valor_base: valor,
+              tarifa_pagamento: calculado.tarifa_pagamento,
+              multa: calculado.multa,
+              juros: calculado.juros,
+              desconto: calculado.desconto,
+              total_cobrado: calculado.total_cobrado,
+              dias_atraso: calculado.dias_atraso,
+              data_vencimento: vencimento,
+              situacao: valor === 0 ? "isento" : "em_aberto",
+              tipo_pagamento: tipoPagamento,
+              conta_pagadora_id: socio.conta_bancaria_id || null,
+            };
+          });
 
-          const dia = config?.dia_vencimento
-            ? Number(config.dia_vencimento)
-            : Number(s.dia_vencimento || 10);
-
-          const tipoPagamentoOriginal = s.tipo_pagamento || null;
-          const tipoPagamento = tipoPagamentoPersistivel(tipoPagamentoOriginal);
-
-          const vencimento = dataVencimento(competencia, dia);
-          const contaBancaria = s.conta_bancaria_id ? mapaContas.get(String(s.conta_bancaria_id)) || null : null;
-          // A tarifa precisa do valor cadastral original (ex.: Banrisul/Sicredi);
-          // o campo mensalidades.tipo_pagamento recebe o código aceito pelo banco.
-          const tarifa = valorTarifa(tarifas || [], tipoPagamentoOriginal, contaBancaria);
-          const calculado = calcularCobranca(
-            valor,
-            vencimento,
-            competencia,
-            tarifa,
-            regraCobranca
-          );
-
-          return {
-            socio_id: s.id,
-            competencia,
-            valor,
-            valor_base: valor,
-            tarifa_pagamento: calculado.tarifa_pagamento,
-            multa: calculado.multa,
-            juros: calculado.juros,
-            desconto: calculado.desconto,
-            total_cobrado: calculado.total_cobrado,
-            dias_atraso: calculado.dias_atraso,
-            data_vencimento: vencimento,
-            situacao: valor === 0 ? "isento" : "em_aberto",
-            tipo_pagamento: tipoPagamento,
-            conta_pagadora_id: s.conta_bancaria_id || null,
-          };
-        });
-
-      if (novos.length > 0) {
-        // Inserimos em lotes para evitar timeout da função/serverless
-        // quando uma competência possui centenas de lançamentos.
-        const TAMANHO_LOTE = 50;
-        let criadas = 0;
-
-        for (let inicio = 0; inicio < novos.length; inicio += TAMANHO_LOTE) {
-          const lote = novos.slice(inicio, inicio + TAMANHO_LOTE);
-          const { error: erroInsert } = await db
-            .from("mensalidades")
-            .insert(lote);
-
-          if (erroInsert) {
-            throw new Error(
-              `Erro ao gerar o lote ${Math.floor(inicio / TAMANHO_LOTE) + 1}: ${erroInsert.message}`
-            );
-          }
-
-          criadas += lote.length;
-        }
-
-        return NextResponse.json({
-          ok: true,
-          criadas,
-          message: `${criadas} mensalidade(s) gerada(s) com sucesso.`,
-        });
+        quantidadePorCompetencia[competencia] = novosDoMes.length;
+        novos.push(...novosDoMes);
       }
 
+      // Inserção mantém lotes de 50 para respeitar limites de payload/timeout.
+      const TAMANHO_LOTE = 50;
+      for (let inicio = 0; inicio < novos.length; inicio += TAMANHO_LOTE) {
+        const lote = novos.slice(inicio, inicio + TAMANHO_LOTE);
+        const { error: erroInsert } = await db.from("mensalidades").insert(lote);
+        if (erroInsert) {
+          throw new Error(
+            `Erro ao gerar o lote ${Math.floor(inicio / TAMANHO_LOTE) + 1}: ${erroInsert.message}`
+          );
+        }
+      }
+
+      const criadas = novos.length;
+      const competenciasTexto = competencias.map((competencia) => `${competencia.slice(5, 7)}/${competencia.slice(0, 4)}`);
       return NextResponse.json({
         ok: true,
-        criadas: 0,
-        message: "Nenhuma nova mensalidade foi gerada. Os registros já existem.",
+        criadas,
+        atualizadas_individuais: atualizacoesIndividuais,
+        por_competencia: quantidadePorCompetencia,
+        competencias,
+        message: criadas > 0
+          ? `${criadas} mensalidade(s) gerada(s) para ${competenciasTexto.join(", ")}.`
+          : "Nenhuma nova mensalidade foi gerada. Os registros já existem ou ainda não são devidos pela data de associação.",
       });
     }
 
