@@ -181,6 +181,21 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
+// Identifica somente a marcação explícita feita pela ação S.S. Assim, o
+// botão de desfazer não aparece para observações históricas que apenas citam
+// falta de saldo.
+function ehMarcacaoSS(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
+  if (item.situacao === "pago" || item.situacao === "isento") return false;
+  const motivo = String(item.motivo || "").trim().toLowerCase();
+  const observacoes = String(item.observacoes || "").trim().toLowerCase();
+  return (
+    motivo === "s.s" ||
+    motivo === "ss" ||
+    observacoes === "s.s — sem saldo" ||
+    observacoes === "s.s - sem saldo"
+  );
+}
+
 const PREFIXO_HISTORICO_IMPORTADO = "MIGRACAO_HISTORICO_58_PAGINAS";
 
 function ehObservacaoHistoricoImportado(texto?: string | null) {
@@ -1059,6 +1074,38 @@ export default function Page() {
     }
   }
 
+  async function desfazerSemSaldo(item: M) {
+    if (!ehMarcacaoSS(item)) return;
+
+    const nome = item.socio?.nome || socioPorId.get(String(item.socio_id))?.nome || "este associado";
+    const competencia = `${String(item.competencia || "").slice(5, 7)}/${String(item.competencia || "").slice(0, 4)}`;
+    const confirmar = window.confirm(
+      `Desfazer a marcação S.S — Sem saldo de ${nome}, competência ${competencia}?\n\nA mensalidade voltará a aparecer como Em aberto ou Atrasada, conforme o vencimento. Nenhum pagamento ou lançamento financeiro será criado, apagado ou alterado.`
+    );
+    if (!confirmar) return;
+
+    setErro("");
+    setMsg("");
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({ acao: "desfazer_sem_saldo", id: item.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível desfazer a marcação S.S.");
+
+      setMsg(d.message || "Marcação S.S removida.");
+      setSel((selecionadas) => selecionadas.filter((id) => id !== item.id));
+      await carregar();
+      if (socioSelecionado) {
+        await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível desfazer a marcação S.S.");
+    }
+  }
+
   async function estornarBaixa(item: M) {
     if (item.situacao !== "pago") return;
 
@@ -1649,6 +1696,15 @@ export default function Page() {
                             >
                               ↩️ Estornar baixa
                             </button>
+                          ) : ehMarcacaoSS(x) ? (
+                            <button
+                              type="button"
+                              onClick={() => void desfazerSemSaldo(x)}
+                              className="whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                              title="Remover somente a marcação S.S; não altera valores nem movimentações financeiras"
+                            >
+                              ↩ Desfazer S.S.
+                            </button>
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
                           )}
@@ -1994,6 +2050,15 @@ export default function Page() {
                         ) : registroMes.situacao !== "isento" ? (
                           <>
                             <div className="flex flex-wrap gap-2">
+                              {ehMarcacaoSS(registroMes) && (
+                                <button
+                                  type="button"
+                                  onClick={() => void desfazerSemSaldo(registroMes)}
+                                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                                >
+                                  ↩ Desfazer S.S.
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
