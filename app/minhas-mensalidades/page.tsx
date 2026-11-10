@@ -20,6 +20,7 @@ type Mensalidade = {
   comprovante_url?: string | null;
   comprovante_status?: string | null;
   motivo_recusa?: string | null;
+  anterior_a_associacao?: boolean;
 };
 
 type ConfigPix = {
@@ -93,7 +94,7 @@ export default function MinhasMensalidadesPage() {
   }, [router]);
 
   const pendentes = useMemo(
-    () => mensalidades.filter((m) => m.situacao === "em_aberto" || m.situacao === "em_atraso"),
+    () => mensalidades.filter((m) => !m.anterior_a_associacao && (m.situacao === "em_aberto" || m.situacao === "em_atraso")),
     [mensalidades]
   );
   const totalPendente = pendentes.reduce((soma, m) => soma + Number(m.valor || 0), 0);
@@ -252,8 +253,10 @@ export default function MinhasMensalidadesPage() {
                   {carregando && <tr><td colSpan={6} className="p-10 text-center text-gray-500">Carregando...</td></tr>}
                   {!carregando && mensalidades.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-gray-500">Nenhuma mensalidade lançada ainda.</td></tr>}
                   {!carregando && mensalidades.map((m) => {
-                    const info = situacaoInfo(m.situacao);
-                    const podeSelecionar = (m.situacao === "em_aberto" || m.situacao === "em_atraso") && m.comprovante_status !== "pendente";
+                    const info = m.anterior_a_associacao
+                      ? { texto: "Anterior à associação", cor: "bg-gray-100 text-gray-600" }
+                      : situacaoInfo(m.situacao);
+                    const podeSelecionar = !m.anterior_a_associacao && (m.situacao === "em_aberto" || m.situacao === "em_atraso") && m.comprovante_status !== "pendente";
                     return (
                       <tr key={m.id} className={selecionadas.includes(m.id) ? "bg-[#eef7f2]" : ""}>
                         <td className="p-3 text-center">
@@ -270,6 +273,8 @@ export default function MinhasMensalidadesPage() {
                         <td className="p-3 text-sm text-gray-600">
                           {m.situacao === "pago" ? (
                             <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="h-4 w-4" />{formatarData(m.data_pagamento)} · {m.tipo_pagamento || "Pagamento"}</span>
+                          ) : m.anterior_a_associacao ? (
+                            <span className="text-xs text-gray-500">Competência anterior ao início da associação; não disponível para cobrança.</span>
                           ) : m.comprovante_status === "pendente" ? (
                             <span className="font-bold text-amber-700">Comprovante enviado — aguardando aprovação</span>
                           ) : m.comprovante_status === "recusado" ? (
