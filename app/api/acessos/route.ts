@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 type LinhaMensalidadeAcesso = { id: string; valor: number | string | null; data_vencimento: string | null; competencia: string | null; situacao: string | null };
@@ -353,6 +354,7 @@ export async function POST(request: Request) {
     let id = socioId;
     let temporadaId = "";
     let temporadaParticipanteId = "";
+    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
 
     if (!id && qr.startsWith("guarani:socio:")) {
       id = qr.replace("guarani:socio:", "");
@@ -712,8 +714,6 @@ export async function POST(request: Request) {
         id = socioPorMatricula.id;
       }
     }
-
-    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
 
     if (dependenteId) {
       etapa = "buscando dependente";
