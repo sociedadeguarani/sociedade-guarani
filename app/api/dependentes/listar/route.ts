@@ -34,6 +34,7 @@ type Socio = {
   tipo_pagamento: string | null;
   situacao_financeira: string | null;
   data_ultimo_pagamento: string | null;
+  data_associacao: string | null;
   // Campos calculados pela API após o resumo de inadimplência.
   financeiro_status?: string;
   meses_atraso?: number;
@@ -125,7 +126,7 @@ export async function GET(request: Request) {
     const politica = podeVerFinanceiro ? await carregarPolitica(db) : POLITICA_INADIMPLENCIA_PADRAO;
     const hoje = dataHojeBrasil();
 
-    const colunasSocio = ["id", "matricula", "nome", "situacao", "responsavel_id", "tipo_socio", "categoria", "parentesco", "cpf", "data_nascimento", "telefone", "whatsapp", "foto_url"];
+    const colunasSocio = ["id", "matricula", "nome", "situacao", "responsavel_id", "tipo_socio", "categoria", "parentesco", "cpf", "data_nascimento", "telefone", "whatsapp", "foto_url", "data_associacao"];
     if (podeVerExameMedico) colunasSocio.push("exame_medico_validade");
     if (podeVerFinanceiro) colunasSocio.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento");
 
