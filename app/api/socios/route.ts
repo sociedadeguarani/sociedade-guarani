@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { dependenteTemMensalidade } from "@/lib/regrasMensalidade";
-import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { mensalidadeRegistroAnteriorAAssociacao, obterPrimeiraCompetenciaPaga } from "@/lib/competenciaAssociacao";
 import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO } from "@/lib/politicaInadimplencia";
 
@@ -41,7 +41,7 @@ function mensalidadePaga(situacao: unknown) {
   return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada", "isento", "isenta", "cancelado", "cancelada"].includes(status);
 }
 
-function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string, sociosPorId: Map<string, Record<string, unknown>>) {
+function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string, sociosPorId: Map<string, Record<string, unknown>>, primeiraCompetenciaPagaPorSocio: Map<string, string>) {
   const mapa = new Map<string, Set<string>>();
   for (const m of mensalidades) {
     const id = String(m.socio_id || "");
@@ -55,7 +55,7 @@ function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: stri
     const competencia = String(m.competencia || vencimento).slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(competencia)) continue;
     const socio = sociosPorId.get(id);
-    if (mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, competencia, vencimentoInformado || null, socio?.dia_vencimento)) continue;
+    if (mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, competencia, vencimentoInformado || null, socio?.dia_vencimento, primeiraCompetenciaPagaPorSocio.get(id))) continue;
     const lista = mapa.get(id) || new Set<string>();
     lista.add(competencia);
     mapa.set(id, lista);
@@ -165,17 +165,41 @@ export async function GET(request: Request) {
         }
         return registrosLote;
       }));
+      const mensalidadesPorSocio = new Map<string, Array<Record<string, unknown>>>();
       for (const lote of resultadosLotes) {
         mensalidades.push(...lote);
         for (const mensalidade of lote) {
           const idSocio = String(mensalidade.socio_id || "");
-          const socio = registros.find((item) => String(item.id || "") === idSocio);
-          if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, mensalidade.competencia, mensalidade.data_vencimento, socio?.dia_vencimento)) {
-            sociosComHistorico.add(idSocio);
-          }
+          if (!idSocio) continue;
+          const lista = mensalidadesPorSocio.get(idSocio) || [];
+          lista.push(mensalidade);
+          mensalidadesPorSocio.set(idSocio, lista);
         }
       }
-      atrasos = agruparAtrasos(mensalidades, hoje, new Map(registros.map((s) => [String(s.id || ""), s])));
+      const primeiraCompetenciaPagaPorSocio = new Map<string, string>();
+      for (const [idSocio, historico] of mensalidadesPorSocio) {
+        const primeira = obterPrimeiraCompetenciaPaga(historico);
+        if (primeira) primeiraCompetenciaPagaPorSocio.set(idSocio, primeira);
+      }
+      for (const mensalidade of mensalidades) {
+        const idSocio = String(mensalidade.socio_id || "");
+        const socio = registros.find((item) => String(item.id || "") === idSocio);
+        if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(
+          socio?.data_associacao,
+          mensalidade.competencia,
+          mensalidade.data_vencimento,
+          socio?.dia_vencimento,
+          primeiraCompetenciaPagaPorSocio.get(idSocio),
+        )) {
+          sociosComHistorico.add(idSocio);
+        }
+      }
+      atrasos = agruparAtrasos(
+        mensalidades,
+        hoje,
+        new Map(registros.map((s) => [String(s.id || ""), s])),
+        primeiraCompetenciaPagaPorSocio,
+      );
     }
 
     const socioPorMatricula = new Map(
