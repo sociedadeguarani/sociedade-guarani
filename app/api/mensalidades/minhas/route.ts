@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { carregarMapaPrimeiraCompetenciaPaga } from "@/lib/primeiraCompetenciaPaga";
 
 type PessoaFamilia = {
   id: string;
@@ -8,6 +10,8 @@ type PessoaFamilia = {
   responsavel_id: string | null;
   parentesco: string | null;
   possui_mensalidade: boolean | null;
+  data_associacao?: string | null;
+  dia_vencimento?: number | null;
 };
 
 type MensalidadeMinha = {
@@ -26,6 +30,7 @@ type MensalidadeMinha = {
   motivo_recusa: string | null;
   observacoes: string | null;
   motivo: string | null;
+  anterior_a_associacao?: boolean;
 };
 
 export async function GET(request: Request) {
@@ -58,7 +63,7 @@ export async function GET(request: Request) {
     const titularId = pessoa.responsavel_id || pessoa.id;
     const { data: familia, error: familiaError } = await db
       .from("socios")
-      .select("id,nome,matricula,responsavel_id,parentesco,possui_mensalidade")
+      .select("id,nome,matricula,responsavel_id,parentesco,possui_mensalidade,data_associacao,dia_vencimento")
       .or(`id.eq.${titularId},responsavel_id.eq.${titularId}`)
       .order("nome");
 
@@ -83,7 +88,27 @@ export async function GET(request: Request) {
         .limit(60);
 
       if (error) throw error;
-      mensalidades = (data ?? []) as unknown as MensalidadeMinha[];
+      const mensalidadesCarregadas = (data ?? []) as unknown as MensalidadeMinha[];
+      const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
+        db,
+        cobraveis,
+      );
+      const sociosPorId = new Map(
+        familiaRegistros.map((membro) => [String(membro.id), membro]),
+      );
+      mensalidades = mensalidadesCarregadas.map((mensalidade) => {
+        const socio = sociosPorId.get(String(mensalidade.socio_id));
+        return {
+          ...mensalidade,
+          anterior_a_associacao: mensalidadeRegistroAnteriorAAssociacao(
+            socio?.data_associacao,
+            mensalidade.competencia,
+            mensalidade.data_vencimento,
+            socio?.dia_vencimento,
+            primeiraCompetenciaPagaPorSocio.get(String(mensalidade.socio_id)),
+          ),
+        };
+      });
     }
 
     const socioTitular = familiaRegistros.find((membro) => membro.id === titularId) || pessoa;
