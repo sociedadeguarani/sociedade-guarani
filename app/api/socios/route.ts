@@ -93,9 +93,13 @@ export async function GET(request: Request) {
     const podeVerFinanceiro = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
     const podeVerExameMedico = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
     const colunasFinanceiras = new Set(["possui_mensalidade", ...COLUNAS_EXTRAS.filter((coluna) => ["valor_mensalidade", "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "situacao_financeira", "data_ultimo_pagamento"].includes(coluna))]);
+    const colunasRestritasExame = new Set(["exame_medico_validade"]);
+    const podeRetornarColuna = (coluna: string) =>
+      (podeVerFinanceiro || !colunasFinanceiras.has(coluna)) &&
+      (podeVerExameMedico || !colunasRestritasExame.has(coluna));
     const colunas = [
-      ...COLUNAS_BASE.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
-      ...COLUNAS_EXTRAS.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+      ...COLUNAS_BASE.filter(podeRetornarColuna),
+      ...COLUNAS_EXTRAS.filter(podeRetornarColuna),
     ];
     const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
