@@ -733,7 +733,9 @@ export default function FinanceiroPage() {
       .map((m) => String(m.origem_id))
   ), [movimentosFinanceiros]);
 
-  const movimentosFluxo = movimentosFinanceiros;
+  const movimentosFluxo = abaFinanceira === "aluguéis"
+    ? movimentosFinanceiros.filter(ehMovimentoDeAluguel)
+    : movimentosFinanceiros;
   const totalPaginasMovimentos = Math.max(1, Math.ceil(totalMovimentosFiltrados / movimentosPorPagina));
   const movimentosVisiveis = movimentosFluxo;
 
