@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { exigirAdministrador, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { exigirAdministrador, getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { carregarMapaPrimeiraCompetenciaPaga } from "@/lib/primeiraCompetenciaPaga";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,8 @@ type RegistroGenerico = {
   socio_id?: string | null;
   dependente_id?: string | null;
   situacao?: string | null;
+  competencia?: string | null;
+  data_vencimento?: string | null;
   status?: string | null;
   comprovante_status?: string | null;
   comprovante_enviado_em?: string | null;
@@ -202,7 +206,8 @@ export async function POST(request: Request) {
       );
     }
 
-    for (const registro of (registros || []) as RegistroGenerico[]) {
+    const registrosTipados = (registros || []) as RegistroGenerico[];
+    for (const registro of registrosTipados) {
       if (tipo === "mensalidade" && registro.socio_id !== auth.usuario.socio_id) {
         return NextResponse.json(
           { error: "Você não pode alterar uma destas mensalidades." },
@@ -232,6 +237,37 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Uma das cobranças selecionadas já possui comprovante aguardando aprovação." },
           { status: 409 }
+        );
+      }
+    }
+
+
+    if (tipo === "mensalidade") {
+      const serviceDb = getServiceClient();
+      const socioId = String(auth.usuario.socio_id);
+      const { data: socio, error: socioError } = await serviceDb
+        .from("socios")
+        .select("data_associacao,dia_vencimento")
+        .eq("id", socioId)
+        .maybeSingle();
+      if (socioError) throw new Error(socioError.message);
+      const primeiraCompetenciaPaga = (await carregarMapaPrimeiraCompetenciaPaga(
+        serviceDb,
+        [socioId],
+      )).get(socioId);
+      const competenciaAnterior = registrosTipados.find((registro) =>
+        mensalidadeRegistroAnteriorAAssociacao(
+          socio?.data_associacao,
+          registro.competencia,
+          registro.data_vencimento,
+          socio?.dia_vencimento,
+          primeiraCompetenciaPaga,
+        )
+      );
+      if (competenciaAnterior) {
+        return NextResponse.json(
+          { error: "Uma ou mais competências são anteriores ao início da associação e não podem receber comprovante." },
+          { status: 409 },
         );
       }
     }
