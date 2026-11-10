@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { usuarioAutenticado } from "@/lib/guaraniAuth";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 
 export const dynamic = "force-dynamic";
 const BUCKET = "comprovantes-financeiro";
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
 
     const { data: mensalidades, error: mensalidadesError } = await auth.supabase
       .from("mensalidades")
-      .select("id,socio_id,competencia,valor,situacao")
+      .select("id,socio_id,competencia,data_vencimento,valor,situacao")
       .in("id", ids)
       .eq("socio_id", auth.usuario.socio_id);
     if (mensalidadesError) throw new Error(mensalidadesError.message);
@@ -35,6 +36,27 @@ export async function POST(request: Request) {
     }
     const invalidas = mensalidades.filter((m) => !["em_aberto", "em_atraso"].includes(String(m.situacao || "")));
     if (invalidas.length) return NextResponse.json({ error: "Só é possível pagar mensalidades em aberto ou em atraso." }, { status: 409 });
+
+    const { data: socio, error: socioError } = await auth.supabase
+      .from("socios")
+      .select("data_associacao,dia_vencimento")
+      .eq("id", auth.usuario.socio_id)
+      .maybeSingle();
+    if (socioError) throw new Error(socioError.message);
+    const anterioresAAssociacao = mensalidades.filter((mensalidade) =>
+      mensalidadeRegistroAnteriorAAssociacao(
+        socio?.data_associacao,
+        mensalidade.competencia,
+        mensalidade.data_vencimento,
+        socio?.dia_vencimento,
+      )
+    );
+    if (anterioresAAssociacao.length) {
+      return NextResponse.json(
+        { error: "Uma ou mais competências são anteriores à sua data de associação e não podem ser enviadas para pagamento." },
+        { status: 409 },
+      );
+    }
 
     const { data: pendenteExistente } = await auth.supabase
       .from("comprovantes_mensalidades")
