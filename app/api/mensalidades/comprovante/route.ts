@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { usuarioAutenticado } from "@/lib/guaraniAuth";
+import { getServiceClient, usuarioAutenticado } from "@/lib/guaraniAuth";
 import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { carregarMapaPrimeiraCompetenciaPaga } from "@/lib/primeiraCompetenciaPaga";
 
 export const dynamic = "force-dynamic";
 const BUCKET = "comprovantes-financeiro";
@@ -43,12 +44,17 @@ export async function POST(request: Request) {
       .eq("id", auth.usuario.socio_id)
       .maybeSingle();
     if (socioError) throw new Error(socioError.message);
+    const primeiraCompetenciaPaga = (await carregarMapaPrimeiraCompetenciaPaga(
+      getServiceClient(),
+      [auth.usuario.socio_id],
+    )).get(String(auth.usuario.socio_id));
     const anterioresAAssociacao = mensalidades.filter((mensalidade) =>
       mensalidadeRegistroAnteriorAAssociacao(
         socio?.data_associacao,
         mensalidade.competencia,
         mensalidade.data_vencimento,
         socio?.dia_vencimento,
+        primeiraCompetenciaPaga,
       )
     );
     if (anterioresAAssociacao.length) {
