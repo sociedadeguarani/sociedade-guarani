@@ -1773,7 +1773,7 @@ function ModalSocio({
     });
 
     return () => { ativo = false; };
-  }, [socioEditando?.id, socios, setMensagem]);
+  }, [socioEditando?.id, socioEditando?.matricula, socios, setMensagem]);
 
 
   return (
