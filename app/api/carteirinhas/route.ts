@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
-import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { mensalidadeRegistroAnteriorAAssociacao, obterPrimeiraCompetenciaPaga } from "@/lib/competenciaAssociacao";
 
 // The selected column list is built dynamically according to permissions. The
 // generated Supabase type cannot infer that runtime string, so narrow only the
@@ -310,20 +310,35 @@ export async function GET(request: Request) {
         }
         return registrosLote;
       }));
-      for (const lote of resultados) {
-        mensalidades.push(...lote);
-        for (const mensalidade of lote) {
-          const idSocio = String(mensalidade.socio_id || "");
-          const socio = socios.find((item) => String(item.id) === idSocio);
-          const competencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
-          if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, competencia, mensalidade.data_vencimento, socio?.dia_vencimento)) {
-            sociosComHistorico.add(idSocio);
-          }
-        }
-      }
+      for (const lote of resultados) mensalidades.push(...lote);
     }
 
     const sociosPorIdFinanceiro = new Map(socios.map((s) => [String(s.id), s]));
+    const mensalidadesPorSocio = new Map<string, MensalidadeCarteirinha[]>();
+    for (const mensalidade of mensalidades) {
+      const id = String(mensalidade.socio_id || "");
+      if (!id) continue;
+      const historico = mensalidadesPorSocio.get(id) || [];
+      historico.push(mensalidade);
+      mensalidadesPorSocio.set(id, historico);
+    }
+    const primeiraCompetenciaPagaPorSocio = new Map<string, string>();
+    for (const [id, historico] of mensalidadesPorSocio) {
+      const primeira = obterPrimeiraCompetenciaPaga(historico);
+      if (primeira) primeiraCompetenciaPagaPorSocio.set(id, primeira);
+    }
+    for (const mensalidade of mensalidades) {
+      const idSocio = String(mensalidade.socio_id || "");
+      const socio = sociosPorIdFinanceiro.get(idSocio);
+      const competencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
+      if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(
+        socio?.data_associacao,
+        competencia,
+        mensalidade.data_vencimento,
+        socio?.dia_vencimento,
+        primeiraCompetenciaPagaPorSocio.get(idSocio),
+      )) sociosComHistorico.add(idSocio);
+    }
     mensalidades = mensalidades.filter((mensalidade) => {
       const idSocio = String(mensalidade.socio_id || "");
       const socio = sociosPorIdFinanceiro.get(idSocio);
@@ -333,6 +348,7 @@ export async function GET(request: Request) {
         competencia,
         mensalidade.data_vencimento,
         socio?.dia_vencimento,
+        primeiraCompetenciaPagaPorSocio.get(idSocio),
       );
     });
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
