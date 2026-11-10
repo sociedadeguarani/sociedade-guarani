@@ -174,7 +174,7 @@ export async function GET(request: Request) {
     const resumoMensalidades: ResumoMensalidade[] = [];
     for (let inicio = 0; inicio < idsComCobranca.length; inicio += TAMANHO_LOTE_SOCIOS) {
       const lote = idsComCobranca.slice(inicio, inicio + TAMANHO_LOTE_SOCIOS);
-      const { data, error } = await db.rpc("dependentes_resumo_inadimplencia", {
+      const { data, error } = await db.rpc("dependentes_resumo_inadimplencia_v2", {
         p_socio_ids: lote,
         p_hoje: hoje,
       });
