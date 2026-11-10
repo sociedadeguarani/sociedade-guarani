@@ -7,6 +7,7 @@ import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
 import RegistrarPagamentoMensalidade from "./components/RegistrarPagamentoMensalidade";
 import { socioElegivelParaMensalidade } from "@/lib/regrasMensalidade";
+import { mensalidadeAnteriorAAssociacao, mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 
 // Captura o instante de referência fora da renderização para que os cálculos
 // de status não dependam de uma função impura chamada a cada render.
@@ -26,6 +27,7 @@ type Socio = {
   tipo_pagamento?: string | null;
   conta_bancaria_id?: string | null;
   dia_vencimento?: number | null;
+  data_associacao?: string | null;
 };
 
 type SocioResumo = {
@@ -42,6 +44,7 @@ type SocioResumo = {
   tipo_pagamento?: string | null;
   conta_bancaria_id?: string | null;
   dia_vencimento?: number | null;
+  data_associacao?: string | null;
 };
 
 type M = {
@@ -181,21 +184,6 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
-// Identifica somente a marcação explícita feita pela ação S.S. Assim, o
-// botão de desfazer não aparece para observações históricas que apenas citam
-// falta de saldo.
-function ehMarcacaoSS(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
-  if (item.situacao === "pago" || item.situacao === "isento") return false;
-  const motivo = String(item.motivo || "").trim().toLowerCase();
-  const observacoes = String(item.observacoes || "").trim().toLowerCase();
-  return (
-    motivo === "s.s" ||
-    motivo === "ss" ||
-    observacoes === "s.s — sem saldo" ||
-    observacoes === "s.s - sem saldo"
-  );
-}
-
 const PREFIXO_HISTORICO_IMPORTADO = "MIGRACAO_HISTORICO_58_PAGINAS";
 
 function ehObservacaoHistoricoImportado(texto?: string | null) {
@@ -223,6 +211,7 @@ function competenciaNaoGeradaAtrasada(item: Pick<M, "situacao" | "competencia" |
   // Segue a mesma regra do gerador: dia configurado, limitado a 28; padrão dia 10.
   const diaConfigurado = Number(item.socio?.dia_vencimento || 10);
   const diaVencimento = Math.min(Math.max(diaConfigurado, 1), 28);
+  if (mensalidadeAnteriorAAssociacao(item.socio?.data_associacao, competencia, diaVencimento)) return false;
   const vencimento = new Date(anoCompetencia, mesCompetencia - 1, diaVencimento, 23, 59, 59, 999);
   return vencimento.getTime() < Date.now();
 }
@@ -256,6 +245,9 @@ function situacaoVisual(item: M) {
 }
 
 function statusMensalidade(item: M, semSaldoPermitido = false) {
+  if (mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)) {
+    return ["Anterior à associação", "bg-gray-100 text-gray-600"];
+  }
   if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
   if (competenciaNaoGeradaAtrasada(item)) {
     return ["Atrasada · não gerada", "bg-red-100 text-red-700"];
@@ -945,7 +937,8 @@ export default function Page() {
   // A seleção em massa respeita exatamente os filtros visíveis na tela.
   // Mensalidades pagas ou ainda não geradas não podem ser selecionadas.
   const linhasSelecionaveis = filtrada.filter(
-    (item) => item.situacao !== "pago" && item.situacao !== "nao_gerada"
+    (item) => item.situacao !== "pago" && item.situacao !== "nao_gerada" &&
+      !mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)
   );
   const todosSelecionaveisMarcados =
     linhasSelecionaveis.length > 0 &&
@@ -962,7 +955,8 @@ export default function Page() {
         (item) =>
           sel.includes(item.id) &&
           item.situacao !== "pago" &&
-          item.situacao !== "nao_gerada"
+          item.situacao !== "nao_gerada" &&
+          !mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)
       ),
     [filtrada, sel]
   );
@@ -1071,38 +1065,6 @@ export default function Page() {
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
-    }
-  }
-
-  async function desfazerSemSaldo(item: M) {
-    if (!ehMarcacaoSS(item)) return;
-
-    const nome = item.socio?.nome || socioPorId.get(String(item.socio_id))?.nome || "este associado";
-    const competencia = `${String(item.competencia || "").slice(5, 7)}/${String(item.competencia || "").slice(0, 4)}`;
-    const confirmar = window.confirm(
-      `Desfazer a marcação S.S — Sem saldo de ${nome}, competência ${competencia}?\n\nA mensalidade voltará a aparecer como Em aberto ou Atrasada, conforme o vencimento. Nenhum pagamento ou lançamento financeiro será criado, apagado ou alterado.`
-    );
-    if (!confirmar) return;
-
-    setErro("");
-    setMsg("");
-    try {
-      const r = await fetch("/api/mensalidades/admin", {
-        method: "POST",
-        headers: await h(),
-        body: JSON.stringify({ acao: "desfazer_sem_saldo", id: item.id }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Não foi possível desfazer a marcação S.S.");
-
-      setMsg(d.message || "Marcação S.S removida.");
-      setSel((selecionadas) => selecionadas.filter((id) => id !== item.id));
-      await carregar();
-      if (socioSelecionado) {
-        await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
-      }
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Não foi possível desfazer a marcação S.S.");
     }
   }
 
@@ -1492,11 +1454,11 @@ export default function Page() {
                         <input
                           type="checkbox"
                           className="mt-1 h-5 w-5 shrink-0 accent-[#005a3c]"
-                          disabled={x.situacao === "pago" || x.situacao === "nao_gerada"}
-                          checked={marcado}
+                          disabled={x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
+                          checked={marcado && !mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
                           aria-label={`Selecionar mensalidade de ${x.socio?.nome || "associado"}`}
                           onChange={() => {
-                            if (x.situacao === "pago") return;
+                            if (x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
                             setSel((atual) => atual.includes(x.id) ? atual.filter((id) => id !== x.id) : [...atual, x.id]);
                           }}
                         />
@@ -1593,11 +1555,11 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            disabled={x.situacao === "pago" || x.situacao === "nao_gerada"}
-                            checked={x.situacao !== "pago" && x.situacao !== "nao_gerada" && sel.includes(x.id)}
+                            disabled={x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
+                            checked={x.situacao !== "pago" && x.situacao !== "nao_gerada" && !mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento) && sel.includes(x.id)}
                             onChange={() => {
 
-                              if (x.situacao === "pago") return;
+                              if (x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
 
                               setSel((s) =>
                                 s.includes(x.id)
@@ -1695,15 +1657,6 @@ export default function Page() {
                               className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs font-bold text-yellow-700 hover:bg-yellow-100"
                             >
                               ↩️ Estornar baixa
-                            </button>
-                          ) : ehMarcacaoSS(x) ? (
-                            <button
-                              type="button"
-                              onClick={() => void desfazerSemSaldo(x)}
-                              className="whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100"
-                              title="Remover somente a marcação S.S; não altera valores nem movimentações financeiras"
-                            >
-                              ↩ Desfazer S.S.
                             </button>
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
@@ -2050,15 +2003,6 @@ export default function Page() {
                         ) : registroMes.situacao !== "isento" ? (
                           <>
                             <div className="flex flex-wrap gap-2">
-                              {ehMarcacaoSS(registroMes) && (
-                                <button
-                                  type="button"
-                                  onClick={() => void desfazerSemSaldo(registroMes)}
-                                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
-                                >
-                                  ↩ Desfazer S.S.
-                                </button>
-                              )}
                               <button
                                 type="button"
                                 onClick={() => {
