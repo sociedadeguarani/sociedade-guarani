@@ -985,7 +985,7 @@ export default function Home() {
     });
   }
 
-  async function salvarSocio(dependenteIds: string[] = []) {
+  async function salvarSocio(dependenteIds: string[] = [], quantidadeDependentes = dependenteIds.length) {
     if (!form.nome?.trim()) {
       setMensagem("Informe o nome completo do sócio.");
       return;
@@ -1179,16 +1179,18 @@ export default function Home() {
             titular_id: socioEditando.id,
             validade: form.exame_medico_validade || null,
             dependente_ids: dependenteIds,
+            quantidade_pessoas: quantidadeDependentes,
           }),
         });
         const resultadoExames = await respostaExames.json().catch(() => ({}));
         if (!respostaExames.ok) {
           throw new Error(`Cadastro salvo, mas os exames dos dependentes não foram atualizados: ${resultadoExames.error || "falha na API"}`);
         }
-        dependentesAtualizados = Number(resultadoExames.dependentes_atualizados || 0);
-        if (dependentesAtualizados !== dependenteIds.length) {
-          throw new Error(`Cadastro salvo, mas somente ${dependentesAtualizados} de ${dependenteIds.length} dependente(s) tiveram a atualização confirmada.`);
+        const registrosAtualizados = Number(resultadoExames.registros_atualizados ?? resultadoExames.dependentes_atualizados ?? 0);
+        if (registrosAtualizados !== dependenteIds.length) {
+          throw new Error(`Cadastro salvo, mas somente ${registrosAtualizados} de ${dependenteIds.length} registro(s) de dependentes tiveram a atualização confirmada.`);
         }
+        dependentesAtualizados = Number(resultadoExames.pessoas_atualizadas ?? quantidadeDependentes);
       }
 
       setMensagem(
@@ -3279,19 +3281,28 @@ function ModalSocio({
   setMensagem: (valor: string) => void;
   fechar: () => void;
   alterarCampo: (campo: keyof Socio, valor: string) => void;
-  salvar: (dependenteIds?: string[]) => void;
+  salvar: (dependenteIds?: string[], quantidadeDependentes?: number) => void;
   selecionarFoto: (file: File | null) => void;
   removerFoto: () => void;
 }) {
-  const [dependentesExame, setDependentesExame] = useState<Array<{ id: string; nome: string; matricula: string | null; exame_medico_validade: string | null; ativo: boolean | null }>>([]);
+  type ItemExameFamilia = {
+    chave: string;
+    nome: string;
+    matricula: string | null;
+    exame_medico_validade: string | null;
+    socio_ids: string[];
+    dependente_ids: string[];
+  };
+  const [dependentesExame, setDependentesExame] = useState<ItemExameFamilia[]>([]);
   const [dependentesExameSelecionados, setDependentesExameSelecionados] = useState<string[]>([]);
 
   useEffect(() => {
     let ativo = true;
 
-    // Deixa a sincronização de estado acontecer após o efeito montar. Isso evita
-    // atualização síncrona durante o commit do React. Um sócio que também é
-    // dependente em outra família pode ter dependentes próprios.
+    // As famílias novas são gravadas em `socios` (responsavel_id). Cadastros
+    // antigos ainda podem estar em `dependentes` (socio_id). Consultamos as
+    // duas fontes para que um sócio que também é dependente de outra pessoa
+    // possa ter sua própria família e para não deixar famílias legadas de fora.
     void Promise.resolve().then(async () => {
       if (!socioEditando?.id) {
         if (ativo) {
@@ -3301,7 +3312,7 @@ function ModalSocio({
         return;
       }
 
-      const { data, error } = await supabase
+      const dependentesResult = await supabase
         .from("dependentes")
         .select("id,nome,matricula,exame_medico_validade,ativo")
         .eq("socio_id", socioEditando.id)
@@ -3309,17 +3320,80 @@ function ModalSocio({
         .order("nome");
 
       if (!ativo) return;
-      if (error) {
-        setMensagem("Não foi possível carregar os dependentes para seleção.");
+
+      // A tela Sócios já carrega a tabela `socios` completa pela API
+      // administrativa. Usamos essa lista para localizar os filhos vinculados
+      // por responsavel_id; isso também atende um SD/SC que seja dependente de
+      // alguém, mas tenha filhos próprios cadastrados como sócios.
+      const matriculaResponsavel = String(socioEditando.matricula ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const baseMatriculaFamiliar = matriculaResponsavel.endsWith("A") ? matriculaResponsavel.slice(0, -1) : "";
+      const filhosComoSocios = socios.filter((registro) => {
+        const matriculaFamiliar = String(registro.matricula ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const vinculoPorId = registro.responsavel_id === socioEditando.id;
+        // Compatibilidade com famílias antigas em que B/C/D compartilham a
+        // matrícula-base A, mas o campo responsavel_id não foi preenchido.
+        const vinculoPorMatricula = Boolean(
+          baseMatriculaFamiliar &&
+          matriculaFamiliar.length === baseMatriculaFamiliar.length + 1 &&
+          matriculaFamiliar.startsWith(baseMatriculaFamiliar) &&
+          matriculaFamiliar.slice(-1) !== "A"
+        );
+        if (!vinculoPorId && !vinculoPorMatricula) return false;
+        const situacao = String(registro.situacao || "").trim().toLowerCase();
+        return situacao !== "inativo" && situacao !== "cancelado" && situacao !== "cancelada";
+      });
+      if (dependentesResult.error && filhosComoSocios.length === 0) {
+        setMensagem("Não foi possível carregar os dependentes desta família. Confira se os cadastros estão vinculados ao responsável.");
         return;
       }
 
-      setDependentesExame((data || []) as typeof dependentesExame);
+      const porPessoa = new Map<string, ItemExameFamilia>();
+      const chavePessoa = (nome: unknown, matricula: unknown) => {
+        const matriculaNormalizada = String(matricula ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (matriculaNormalizada) return `matricula:${matriculaNormalizada}`;
+        const nomeNormalizado = String(nome ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+        return `nome:${nomeNormalizado}`;
+      };
+      const incluir = (registro: { id: string; nome: string; matricula: string | null; exame_medico_validade: string | null }, origem: "socio" | "dependente") => {
+        const chave = chavePessoa(registro.nome, registro.matricula);
+        const existente = porPessoa.get(chave);
+        if (existente) {
+          if (origem === "socio" && !existente.socio_ids.includes(registro.id)) existente.socio_ids.push(registro.id);
+          if (origem === "dependente" && !existente.dependente_ids.includes(registro.id)) existente.dependente_ids.push(registro.id);
+          if (!existente.exame_medico_validade && registro.exame_medico_validade) existente.exame_medico_validade = registro.exame_medico_validade;
+          return;
+        }
+        porPessoa.set(chave, {
+          chave,
+          nome: registro.nome,
+          matricula: registro.matricula == null ? null : String(registro.matricula),
+          exame_medico_validade: registro.exame_medico_validade,
+          socio_ids: origem === "socio" ? [registro.id] : [],
+          dependente_ids: origem === "dependente" ? [registro.id] : [],
+        });
+      };
+
+      // Os registros da tabela socios são a fonte principal para famílias atuais.
+      for (const registro of filhosComoSocios) {
+        incluir({
+          id: registro.id,
+          nome: registro.nome,
+          matricula: registro.matricula == null ? null : String(registro.matricula),
+          exame_medico_validade: registro.exame_medico_validade,
+        }, "socio");
+      }
+      // Inclui também dependentes do modelo legado. Duplicados por matrícula
+      // são agrupados no mesmo checkbox e terão os dois registros atualizados.
+      for (const registro of (dependentesResult.data || []) as Array<{ id: string; nome: string; matricula: string | number | null; exame_medico_validade: string | null }>) {
+        incluir({ ...registro, matricula: registro.matricula == null ? null : String(registro.matricula) }, "dependente");
+      }
+
+      setDependentesExame([...porPessoa.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
       setDependentesExameSelecionados([]);
     });
 
     return () => { ativo = false; };
-  }, [socioEditando?.id, setMensagem]);
+  }, [socioEditando?.id, socios, setMensagem]);
 
 
   return (
@@ -3542,8 +3616,8 @@ function ModalSocio({
             {socioEditando && dependentesExame.length > 0 && (
               <div className="md:col-span-2 rounded-2xl border border-[#cbded3] bg-[#f5faf7] p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-[#005a3c]">Atualizar exame dos dependentes</h3><p className="text-xs text-slate-600">Marque somente quem também realizou o exame. Os demais cadastros não serão alterados.</p></div>
-                  <button type="button" onClick={() => setDependentesExameSelecionados(dependentesExameSelecionados.length === dependentesExame.length ? [] : dependentesExame.map((d) => d.id))} className="rounded-lg border px-3 py-2 text-xs font-bold">{dependentesExameSelecionados.length === dependentesExame.length ? "Desmarcar todos" : "Selecionar todos"}</button></div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">{dependentesExame.map((d) => <label key={d.id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm"><input type="checkbox" checked={dependentesExameSelecionados.includes(d.id)} onChange={(e) => setDependentesExameSelecionados((old) => e.target.checked ? [...old, d.id] : old.filter((id) => id !== d.id))} /><span className="min-w-0"><b className="block">{d.nome}</b><span className="text-xs text-slate-500">{d.matricula || "Sem matrícula"} · Validade: {d.exame_medico_validade ? new Date(`${d.exame_medico_validade}T12:00:00`).toLocaleDateString("pt-BR") : "não cadastrada"}</span></span></label>)}</div>
+                  <button type="button" onClick={() => setDependentesExameSelecionados(dependentesExameSelecionados.length === dependentesExame.length ? [] : dependentesExame.map((d) => d.chave))} className="rounded-lg border px-3 py-2 text-xs font-bold">{dependentesExameSelecionados.length === dependentesExame.length ? "Desmarcar todos" : "Selecionar todos"}</button></div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">{dependentesExame.map((d) => <label key={d.chave} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm"><input type="checkbox" checked={dependentesExameSelecionados.includes(d.chave)} onChange={(e) => setDependentesExameSelecionados((old) => e.target.checked ? [...old, d.chave] : old.filter((key) => key !== d.chave))} /><span className="min-w-0"><b className="block">{d.nome}</b><span className="text-xs text-slate-500">{d.matricula || "Sem matrícula"} · Validade: {d.exame_medico_validade ? new Date(`${d.exame_medico_validade}T12:00:00`).toLocaleDateString("pt-BR") : "não cadastrada"}</span></span></label>)}</div>
                 <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#315b49]">A validade informada acima será aplicada ao titular e aos dependentes marcados quando você clicar em <b>Salvar alterações</b>.</p>
               </div>
             )}
@@ -3788,7 +3862,14 @@ function ModalSocio({
           </button>
 
           <button
-            onClick={() => salvar(dependentesExameSelecionados)}
+            onClick={() => {
+              const selecionados = dependentesExame.filter((d) => dependentesExameSelecionados.includes(d.chave));
+              const idsSelecionados = selecionados.flatMap((d) => [
+                ...d.socio_ids.map((id) => `socio:${id}`),
+                ...d.dependente_ids.map((id) => `dependente:${id}`),
+              ]);
+              salvar(idsSelecionados, selecionados.length);
+            }}
             disabled={salvando}
             className="rounded-xl bg-[#063b28] px-6 py-3 font-bold text-white shadow hover:bg-[#003d2b] disabled:opacity-50"
           >
