@@ -1745,6 +1745,74 @@ export async function POST(request: Request) {
 
     /*
      * =====================================================
+     * DESFAZER MARCAÇÃO S.S. — SEM SALDO
+     * =====================================================
+     * Remove somente os marcadores criados pela ação S.S. Não altera
+     * situação, vencimento, forma de cobrança, valores ou movimentos.
+     */
+    if (acao === "desfazer_sem_saldo") {
+      const id = String(body.id || "").trim();
+      if (!id) {
+        return NextResponse.json(
+          { error: "Mensalidade não informada." },
+          { status: 400 }
+        );
+      }
+
+      const { data: registro, error: erroBusca } = await db
+        .from("mensalidades")
+        .select("id,situacao,motivo,observacoes")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (erroBusca) throw erroBusca;
+      if (!registro) {
+        return NextResponse.json(
+          { error: "Mensalidade não encontrada." },
+          { status: 404 }
+        );
+      }
+      if (registro.situacao === "pago" || registro.situacao === "isento") {
+        return NextResponse.json(
+          { error: "Somente uma mensalidade em aberto marcada como S.S pode ter essa marcação removida." },
+          { status: 409 }
+        );
+      }
+
+      const motivo = normalizarTexto(registro.motivo || "");
+      const observacoes = normalizarTexto(registro.observacoes || "");
+      const motivoEhSS = motivo === "s.s" || motivo === "ss";
+      const observacaoEhSS =
+        observacoes === "s.s — sem saldo" || observacoes === "s.s - sem saldo";
+
+      if (!motivoEhSS && !observacaoEhSS) {
+        return NextResponse.json(
+          { error: "Esta mensalidade não possui uma marcação S.S ativa para desfazer." },
+          { status: 409 }
+        );
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (motivoEhSS) patch.motivo = null;
+      if (observacaoEhSS) patch.observacoes = null;
+
+      const { error: erroUpdate } = await db
+        .from("mensalidades")
+        .update(patch)
+        .eq("id", id)
+        .neq("situacao", "pago")
+        .neq("situacao", "isento");
+
+      if (erroUpdate) throw erroUpdate;
+
+      return NextResponse.json({
+        ok: true,
+        message: "Marcação S.S removida. A mensalidade permanece em aberto e será exibida como Em aberto ou Atrasada conforme o vencimento. Nenhuma movimentação financeira foi alterada.",
+      });
+    }
+
+    /*
+     * =====================================================
      * ATUALIZAR MENSALIDADE
      * =====================================================
      */
