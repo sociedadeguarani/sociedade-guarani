@@ -3,7 +3,9 @@ import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
-/** Atualiza somente os dependentes selecionados de um titular já salvo. */
+/** Atualiza somente os dependentes selecionados do núcleo familiar do sócio informado.
+ * Um sócio que é dependente em outra família também pode ser responsável por sua própria família.
+ */
 export async function PUT(request: Request) {
   const auth = await exigirAdministrador(request);
   if ("error" in auth) {
@@ -33,14 +35,14 @@ export async function PUT(request: Request) {
     }
 
     const db = getServiceClient();
-    const { data: titular, error: titularError } = await db
+    const { data: cadastroResponsavel, error: titularError } = await db
       .from("socios")
-      .select("id,responsavel_id")
+      .select("id")
       .eq("id", titularId)
       .maybeSingle();
     if (titularError) throw titularError;
-    if (!titular || titular.responsavel_id) {
-      return NextResponse.json({ error: "Selecione um cadastro titular válido." }, { status: 400 });
+    if (!cadastroResponsavel) {
+      return NextResponse.json({ error: "Cadastro responsável pela família não encontrado." }, { status: 404 });
     }
 
     // Não permite salvar parcialmente uma seleção: todos os IDs precisam
