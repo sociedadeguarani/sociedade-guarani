@@ -5,6 +5,7 @@ import {
   getServiceClient,
 } from "@/lib/guaraniAuth";
 import { socioElegivelParaMensalidade, type CadastroMensalidade } from "@/lib/regrasMensalidade";
+import { competenciaPermitidaPelaAssociacao, mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ type SocioMensalidadeRow = CadastroMensalidade & {
   situacao?: string | null;
   situacao_financeira?: string | null;
   ativo?: boolean | null;
+  data_associacao?: string | null;
 };
 
 type ConfiguracaoMensalidadeRow = {
@@ -460,7 +462,7 @@ export async function GET(request: Request) {
       db
         .from("socios")
         .select(
-          "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira"
+          "id,matricula,nome,cpf,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,situacao_financeira,data_associacao"
         )
         .order("nome"),
       consultaMensalidades,
@@ -561,7 +563,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
+          "id,nome,matricula,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo,data_associacao"
         )
         .order("nome");
 
@@ -616,6 +618,14 @@ export async function POST(request: Request) {
       if (erroCobrancas) throw erroCobrancas;
 
       const regraCobranca = cobrancas?.[0] || null;
+
+      // Respeita a data de entrada do associado e o vencimento configurado.
+      // No mês da associação, se entrou depois do dia de vencimento, começa no mês seguinte.
+      cobraveis = cobraveis.filter((s: SocioMensalidadeRow) => {
+        const config = escolherConfiguracao(configuracoes || [], s.tipo_socio, competencia);
+        const dia = config?.dia_vencimento ? Number(config.dia_vencimento) : Number(s.dia_vencimento || 10);
+        return competenciaPermitidaPelaAssociacao(s.data_associacao, competencia, dia);
+      });
 
       const { data: existentes, error: erroExistentes } = await db
         .from("mensalidades")
@@ -726,7 +736,7 @@ export async function POST(request: Request) {
       const { data: socios, error: erroSocios } = await db
         .from("socios")
         .select(
-          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo"
+          "id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo,data_associacao"
         );
 
       if (erroSocios) throw erroSocios;
@@ -779,6 +789,15 @@ export async function POST(request: Request) {
 
       if (erroConfiguracoes) throw erroConfiguracoes;
 
+      // Não gerar nem recalcular mensalidades em competências anteriores à
+      // data de associação. No mês de entrada, respeita o dia de vencimento
+      // configurado para o tipo de associado.
+      cobraveis = cobraveis.filter((s: SocioMensalidadeRow) => {
+        const config = escolherConfiguracao(configuracoes || [], s.tipo_socio, competencia);
+        const dia = config?.dia_vencimento ? Number(config.dia_vencimento) : Number(s.dia_vencimento || 10);
+        return competenciaPermitidaPelaAssociacao(s.data_associacao, competencia, dia);
+      });
+
       const { data: tarifas, error: erroTarifas } = await db
         .from("configuracoes_tarifas_mensalidades")
         .select("*")
@@ -822,7 +841,7 @@ export async function POST(request: Request) {
       // Corrige lançamentos já existentes de dependentes com cobrança individual,
       // mas somente quando ainda estão em aberto/atraso. Pagamentos, isenções e
       // demais estados históricos ficam intocados.
-      const sociosIndividuais = (socios || []).filter(usaValorIndividual);
+      const sociosIndividuais = cobraveis.filter(usaValorIndividual);
       if (sociosIndividuais.length > 0) {
         const mapaIndividual = new Map<string, SocioMensalidadeRow>(
           sociosIndividuais.map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
@@ -1057,7 +1076,7 @@ export async function POST(request: Request) {
 
       const { data: sociosBaixa, error: erroSociosBaixa } = await db
         .from("socios")
-        .select("id,nome,matricula,conta_bancaria_id,responsavel_id")
+        .select("id,nome,matricula,conta_bancaria_id,responsavel_id,data_associacao,dia_vencimento")
         .in("id", socioIds);
 
       if (erroSociosBaixa) throw erroSociosBaixa;
@@ -1069,6 +1088,18 @@ export async function POST(request: Request) {
       const registrosParaBaixar = (registros || []).filter((r: MensalidadeRow) =>
         idsParaBaixar.includes(String(r.id))
       );
+
+      const anteriorAssociacao = registrosParaBaixar.find((registro: MensalidadeRow) => {
+        const socio = mapaSociosBaixa.get(String(registro.socio_id));
+        return mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, registro.competencia, registro.data_vencimento, socio?.dia_vencimento);
+      });
+      if (anteriorAssociacao) {
+        const socio = mapaSociosBaixa.get(String(anteriorAssociacao.socio_id));
+        return NextResponse.json(
+          { error: `A competência ${String(anteriorAssociacao.competencia || "").slice(0, 7)} é anterior à data de associação de ${socio?.nome || "um dos associados"}. Nenhuma mensalidade deste lote foi baixada.` },
+          { status: 409 },
+        );
+      }
 
       // Não permite marcar como pago sem uma conta de destino definida.
       const contaRecebimentoSelecionada = String(body.conta_recebimento_id || "").trim();
@@ -1486,7 +1517,7 @@ export async function POST(request: Request) {
       if (socioVirtualId && /^\d{4}-\d{2}-01$/.test(competenciaVirtual)) {
         const { data: socioVirtual, error: erroSocioVirtual } = await db
           .from("socios")
-          .select("id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo")
+          .select("id,nome,categoria,tipo_socio,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,conta_bancaria_id,situacao,ativo,data_associacao")
           .eq("id", socioVirtualId)
           .maybeSingle();
 
@@ -1521,7 +1552,7 @@ export async function POST(request: Request) {
 
         const { data: existenteVirtual, error: erroExistenteVirtual } = await db
           .from("mensalidades")
-          .select("id,situacao")
+          .select("id,situacao,competencia,data_vencimento")
           .eq("socio_id", socioVirtualId)
           .eq("competencia", competenciaVirtual)
           .maybeSingle();
@@ -1532,6 +1563,18 @@ export async function POST(request: Request) {
           return NextResponse.json(
             { error: "Esta competência já está paga ou isenta e não pode ser marcada como S.S." },
             { status: 400 }
+          );
+        }
+
+        if (mensalidadeRegistroAnteriorAAssociacao(
+          socioVirtual.data_associacao,
+          competenciaVirtual,
+          existenteVirtual?.data_vencimento,
+          socioVirtual.dia_vencimento,
+        )) {
+          return NextResponse.json(
+            { error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." },
+            { status: 409 },
           );
         }
 
@@ -1585,6 +1628,9 @@ export async function POST(request: Request) {
           const diaVirtual = configVirtual?.dia_vencimento
             ? Number(configVirtual.dia_vencimento)
             : Number(socioVirtual.dia_vencimento || 10);
+          if (!competenciaPermitidaPelaAssociacao(socioVirtual.data_associacao, competenciaVirtual, diaVirtual)) {
+            return NextResponse.json({ error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." }, { status: 409 });
+          }
           const vencimentoVirtual = dataVencimento(competenciaVirtual, diaVirtual);
           const tipoPagamentoOriginalVirtual = socioVirtual.tipo_pagamento || null;
           const tipoPagamentoVirtual = tipoPagamentoPersistivel(tipoPagamentoOriginalVirtual);
@@ -1644,7 +1690,7 @@ export async function POST(request: Request) {
 
       const { data: registros, error: erroBusca } = await db
         .from("mensalidades")
-        .select("id,socio_id,situacao,tipo_pagamento,conta_pagadora_id")
+        .select("id,socio_id,competencia,data_vencimento,situacao,tipo_pagamento,conta_pagadora_id")
         .in("id", ids);
 
       if (erroBusca) throw erroBusca;
@@ -1656,7 +1702,7 @@ export async function POST(request: Request) {
 
       const { data: sociosSS, error: erroSociosSS } = await db
         .from("socios")
-        .select("id,tipo_pagamento,conta_bancaria_id")
+        .select("id,tipo_pagamento,conta_bancaria_id,data_associacao,dia_vencimento")
         .in("id", socioIds);
 
       if (erroSociosSS) throw erroSociosSS;
@@ -1664,6 +1710,13 @@ export async function POST(request: Request) {
       const mapaSociosSS = new Map<string, SocioMensalidadeRow>(
         (sociosSS || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
       );
+      const mensalidadeAnteriorAssociacao = registrosEncontrados.find((r: MensalidadeRow) => {
+        const socio = mapaSociosSS.get(String(r.socio_id));
+        return mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, r.competencia, r.data_vencimento, socio?.dia_vencimento);
+      });
+      if (mensalidadeAnteriorAssociacao) {
+        return NextResponse.json({ error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." }, { status: 409 });
+      }
 
       function cobrancaPermiteSS(registro: MensalidadeRow) {
         const socio = mapaSociosSS.get(String(registro.socio_id));
@@ -1740,74 +1793,6 @@ export async function POST(request: Request) {
         ok: true,
         marcadas: idsElegiveis.length,
         message: `${idsElegiveis.length} mensalidade(s) marcada(s) como S.S. — Sem saldo.`,
-      });
-    }
-
-    /*
-     * =====================================================
-     * DESFAZER MARCAÇÃO S.S. — SEM SALDO
-     * =====================================================
-     * Remove somente os marcadores criados pela ação S.S. Não altera
-     * situação, vencimento, forma de cobrança, valores ou movimentos.
-     */
-    if (acao === "desfazer_sem_saldo") {
-      const id = String(body.id || "").trim();
-      if (!id) {
-        return NextResponse.json(
-          { error: "Mensalidade não informada." },
-          { status: 400 }
-        );
-      }
-
-      const { data: registro, error: erroBusca } = await db
-        .from("mensalidades")
-        .select("id,situacao,motivo,observacoes")
-        .eq("id", id)
-        .maybeSingle();
-
-      if (erroBusca) throw erroBusca;
-      if (!registro) {
-        return NextResponse.json(
-          { error: "Mensalidade não encontrada." },
-          { status: 404 }
-        );
-      }
-      if (registro.situacao === "pago" || registro.situacao === "isento") {
-        return NextResponse.json(
-          { error: "Somente uma mensalidade em aberto marcada como S.S pode ter essa marcação removida." },
-          { status: 409 }
-        );
-      }
-
-      const motivo = normalizarTexto(registro.motivo || "");
-      const observacoes = normalizarTexto(registro.observacoes || "");
-      const motivoEhSS = motivo === "s.s" || motivo === "ss";
-      const observacaoEhSS =
-        observacoes === "s.s — sem saldo" || observacoes === "s.s - sem saldo";
-
-      if (!motivoEhSS && !observacaoEhSS) {
-        return NextResponse.json(
-          { error: "Esta mensalidade não possui uma marcação S.S ativa para desfazer." },
-          { status: 409 }
-        );
-      }
-
-      const patch: Record<string, unknown> = {};
-      if (motivoEhSS) patch.motivo = null;
-      if (observacaoEhSS) patch.observacoes = null;
-
-      const { error: erroUpdate } = await db
-        .from("mensalidades")
-        .update(patch)
-        .eq("id", id)
-        .neq("situacao", "pago")
-        .neq("situacao", "isento");
-
-      if (erroUpdate) throw erroUpdate;
-
-      return NextResponse.json({
-        ok: true,
-        message: "Marcação S.S removida. A mensalidade permanece em aberto e será exibida como Em aberto ou Atrasada conforme o vencimento. Nenhuma movimentação financeira foi alterada.",
       });
     }
 
