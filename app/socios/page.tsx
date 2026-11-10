@@ -1183,11 +1183,11 @@ export default function Home() {
         });
         const resultadoExames = await respostaExames.json().catch(() => ({}));
         if (!respostaExames.ok) {
-          throw new Error(`Cadastro do titular salvo, mas os exames dos dependentes não foram atualizados: ${resultadoExames.error || "falha na API"}`);
+          throw new Error(`Cadastro salvo, mas os exames dos dependentes não foram atualizados: ${resultadoExames.error || "falha na API"}`);
         }
         dependentesAtualizados = Number(resultadoExames.dependentes_atualizados || 0);
         if (dependentesAtualizados !== dependenteIds.length) {
-          throw new Error(`Cadastro do titular salvo, mas somente ${dependentesAtualizados} de ${dependenteIds.length} dependente(s) tiveram a atualização confirmada.`);
+          throw new Error(`Cadastro salvo, mas somente ${dependentesAtualizados} de ${dependenteIds.length} dependente(s) tiveram a atualização confirmada.`);
         }
       }
 
@@ -3290,10 +3290,10 @@ function ModalSocio({
     let ativo = true;
 
     // Deixa a sincronização de estado acontecer após o efeito montar. Isso evita
-    // atualização síncrona durante o commit do React e limpa a lista ao editar
-    // um cadastro que não é titular.
+    // atualização síncrona durante o commit do React. Um sócio que também é
+    // dependente em outra família pode ter dependentes próprios.
     void Promise.resolve().then(async () => {
-      if (!socioEditando?.id || socioEditando.responsavel_id) {
+      if (!socioEditando?.id) {
         if (ativo) {
           setDependentesExame([]);
           setDependentesExameSelecionados([]);
@@ -3305,7 +3305,7 @@ function ModalSocio({
         .from("dependentes")
         .select("id,nome,matricula,exame_medico_validade,ativo")
         .eq("socio_id", socioEditando.id)
-        .eq("ativo", true)
+        .or("ativo.eq.true,ativo.is.null")
         .order("nome");
 
       if (!ativo) return;
@@ -3319,7 +3319,7 @@ function ModalSocio({
     });
 
     return () => { ativo = false; };
-  }, [socioEditando?.id, socioEditando?.responsavel_id, setMensagem]);
+  }, [socioEditando?.id, setMensagem]);
 
 
   return (
@@ -3539,7 +3539,7 @@ function ModalSocio({
               value={form.exame_medico_validade || ""}
               onChange={(v) => alterarCampo("exame_medico_validade", v)}
             />
-            {socioEditando && !form.responsavel_id && dependentesExame.length > 0 && (
+            {socioEditando && dependentesExame.length > 0 && (
               <div className="md:col-span-2 rounded-2xl border border-[#cbded3] bg-[#f5faf7] p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-[#005a3c]">Atualizar exame dos dependentes</h3><p className="text-xs text-slate-600">Marque somente quem também realizou o exame. Os demais cadastros não serão alterados.</p></div>
                   <button type="button" onClick={() => setDependentesExameSelecionados(dependentesExameSelecionados.length === dependentesExame.length ? [] : dependentesExame.map((d) => d.id))} className="rounded-lg border px-3 py-2 text-xs font-bold">{dependentesExameSelecionados.length === dependentesExame.length ? "Desmarcar todos" : "Selecionar todos"}</button></div>
