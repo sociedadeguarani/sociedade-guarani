@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dependenteTemMensalidade } from "@/lib/regrasMensalidade";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 import { exigirAdministrador, getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO } from "@/lib/politicaInadimplencia";
 
@@ -40,7 +41,7 @@ function mensalidadePaga(situacao: unknown) {
   return ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "confirmado", "confirmada", "compensado", "compensada", "isento", "isenta", "cancelado", "cancelada"].includes(status);
 }
 
-function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string) {
+function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: string, sociosPorId: Map<string, Record<string, unknown>>) {
   const mapa = new Map<string, Set<string>>();
   for (const m of mensalidades) {
     const id = String(m.socio_id || "");
@@ -53,6 +54,8 @@ function agruparAtrasos(mensalidades: Array<Record<string, unknown>>, hoje: stri
     if (!id || !vencimento || vencimento >= hoje || mensalidadePaga(m.situacao)) continue;
     const competencia = String(m.competencia || vencimento).slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(competencia)) continue;
+    const socio = sociosPorId.get(id);
+    if (mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, competencia, vencimentoInformado || null, socio?.dia_vencimento)) continue;
     const lista = mapa.get(id) || new Set<string>();
     lista.add(competencia);
     mapa.set(id, lista);
@@ -93,13 +96,9 @@ export async function GET(request: Request) {
     const podeVerFinanceiro = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
     const podeVerExameMedico = auth.usuario.perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
     const colunasFinanceiras = new Set(["possui_mensalidade", ...COLUNAS_EXTRAS.filter((coluna) => ["valor_mensalidade", "dia_vencimento", "tipo_pagamento", "conta_bancaria_id", "situacao_financeira", "data_ultimo_pagamento"].includes(coluna))]);
-    const colunasRestritasExame = new Set(["exame_medico_validade"]);
-    const podeRetornarColuna = (coluna: string) =>
-      (podeVerFinanceiro || !colunasFinanceiras.has(coluna)) &&
-      (podeVerExameMedico || !colunasRestritasExame.has(coluna));
     const colunas = [
-      ...COLUNAS_BASE.filter(podeRetornarColuna),
-      ...COLUNAS_EXTRAS.filter(podeRetornarColuna),
+      ...COLUNAS_BASE.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
+      ...COLUNAS_EXTRAS.filter((coluna) => podeVerFinanceiro || !colunasFinanceiras.has(coluna)),
     ];
     const camposVisiveis = { financeiro: podeVerFinanceiro, exameMedico: podeVerExameMedico };
     const url = new URL(request.url);
@@ -170,10 +169,13 @@ export async function GET(request: Request) {
         mensalidades.push(...lote);
         for (const mensalidade of lote) {
           const idSocio = String(mensalidade.socio_id || "");
-          if (idSocio) sociosComHistorico.add(idSocio);
+          const socio = registros.find((item) => String(item.id || "") === idSocio);
+          if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, mensalidade.competencia, mensalidade.data_vencimento, socio?.dia_vencimento)) {
+            sociosComHistorico.add(idSocio);
+          }
         }
       }
-      atrasos = agruparAtrasos(mensalidades, hoje);
+      atrasos = agruparAtrasos(mensalidades, hoje, new Map(registros.map((s) => [String(s.id || ""), s])));
     }
 
     const socioPorMatricula = new Map(
