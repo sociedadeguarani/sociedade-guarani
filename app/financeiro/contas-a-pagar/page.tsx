@@ -222,7 +222,15 @@ export default function ContasAPagarPage() {
     }
   }, [api]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => {
+    let ativo = true;
+    // Agenda a carga inicial depois do commit para não disparar setState
+    // sincronamente dentro do efeito.
+    void Promise.resolve().then(() => {
+      if (ativo) void carregar();
+    });
+    return () => { ativo = false; };
+  }, [carregar]);
 
   const parcelasPorObrigacao = useMemo(() => {
     const mapa = new Map<string, Parcela[]>();
