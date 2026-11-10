@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 
 // The selected column list is built dynamically according to permissions. The
 // generated Supabase type cannot infer that runtime string, so narrow only the
@@ -27,6 +28,8 @@ type SocioCarteirinha = {
   situacao?: string | null;
   responsavel_id?: string | null;
   possui_mensalidade?: boolean | null;
+  data_associacao?: string | null;
+  dia_vencimento?: number | string | null;
   financeiro_status?: string;
   dias_atraso?: number;
   meses_atraso?: number;
@@ -219,7 +222,7 @@ export async function GET(request: Request) {
       "data_associacao", "foto_url", "inicio_temporada", "fim_temporada", "responsavel_id", "parentesco",
     ];
     if (podeVerExameMedico) colunasBase.push("exame_medico_validade");
-    if (podeVerFinanceiro) colunasBase.push("possui_mensalidade", "valor_mensalidade");
+    if (podeVerFinanceiro) colunasBase.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento");
     const base = colunasBase.join(",");
 
     let socios: SocioCarteirinha[] = [];
@@ -283,7 +286,7 @@ export async function GET(request: Request) {
       .filter(Boolean)
       .map(String);
 
-    const mensalidades: MensalidadeCarteirinha[] = [];
+    let mensalidades: MensalidadeCarteirinha[] = [];
     const sociosComHistorico = new Set<string>();
 
     // Busca em lotes paralelos para reduzir a espera da tela. Mantém paginação
@@ -311,11 +314,27 @@ export async function GET(request: Request) {
         mensalidades.push(...lote);
         for (const mensalidade of lote) {
           const idSocio = String(mensalidade.socio_id || "");
-          if (idSocio) sociosComHistorico.add(idSocio);
+          const socio = socios.find((item) => String(item.id) === idSocio);
+          const competencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
+          if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, competencia, mensalidade.data_vencimento, socio?.dia_vencimento)) {
+            sociosComHistorico.add(idSocio);
+          }
         }
       }
     }
 
+    const sociosPorIdFinanceiro = new Map(socios.map((s) => [String(s.id), s]));
+    mensalidades = mensalidades.filter((mensalidade) => {
+      const idSocio = String(mensalidade.socio_id || "");
+      const socio = sociosPorIdFinanceiro.get(idSocio);
+      const competencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
+      return !mensalidadeRegistroAnteriorAAssociacao(
+        socio?.data_associacao,
+        competencia,
+        mensalidade.data_vencimento,
+        socio?.dia_vencimento,
+      );
+    });
     const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
     // A matrícula familiar é uma segunda forma de vínculo: A = titular, B = cônjuge.
     // Alguns cadastros antigos não têm responsavel_id ou mantêm possui_mensalidade=true
