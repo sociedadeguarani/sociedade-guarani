@@ -3288,16 +3288,38 @@ function ModalSocio({
 
   useEffect(() => {
     let ativo = true;
-    if (!socioEditando?.id || socioEditando.responsavel_id) { setDependentesExame([]); return; }
-    supabase.from("dependentes").select("id,nome,matricula,exame_medico_validade,ativo").eq("socio_id", socioEditando.id).eq("ativo", true).order("nome")
-      .then(({ data, error }) => {
-        if (!ativo) return;
-        if (error) { setMensagem("Não foi possível carregar os dependentes para seleção."); return; }
-        setDependentesExame((data || []) as typeof dependentesExame);
-        setDependentesExameSelecionados([]);
-      });
+
+    // Deixa a sincronização de estado acontecer após o efeito montar. Isso evita
+    // atualização síncrona durante o commit do React e limpa a lista ao editar
+    // um cadastro que não é titular.
+    void Promise.resolve().then(async () => {
+      if (!socioEditando?.id || socioEditando.responsavel_id) {
+        if (ativo) {
+          setDependentesExame([]);
+          setDependentesExameSelecionados([]);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("dependentes")
+        .select("id,nome,matricula,exame_medico_validade,ativo")
+        .eq("socio_id", socioEditando.id)
+        .eq("ativo", true)
+        .order("nome");
+
+      if (!ativo) return;
+      if (error) {
+        setMensagem("Não foi possível carregar os dependentes para seleção.");
+        return;
+      }
+
+      setDependentesExame((data || []) as typeof dependentesExame);
+      setDependentesExameSelecionados([]);
+    });
+
     return () => { ativo = false; };
-  }, [socioEditando?.id, socioEditando?.responsavel_id]);
+  }, [socioEditando?.id, socioEditando?.responsavel_id, setMensagem]);
 
 
   return (
