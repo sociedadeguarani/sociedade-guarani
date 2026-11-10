@@ -45,7 +45,7 @@ test('API de dependentes usa resumo agregado no banco para evitar carregar hist�
   const listarDependentes = readFileSync(new URL('../app/api/dependentes/listar/route.ts', import.meta.url), 'utf8');
   assert.match(listarDependentes, /TAMANHO_PAGINA = 1000/);
   assert.match(listarDependentes, /socios\.filter\(\(s\) => s\.possui_mensalidade === true\)/);
-  assert.match(listarDependentes, /db\.rpc\(\"dependentes_resumo_inadimplencia\"/);
+  assert.match(listarDependentes, /db\.rpc\(\"dependentes_resumo_inadimplencia_v2\"/);
   assert.doesNotMatch(listarDependentes, /from\(\"mensalidades\"\)[\s\S]{0,300}\.range\(offset/);
   const sqlResumo = readFileSync(new URL('../docs/sql/07_dependentes_resumo_inadimplencia.sql', import.meta.url), 'utf8');
   assert.match(sqlResumo, /count\(distinct l\.competencia_ref\)/);
@@ -60,4 +60,13 @@ test('API de carteirinhas não emite carteira duplicada para dependente promovid
   assert.match(carteirinhas, /dependentesAtivosParaCarteirinha/);
   assert.match(carteirinhas, /\.filter\(\(d\) => !d\.migrado_para_socio_id\)/);
   assert.match(carteirinhas, /migrado_para_socio_id/);
+});
+
+
+test('API de dependentes usa a função v2 com fallback da primeira mensalidade paga', () => {
+  const listarDependentes = readFileSync(new URL('../app/api/dependentes/listar/route.ts', import.meta.url), 'utf8');
+  const sqlRegra = readFileSync(new URL('../docs/sql/11_inicio_associacao_primeira_mensalidade_paga.sql', import.meta.url), 'utf8');
+  assert.match(listarDependentes, /dependentes_resumo_inadimplencia_v2/);
+  assert.match(sqlRegra, /socios_primeira_competencia_paga_v1/);
+  assert.match(sqlRegra, /COALESCE\([\s\S]{0,120}s\.data_associacao::date[\s\S]{0,180}primeira\.competencia/);
 });
