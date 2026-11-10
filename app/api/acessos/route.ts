@@ -58,7 +58,7 @@ export async function GET(request: Request) {
         ? supabase.from("socios").select("id,nome,matricula,foto_url").in("id", socioIds)
         : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       dependenteIds.length
-        ? supabase.from("dependentes").select("id,nome,matricula,foto_url,parentesco").in("id", dependenteIds)
+        ? supabase.from("dependentes").select("id,nome").in("id", dependenteIds)
         : Promise.resolve({ data: [] as Array<{ id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; nome_exibicao?: string | null; codigo?: string | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null; papel?: string | null; parentesco?: string | null }>, error: null }),
       usuarioIds.length
         ? supabase.from("usuarios_sistema").select("id,nome_exibicao").in("id", usuarioIds)
@@ -80,7 +80,7 @@ export async function GET(request: Request) {
     if (temporadaParticipantesResult.error) throw temporadaParticipantesResult.error;
 
     const mapaSocios = new Map((sociosResult.data || []).map((s: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null }) => [s.id, s]));
-    const mapaDependentes = new Map((dependentesResult.data || []).map((d: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; parentesco?: string | null }) => [d.id, d]));
+    const mapaDependentes = new Map((dependentesResult.data || []).map((d: { id: string; nome?: string }) => [d.id, d]));
     const mapaUsuarios = new Map((usuariosResult.data || []).map((u: { id: string; nome_exibicao?: string | null }) => [u.id, u]));
     const mapaTemporadas = new Map((temporadasResult.data || []).map((t: { id: string; codigo?: string | null; matricula?: string | number | null; tipo?: string | null; modalidade?: string | null; inicio?: string | null; fim?: string | null; situacao?: string | null; responsavel_nome?: string | null }) => [t.id, t]));
     const mapaTemporadaParticipantes = new Map((temporadaParticipantesResult.data || []).map((p: { id: string; nome?: string; matricula?: string | number | null; foto_url?: string | null; papel?: string | null; parentesco?: string | null }) => [p.id, p]));
@@ -147,7 +147,9 @@ function situacaoMensalidadePorQuantidade(
 
 async function verificarMensalidadesAtrasadas(
   supabase: ReturnType<typeof getServiceClient>,
-  socioId: string
+  socioId: string,
+  dataAssociacao?: string | null,
+  diaVencimento?: number | string | null,
 ) {
   const hoje = dataHojeBrasil();
   const { data, error } = await supabase
@@ -159,6 +161,7 @@ async function verificarMensalidadesAtrasadas(
   if (error) throw error;
 
   const itens = (data || []).filter((m: LinhaMensalidadeAcesso) =>
+    !mensalidadeRegistroAnteriorAAssociacao(dataAssociacao, m.competencia, m.data_vencimento, diaVencimento) &&
     !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
       String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     )
@@ -678,46 +681,31 @@ export async function POST(request: Request) {
       });
     }
 
-    // A variável precisa existir antes da busca por matrícula, pois o primeiro
-    // resultado possível é justamente um dependente familiar.
-    let dependente: { id: string; socio_id: string; nome: string; matricula?: string | null; foto_url?: string | null; parentesco?: string | null; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
-
     if (!id && !dependenteId && matricula) {
       etapa = "buscando matrícula de associado ou dependente";
-      // A matrícula familiar é própria do dependente. Não filtrar por ativo=true:
-      // cadastros antigos podem ter ativo nulo. Só bloqueamos quando for false.
+      // Dependentes familiares possuem matrícula própria na tabela dependentes.
+      // Consultá-los antes de socios evita o falso 404 visto na portaria (ex.: SD0024B).
       const { data: dependentePorMatricula, error: dependenteMatriculaError } = await supabase
         .from("dependentes")
-        .select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo")
-        .ilike("matricula", matricula)
+        .select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo")
+        .eq("matricula", matricula)
+        .eq("ativo", true)
         .maybeSingle();
       if (dependenteMatriculaError) throw dependenteMatriculaError;
       if (dependentePorMatricula) {
-        if (dependentePorMatricula.ativo === false) {
-          return NextResponse.json(
-            { error: `O dependente da matrícula ${matricula} está inativo.` },
-            { status: 403 }
-          );
-        }
-        if (!dependentePorMatricula.socio_id) {
-          return NextResponse.json(
-            { error: `O dependente ${matricula} está sem vínculo com o titular. Corrija o cadastro antes de registrar o acesso.` },
-            { status: 409 }
-          );
-        }
         dependenteId = String(dependentePorMatricula.id);
         dependente = dependentePorMatricula;
         id = String(dependentePorMatricula.socio_id);
       } else {
         const { data: socioPorMatricula, error: matriculaError } = await supabase
           .from("socios")
-          .select("id,matricula")
-          .ilike("matricula", matricula)
+          .select("id")
+          .eq("matricula", matricula)
           .maybeSingle();
         if (matriculaError) throw matriculaError;
         if (!socioPorMatricula) {
           return NextResponse.json(
-            { error: `Nenhum associado ou dependente encontrado com a matrícula ${matricula}.` },
+            { error: `Nenhum associado ou dependente ativo encontrado com a matrícula ${matricula}.` },
             { status: 404 }
           );
         }
@@ -725,10 +713,12 @@ export async function POST(request: Request) {
       }
     }
 
+    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
+
     if (dependenteId) {
       etapa = "buscando dependente";
       const { data: dep, error: depError } = await supabase
-        .from("dependentes").select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
+        .from("dependentes").select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
       if (depError) throw depError;
       if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
       dependente = dep;
@@ -738,56 +728,17 @@ export async function POST(request: Request) {
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
 
     etapa = "buscando sócio";
-    let { data: socio, error: socioError } = await supabase
+    const { data: socio, error: socioError } = await supabase
       .from("socios")
-      .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade")
+      .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
       .eq("id", id).maybeSingle();
     if (socioError) throw socioError;
-
-    // QR Codes de dependentes emitidos por versões anteriores usavam
-    // ?id=<dependente.id>. A tela enviava esse valor como socio_id, por isso
-    // a busca em `socios` falhava. Mantemos compatibilidade identificando
-    // o UUID na tabela `dependentes` e seguindo com o titular responsável.
-    if (!socio && !dependente && !dependenteId) {
-      etapa = "localizando dependente por QR legado";
-      const { data: dependentePorQr, error: dependenteQrError } = await supabase
-        .from("dependentes")
-        .select("id,socio_id,nome,matricula,foto_url,parentesco,situacao_financeira,exame_medico_validade,ativo")
-        .eq("id", id)
-        .maybeSingle();
-      if (dependenteQrError) throw dependenteQrError;
-
-      if (dependentePorQr) {
-        if (dependentePorQr.ativo === false) {
-          return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
-        }
-        if (!dependentePorQr.socio_id) {
-          return NextResponse.json(
-            { error: "Dependente sem vínculo com o titular. Corrija o cadastro antes de registrar o acesso." },
-            { status: 409 }
-          );
-        }
-        dependente = dependentePorQr;
-        dependenteId = String(dependentePorQr.id);
-        id = String(dependentePorQr.socio_id);
-
-        const resultadoTitular = await supabase
-          .from("socios")
-          .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade")
-          .eq("id", id)
-          .maybeSingle();
-        socio = resultadoTitular.data;
-        socioError = resultadoTitular.error;
-        if (socioError) throw socioError;
-      }
-    }
-
     if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
 
     const situacao = String(socio.situacao || "").toLowerCase();
     const socioAtivo = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
     // A inadimplência pode bloquear a entrada no parque; exame médico não.
-    const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id);
+    const inadimplenciaSocio = await verificarMensalidadesAtrasadas(supabase, socio.id, socio.data_associacao, socio.dia_vencimento);
     const autorizado = socioAtivo && !inadimplenciaSocio.bloqueiaEntrada;
     const motivoNegacao = !socioAtivo
       ? `Entrada bloqueada. Situação do sócio: ${socio.situacao || "não informada"}.`
@@ -826,9 +777,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Cada pessoa possui validade própria. Se o dependente não fez exame,
-    // não herdar a validade do titular: isso liberaria indevidamente o uso da água.
-    const validadeExameSocio = String(dependente ? (dependente.exame_medico_validade || "") : (socio.exame_medico_validade || "")).slice(0, 10) || null;
+    const validadeExameSocio = String(dependente?.exame_medico_validade || socio.exame_medico_validade || "").slice(0, 10) || null;
     const hojeExame = dataHojeBrasil();
     const exameEmDia = Boolean(validadeExameSocio && validadeExameSocio >= hojeExame);
     const exame = {
@@ -877,18 +826,9 @@ export async function POST(request: Request) {
       },
       socio: socioResposta,
       dependente: dependenteResposta,
-      pessoa: dependente
-        ? { id: dependente.id, nome: dependente.nome, matricula: dependente.matricula || matricula, foto_url: dependente.foto_url || null, situacao: dependente.ativo === false ? "inativo" : "ativo", parentesco: dependente.parentesco || null }
-        : { id: socio.id, nome: socio.nome, matricula: socio.matricula, foto_url: socio.foto_url, situacao: socio.situacao, parentesco: null },
       liberado: autorizado,
       motivo_bloqueio: motivoNegacaoResposta,
       exame,
-      uso_agua: {
-        permitido: exameEmDia,
-        texto: exameEmDia ? "Exame médico válido — acesso à água liberado" : validadeExameSocio ? "Exame médico vencido — acesso à água restrito" : "Exame médico sem validade — acesso à água restrito",
-        validade: validadeExameSocio,
-        observacao: "O exame médico controla somente o uso da água; não bloqueia a entrada no parque."
-      },
       mensalidade: dependente ? statusMensalidadeDependente : statusMensalidadeSocio,
       inadimplencia: inadimplenciaResposta,
     });
