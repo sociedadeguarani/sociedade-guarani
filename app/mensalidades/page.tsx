@@ -75,6 +75,7 @@ type C = {
   nome: string;
   valor: number;
   vigencia_inicio: string;
+  dia_vencimento?: number | null;
   ativo: boolean;
 };
 
@@ -596,28 +597,18 @@ export default function Page() {
       const mesesConsulta: number[] = [...new Set<number>(mesesSelecionados)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
       if (mesesConsulta.length === 0) return;
 
-      // Faz uma consulta por competência para não atingir o limite de linhas
-      // da API quando vários meses são selecionados.
+      // Uma única chamada traz os meses selecionados. A API pagina internamente
+      // os resultados para não truncar competências quando ultrapassam 1.000 linhas.
       const headers = await h();
-      const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
-        const r = await fetch(
-          `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
-          { headers, cache: "no-store" }
-        );
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Erro ao carregar mensalidades de ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
-        return d;
-      }));
+      const mesesParam = mesesConsulta.join(",");
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${ano}&meses=${encodeURIComponent(mesesParam)}`,
+        { headers, cache: "no-store" }
+      );
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Erro ao carregar as mensalidades selecionadas.");
 
-      const d = respostas[0] || {};
-      const mensalidadesUnicas = new Map<string, M>();
-      respostas.forEach((resposta) => {
-        (Array.isArray(resposta.mensalidades) ? resposta.mensalidades : []).forEach((item: M) => {
-          mensalidadesUnicas.set(String(item.id), item);
-        });
-      });
-
-      setLista([...mensalidadesUnicas.values()]);
+      setLista(Array.isArray(d.mensalidades) ? d.mensalidades : []);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
@@ -652,10 +643,31 @@ export default function Page() {
     const existentes = new Set(
       lista.map((item) => `${String(item.competencia || "").slice(5, 7)}:${String(item.socio_id)}`)
     );
+    const configuracoesPorTipo = new Map<string, C[]>();
+    configs.filter((item) => item.ativo !== false).forEach((item) => {
+      const tipo = String(item.tipo_socio || "");
+      const grupo = configuracoesPorTipo.get(tipo) || [];
+      grupo.push(item);
+      configuracoesPorTipo.set(tipo, grupo);
+    });
+    configuracoesPorTipo.forEach((grupo) =>
+      grupo.sort((a, b) => String(b.vigencia_inicio || "").localeCompare(String(a.vigencia_inicio || "")))
+    );
+
     const faltantes = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => {
       const chaveCompetencia = `${ano}-${String(mesItem).padStart(2, "0")}`;
-      const jaCompleta = elegiveis.every((socio) => existentes.has(`${String(mesItem).padStart(2, "0")}:${String(socio.id)}`));
-      return !jaCompleta && !competenciasEmCriacaoRef.current.has(chaveCompetencia);
+      const competencia = `${chaveCompetencia}-01`;
+      const cobraveisNoMes = elegiveis.filter((socio) => {
+        const configuracao = configuracoesPorTipo
+          .get(String(socio.tipo_socio || ""))
+          ?.find((item) => String(item.vigencia_inicio || "0000-00-00") <= competencia);
+        const diaVencimento = configuracao?.dia_vencimento || socio.dia_vencimento || 10;
+        return !mensalidadeAnteriorAAssociacao(socio.data_associacao, competencia, diaVencimento);
+      });
+      const jaCompleta = cobraveisNoMes.every((socio) =>
+        existentes.has(`${String(mesItem).padStart(2, "0")}:${String(socio.id)}`)
+      );
+      return cobraveisNoMes.length > 0 && !jaCompleta && !competenciasEmCriacaoRef.current.has(chaveCompetencia);
     });
     if (!faltantes.length) return;
 
@@ -663,19 +675,15 @@ export default function Page() {
     setPreparandoMensalidadesAutomaticamente(true);
 
     void (async () => {
-      let houveCriacao = false;
       try {
-        for (const mesItem of faltantes) {
-          const resposta = await fetch("/api/mensalidades/admin", {
-            method: "POST",
-            headers: await h(),
-            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem }),
-          });
-          const dados = await resposta.json();
-          if (!resposta.ok) throw new Error(dados.error || `Não foi possível preparar ${String(mesItem).padStart(2, "0")}/${ano}.`);
-          houveCriacao = true;
-        }
-        if (houveCriacao) await carregar();
+        const resposta = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({ acao: "gerar_lote", ano, meses: faltantes }),
+        });
+        const dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.error || "Não foi possível preparar as mensalidades selecionadas.");
+        await carregar();
       } catch (erro) {
         setErro(erro instanceof Error ? erro.message : "Não foi possível preparar as mensalidades automaticamente.");
       } finally {
@@ -683,7 +691,7 @@ export default function Page() {
         setPreparandoMensalidadesAutomaticamente(false);
       }
     })();
-  }, [ano, mesesSelecionados, lista, socios, h, carregar]);
+  }, [ano, mesesSelecionados, lista, socios, configs, h, carregar]);
 
   function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
     const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
