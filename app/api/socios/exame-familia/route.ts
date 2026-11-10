@@ -3,8 +3,6 @@ import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
-type ReferenciaDependente = { origem: "socio" | "dependente"; id: string };
-
 /**
  * Atualiza os exames dos dependentes selecionados na família de um sócio.
  * As famílias atuais ficam em `socios.responsavel_id`; cadastros legados
