@@ -5,7 +5,8 @@ import {
   getServiceClient,
 } from "@/lib/guaraniAuth";
 import { socioElegivelParaMensalidade, type CadastroMensalidade } from "@/lib/regrasMensalidade";
-import { competenciaPermitidaPelaAssociacao, mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { competenciaPermitidaPelaAssociacao, dataAssociacaoPelaPrimeiraMensalidadePaga, mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
+import { carregarMapaPrimeiraCompetenciaPaga } from "@/lib/primeiraCompetenciaPaga";
 
 export const dynamic = "force-dynamic";
 
@@ -515,8 +516,20 @@ export async function GET(request: Request) {
     if (erroTarifas) throw erroTarifas;
     if (erroCobrancas) throw erroCobrancas;
 
+    const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
+      db,
+      (socios || []).map((s: SocioMensalidadeRow) => s.id),
+    );
+    const sociosComDataReferencia = (socios || []).map((s: SocioMensalidadeRow) => ({
+      ...s,
+      // Campo calculado apenas para esta resposta: não altera o cadastro real.
+      data_associacao: dataAssociacaoPelaPrimeiraMensalidadePaga(
+        s.data_associacao,
+        primeiraCompetenciaPagaPorSocio.get(String(s.id)),
+      ),
+    }));
     const mapaSocios = new Map<string, SocioMensalidadeRow>(
-      (socios || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
+      sociosComDataReferencia.map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
     );
 
     const mensalidadesComSocio = mensalidadesCompletas.map((m: MensalidadeRow) => ({
@@ -525,7 +538,7 @@ export async function GET(request: Request) {
     }));
 
     return NextResponse.json({
-      socios: socios || [],
+      socios: sociosComDataReferencia,
       mensalidades: mensalidadesComSocio,
       configuracoes: configuracoes || [],
       tarifas: tarifas || [],
@@ -588,6 +601,10 @@ export async function POST(request: Request) {
         .order("nome");
 
       if (erroSocios) throw erroSocios;
+      const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
+        db,
+        (socios || []).map((s: SocioMensalidadeRow) => s.id),
+      );
 
       let cobraveis = (socios || []).filter(socioElegivelParaMensalidade);
 
@@ -644,7 +661,12 @@ export async function POST(request: Request) {
       cobraveis = cobraveis.filter((s: SocioMensalidadeRow) => {
         const config = escolherConfiguracao(configuracoes || [], s.tipo_socio, competencia);
         const dia = config?.dia_vencimento ? Number(config.dia_vencimento) : Number(s.dia_vencimento || 10);
-        return competenciaPermitidaPelaAssociacao(s.data_associacao, competencia, dia);
+        return competenciaPermitidaPelaAssociacao(
+          s.data_associacao,
+          competencia,
+          dia,
+          primeiraCompetenciaPagaPorSocio.get(String(s.id)),
+        );
       });
 
       const { data: existentes, error: erroExistentes } = await db
@@ -808,6 +830,10 @@ export async function POST(request: Request) {
       if (existentesResult.error) throw existentesResult.error;
 
       const socios = (sociosResult.data || []) as SocioMensalidadeRow[];
+      const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
+        db,
+        socios.map((socio) => socio.id),
+      );
       const configuracoes = (configuracoesResult.data || []) as ConfiguracaoMensalidadeRow[];
       const configuracoesPorTipo = new Map<string, ConfiguracaoMensalidadeRow[]>();
       configuracoes.filter((item) => item.ativo !== false).forEach((item) => {
@@ -883,7 +909,12 @@ export async function POST(request: Request) {
           const dia = config?.dia_vencimento
             ? Number(config.dia_vencimento)
             : Number(socio.dia_vencimento || 10);
-          return competenciaPermitidaPelaAssociacao(socio.data_associacao, competencia, dia);
+          return competenciaPermitidaPelaAssociacao(
+            socio.data_associacao,
+            competencia,
+            dia,
+            primeiraCompetenciaPagaPorSocio.get(String(socio.id)),
+          );
         });
         cobraveisPorCompetencia.set(competencia, cobraveisDoMes);
         cobraveisDoMes.forEach((socio) => chavesCobraveis.add(`${competencia}|${String(socio.id)}`));
@@ -1133,9 +1164,9 @@ export async function POST(request: Request) {
 
       // Recupera a conta vinculada ao associado para que a baixa também
       // gere automaticamente a entrada correspondente no fluxo financeiro.
-      const socioIds = Array.from(
+      const socioIds: string[] = Array.from(
         new Set((registros || []).map((r: MensalidadeRow) => String(r.socio_id)))
-      );
+      ) as string[];
 
       const { data: sociosBaixa, error: erroSociosBaixa } = await db
         .from("socios")
@@ -1147,6 +1178,7 @@ export async function POST(request: Request) {
       const mapaSociosBaixa = new Map<string, SocioMensalidadeRow>(
         (sociosBaixa || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
       );
+      const primeiraCompetenciaPagaBaixa = await carregarMapaPrimeiraCompetenciaPaga(db, socioIds);
 
       const registrosParaBaixar = (registros || []).filter((r: MensalidadeRow) =>
         idsParaBaixar.includes(String(r.id))
@@ -1154,7 +1186,13 @@ export async function POST(request: Request) {
 
       const anteriorAssociacao = registrosParaBaixar.find((registro: MensalidadeRow) => {
         const socio = mapaSociosBaixa.get(String(registro.socio_id));
-        return mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, registro.competencia, registro.data_vencimento, socio?.dia_vencimento);
+        return mensalidadeRegistroAnteriorAAssociacao(
+          socio?.data_associacao,
+          registro.competencia,
+          registro.data_vencimento,
+          socio?.dia_vencimento,
+          primeiraCompetenciaPagaBaixa.get(String(registro.socio_id)),
+        );
       });
       if (anteriorAssociacao) {
         const socio = mapaSociosBaixa.get(String(anteriorAssociacao.socio_id));
@@ -1585,6 +1623,9 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         if (erroSocioVirtual) throw erroSocioVirtual;
+        const primeiraCompetenciaPagaVirtual = socioVirtual
+          ? (await carregarMapaPrimeiraCompetenciaPaga(db, [socioVirtual.id])).get(String(socioVirtual.id))
+          : undefined;
         if (!socioVirtual || !socioElegivelParaMensalidade(socioVirtual)) {
           return NextResponse.json(
             { error: "Este associado não está elegível para cobrança de mensalidade." },
@@ -1634,6 +1675,7 @@ export async function POST(request: Request) {
           competenciaVirtual,
           existenteVirtual?.data_vencimento,
           socioVirtual.dia_vencimento,
+          primeiraCompetenciaPagaVirtual,
         )) {
           return NextResponse.json(
             { error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." },
@@ -1691,7 +1733,12 @@ export async function POST(request: Request) {
           const diaVirtual = configVirtual?.dia_vencimento
             ? Number(configVirtual.dia_vencimento)
             : Number(socioVirtual.dia_vencimento || 10);
-          if (!competenciaPermitidaPelaAssociacao(socioVirtual.data_associacao, competenciaVirtual, diaVirtual)) {
+          if (!competenciaPermitidaPelaAssociacao(
+            socioVirtual.data_associacao,
+            competenciaVirtual,
+            diaVirtual,
+            primeiraCompetenciaPagaVirtual,
+          )) {
             return NextResponse.json({ error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." }, { status: 409 });
           }
           const vencimentoVirtual = dataVencimento(competenciaVirtual, diaVirtual);
@@ -1759,9 +1806,9 @@ export async function POST(request: Request) {
       if (erroBusca) throw erroBusca;
 
       const registrosEncontrados = registros || [];
-      const socioIds = Array.from(
+      const socioIds: string[] = Array.from(
         new Set(registrosEncontrados.map((r: MensalidadeRow) => String(r.socio_id)).filter(Boolean))
-      );
+      ) as string[];
 
       const { data: sociosSS, error: erroSociosSS } = await db
         .from("socios")
@@ -1773,9 +1820,16 @@ export async function POST(request: Request) {
       const mapaSociosSS = new Map<string, SocioMensalidadeRow>(
         (sociosSS || []).map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
       );
+      const primeiraCompetenciaPagaSS = await carregarMapaPrimeiraCompetenciaPaga(db, socioIds);
       const mensalidadeAnteriorAssociacao = registrosEncontrados.find((r: MensalidadeRow) => {
         const socio = mapaSociosSS.get(String(r.socio_id));
-        return mensalidadeRegistroAnteriorAAssociacao(socio?.data_associacao, r.competencia, r.data_vencimento, socio?.dia_vencimento);
+        return mensalidadeRegistroAnteriorAAssociacao(
+          socio?.data_associacao,
+          r.competencia,
+          r.data_vencimento,
+          socio?.dia_vencimento,
+          primeiraCompetenciaPagaSS.get(String(r.socio_id)),
+        );
       });
       if (mensalidadeAnteriorAssociacao) {
         return NextResponse.json({ error: "Esta competência é anterior à data de associação e não pode ser marcada como S.S." }, { status: 409 });
