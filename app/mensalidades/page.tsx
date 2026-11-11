@@ -75,7 +75,6 @@ type C = {
   nome: string;
   valor: number;
   vigencia_inicio: string;
-  dia_vencimento?: number | null;
   ativo: boolean;
 };
 
@@ -185,6 +184,32 @@ function ehSemSaldo(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
   return texto.includes("s.s") || texto.includes("sem saldo") || texto.includes("sem_saldo");
 }
 
+// Exibe o botão somente para marcações explícitas feitas pela ação S.S.
+function ehMarcacaoSS(item: Pick<M, "situacao" | "motivo" | "observacoes">) {
+  if (item.situacao === "pago" || item.situacao === "isento") return false;
+  const motivo = String(item.motivo || "").trim().toLowerCase();
+  const observacoes = String(item.observacoes || "").trim().toLowerCase();
+  return (
+    motivo === "s.s" ||
+    motivo === "ss" ||
+    observacoes === "s.s — sem saldo" ||
+    observacoes === "s.s - sem saldo"
+  );
+}
+
+function competenciaAtualSaoPaulo() {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const ano = partes.find((parte) => parte.type === "year")?.value;
+  const mes = partes.find((parte) => parte.type === "month")?.value;
+  return ano && mes ? `${ano}-${mes}` : new Date().toISOString().slice(0, 7);
+}
+
+const COMPETENCIA_ATUAL = competenciaAtualSaoPaulo();
+
 const PREFIXO_HISTORICO_IMPORTADO = "MIGRACAO_HISTORICO_58_PAGINAS";
 
 function ehObservacaoHistoricoImportado(texto?: string | null) {
@@ -208,6 +233,8 @@ function competenciaNaoGeradaAtrasada(item: Pick<M, "situacao" | "competencia" |
   const competencia = String(item.competencia || "").slice(0, 7);
   const [anoCompetencia, mesCompetencia] = competencia.split("-").map(Number);
   if (!Number.isInteger(anoCompetencia) || mesCompetencia < 1 || mesCompetencia > 12) return false;
+  // O mês corrente não é considerado atrasado enquanto a competência estiver em andamento.
+  if (competencia >= COMPETENCIA_ATUAL) return false;
 
   // Segue a mesma regra do gerador: dia configurado, limitado a 28; padrão dia 10.
   const diaConfigurado = Number(item.socio?.dia_vencimento || 10);
@@ -236,6 +263,14 @@ function normalizarBanco(valor: unknown): string {
 }
 
 function situacaoVisual(item: M) {
+  const competencia = String(item.competencia || "").slice(0, 7);
+  if (
+    (item.situacao === "em_aberto" || item.situacao === "em_atraso") &&
+    competencia &&
+    competencia >= COMPETENCIA_ATUAL
+  ) {
+    return "em_aberto";
+  }
   if (item.situacao === "em_aberto" && item.data_vencimento) {
     const vencimento = new Date(`${String(item.data_vencimento).slice(0, 10)}T23:59:59`);
     if (!Number.isNaN(vencimento.getTime()) && vencimento.getTime() < INSTANTE_REFERENCIA_MS) {
@@ -250,10 +285,16 @@ function statusMensalidade(item: M, semSaldoPermitido = false) {
     return ["Anterior à associação", "bg-gray-100 text-gray-600"];
   }
   if (semSaldoPermitido && ehSemSaldo(item)) return ["S.S", "bg-amber-100 text-amber-700"];
+  if (
+    item.situacao === "nao_gerada" &&
+    String(item.competencia || "").slice(0, 7) === COMPETENCIA_ATUAL
+  ) {
+    return ["Em aberto", "bg-yellow-100 text-yellow-700"];
+  }
   if (competenciaNaoGeradaAtrasada(item)) {
     return ["Atrasada · não gerada", "bg-red-100 text-red-700"];
   }
-  return status(item.situacao);
+  return status(situacaoVisual(item));
 }
 
 function construirHistoricoPorMes(
@@ -597,18 +638,28 @@ export default function Page() {
       const mesesConsulta: number[] = [...new Set<number>(mesesSelecionados)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
       if (mesesConsulta.length === 0) return;
 
-      // Uma única chamada traz os meses selecionados. A API pagina internamente
-      // os resultados para não truncar competências quando ultrapassam 1.000 linhas.
+      // Faz uma consulta por competência para não atingir o limite de linhas
+      // da API quando vários meses são selecionados.
       const headers = await h();
-      const mesesParam = mesesConsulta.join(",");
-      const r = await fetch(
-        `/api/mensalidades/admin?ano=${ano}&meses=${encodeURIComponent(mesesParam)}`,
-        { headers, cache: "no-store" }
-      );
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error || "Erro ao carregar as mensalidades selecionadas.");
+      const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
+        const r = await fetch(
+          `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
+          { headers, cache: "no-store" }
+        );
+        const d = await r.json();
+        if (!r.ok) throw Error(d.error || `Erro ao carregar mensalidades de ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
+        return d;
+      }));
 
-      setLista(Array.isArray(d.mensalidades) ? d.mensalidades : []);
+      const d = respostas[0] || {};
+      const mensalidadesUnicas = new Map<string, M>();
+      respostas.forEach((resposta) => {
+        (Array.isArray(resposta.mensalidades) ? resposta.mensalidades : []).forEach((item: M) => {
+          mensalidadesUnicas.set(String(item.id), item);
+        });
+      });
+
+      setLista([...mensalidadesUnicas.values()]);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
@@ -643,31 +694,10 @@ export default function Page() {
     const existentes = new Set(
       lista.map((item) => `${String(item.competencia || "").slice(5, 7)}:${String(item.socio_id)}`)
     );
-    const configuracoesPorTipo = new Map<string, C[]>();
-    configs.filter((item) => item.ativo !== false).forEach((item) => {
-      const tipo = String(item.tipo_socio || "");
-      const grupo = configuracoesPorTipo.get(tipo) || [];
-      grupo.push(item);
-      configuracoesPorTipo.set(tipo, grupo);
-    });
-    configuracoesPorTipo.forEach((grupo) =>
-      grupo.sort((a, b) => String(b.vigencia_inicio || "").localeCompare(String(a.vigencia_inicio || "")))
-    );
-
     const faltantes = [...mesesSelecionados].sort((a, b) => a - b).filter((mesItem) => {
       const chaveCompetencia = `${ano}-${String(mesItem).padStart(2, "0")}`;
-      const competencia = `${chaveCompetencia}-01`;
-      const cobraveisNoMes = elegiveis.filter((socio) => {
-        const configuracao = configuracoesPorTipo
-          .get(String(socio.tipo_socio || ""))
-          ?.find((item) => String(item.vigencia_inicio || "0000-00-00") <= competencia);
-        const diaVencimento = configuracao?.dia_vencimento || socio.dia_vencimento || 10;
-        return !mensalidadeAnteriorAAssociacao(socio.data_associacao, competencia, diaVencimento);
-      });
-      const jaCompleta = cobraveisNoMes.every((socio) =>
-        existentes.has(`${String(mesItem).padStart(2, "0")}:${String(socio.id)}`)
-      );
-      return cobraveisNoMes.length > 0 && !jaCompleta && !competenciasEmCriacaoRef.current.has(chaveCompetencia);
+      const jaCompleta = elegiveis.every((socio) => existentes.has(`${String(mesItem).padStart(2, "0")}:${String(socio.id)}`));
+      return !jaCompleta && !competenciasEmCriacaoRef.current.has(chaveCompetencia);
     });
     if (!faltantes.length) return;
 
@@ -675,15 +705,19 @@ export default function Page() {
     setPreparandoMensalidadesAutomaticamente(true);
 
     void (async () => {
+      let houveCriacao = false;
       try {
-        const resposta = await fetch("/api/mensalidades/admin", {
-          method: "POST",
-          headers: await h(),
-          body: JSON.stringify({ acao: "gerar_lote", ano, meses: faltantes }),
-        });
-        const dados = await resposta.json();
-        if (!resposta.ok) throw new Error(dados.error || "Não foi possível preparar as mensalidades selecionadas.");
-        await carregar();
+        for (const mesItem of faltantes) {
+          const resposta = await fetch("/api/mensalidades/admin", {
+            method: "POST",
+            headers: await h(),
+            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem }),
+          });
+          const dados = await resposta.json();
+          if (!resposta.ok) throw new Error(dados.error || `Não foi possível preparar ${String(mesItem).padStart(2, "0")}/${ano}.`);
+          houveCriacao = true;
+        }
+        if (houveCriacao) await carregar();
       } catch (erro) {
         setErro(erro instanceof Error ? erro.message : "Não foi possível preparar as mensalidades automaticamente.");
       } finally {
@@ -691,7 +725,7 @@ export default function Page() {
         setPreparandoMensalidadesAutomaticamente(false);
       }
     })();
-  }, [ano, mesesSelecionados, lista, socios, configs, h, carregar]);
+  }, [ano, mesesSelecionados, lista, socios, h, carregar]);
 
   function atualizarMesesSelecionados(proximos: number[], mesAtivo?: number) {
     const ordenados = [...new Set(proximos)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
@@ -1073,6 +1107,38 @@ export default function Page() {
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro.");
+    }
+  }
+
+  async function desfazerSemSaldo(item: M) {
+    if (!ehMarcacaoSS(item)) return;
+
+    const nome = item.socio?.nome || socioPorId.get(String(item.socio_id))?.nome || "este associado";
+    const competencia = `${String(item.competencia || "").slice(5, 7)}/${String(item.competencia || "").slice(0, 4)}`;
+    const confirmar = window.confirm(
+      `Desfazer a marcação S.S — Sem saldo de ${nome}, competência ${competencia}?\n\nA mensalidade voltará a aparecer como Em aberto ou Atrasada, conforme o vencimento. Nenhum pagamento ou lançamento financeiro será criado, apagado ou alterado.`
+    );
+    if (!confirmar) return;
+
+    setErro("");
+    setMsg("");
+    try {
+      const r = await fetch("/api/mensalidades/admin", {
+        method: "POST",
+        headers: await h(),
+        body: JSON.stringify({ acao: "desfazer_sem_saldo", id: item.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Não foi possível desfazer a marcação S.S.");
+
+      setMsg(d.message || "Marcação S.S removida.");
+      setSel((selecionadas) => selecionadas.filter((id) => id !== item.id));
+      await carregar();
+      if (socioSelecionado) {
+        await carregarHistoricoSocio(socioSelecionado, anoHistoricoSocio);
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível desfazer a marcação S.S.");
     }
   }
 
@@ -1666,6 +1732,15 @@ export default function Page() {
                             >
                               ↩️ Estornar baixa
                             </button>
+                          ) : ehMarcacaoSS(x) ? (
+                            <button
+                              type="button"
+                              onClick={() => void desfazerSemSaldo(x)}
+                              className="whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                              title="Remover somente a marcação S.S; não altera valores nem movimentações financeiras"
+                            >
+                              ↩ Desfazer S.S.
+                            </button>
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
                           )}
@@ -2011,6 +2086,15 @@ export default function Page() {
                         ) : registroMes.situacao !== "isento" ? (
                           <>
                             <div className="flex flex-wrap gap-2">
+                              {ehMarcacaoSS(registroMes) && (
+                                <button
+                                  type="button"
+                                  onClick={() => void desfazerSemSaldo(registroMes)}
+                                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100"
+                                >
+                                  ↩ Desfazer S.S.
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
