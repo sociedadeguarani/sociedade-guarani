@@ -60,6 +60,8 @@ export default function AcessosPage() {
   const router = useRouter();
   const [matricula, setMatricula] = useState("");
   const [opcoesBusca, setOpcoesBusca] = useState<OpcaoBuscaAcesso[]>([]);
+  const [buscandoOpcoes, setBuscandoOpcoes] = useState(false);
+  const [mensagemBusca, setMensagemBusca] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
@@ -76,6 +78,8 @@ export default function AcessosPage() {
   async function validar(dados: { matricula?: string; qr?: string; socio_id?: string; dependente_id?: string }) {
     setErro("");
     setOpcoesBusca([]);
+    setMensagemBusca("");
+    setBuscandoOpcoes(false);
     setResultado(null);
     setCarregando(true);
     try {
@@ -106,36 +110,55 @@ export default function AcessosPage() {
 
     const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
-    if (pareceMatricula) {
-      await validar({ matricula: termo });
-      return;
-    }
-
-    setErro("");
-    setResultado(null);
-    setOpcoesBusca([]);
-    setCarregando(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/login?redirect=/acessos");
-        return;
-      }
-      const resposta = await fetch(`/api/acessos/buscar?q=${encodeURIComponent(termo)}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-      const dados = await resposta.json();
-      if (!resposta.ok) throw new Error(dados.error || "Não foi possível pesquisar associados.");
-      const encontrados = Array.isArray(dados.resultados) ? dados.resultados as OpcaoBuscaAcesso[] : [];
-      setOpcoesBusca(encontrados);
-      if (!encontrados.length) setErro(`Nenhum associado ou dependente ativo encontrado com o nome "${termo}".`);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao pesquisar associado.");
-    } finally {
-      setCarregando(false);
-    }
+    // A busca por nome é automática e mostra sugestões enquanto o operador digita.
+    // O botão/Enter fica reservado à consulta direta por matrícula.
+    if (pareceMatricula) await validar({ matricula: termo });
   }
+
+  useEffect(() => {
+    const termo = matricula.trim();
+    const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
+
+    if (!termo || pareceMatricula || termo.length < 3) return;
+
+    let cancelado = false;
+    const timeout = window.setTimeout(async () => {
+      setBuscandoOpcoes(true);
+      setMensagemBusca("");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          router.push("/login?redirect=/acessos");
+          return;
+        }
+
+        const resposta = await fetch(`/api/acessos/buscar?q=${encodeURIComponent(termo)}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.error || "Não foi possível pesquisar associados.");
+
+        if (cancelado) return;
+        const encontrados = Array.isArray(dados.resultados) ? dados.resultados as OpcaoBuscaAcesso[] : [];
+        setOpcoesBusca(encontrados);
+        setMensagemBusca(encontrados.length ? "" : `Nenhum associado ou dependente ativo encontrado para “${termo}”.`);
+      } catch (e) {
+        if (!cancelado) {
+          setOpcoesBusca([]);
+          setMensagemBusca(e instanceof Error ? e.message : "Erro ao pesquisar associado.");
+        }
+      } finally {
+        if (!cancelado) setBuscandoOpcoes(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelado = true;
+      window.clearTimeout(timeout);
+    };
+  }, [matricula, router]);
 
   const bloqueioPorInadimplencia = resultado
     ? Boolean(resultado.inadimplencia?.bloqueiaEntrada ?? resultado.status_temporada === "bloqueada")
@@ -218,9 +241,60 @@ export default function AcessosPage() {
                 <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
                 <div><h2 className="text-xl font-black">Consultar por matrícula ou nome</h2><p className="text-sm text-gray-500">Digite a matrícula ou parte do nome do associado/dependente.</p></div>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="mt-5 flex gap-2">
-                <input value={matricula} onChange={(e) => { setMatricula(e.target.value); setResultado(null); setOpcoesBusca([]); setErro(""); }} placeholder="Matrícula ou nome (ex.: SP0134A ou Mateus)" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
-                <button type="submit" disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+              <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="relative mt-5">
+                <div className="flex gap-2">
+                  <input
+                    value={matricula}
+                    onChange={(e) => {
+                      setMatricula(e.target.value);
+                      setResultado(null);
+                      setOpcoesBusca([]);
+                      setMensagemBusca("");
+                      setBuscandoOpcoes(false);
+                      setErro("");
+                    }}
+                    placeholder="Digite o nome ou matrícula..."
+                    autoComplete="off"
+                    className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]"
+                  />
+                  {(/^[0-9]+$/.test(matricula.trim()) || /^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim())) && (
+                    <button type="submit" disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+                  )}
+                </div>
+                {buscandoOpcoes && (
+                  <p className="mt-2 px-1 text-xs font-semibold text-gray-500">Buscando associados e dependentes...</p>
+                )}
+                {opcoesBusca.length > 0 && (
+                  <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                    <p className="border-b bg-[#f5faf7] px-3 py-2 text-xs font-bold text-gray-500">
+                      {opcoesBusca.length} resultado(s). Selecione a pessoa para validar o acesso.
+                    </p>
+                    {opcoesBusca.map((opcao) => (
+                      <button
+                        key={`${opcao.tipo}-${opcao.id}`}
+                        type="button"
+                        disabled={carregando}
+                        onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
+                        className="flex w-full items-center justify-between gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-[#f0f8f4] disabled:opacity-50"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-black text-[#17382c]">{opcao.nome}</span>
+                          <span className="mt-0.5 block truncate text-xs text-gray-500">
+                            {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente de ${opcao.socio_nome || "associado"}` : opcao.categoria || "Associado"}
+                            {opcao.parentesco ? ` · ${opcao.parentesco}` : ""}
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Selecionar</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!buscandoOpcoes && mensagemBusca && matricula.trim().length >= 3 && (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">{mensagemBusca}</p>
+                )}
+                {matricula.trim().length > 0 && matricula.trim().length < 3 && !/^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim()) && (
+                  <p className="mt-2 px-1 text-xs text-gray-400">Digite pelo menos 3 letras para iniciar a busca.</p>
+                )}
               </form>
             </div>
 
@@ -247,36 +321,7 @@ export default function AcessosPage() {
             </div>
           </section>
 
-          {opcoesBusca.length > 0 && (
-            <section className="rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <h2 className="text-lg font-black text-[#005a3c]">Resultados da pesquisa</h2>
-                <p className="text-sm text-gray-500">{opcoesBusca.length} pessoa(s) encontrada(s). Selecione a pessoa correta para validar o acesso.</p>
-              </div>
-              <div className="space-y-3">
-                {opcoesBusca.map((opcao) => (
-                  <div key={`${opcao.tipo}-${opcao.id}`} className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="font-black text-[#17382c]">{opcao.nome}</p>
-                      <p className="mt-1 text-sm text-gray-600">
-                        {opcao.tipo === "dependente" ? `Dependente de ${opcao.socio_nome || "associado"}` : opcao.categoria || "Associado"}
-                        {opcao.parentesco ? ` · ${opcao.parentesco}` : ""}
-                      </p>
-                      <p className="text-xs text-gray-500">Matrícula: {opcao.matricula || "sem matrícula própria"} · Situação: {opcao.situacao || "Não informada"}</p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={carregando}
-                      onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
-                      className="shrink-0 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white disabled:opacity-50"
-                    >
-                      Selecionar e validar acesso
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+
 
           {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
           {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
