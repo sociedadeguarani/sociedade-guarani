@@ -190,8 +190,37 @@ function dataVencimento(competencia: string, dia: unknown) {
   return `${competencia.slice(0, 8)}${String(d).padStart(2, "0")}`;
 }
 
+function competenciaAtualSaoPaulo() {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const ano = partes.find((parte) => parte.type === "year")?.value;
+  const mes = partes.find((parte) => parte.type === "month")?.value;
+  return ano && mes ? `${ano}-${mes}` : new Date().toISOString().slice(0, 7);
+}
+
 function atualizarSituacaoAtraso(mensalidade: MensalidadeRow) {
+  // O mês corrente e os futuros ficam Em aberto na apresentação, mesmo que
+  // exista um status antigo de atraso salvo para essa competência. Não grava
+  // essa normalização de volta no banco.
+  const competencia = String(mensalidade.competencia || "").slice(0, 7);
+  if (
+    competencia &&
+    competencia >= competenciaAtualSaoPaulo() &&
+    mensalidade?.situacao === "em_atraso"
+  ) {
+    return { ...mensalidade, situacao: "em_aberto" };
+  }
+
   if (mensalidade?.situacao !== "em_aberto" || !mensalidade?.data_vencimento) {
+    return mensalidade;
+  }
+
+  // A competência corrente permanece Em aberto durante todo o mês,
+  // mesmo que o dia de vencimento configurado já tenha passado.
+  if (competencia && competencia >= competenciaAtualSaoPaulo()) {
     return mensalidade;
   }
 
@@ -1933,6 +1962,74 @@ export async function POST(request: Request) {
         ok: true,
         marcadas: idsElegiveis.length,
         message: `${idsElegiveis.length} mensalidade(s) marcada(s) como S.S. — Sem saldo.`,
+      });
+    }
+
+    /*
+     * =====================================================
+     * DESFAZER MARCAÇÃO S.S. — SEM SALDO
+     * =====================================================
+     * Remove somente os marcadores criados pela ação S.S. Não altera
+     * situação, vencimento, forma de cobrança, valores ou movimentos.
+     */
+    if (acao === "desfazer_sem_saldo") {
+      const id = String(body.id || "").trim();
+      if (!id) {
+        return NextResponse.json(
+          { error: "Mensalidade não informada." },
+          { status: 400 }
+        );
+      }
+
+      const { data: registro, error: erroBusca } = await db
+        .from("mensalidades")
+        .select("id,situacao,motivo,observacoes")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (erroBusca) throw erroBusca;
+      if (!registro) {
+        return NextResponse.json(
+          { error: "Mensalidade não encontrada." },
+          { status: 404 }
+        );
+      }
+      if (registro.situacao === "pago" || registro.situacao === "isento") {
+        return NextResponse.json(
+          { error: "Somente uma mensalidade em aberto marcada como S.S pode ter essa marcação removida." },
+          { status: 409 }
+        );
+      }
+
+      const motivo = normalizarTexto(registro.motivo || "");
+      const observacoes = normalizarTexto(registro.observacoes || "");
+      const motivoEhSS = motivo === "s.s" || motivo === "ss";
+      const observacaoEhSS =
+        observacoes === "s.s — sem saldo" || observacoes === "s.s - sem saldo";
+
+      if (!motivoEhSS && !observacaoEhSS) {
+        return NextResponse.json(
+          { error: "Esta mensalidade não possui uma marcação S.S ativa para desfazer." },
+          { status: 409 }
+        );
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (motivoEhSS) patch.motivo = null;
+      if (observacaoEhSS) patch.observacoes = null;
+
+      const { error: erroUpdate } = await db
+        .from("mensalidades")
+        .update(patch)
+        .eq("id", id)
+        .neq("situacao", "pago")
+        .neq("situacao", "isento");
+
+      if (erroUpdate) throw erroUpdate;
+
+      return NextResponse.json({
+        ok: true,
+        message: "Marcação S.S removida. A mensalidade permanece em aberto e será exibida como Em aberto ou Atrasada conforme o vencimento. Nenhuma movimentação financeira foi alterada.",
       });
     }
 
