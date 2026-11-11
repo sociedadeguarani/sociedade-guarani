@@ -43,9 +43,23 @@ type Resultado = {
   } | null;
 };
 
+type OpcaoBuscaAcesso = {
+  id: string;
+  tipo: "socio" | "dependente";
+  socio_id: string;
+  dependente_id: string | null;
+  nome: string;
+  matricula: string | null;
+  situacao: string | null;
+  categoria?: string | null;
+  socio_nome?: string | null;
+  parentesco?: string | null;
+};
+
 export default function AcessosPage() {
   const router = useRouter();
   const [matricula, setMatricula] = useState("");
+  const [opcoesBusca, setOpcoesBusca] = useState<OpcaoBuscaAcesso[]>([]);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
@@ -59,8 +73,9 @@ export default function AcessosPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number | null>(null);
 
-  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string }) {
+  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string; dependente_id?: string }) {
     setErro("");
+    setOpcoesBusca([]);
     setResultado(null);
     setCarregando(true);
     try {
@@ -80,6 +95,43 @@ export default function AcessosPage() {
       setResultado(d);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function consultarPorNomeOuMatricula() {
+    const termo = matricula.trim();
+    if (!termo) return;
+
+    const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
+    if (pareceMatricula) {
+      await validar({ matricula: termo });
+      return;
+    }
+
+    setErro("");
+    setResultado(null);
+    setOpcoesBusca([]);
+    setCarregando(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/login?redirect=/acessos");
+        return;
+      }
+      const resposta = await fetch(`/api/acessos/buscar?q=${encodeURIComponent(termo)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const dados = await resposta.json();
+      if (!resposta.ok) throw new Error(dados.error || "Não foi possível pesquisar associados.");
+      const encontrados = Array.isArray(dados.resultados) ? dados.resultados as OpcaoBuscaAcesso[] : [];
+      setOpcoesBusca(encontrados);
+      if (!encontrados.length) setErro(`Nenhum associado ou dependente ativo encontrado com o nome "${termo}".`);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao pesquisar associado.");
     } finally {
       setCarregando(false);
     }
@@ -164,11 +216,11 @@ export default function AcessosPage() {
             <div className="rounded-2xl border bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
-                <div><h2 className="text-xl font-black">Consultar por matrícula</h2><p className="text-sm text-gray-500">Digite o número da carteirinha.</p></div>
+                <div><h2 className="text-xl font-black">Consultar por matrícula ou nome</h2><p className="text-sm text-gray-500">Digite a matrícula ou parte do nome do associado/dependente.</p></div>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); if (matricula.trim()) validar({ matricula }); }} className="mt-5 flex gap-2">
-                <input value={matricula} onChange={(e) => { setMatricula(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")); setResultado(null); setErro(""); }} placeholder="Ex.: SP0134A" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
-                <button disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+              <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="mt-5 flex gap-2">
+                <input value={matricula} onChange={(e) => { setMatricula(e.target.value); setResultado(null); setOpcoesBusca([]); setErro(""); }} placeholder="Matrícula ou nome (ex.: SP0134A ou Mateus)" className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]" />
+                <button type="submit" disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
               </form>
             </div>
 
@@ -194,6 +246,37 @@ export default function AcessosPage() {
               )}
             </div>
           </section>
+
+          {opcoesBusca.length > 0 && (
+            <section className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-black text-[#005a3c]">Resultados da pesquisa</h2>
+                <p className="text-sm text-gray-500">{opcoesBusca.length} pessoa(s) encontrada(s). Selecione a pessoa correta para validar o acesso.</p>
+              </div>
+              <div className="space-y-3">
+                {opcoesBusca.map((opcao) => (
+                  <div key={`${opcao.tipo}-${opcao.id}`} className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="font-black text-[#17382c]">{opcao.nome}</p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        {opcao.tipo === "dependente" ? `Dependente de ${opcao.socio_nome || "associado"}` : opcao.categoria || "Associado"}
+                        {opcao.parentesco ? ` · ${opcao.parentesco}` : ""}
+                      </p>
+                      <p className="text-xs text-gray-500">Matrícula: {opcao.matricula || "sem matrícula própria"} · Situação: {opcao.situacao || "Não informada"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={carregando}
+                      onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
+                      className="shrink-0 rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+                    >
+                      Selecionar e validar acesso
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
           {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
