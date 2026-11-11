@@ -56,10 +56,15 @@ type OpcaoBuscaAcesso = {
   parentesco?: string | null;
 };
 
+type GrupoBuscaAcesso = {
+  titular: OpcaoBuscaAcesso;
+  membros: OpcaoBuscaAcesso[];
+};
+
 export default function AcessosPage() {
   const router = useRouter();
   const [matricula, setMatricula] = useState("");
-  const [opcoesBusca, setOpcoesBusca] = useState<OpcaoBuscaAcesso[]>([]);
+  const [gruposBusca, setGruposBusca] = useState<GrupoBuscaAcesso[]>([]);
   const [buscandoOpcoes, setBuscandoOpcoes] = useState(false);
   const [mensagemBusca, setMensagemBusca] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -77,7 +82,7 @@ export default function AcessosPage() {
 
   async function validar(dados: { matricula?: string; qr?: string; socio_id?: string; dependente_id?: string }) {
     setErro("");
-    setOpcoesBusca([]);
+    setGruposBusca([]);
     setMensagemBusca("");
     setBuscandoOpcoes(false);
     setResultado(null);
@@ -141,12 +146,12 @@ export default function AcessosPage() {
         if (!resposta.ok) throw new Error(dados.error || "Não foi possível pesquisar associados.");
 
         if (cancelado) return;
-        const encontrados = Array.isArray(dados.resultados) ? dados.resultados as OpcaoBuscaAcesso[] : [];
-        setOpcoesBusca(encontrados);
-        setMensagemBusca(encontrados.length ? "" : `Nenhum associado ou dependente ativo encontrado para “${termo}”.`);
+        const grupos = Array.isArray(dados.grupos) ? dados.grupos as GrupoBuscaAcesso[] : [];
+        setGruposBusca(grupos);
+        setMensagemBusca(grupos.length ? "" : `Nenhum associado ou dependente ativo encontrado para “${termo}”.`);
       } catch (e) {
         if (!cancelado) {
-          setOpcoesBusca([]);
+          setGruposBusca([]);
           setMensagemBusca(e instanceof Error ? e.message : "Erro ao pesquisar associado.");
         }
       } finally {
@@ -248,7 +253,7 @@ export default function AcessosPage() {
                     onChange={(e) => {
                       setMatricula(e.target.value);
                       setResultado(null);
-                      setOpcoesBusca([]);
+                      setGruposBusca([]);
                       setMensagemBusca("");
                       setBuscandoOpcoes(false);
                       setErro("");
@@ -264,28 +269,54 @@ export default function AcessosPage() {
                 {buscandoOpcoes && (
                   <p className="mt-2 px-1 text-xs font-semibold text-gray-500">Buscando associados e dependentes...</p>
                 )}
-                {opcoesBusca.length > 0 && (
-                  <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
-                    <p className="border-b bg-[#f5faf7] px-3 py-2 text-xs font-bold text-gray-500">
-                      {opcoesBusca.length} resultado(s). Selecione a pessoa para validar o acesso.
+                {gruposBusca.length > 0 && (
+                  <div className="mt-2 max-h-[30rem] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                    <p className="sticky top-0 z-10 border-b bg-[#f5faf7] px-3 py-2 text-xs font-bold text-gray-500">
+                      {gruposBusca.length} família(s) encontrada(s). Escolha o titular ou uma pessoa da família.
                     </p>
-                    {opcoesBusca.map((opcao) => (
-                      <button
-                        key={`${opcao.tipo}-${opcao.id}`}
-                        type="button"
-                        disabled={carregando}
-                        onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
-                        className="flex w-full items-center justify-between gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-[#f0f8f4] disabled:opacity-50"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate font-black text-[#17382c]">{opcao.nome}</span>
-                          <span className="mt-0.5 block truncate text-xs text-gray-500">
-                            {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente de ${opcao.socio_nome || "associado"}` : opcao.categoria || "Associado"}
-                            {opcao.parentesco ? ` · ${opcao.parentesco}` : ""}
+                    {gruposBusca.map((grupo) => (
+                      <div key={grupo.titular.id} className="border-b border-gray-200 p-2 last:border-b-0">
+                        <button
+                          type="button"
+                          disabled={carregando}
+                          onClick={() => void validar({ socio_id: grupo.titular.socio_id })}
+                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-[#d5e7dd] bg-[#f5faf7] px-3 py-3 text-left hover:border-[#005a3c] hover:bg-[#edf7f1] disabled:opacity-50"
+                        >
+                          <span className="min-w-0">
+                            <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">Titular</span>
+                            <span className="block truncate font-black text-[#17382c]">{grupo.titular.nome}</span>
+                            <span className="mt-0.5 block truncate text-xs text-gray-500">
+                              {grupo.titular.matricula || "Sem matrícula"} · {grupo.titular.categoria || "Associado"}
+                            </span>
                           </span>
-                        </span>
-                        <span className="shrink-0 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Selecionar</span>
-                      </button>
+                          <span className="shrink-0 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Selecionar</span>
+                        </button>
+
+                        {grupo.membros.length > 0 && (
+                          <div className="ml-3 mt-2 border-l-2 border-[#d5e7dd] pl-3">
+                            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">Dependentes e familiares</p>
+                            <div className="space-y-1">
+                              {grupo.membros.map((opcao) => (
+                                <button
+                                  key={`${opcao.tipo}-${opcao.id}`}
+                                  type="button"
+                                  disabled={carregando}
+                                  onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
+                                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-[#f0f8f4] disabled:opacity-50"
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-bold text-[#17382c]">{opcao.nome}</span>
+                                    <span className="mt-0.5 block truncate text-xs text-gray-500">
+                                      {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 rounded-lg border border-[#005a3c] px-3 py-1.5 text-xs font-black text-[#005a3c]">Selecionar</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
