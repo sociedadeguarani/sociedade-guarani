@@ -124,6 +124,23 @@ function normalizarTexto(valor: unknown) {
     .trim();
 }
 
+/** Converte erros do Supabase/PostgREST (objetos simples) em mensagens úteis. */
+function mensagemErroOperacao(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+
+  if (error && typeof error === "object") {
+    const detalhe = error as { code?: unknown; message?: unknown };
+    if (String(detalhe.code || "") === "23505") {
+      return "Já existe um lançamento financeiro vinculado a esta mensalidade. Verifique o histórico de baixa e estorno antes de tentar novamente.";
+    }
+    if (typeof detalhe.message === "string" && detalhe.message.trim()) {
+      return detalhe.message;
+    }
+  }
+
+  return "Erro ao processar mensalidades.";
+}
+
 
 /**
  * Associado dependente com cobrança individual usa o valor próprio do cadastro.
@@ -1281,12 +1298,58 @@ export async function POST(request: Request) {
 
       if (erroEstornosRelacionados) throw erroEstornosRelacionados;
 
-      // Cada estorno conciliado registra o ID exato da entrada neutralizada.
-      // Assim, estornos antigos não escondem uma nova entrada criada depois.
+      // Tarifas têm uma chave única própria (tarifa_mensalidade, origem_id).
+      // Precisamos preservar e arquivar a tarifa do ciclo estornado também,
+      // senão a próxima baixa consegue inserir a receita mas falha ao inserir
+      // a nova tarifa bancária.
+      const { data: tarifasExistentes, error: erroTarifasExistentes } = await db
+        .from("movimentacoes_financeiras")
+        .select("id,origem_id")
+        .eq("origem_tipo", "tarifa_mensalidade")
+        .in("origem_id", idsParaBaixar);
+
+      if (erroTarifasExistentes) throw erroTarifasExistentes;
+
+      // Cada estorno registra o ID exato da entrada neutralizada. Guardamos
+      // também a mensalidade que teve ciclo estornado para recuperar legados.
       const idsMovimentosEstornados = new Set<string>();
+      const idsMensalidadesComEstornoReferenciado = new Set<string>();
       for (const estorno of estornosRelacionados || []) {
         const referencia = String(estorno.observacoes || "").match(/Estorno da entrada financeira ([a-zA-Z0-9-]+)\./);
-        if (referencia?.[1]) idsMovimentosEstornados.add(referencia[1]);
+        if (referencia?.[1]) {
+          idsMovimentosEstornados.add(referencia[1]);
+          if (estorno.origem_id) idsMensalidadesComEstornoReferenciado.add(String(estorno.origem_id));
+        }
+      }
+
+      // Migra logicamente entradas de estornos antigos: o lançamento original
+      // continua no Financeiro, mas deixa de ocupar a chave única
+      // (origem_tipo, origem_id) reservada para a próxima baixa da mensalidade.
+      // Isso corrige estornos conciliados realizados antes desta proteção.
+      const movimentosJaEstornados = (movimentosExistentes || []).filter(
+        (movimento: MovimentoMensalidadeRow) => idsMovimentosEstornados.has(String(movimento.id))
+      );
+      for (const movimento of movimentosJaEstornados) {
+        const { data: arquivado, error: erroArquivamento } = await db
+          .from("movimentacoes_financeiras")
+          .update({ origem_tipo: "mensalidade_estornada" })
+          .eq("id", movimento.id)
+          .eq("origem_tipo", "mensalidade")
+          .select("id")
+          .maybeSingle();
+
+        if (erroArquivamento) throw erroArquivamento;
+        if (!arquivado) {
+          const { data: estado, error: erroEstado } = await db
+            .from("movimentacoes_financeiras")
+            .select("origem_tipo")
+            .eq("id", movimento.id)
+            .maybeSingle();
+          if (erroEstado) throw erroEstado;
+          if (estado?.origem_tipo !== "mensalidade_estornada") {
+            throw new Error("Não foi possível liberar a referência financeira da baixa já estornada. Nenhum novo recebimento foi registrado.");
+          }
+        }
       }
 
       const movimentosAtivos = (movimentosExistentes || []).filter(
@@ -1307,10 +1370,65 @@ export async function POST(request: Request) {
 
         return NextResponse.json(
           {
-            error: `Já existe entrada financeira para: ${nomes}. A baixa foi interrompida para evitar duplicidade.`,
+            error: `Já existe entrada financeira ativa para: ${nomes}. A baixa foi interrompida para evitar duplicidade.`,
           },
           { status: 409 }
         );
+      }
+
+      // Se o ciclo já foi estornado e sua receita não está mais ativa,
+      // arquivamos também a tarifa antiga. O registro continua visível no
+      // Financeiro como despesa histórica, mas libera a chave única para a
+      // tarifa da nova baixa.
+      const idsSemEntradaAtivaComEstorno = new Set(
+        idsParaBaixar.filter((mensalidadeId: string) =>
+          idsMensalidadesComEstornoReferenciado.has(mensalidadeId) && !idsComEntrada.has(mensalidadeId)
+        )
+      );
+      const tarifasLegadasEstornadas = (tarifasExistentes || []).filter(
+        (tarifa: MovimentoMensalidadeRow) => idsSemEntradaAtivaComEstorno.has(String(tarifa.origem_id))
+      );
+      const idsTarifasArquivadas = new Set<string>();
+
+      for (const tarifa of tarifasLegadasEstornadas) {
+        const { data: tarifaArquivada, error: erroArquivamentoTarifa } = await db
+          .from("movimentacoes_financeiras")
+          .update({ origem_tipo: "tarifa_mensalidade_estornada" })
+          .eq("id", tarifa.id)
+          .eq("origem_tipo", "tarifa_mensalidade")
+          .select("id")
+          .maybeSingle();
+
+        if (erroArquivamentoTarifa) throw erroArquivamentoTarifa;
+        if (tarifaArquivada) idsTarifasArquivadas.add(String(tarifa.id));
+        else {
+          const { data: estadoTarifa, error: erroEstadoTarifa } = await db
+            .from("movimentacoes_financeiras")
+            .select("origem_tipo")
+            .eq("id", tarifa.id)
+            .maybeSingle();
+          if (erroEstadoTarifa) throw erroEstadoTarifa;
+          if (estadoTarifa?.origem_tipo !== "tarifa_mensalidade_estornada") {
+            throw new Error("Não foi possível liberar a tarifa do ciclo estornado. Nenhuma nova baixa foi registrada.");
+          }
+          idsTarifasArquivadas.add(String(tarifa.id));
+        }
+      }
+
+      const tarifasAtivasSemCiclo = (tarifasExistentes || []).filter(
+        (tarifa: MovimentoMensalidadeRow) => !idsTarifasArquivadas.has(String(tarifa.id))
+      );
+      if (tarifasAtivasSemCiclo.length > 0) {
+        const nomes = registrosParaBaixar
+          .filter((r: MensalidadeRow) => tarifasAtivasSemCiclo.some((t: MovimentoMensalidadeRow) => String(t.origem_id) === String(r.id)))
+          .map((r: MensalidadeRow) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
+          .join(", ");
+        if (nomes) {
+          return NextResponse.json(
+            { error: `Existe tarifa bancária anterior ainda vinculada à mensalidade de ${nomes}. A baixa foi bloqueada para conferência, sem alterar o financeiro.` },
+            { status: 409 }
+          );
+        }
       }
 
       // Validar todo o lote antes de alterar qualquer registro evita uma
@@ -1352,10 +1470,87 @@ export async function POST(request: Request) {
           regraCobranca
         );
 
-        // Reserva a baixa de forma atômica na aplicação: somente a primeira
-        // requisição que encontrar a mensalidade aberta consegue mudar seu
-        // estado para pago. Isso evita a corrida que estava permitindo dois
-        // cliques/requisições simultâneos criarem duas entradas financeiras.
+        // Registra primeiro os movimentos financeiros. A mensalidade só muda
+        // para PAGO depois que a receita e, quando aplicável, a tarifa forem
+        // gravadas com sucesso. Assim um erro de índice único não deixa um
+        // pagamento sem entrada correspondente no Financeiro.
+        const { data: entradaCriada, error: erroEntrada } = await db
+          .from("movimentacoes_financeiras")
+          .insert({
+            conta_bancaria_id: contaId,
+            conta_destino_id: null,
+            grupo_transferencia: null,
+            tipo: "entrada",
+            categoria: "Mensalidade",
+            descricao: `Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
+            // A receita da Sociedade é o valor-base da mensalidade, sem somar
+            // a tarifa bancária cobrada do associado.
+            valor: Number(valorBase || 0),
+            data_movimentacao: dataPagamento,
+            forma_pagamento: formaPagamento,
+            origem_tipo: "mensalidade",
+            origem_id: registro.id,
+            socio_id: registro.socio_id,
+            dependente_id: null,
+            created_by: auth.usuario.id,
+            comprovante_url: comprovanteUrl,
+            conciliado: false,
+            data_conciliacao: null,
+            observacoes: observacoesPagamento,
+          })
+          .select("id")
+          .single();
+
+        if (erroEntrada) throw erroEntrada;
+        if (!entradaCriada?.id) {
+          throw new Error("A receita não retornou um identificador financeiro. A mensalidade permaneceu sem baixa.");
+        }
+
+        let tarifaCriadaId: string | null = null;
+        if (calculado.tarifa_pagamento > 0) {
+          const { data: tarifaCriada, error: erroTarifa } = await db
+            .from("movimentacoes_financeiras")
+            .insert({
+              conta_bancaria_id: contaId,
+              conta_destino_id: null,
+              grupo_transferencia: null,
+              tipo: "saida",
+              categoria: "Tarifa bancária",
+              descricao: `Tarifa ${formaPagamento} - Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
+              valor: Number(calculado.tarifa_pagamento || 0),
+              data_movimentacao: dataPagamento,
+              forma_pagamento: formaPagamento,
+              origem_tipo: "tarifa_mensalidade",
+              origem_id: registro.id,
+              socio_id: registro.socio_id,
+              dependente_id: null,
+              created_by: auth.usuario.id,
+              comprovante_url: null,
+              conciliado: false,
+              data_conciliacao: null,
+              observacoes: "Tarifa bancária repassada ao associado.",
+            })
+            .select("id")
+            .single();
+
+          if (erroTarifa || !tarifaCriada?.id) {
+            const detalheErroTarifa = erroTarifa?.message || "a resposta não trouxe o identificador da tarifa";
+            const { error: erroLimpezaEntrada } = await db
+              .from("movimentacoes_financeiras")
+              .delete()
+              .eq("id", entradaCriada.id);
+            if (erroLimpezaEntrada) {
+              throw new Error(`A tarifa bancária não foi registrada (${detalheErroTarifa}) e a limpeza da receita provisória também falhou (${erroLimpezaEntrada.message}). Confira o Financeiro antes de tentar novamente.`);
+            }
+            if (erroTarifa) throw erroTarifa;
+            throw new Error("A tarifa bancária não retornou um identificador. A receita provisória foi removida e a mensalidade permaneceu em aberto.");
+          }
+          tarifaCriadaId = String(tarifaCriada.id);
+        }
+
+        // Só confirma a mensalidade após todos os movimentos terem sido
+        // gravados. O filtro de situação evita que duas requisições concorrentes
+        // confirmem a mesma competência.
         const { data: baixaConfirmada, error: erroBaixa } = await db
           .from("mensalidades")
           .update({
@@ -1377,126 +1572,33 @@ export async function POST(request: Request) {
           .select("id")
           .maybeSingle();
 
-        if (erroBaixa) throw erroBaixa;
+        if (erroBaixa || !baixaConfirmada) {
+          const errosLimpeza: string[] = [];
+          if (tarifaCriadaId) {
+            const { error } = await db.from("movimentacoes_financeiras").delete().eq("id", tarifaCriadaId);
+            if (error) errosLimpeza.push(`tarifa: ${error.message}`);
+          }
+          const { error: erroLimpezaEntrada } = await db
+            .from("movimentacoes_financeiras")
+            .delete()
+            .eq("id", entradaCriada.id);
+          if (erroLimpezaEntrada) errosLimpeza.push(`entrada: ${erroLimpezaEntrada.message}`);
 
-        if (!baixaConfirmada) {
+          if (errosLimpeza.length > 0) {
+            throw new Error(`A mensalidade não foi confirmada. A compensação dos movimentos precisa de conferência: ${errosLimpeza.join("; ")}.`);
+          }
+          if (erroBaixa) throw erroBaixa;
+
           const { data: estadoAtual, error: erroEstadoAtual } = await db
             .from("mensalidades")
             .select("situacao")
             .eq("id", registro.id)
             .maybeSingle();
-
           if (erroEstadoAtual) throw erroEstadoAtual;
-
           if (estadoAtual?.situacao === "pago") {
-            throw new Error(
-              `A mensalidade ${String(registro.competencia || "").slice(0, 7)} já foi registrada por outra operação. A página foi atualizada para evitar duplicidade.`
-            );
+            throw new Error(`A mensalidade ${String(registro.competencia || "").slice(0, 7)} já foi registrada por outra operação. Nenhum movimento duplicado foi mantido.`);
           }
-
-          throw new Error(
-            "Não foi possível reservar a baixa desta mensalidade. Tente novamente."
-          );
-        }
-
-        // A baixa da mensalidade precisa gerar a entrada no Financeiro.
-        // Cada mensalidade recebe sua própria origem_id para impedir
-        // duplicidade e permitir rastrear o recebimento até a cobrança.
-        const { error: erroEntrada } = await db
-          .from("movimentacoes_financeiras")
-          .insert({
-            conta_bancaria_id: contaId,
-            conta_destino_id: null,
-            grupo_transferencia: null,
-            tipo: "entrada",
-            categoria: "Mensalidade",
-            descricao: `Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
-            // A receita da Sociedade é sempre o valor da mensalidade,
-            // sem somar a tarifa cobrada do associado pelo banco.
-            // Ex.: mensalidade R$ 60,00 + tarifa R$ 2,50 =
-            // associado paga R$ 62,50, mas a Sociedade registra
-            // R$ 60,00 como receita.
-            valor: Number(valorBase || 0),
-            data_movimentacao: dataPagamento,
-            forma_pagamento: formaPagamento,
-            origem_tipo: "mensalidade",
-            origem_id: registro.id,
-            socio_id: registro.socio_id,
-            dependente_id: null,
-            created_by: auth.usuario.id,
-            comprovante_url: comprovanteUrl,
-            conciliado: false,
-            data_conciliacao: null,
-            observacoes: observacoesPagamento,
-          });
-
-        if (erroEntrada) {
-          // Se a entrada falhar, desfaz a marcação como paga para não
-          // deixar a mensalidade quitada sem correspondente financeiro.
-          await db
-            .from("mensalidades")
-            .update({
-              situacao: registro.situacao,
-              data_pagamento: null,
-              tipo_pagamento: registro.tipo_pagamento || null,
-              comprovante_url: registro.comprovante_url || null,
-              observacoes: registro.observacoes || null,
-              tarifa_pagamento: null,
-              total_cobrado: null,
-            })
-            .eq("id", registro.id);
-
-          throw erroEntrada;
-        }
-
-        // A tarifa paga pelo associado é registrada separadamente
-        // como DESPESA bancária da Sociedade.
-        if (calculado.tarifa_pagamento > 0) {
-          const { error: erroTarifa } = await db
-            .from("movimentacoes_financeiras")
-            .insert({
-              conta_bancaria_id: contaId,
-              conta_destino_id: null,
-              grupo_transferencia: null,
-              tipo: "saida",
-              categoria: "Tarifa bancária",
-              descricao: `Tarifa ${formaPagamento} - Mensalidade ${registro.competencia ? String(registro.competencia).slice(0, 7) : ""} - ${socio?.nome || "Associado"}`,
-              valor: Number(calculado.tarifa_pagamento || 0),
-              data_movimentacao: dataPagamento,
-              forma_pagamento: formaPagamento,
-              origem_tipo: "tarifa_mensalidade",
-              origem_id: registro.id,
-              socio_id: registro.socio_id,
-              dependente_id: null,
-              created_by: auth.usuario.id,
-              comprovante_url: null,
-              conciliado: false,
-              data_conciliacao: null,
-              observacoes: "Tarifa bancária repassada ao associado.",
-            });
-
-          if (erroTarifa) {
-            await db
-              .from("movimentacoes_financeiras")
-              .delete()
-              .eq("origem_tipo", "mensalidade")
-              .eq("origem_id", registro.id);
-
-            await db
-              .from("mensalidades")
-              .update({
-                situacao: registro.situacao,
-                data_pagamento: null,
-                tipo_pagamento: registro.tipo_pagamento || null,
-                comprovante_url: registro.comprovante_url || null,
-                observacoes: registro.observacoes || null,
-                tarifa_pagamento: null,
-                total_cobrado: null,
-              })
-              .eq("id", registro.id);
-
-            throw erroTarifa;
-          }
+          throw new Error("Não foi possível confirmar a baixa. Os movimentos provisórios foram removidos e a mensalidade permaneceu em aberto.");
         }
 
       }
@@ -1597,10 +1699,11 @@ export async function POST(request: Request) {
         if (error) throw error;
       }
 
-      // Se já foi conciliada, não apagamos o histórico. Criamos uma
-      // saída correspondente, mantendo a trilha do estorno.
+      // Se já foi conciliada, preservamos a entrada original no histórico.
+      // Ela recebe uma origem arquivada (mensalidade_estornada), liberando a
+      // chave única para uma nova baixa sem excluir ou alterar valor/conta/data.
       for (const movimento of conciliados) {
-        const { error } = await db
+        const { data: estornoCriado, error: erroEstornoCriado } = await db
           .from("movimentacoes_financeiras")
           .insert({
             conta_bancaria_id: movimento.conta_bancaria_id,
@@ -1621,9 +1724,57 @@ export async function POST(request: Request) {
             conciliado: false,
             data_conciliacao: null,
             observacoes: `Estorno da entrada financeira ${movimento.id}.`,
-          });
+          })
+          .select("id")
+          .single();
 
-        if (error) throw error;
+        if (erroEstornoCriado) throw erroEstornoCriado;
+
+        const { data: origemArquivada, error: erroArquivamentoOrigem } = await db
+          .from("movimentacoes_financeiras")
+          .update({ origem_tipo: "mensalidade_estornada" })
+          .eq("id", movimento.id)
+          .eq("origem_tipo", "mensalidade")
+          .select("id")
+          .maybeSingle();
+
+        if (erroArquivamentoOrigem || !origemArquivada) {
+          // Compensação: não deixamos um débito de estorno isolado se a
+          // entrada original não puder ser arquivada.
+          await db
+            .from("movimentacoes_financeiras")
+            .delete()
+            .eq("id", estornoCriado.id);
+
+          if (erroArquivamentoOrigem) throw erroArquivamentoOrigem;
+          throw new Error("Não foi possível arquivar a entrada original do estorno. A mensalidade continua como paga.");
+        }
+      }
+
+      // A tarifa também possui índice único por mensalidade. Mantemos o débito
+      // bancário histórico, mas mudamos apenas sua origem lógica para liberar
+      // uma nova tarifa quando a mensalidade for baixada novamente.
+      const { data: tarifasDaMensalidade, error: erroTarifasDaMensalidade } = await db
+        .from("movimentacoes_financeiras")
+        .select("id")
+        .eq("origem_tipo", "tarifa_mensalidade")
+        .eq("origem_id", id);
+
+      if (erroTarifasDaMensalidade) throw erroTarifasDaMensalidade;
+
+      const idsTarifasDaMensalidade = (tarifasDaMensalidade || []).map((tarifa: { id: string }) => String(tarifa.id));
+      if (idsTarifasDaMensalidade.length > 0) {
+        const { data: tarifasArquivadas, error: erroArquivamentoTarifas } = await db
+          .from("movimentacoes_financeiras")
+          .update({ origem_tipo: "tarifa_mensalidade_estornada" })
+          .in("id", idsTarifasDaMensalidade)
+          .eq("origem_tipo", "tarifa_mensalidade")
+          .select("id");
+
+        if (erroArquivamentoTarifas) throw erroArquivamentoTarifas;
+        if ((tarifasArquivadas || []).length !== idsTarifasDaMensalidade.length) {
+          throw new Error("Não foi possível arquivar todas as tarifas da baixa estornada. Confira o Financeiro antes de tentar novamente.");
+        }
       }
 
       const observacaoAnterior = String(mensalidade.observacoes || "").trim();
@@ -1650,7 +1801,8 @@ export async function POST(request: Request) {
         mensagemId: id,
         entradas_removidas: pendentes.length,
         estornos_conciliados: conciliados.length,
-        message: "Pagamento estornado com sucesso. A mensalidade voltou para Em aberto.",
+        tarifas_arquivadas: (tarifasDaMensalidade || []).length,
+        message: "Pagamento estornado com sucesso. O histórico financeiro foi preservado e a mensalidade voltou para Em aberto.",
       });
     }
 
@@ -2330,12 +2482,7 @@ export async function POST(request: Request) {
     );
   } catch (e) {
     return NextResponse.json(
-      {
-        error:
-          e instanceof Error
-            ? e.message
-            : "Erro ao processar mensalidades.",
-      },
+      { error: mensagemErroOperacao(e) },
       { status: 500 }
     );
   }
