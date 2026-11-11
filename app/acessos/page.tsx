@@ -61,6 +61,19 @@ type GrupoBuscaAcesso = {
   membros: OpcaoBuscaAcesso[];
 };
 
+type ResultadoAcessoLote = {
+  id: string;
+  nome: string;
+  matricula: string | null;
+  sucesso: boolean;
+  liberado: boolean;
+  mensagem: string;
+};
+
+function chaveOpcaoAcesso(opcao: OpcaoBuscaAcesso) {
+  return `${opcao.tipo}:${opcao.id}`;
+}
+
 export default function AcessosPage() {
   const router = useRouter();
   const [matricula, setMatricula] = useState("");
@@ -68,6 +81,9 @@ export default function AcessosPage() {
   const [buscandoOpcoes, setBuscandoOpcoes] = useState(false);
   const [mensagemBusca, setMensagemBusca] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [selecionados, setSelecionados] = useState<OpcaoBuscaAcesso[]>([]);
+  const [registrandoSelecionados, setRegistrandoSelecionados] = useState(false);
+  const [resultadosLote, setResultadosLote] = useState<ResultadoAcessoLote[]>([]);
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [cameraAberta, setCameraAberta] = useState(false);
@@ -106,6 +122,110 @@ export default function AcessosPage() {
       setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
     } finally {
       setCarregando(false);
+    }
+  }
+
+  function opcaoEstaSelecionada(opcao: OpcaoBuscaAcesso) {
+    const chave = chaveOpcaoAcesso(opcao);
+    return selecionados.some((item) => chaveOpcaoAcesso(item) === chave);
+  }
+
+  function alternarSelecao(opcao: OpcaoBuscaAcesso) {
+    const chave = chaveOpcaoAcesso(opcao);
+    setSelecionados((atuais) => atuais.some((item) => chaveOpcaoAcesso(item) === chave)
+      ? atuais.filter((item) => chaveOpcaoAcesso(item) !== chave)
+      : [...atuais, opcao]);
+    setResultadosLote([]);
+    setErro("");
+  }
+
+  function alternarSelecaoFamilia(grupo: GrupoBuscaAcesso) {
+    const pessoas = [grupo.titular, ...grupo.membros];
+    const chaves = new Set(pessoas.map(chaveOpcaoAcesso));
+    const familiaCompletaSelecionada = pessoas.every(opcaoEstaSelecionada);
+    setSelecionados((atuais) => {
+      const semFamilia = atuais.filter((item) => !chaves.has(chaveOpcaoAcesso(item)));
+      return familiaCompletaSelecionada ? semFamilia : [...semFamilia, ...pessoas];
+    });
+    setResultadosLote([]);
+    setErro("");
+  }
+
+  async function registrarAcessosSelecionados() {
+    if (!selecionados.length || registrandoSelecionados) return;
+    setRegistrandoSelecionados(true);
+    setErro("");
+    setResultado(null);
+    setResultadosLote([]);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/login?redirect=/acessos");
+        return;
+      }
+
+      const concluidos: ResultadoAcessoLote[] = [];
+      const falhas: OpcaoBuscaAcesso[] = [];
+      // Envia um registro por pessoa, em sequência, para preservar as regras
+      // individuais de inadimplência, exame e autorização da portaria.
+      for (const pessoa of selecionados) {
+        const payload = pessoa.tipo === "dependente" && pessoa.dependente_id
+          ? { socio_id: pessoa.socio_id, dependente_id: pessoa.dependente_id }
+          : { socio_id: pessoa.socio_id };
+        try {
+          const resposta = await fetch("/api/acessos", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            cache: "no-store",
+          });
+          const dados = await resposta.json().catch(() => ({}));
+          if (!resposta.ok) {
+            falhas.push(pessoa);
+            concluidos.push({
+              id: chaveOpcaoAcesso(pessoa),
+              nome: pessoa.nome,
+              matricula: pessoa.matricula,
+              sucesso: false,
+              liberado: false,
+              mensagem: dados.error || "Não foi possível registrar este acesso.",
+            });
+            continue;
+          }
+
+          const nome = dados.pessoa?.nome || dados.dependente?.nome || dados.socio?.nome || pessoa.nome;
+          concluidos.push({
+            id: chaveOpcaoAcesso(pessoa),
+            nome,
+            matricula: pessoa.matricula,
+            sucesso: true,
+            liberado: Boolean(dados.liberado),
+            mensagem: dados.liberado
+              ? "Entrada registrada e liberada."
+              : (dados.motivo_bloqueio || dados.acesso?.motivo_negacao || "Acesso registrado como bloqueado."),
+          });
+        } catch (erroPessoa) {
+          falhas.push(pessoa);
+          concluidos.push({
+            id: chaveOpcaoAcesso(pessoa),
+            nome: pessoa.nome,
+            matricula: pessoa.matricula,
+            sucesso: false,
+            liberado: false,
+            mensagem: erroPessoa instanceof Error ? erroPessoa.message : "Falha de comunicação ao registrar o acesso.",
+          });
+        }
+      }
+
+      setResultadosLote(concluidos);
+      // Mantém selecionadas apenas as pessoas cuja gravação falhou, permitindo
+      // nova tentativa sem repetir registros que já foram processados.
+      setSelecionados(falhas);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível registrar os acessos selecionados.");
+    } finally {
+      setRegistrandoSelecionados(false);
     }
   }
 
@@ -274,50 +394,73 @@ export default function AcessosPage() {
                     <p className="sticky top-0 z-10 border-b bg-[#f5faf7] px-3 py-2 text-xs font-bold text-gray-500">
                       {gruposBusca.length} família(s) encontrada(s). Escolha o titular ou uma pessoa da família.
                     </p>
-                    {gruposBusca.map((grupo) => (
-                      <div key={grupo.titular.id} className="border-b border-gray-200 p-2 last:border-b-0">
-                        <button
-                          type="button"
-                          disabled={carregando}
-                          onClick={() => void validar({ socio_id: grupo.titular.socio_id })}
-                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-[#d5e7dd] bg-[#f5faf7] px-3 py-3 text-left hover:border-[#005a3c] hover:bg-[#edf7f1] disabled:opacity-50"
-                        >
-                          <span className="min-w-0">
-                            <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">Titular</span>
-                            <span className="block truncate font-black text-[#17382c]">{grupo.titular.nome}</span>
-                            <span className="mt-0.5 block truncate text-xs text-gray-500">
-                              {grupo.titular.matricula || "Sem matrícula"} · {grupo.titular.categoria || "Associado"}
-                            </span>
-                          </span>
-                          <span className="shrink-0 rounded-lg bg-[#005a3c] px-3 py-2 text-xs font-black text-white">Selecionar</span>
-                        </button>
-
-                        {grupo.membros.length > 0 && (
-                          <div className="ml-3 mt-2 border-l-2 border-[#d5e7dd] pl-3">
-                            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">Dependentes e familiares</p>
-                            <div className="space-y-1">
-                              {grupo.membros.map((opcao) => (
-                                <button
-                                  key={`${opcao.tipo}-${opcao.id}`}
-                                  type="button"
-                                  disabled={carregando}
-                                  onClick={() => void validar({ socio_id: opcao.socio_id, ...(opcao.dependente_id ? { dependente_id: opcao.dependente_id } : {}) })}
-                                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-[#f0f8f4] disabled:opacity-50"
-                                >
-                                  <span className="min-w-0">
-                                    <span className="block truncate text-sm font-bold text-[#17382c]">{opcao.nome}</span>
-                                    <span className="mt-0.5 block truncate text-xs text-gray-500">
-                                      {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
-                                    </span>
-                                  </span>
-                                  <span className="shrink-0 rounded-lg border border-[#005a3c] px-3 py-1.5 text-xs font-black text-[#005a3c]">Selecionar</span>
-                                </button>
-                              ))}
-                            </div>
+                    {gruposBusca.map((grupo) => {
+                      const familia = [grupo.titular, ...grupo.membros];
+                      const familiaCompletaSelecionada = familia.every(opcaoEstaSelecionada);
+                      const titularSelecionado = opcaoEstaSelecionada(grupo.titular);
+                      return (
+                        <div key={grupo.titular.id} className="border-b border-gray-200 p-2 last:border-b-0">
+                          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                            <span className="text-[10px] font-black uppercase tracking-wide text-gray-400">Grupo familiar</span>
+                            <button
+                              type="button"
+                              disabled={carregando || registrandoSelecionados}
+                              onClick={() => alternarSelecaoFamilia(grupo)}
+                              className="rounded-lg border border-[#005a3c] px-2.5 py-1.5 text-[11px] font-black text-[#005a3c] hover:bg-[#edf7f1] disabled:opacity-50"
+                            >
+                              {familiaCompletaSelecionada ? "Desmarcar família" : "Selecionar família toda"}
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <button
+                            type="button"
+                            disabled={carregando || registrandoSelecionados}
+                            onClick={() => alternarSelecao(grupo.titular)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left disabled:opacity-50 ${titularSelecionado ? "border-[#005a3c] bg-[#e6f4eb]" : "border-[#d5e7dd] bg-[#f5faf7] hover:border-[#005a3c] hover:bg-[#edf7f1]"}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">Responsável da família</span>
+                              <span className="block truncate font-black text-[#17382c]">{grupo.titular.nome}</span>
+                              <span className="mt-0.5 block truncate text-xs text-gray-500">
+                                {grupo.titular.matricula || "Sem matrícula"} · Responsável familiar
+                              </span>
+                            </span>
+                            <span className={`shrink-0 rounded-lg px-3 py-2 text-xs font-black ${titularSelecionado ? "bg-[#005a3c] text-white" : "border border-[#005a3c] text-[#005a3c]"}`}>
+                              {titularSelecionado ? "Selecionado" : "Selecionar"}
+                            </span>
+                          </button>
+
+                          {grupo.membros.length > 0 && (
+                            <div className="ml-3 mt-2 border-l-2 border-[#d5e7dd] pl-3">
+                              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">Dependentes e familiares</p>
+                              <div className="space-y-1">
+                                {grupo.membros.map((opcao) => {
+                                  const selecionado = opcaoEstaSelecionada(opcao);
+                                  return (
+                                    <button
+                                      key={`${opcao.tipo}-${opcao.id}`}
+                                      type="button"
+                                      disabled={carregando || registrandoSelecionados}
+                                      onClick={() => alternarSelecao(opcao)}
+                                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left disabled:opacity-50 ${selecionado ? "bg-[#e6f4eb]" : "hover:bg-[#f0f8f4]"}`}
+                                    >
+                                      <span className="min-w-0">
+                                        <span className="block truncate text-sm font-bold text-[#17382c]">{opcao.nome}</span>
+                                        <span className="mt-0.5 block truncate text-xs text-gray-500">
+                                          {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
+                                        </span>
+                                      </span>
+                                      <span className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-black ${selecionado ? "bg-[#005a3c] text-white" : "border border-[#005a3c] text-[#005a3c]"}`}>
+                                        {selecionado ? "Selecionado" : "Selecionar"}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 {!buscandoOpcoes && mensagemBusca && matricula.trim().length >= 3 && (
@@ -325,6 +468,43 @@ export default function AcessosPage() {
                 )}
                 {matricula.trim().length > 0 && matricula.trim().length < 3 && !/^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim()) && (
                   <p className="mt-2 px-1 text-xs text-gray-400">Digite pelo menos 3 letras para iniciar a busca.</p>
+                )}
+                {selecionados.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-[#b9d9c7] bg-[#f4faf6] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-black text-[#005a3c]">{selecionados.length} pessoa(s) selecionada(s)</p>
+                        <p className="text-xs text-gray-500">Os acessos serão validados individualmente, em sequência.</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={registrandoSelecionados}
+                        onClick={() => setSelecionados([])}
+                        className="text-xs font-bold text-gray-500 underline disabled:opacity-50"
+                      >Limpar seleção</button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {selecionados.map((pessoa) => (
+                        <button
+                          key={chaveOpcaoAcesso(pessoa)}
+                          type="button"
+                          disabled={registrandoSelecionados}
+                          onClick={() => alternarSelecao(pessoa)}
+                          className="rounded-full border border-[#c9dfd2] bg-white px-2.5 py-1 text-xs font-semibold text-[#24513e] disabled:opacity-50"
+                        >
+                          {pessoa.nome} ×
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={registrandoSelecionados || carregando}
+                      onClick={() => void registrarAcessosSelecionados()}
+                      className="mt-3 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-black text-white hover:bg-[#00462f] disabled:opacity-50"
+                    >
+                      {registrandoSelecionados ? "Registrando acessos..." : `Registrar acesso de ${selecionados.length} pessoa(s)`}
+                    </button>
+                  </div>
                 )}
               </form>
             </div>
@@ -354,6 +534,28 @@ export default function AcessosPage() {
 
 
 
+          {registrandoSelecionados && <div className="rounded-2xl border bg-white p-5 text-center shadow-sm"><Clock3 className="mx-auto h-8 w-8 animate-pulse text-[#005a3c]" /><p className="mt-2 font-bold">Registrando os acessos selecionados em sequência...</p></div>}
+          {resultadosLote.length > 0 && (
+            <section className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-black text-[#005a3c]">Resultado dos acessos</h2>
+                <span className="text-xs font-semibold text-gray-500">{resultadosLote.filter((item) => item.sucesso && item.liberado).length} liberado(s) · {resultadosLote.filter((item) => item.sucesso && !item.liberado).length} bloqueado(s) · {resultadosLote.filter((item) => !item.sucesso).length} falha(s)</span>
+              </div>
+              <div className="mt-3 divide-y">
+                {resultadosLote.map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                    <div>
+                      <p className="font-bold text-[#17382c]">{item.nome} <span className="text-xs font-normal text-gray-500">{item.matricula || ""}</span></p>
+                      <p className="text-sm text-gray-600">{item.mensagem}</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.sucesso && item.liberado ? "bg-green-100 text-green-800" : item.sucesso ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
+                      {item.sucesso ? item.liberado ? "Liberado" : "Bloqueado" : "Falha"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
           {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
 
