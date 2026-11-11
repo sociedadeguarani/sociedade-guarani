@@ -227,9 +227,32 @@ export async function GET(request: Request) {
       normalizar(socio.nome).includes(termoNormalizado) || matriculaNormalizada(socio.matricula).toLowerCase().includes(termoNormalizado),
     );
 
-    // Encontra o titular raiz seguindo responsavel_id, sem permitir ciclos.
-    // O vínculo legado só é usado quando o cadastro atual ainda não tem responsável.
+    // A matrícula familiar tem precedência sobre o responsável cadastral.
+    // O sufixo A identifica quem responde pela própria família (ex.: SD0024A),
+    // mesmo quando o legado ainda mantém responsavel_id apontando para o pai.
+    // Os sufixos B-Z ficam agrupados sob a matrícula A correspondente.
+    const dadosMatriculaFamilia = (valor: unknown) => {
+      const matricula = matriculaNormalizada(valor);
+      const match = matricula.match(/^(SP|SC|SD|ST|TE)(\d{4})([A-Z])$/);
+      return match ? { base: `${match[1]}${match[2]}`, sufixo: match[3] } : null;
+    };
+    const titularPorMatriculaFamilia = (socio: SocioBusca): SocioBusca | null => {
+      const dados = dadosMatriculaFamilia(socio.matricula);
+      if (!dados) return null;
+      if (dados.sufixo === "A") return socio;
+      const candidatos = sociosPorMatricula.get(`${dados.base}A`) || [];
+      return candidatos.length === 1 ? candidatos[0] : null;
+    };
+
+    // Encontra o titular raiz sem permitir ciclos. A matrícula A prevalece
+    // sobre responsavel_id quando o cadastro foi promovido a sócio com família.
     const responsavelEfetivo = (socio: SocioBusca) => {
+      const dados = dadosMatriculaFamilia(socio.matricula);
+      const titularFamilia = titularPorMatriculaFamilia(socio);
+      if (titularFamilia && String(titularFamilia.id) !== String(socio.id)) {
+        return String(titularFamilia.id);
+      }
+      if (dados?.sufixo === "A") return null;
       if (socio.responsavel_id) return String(socio.responsavel_id);
       const legados = [...(responsaveisLegados.get(String(socio.id)) || [])];
       return legados.length === 1 ? legados[0] : null;
