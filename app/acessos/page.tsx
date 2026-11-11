@@ -347,27 +347,27 @@ export default function AcessosPage() {
     <div className="min-h-screen bg-[#f8faf9] text-[#17382c]">
       <CabecalhoPadrao />
       <MenuLateralPadrao />
-      <main className="min-h-[calc(100vh-76px)] px-4 py-6 lg:ml-[220px] lg:px-7 lg:py-8">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+      <main className="min-h-[calc(100vh-76px)] px-3 pb-28 pt-4 sm:px-4 sm:py-6 lg:ml-[220px] lg:px-7 lg:py-8">
+        <div className="mx-auto w-full max-w-5xl space-y-4 sm:space-y-6">
+          <div className="flex min-w-0 flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div>
               <p className="text-sm text-gray-500">Portaria</p>
-              <h1 className="text-3xl font-extrabold text-[#005a3c]">Acessos</h1>
-              <p className="mt-1 text-sm text-gray-500">Consulte a carteirinha por matrícula ou leia o QR Code para validar e registrar a entrada.</p>
+              <h1 className="text-2xl font-extrabold text-[#005a3c] sm:text-3xl">Acessos</h1>
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-gray-500">Consulte por nome ou matrícula, selecione uma ou várias pessoas ou leia o QR Code para validar a entrada.</p>
             </div>
-            <a href="/acessos/relatorio" className="inline-flex shrink-0 items-center gap-2 rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c] hover:bg-[#e8f3ee]">
+            <a href="/acessos/relatorio" className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border-2 border-[#005a3c] px-4 py-3 text-sm font-black text-[#005a3c] hover:bg-[#e8f3ee] sm:w-auto">
               📊 Relatório de acessos
             </a>
           </div>
 
-          <section className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+          <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
+            <div className="min-w-0 rounded-2xl border border-[#dce8e1] bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
-                <div><h2 className="text-xl font-black">Consultar por matrícula ou nome</h2><p className="text-sm text-gray-500">Digite a matrícula ou parte do nome do associado/dependente.</p></div>
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
+                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Buscar associado ou dependente</h2><p className="text-sm leading-5 text-gray-500">Digite a matrícula ou parte do nome.</p></div>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="relative mt-5">
-                <div className="flex gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="relative mt-4 sm:mt-5">
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                   <input
                     value={matricula}
                     onChange={(e) => {
@@ -380,79 +380,98 @@ export default function AcessosPage() {
                     }}
                     placeholder="Digite o nome ou matrícula..."
                     autoComplete="off"
-                    className="min-w-0 flex-1 rounded-xl border px-4 py-3 outline-none focus:border-[#005a3c]"
+                    aria-label="Buscar por nome ou matrícula"
+                    inputMode="search"
+                    className="min-h-14 w-full min-w-0 flex-1 rounded-xl border border-[#bdcec4] px-4 py-3 text-base outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/15 sm:w-auto"
                   />
                   {(/^[0-9]+$/.test(matricula.trim()) || /^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim())) && (
-                    <button type="submit" disabled={carregando || !matricula.trim()} className="rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50">Consultar</button>
+                    <button type="submit" disabled={carregando || !matricula.trim()} className="min-h-12 w-full rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50 sm:w-auto">Consultar matrícula</button>
                   )}
                 </div>
                 {buscandoOpcoes && (
                   <p className="mt-2 px-1 text-xs font-semibold text-gray-500">Buscando associados e dependentes...</p>
                 )}
                 {gruposBusca.length > 0 && (
-                  <div className="mt-2 max-h-[30rem] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
-                    <p className="sticky top-0 z-10 border-b bg-[#f5faf7] px-3 py-2 text-xs font-bold text-gray-500">
-                      {gruposBusca.length} família(s) encontrada(s). Escolha o titular ou uma pessoa da família.
-                    </p>
+                  <div className="mt-2 max-h-[52vh] overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white shadow-lg sm:max-h-[30rem]">
+                    <div className="sticky top-0 z-10 border-b bg-[#f5faf7] px-3 py-3 text-xs font-bold leading-5 text-gray-600">
+                      <p>{gruposBusca.length} família(s) encontrada(s). Marque as caixas das pessoas que entrarão.</p>
+                      <p className="mt-1 font-medium text-[#547264]">A lista permanece aberta enquanto você seleciona. A entrada só é registrada no botão abaixo.</p>
+                    </div>
                     {gruposBusca.map((grupo) => {
                       const familia = [grupo.titular, ...grupo.membros];
-                      const familiaCompletaSelecionada = familia.every(opcaoEstaSelecionada);
+                      const quantidadeSelecionadaNaFamilia = familia.filter(opcaoEstaSelecionada).length;
+                      const familiaCompletaSelecionada = quantidadeSelecionadaNaFamilia === familia.length;
                       const titularSelecionado = opcaoEstaSelecionada(grupo.titular);
+                      const checkboxTitularId = `acesso-${chaveOpcaoAcesso(grupo.titular).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
                       return (
-                        <div key={grupo.titular.id} className="border-b border-gray-200 p-2 last:border-b-0">
-                          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                        <div key={grupo.titular.id} className="border-b border-gray-200 p-2.5 last:border-b-0 sm:p-3">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
                             <span className="text-[10px] font-black uppercase tracking-wide text-gray-400">Grupo familiar</span>
-                            <button
-                              type="button"
-                              disabled={carregando || registrandoSelecionados}
-                              onClick={() => alternarSelecaoFamilia(grupo)}
-                              className="rounded-lg border border-[#005a3c] px-2.5 py-1.5 text-[11px] font-black text-[#005a3c] hover:bg-[#edf7f1] disabled:opacity-50"
-                            >
-                              {familiaCompletaSelecionada ? "Desmarcar família" : "Selecionar família toda"}
-                            </button>
+                            <label className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-lg border border-[#b9d9c7] bg-[#f5faf7] px-3 py-2 text-xs font-black text-[#005a3c]">
+                              <input
+                                type="checkbox"
+                                checked={familiaCompletaSelecionada}
+                                disabled={carregando || registrandoSelecionados}
+                                onChange={() => alternarSelecaoFamilia(grupo)}
+                                className="h-5 w-5 shrink-0 accent-[#005a3c]"
+                                aria-label={`Selecionar todos da família ${grupo.titular.nome}`}
+                              />
+                              <span>{familiaCompletaSelecionada ? "Família selecionada" : "Selecionar família toda"}</span>
+                              <span className="font-semibold text-[#547264]">{quantidadeSelecionadaNaFamilia}/{familia.length}</span>
+                            </label>
                           </div>
-                          <button
-                            type="button"
-                            disabled={carregando || registrandoSelecionados}
-                            onClick={() => alternarSelecao(grupo.titular)}
-                            className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left disabled:opacity-50 ${titularSelecionado ? "border-[#005a3c] bg-[#e6f4eb]" : "border-[#d5e7dd] bg-[#f5faf7] hover:border-[#005a3c] hover:bg-[#edf7f1]"}`}
+
+                          <label
+                            htmlFor={checkboxTitularId}
+                            className={`flex min-h-[68px] w-full cursor-pointer touch-manipulation items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${titularSelecionado ? "border-[#005a3c] bg-[#e6f4eb]" : "border-[#d5e7dd] bg-[#f5faf7] hover:border-[#005a3c] hover:bg-[#edf7f1]"}`}
                           >
-                            <span className="min-w-0">
+                            <input
+                              id={checkboxTitularId}
+                              type="checkbox"
+                              checked={titularSelecionado}
+                              disabled={carregando || registrandoSelecionados}
+                              onChange={() => alternarSelecao(grupo.titular)}
+                              className="h-6 w-6 shrink-0 accent-[#005a3c]"
+                            />
+                            <span className="min-w-0 flex-1">
                               <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">Responsável da família</span>
-                              <span className="block truncate font-black text-[#17382c]">{grupo.titular.nome}</span>
-                              <span className="mt-0.5 block truncate text-xs text-gray-500">
+                              <span className="block break-words font-black text-[#17382c]">{grupo.titular.nome}</span>
+                              <span className="mt-0.5 block text-xs text-gray-500">
                                 {grupo.titular.matricula || "Sem matrícula"} · Responsável familiar
                               </span>
                             </span>
-                            <span className={`shrink-0 rounded-lg px-3 py-2 text-xs font-black ${titularSelecionado ? "bg-[#005a3c] text-white" : "border border-[#005a3c] text-[#005a3c]"}`}>
-                              {titularSelecionado ? "Selecionado" : "Selecionar"}
-                            </span>
-                          </button>
+                            {titularSelecionado && <CheckCircle2 className="h-5 w-5 shrink-0 text-[#005a3c]" aria-hidden="true" />}
+                          </label>
 
                           {grupo.membros.length > 0 && (
-                            <div className="ml-3 mt-2 border-l-2 border-[#d5e7dd] pl-3">
+                            <div className="ml-2 mt-2 border-l-2 border-[#d5e7dd] pl-2 sm:ml-3 sm:pl-3">
                               <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">Dependentes e familiares</p>
                               <div className="space-y-1">
                                 {grupo.membros.map((opcao) => {
                                   const selecionado = opcaoEstaSelecionada(opcao);
+                                  const checkboxId = `acesso-${chaveOpcaoAcesso(opcao).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
                                   return (
-                                    <button
+                                    <label
                                       key={`${opcao.tipo}-${opcao.id}`}
-                                      type="button"
-                                      disabled={carregando || registrandoSelecionados}
-                                      onClick={() => alternarSelecao(opcao)}
-                                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left disabled:opacity-50 ${selecionado ? "bg-[#e6f4eb]" : "hover:bg-[#f0f8f4]"}`}
+                                      htmlFor={checkboxId}
+                                      className={`flex min-h-[64px] w-full cursor-pointer touch-manipulation items-center gap-3 rounded-xl px-3 py-3 transition-colors ${selecionado ? "bg-[#e6f4eb]" : "hover:bg-[#f0f8f4]"}`}
                                     >
-                                      <span className="min-w-0">
-                                        <span className="block truncate text-sm font-bold text-[#17382c]">{opcao.nome}</span>
-                                        <span className="mt-0.5 block truncate text-xs text-gray-500">
+                                      <input
+                                        id={checkboxId}
+                                        type="checkbox"
+                                        checked={selecionado}
+                                        disabled={carregando || registrandoSelecionados}
+                                        onChange={() => alternarSelecao(opcao)}
+                                        className="h-6 w-6 shrink-0 accent-[#005a3c]"
+                                      />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block break-words text-sm font-bold text-[#17382c]">{opcao.nome}</span>
+                                        <span className="mt-0.5 block text-xs leading-4 text-gray-500">
                                           {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
                                         </span>
                                       </span>
-                                      <span className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-black ${selecionado ? "bg-[#005a3c] text-white" : "border border-[#005a3c] text-[#005a3c]"}`}>
-                                        {selecionado ? "Selecionado" : "Selecionar"}
-                                      </span>
-                                    </button>
+                                      {selecionado && <CheckCircle2 className="h-5 w-5 shrink-0 text-[#005a3c]" aria-hidden="true" />}
+                                    </label>
                                   );
                                 })}
                               </div>
@@ -470,7 +489,7 @@ export default function AcessosPage() {
                   <p className="mt-2 px-1 text-xs text-gray-400">Digite pelo menos 3 letras para iniciar a busca.</p>
                 )}
                 {selecionados.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-[#b9d9c7] bg-[#f4faf6] p-3">
+                  <div className="sticky bottom-2 z-20 mt-4 rounded-xl border border-[#b9d9c7] bg-[#f4faf6] p-3 shadow-[0_-4px_18px_rgba(0,0,0,0.08)] sm:static sm:shadow-none">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="font-black text-[#005a3c]">{selecionados.length} pessoa(s) selecionada(s)</p>
@@ -480,7 +499,7 @@ export default function AcessosPage() {
                         type="button"
                         disabled={registrandoSelecionados}
                         onClick={() => setSelecionados([])}
-                        className="text-xs font-bold text-gray-500 underline disabled:opacity-50"
+                        className="min-h-10 px-2 text-xs font-bold text-gray-500 underline disabled:opacity-50"
                       >Limpar seleção</button>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -500,7 +519,7 @@ export default function AcessosPage() {
                       type="button"
                       disabled={registrandoSelecionados || carregando}
                       onClick={() => void registrarAcessosSelecionados()}
-                      className="mt-3 w-full rounded-xl bg-[#005a3c] px-4 py-3 font-black text-white hover:bg-[#00462f] disabled:opacity-50"
+                      className="mt-3 min-h-14 w-full rounded-xl bg-[#005a3c] px-4 py-3 text-base font-black text-white shadow-sm hover:bg-[#00462f] disabled:opacity-50"
                     >
                       {registrandoSelecionados ? "Registrando acessos..." : `Registrar acesso de ${selecionados.length} pessoa(s)`}
                     </button>
@@ -509,24 +528,24 @@ export default function AcessosPage() {
               </form>
             </div>
 
-            <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="min-w-0 rounded-2xl border bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
-                <div><h2 className="text-xl font-black">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
+                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
               </div>
               {!suportaLeituraQr ? (
-                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-5 text-amber-800 sm:mt-5">
                   Este navegador (comum em iPhone) não permite ler QR Code direto no site.
                   Abra o <b>app de Câmera do celular</b> e aponte para o QR Code da carteirinha —
                   ele vai abrir esta página automaticamente e já registrar o acesso.
                 </div>
               ) : !cameraAberta ? (
-                <button onClick={iniciarCamera} className="mt-5 w-full rounded-xl border-2 border-[#005a3c] px-4 py-3 font-black text-[#005a3c]">📷 Abrir câmera e ler QR Code</button>
+                <button onClick={iniciarCamera} className="mt-4 min-h-14 w-full touch-manipulation rounded-xl border-2 border-[#005a3c] px-4 py-3 text-base font-black text-[#005a3c] sm:mt-5">📷 Abrir câmera e ler QR Code</button>
               ) : (
                 <div className="mt-5">
-                  <div className="overflow-hidden rounded-2xl bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div>
+                  <div className="overflow-hidden rounded-2xl bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-[4/3] max-h-[55svh] w-full object-cover sm:aspect-video" /></div>
                   <p className="mt-2 text-center text-xs font-semibold text-gray-500">Aponte para o QR Code da carteirinha.</p>
-                  <button onClick={pararCamera} className="mt-3 w-full rounded-xl border px-4 py-3 font-bold">Fechar câmera</button>
+                  <button onClick={pararCamera} className="mt-3 min-h-14 w-full touch-manipulation rounded-xl border border-[#bdcec4] px-4 py-3 font-bold">Fechar câmera</button>
                 </div>
               )}
             </div>
@@ -534,9 +553,9 @@ export default function AcessosPage() {
 
 
 
-          {registrandoSelecionados && <div className="rounded-2xl border bg-white p-5 text-center shadow-sm"><Clock3 className="mx-auto h-8 w-8 animate-pulse text-[#005a3c]" /><p className="mt-2 font-bold">Registrando os acessos selecionados em sequência...</p></div>}
+          {registrandoSelecionados && <div className="rounded-2xl border bg-white p-4 text-center shadow-sm sm:p-5"><Clock3 className="mx-auto h-8 w-8 animate-pulse text-[#005a3c]" /><p className="mt-2 font-bold">Registrando os acessos selecionados em sequência...</p></div>}
           {resultadosLote.length > 0 && (
-            <section className="rounded-2xl border bg-white p-5 shadow-sm">
+            <section className="rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-black text-[#005a3c]">Resultado dos acessos</h2>
                 <span className="text-xs font-semibold text-gray-500">{resultadosLote.filter((item) => item.sucesso && item.liberado).length} liberado(s) · {resultadosLote.filter((item) => item.sucesso && !item.liberado).length} bloqueado(s) · {resultadosLote.filter((item) => !item.sucesso).length} falha(s)</span>
@@ -556,21 +575,21 @@ export default function AcessosPage() {
               </div>
             </section>
           )}
-          {carregando && <div className="rounded-2xl border bg-white p-8 text-center shadow-sm"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
-          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
+          {carregando && <div className="rounded-2xl border bg-white p-5 text-center shadow-sm sm:p-8"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 sm:p-5"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
 
           {resultado?.socio && (
-            <section className={`rounded-2xl border p-6 shadow-sm ${resultado.liberado ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+            <section className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${resultado.liberado ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div className="h-20 w-16 overflow-hidden rounded-xl bg-white">
                     {(resultado.pessoa?.foto_url || resultado.socio.foto_url) ? <Image src={(resultado.pessoa?.foto_url || resultado.socio.foto_url)!} alt={resultado.pessoa?.nome || resultado.socio.nome} width={64} height={80} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><UserRound className="text-gray-400" /></div>}
                   </div>
-                  <div><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="text-2xl font-black">{resultado.pessoa?.nome || resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.pessoa?.matricula || resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.pessoa?.situacao || resultado.socio.situacao || "Não informada"}</b></p>{resultado.dependente && <p className="mt-1 text-xs font-semibold text-gray-500">Dependente de {resultado.socio.nome}{resultado.pessoa?.parentesco ? ` · ${resultado.pessoa.parentesco}` : ""}</p>}</div>
+                  <div className="min-w-0"><p className="text-xs font-black uppercase tracking-wide text-gray-500">Carteirinha</p><h2 className="break-words text-xl font-black sm:text-2xl">{resultado.pessoa?.nome || resultado.socio.nome}</h2><p className="text-sm text-gray-600">Matrícula: <b>{resultado.pessoa?.matricula || resultado.socio.matricula || "—"}</b> · Situação: <b>{resultado.pessoa?.situacao || resultado.socio.situacao || "Não informada"}</b></p>{resultado.dependente && <p className="mt-1 text-xs font-semibold text-gray-500">Dependente de {resultado.socio.nome}{resultado.pessoa?.parentesco ? ` · ${resultado.pessoa.parentesco}` : ""}</p>}</div>
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
-                  <div><div className={`text-2xl font-black ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
+                  <div className="min-w-0"><div className={`text-xl font-black sm:text-2xl ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
               <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
