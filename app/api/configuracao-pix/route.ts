@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { CHAVE_PIX_BANRISUL, ehChavePixLegada } from "@/lib/pix";
+import { CHAVE_PIX_BANRISUL, CHAVE_PIX_SICREDI_CNPJ, ehChavePixLegada } from "@/lib/pix";
 
 export const dynamic = "force-dynamic";
 
@@ -67,10 +67,11 @@ function gerarCopiaECola(chave: string, nome: string, cidade: string, valor: num
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const valor = Number(url.searchParams.get("valor") || 0);
+  const destinoReservas = url.searchParams.get("destino") === "reservas";
 
-  // A mesma chave PIX já utilizada em Convites.
-  // O PIX de Reservas não depende mais de uma configuração prévia no banco:
-  // ele funciona imediatamente e monta o copia e cola com o valor da reserva.
+  // Convites e Reservas usam o CNPJ confirmado do Sicredi para novos pagamentos.
+  // Para evitar alterar outros fluxos (ex.: Eventos e Mensalidades), o CNPJ é
+  // forçado apenas quando a chamada identifica destino=reservas.
   let config: {
     id: string | null;
     chave_pix: string;
@@ -79,7 +80,7 @@ export async function GET(request: Request) {
     ativo: boolean;
   } = {
     id: null,
-    chave_pix: CHAVE_PIX_PADRAO,
+    chave_pix: destinoReservas ? CHAVE_PIX_SICREDI_CNPJ : CHAVE_PIX_PADRAO,
     nome_recebedor: NOME_PADRAO,
     cidade: CIDADE_PADRAO,
     ativo: true,
@@ -106,10 +107,11 @@ export async function GET(request: Request) {
         const chaveSalva = String(data.chave_pix);
         config = {
           id: data.id ?? null,
-          // Migra em tempo de leitura a configuração antiga do Sicredi para o
-          // PIX de celular do Banrisul, sem exigir acesso manual ao banco.
-          // Outras chaves configuradas posteriormente continuam sendo respeitadas.
-          chave_pix: ehChavePixLegada(chaveSalva) ? CHAVE_PIX_PADRAO : chaveSalva,
+          // Reservas usam a chave CNPJ do Sicredi confirmada pela Sociedade.
+          // Outros consumidores do endpoint mantêm a configuração global atual.
+          chave_pix: destinoReservas
+            ? CHAVE_PIX_SICREDI_CNPJ
+            : ehChavePixLegada(chaveSalva) ? CHAVE_PIX_PADRAO : chaveSalva,
           nome_recebedor: String(data.nome_recebedor || NOME_PADRAO),
           cidade: String(data.cidade || CIDADE_PADRAO),
           ativo: data.ativo !== false,
@@ -117,7 +119,7 @@ export async function GET(request: Request) {
       }
     }
   } catch {
-    // Mantém a configuração PIX padrão para não bloquear a reserva.
+    // Mantém a chave padrão do contexto solicitado para não bloquear a reserva.
   }
 
   const copia_e_cola = gerarCopiaECola(

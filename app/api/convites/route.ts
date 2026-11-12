@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exigirAdministrador } from "@/lib/guaraniAuth";
+import { requireRoles } from "@/lib/guaraniAuth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
@@ -16,18 +16,42 @@ async function garantirBucket(db: SupabaseClient) {
 
 export async function GET(request: Request) {
   try {
-    const auth = await exigirAdministrador(request);
-    if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const auth = await requireRoles(
+      request,
+      ["funcionario", "administrador", "administrador_master"],
+      ["menu.convites", "convites.comprar"],
+    );
+    if ("response" in auth) return auth.response;
+
     const db = auth.supabase;
-    const [{ data: convites, error: ce }, { data: socios, error: se }, { data: contas, error: be }] = await Promise.all([
-      db.from("convites").select("*").order("created_at", { ascending: false }),
+    const ehFuncionario = auth.usuario.perfil === "funcionario";
+    const consultaConvites = ehFuncionario
+      ? db.from("convites").select("id,socio_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,status,created_at").order("created_at", { ascending: false })
+      : db.from("convites").select("*").order("created_at", { ascending: false });
+
+    const [{ data: convites, error: ce }, { data: socios, error: se }] = await Promise.all([
+      consultaConvites,
       db.from("socios").select("id,nome,matricula").order("nome", { ascending: true }),
-      db.from("contas_bancarias").select("id,nome,banco").eq("ativo", true).order("nome", { ascending: true }),
     ]);
     if (ce) return NextResponse.json({ error: ce.message }, { status: 500 });
     if (se) return NextResponse.json({ error: se.message }, { status: 500 });
-    if (be) return NextResponse.json({ error: be.message }, { status: 500 });
-    return NextResponse.json({ convites: convites || [], socios: socios || [], contas: contas || [] });
+
+    // Funcionários da portaria precisam identificar o associado responsável,
+    // mas não devem consultar contas bancárias nem valores/comprovantes.
+    let contas: Array<{ id: string; nome: string; banco: string | null }> = [];
+    if (!ehFuncionario) {
+      const { data, error } = await db.from("contas_bancarias").select("id,nome,banco").eq("ativo", true).order("nome", { ascending: true });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      contas = data || [];
+    }
+
+    return NextResponse.json({
+      convites: convites || [],
+      socios: socios || [],
+      contas,
+      perfil: auth.usuario.perfil,
+      podeGerenciarFinanceiro: !ehFuncionario,
+    });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Erro ao carregar convites." }, { status: 500 });
   }
@@ -35,9 +59,15 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const auth = await exigirAdministrador(request);
-    if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const auth = await requireRoles(
+      request,
+      ["funcionario", "administrador", "administrador_master"],
+      ["menu.convites", "convites.comprar"],
+    );
+    if ("response" in auth) return auth.response;
+
     const db = auth.supabase;
+    const ehFuncionario = auth.usuario.perfil === "funcionario";
     const form = await request.formData();
     const socio_id = String(form.get("socio_id") || "").trim() || null;
     const nome = String(form.get("nome") || "").trim();
@@ -47,15 +77,22 @@ export async function POST(request: Request) {
     const inicio = String(form.get("inicio") || dataHoje()).trim();
     const fimRaw = String(form.get("fim") || "").trim();
     const fim = tipo === "diario" ? inicio : (fimRaw || null);
-    const valor = Number(String(form.get("valor") || "0").replace(",", "."));
     const pagamento = String(form.get("pagamento") || "pix").trim().toLowerCase();
     const conta_id = String(form.get("conta_id") || "").trim();
     const arquivo = form.get("arquivo");
+    // A portaria não escolhe conta nem altera valores. A tarifa do convite é
+    // calculada no servidor conforme as mesmas regras exibidas na tela.
+    const cidadeNormalizada = cidade.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+    const valor = ehFuncionario
+      ? (tipo === "semanal" ? (cidadeNormalizada === "augusto pestana" ? 30 : 120) : 30)
+      : Number(String(form.get("valor") || "0").replace(",", "."));
 
     if (!nome) return NextResponse.json({ error: "Informe o nome do convidado." }, { status: 400 });
     if (!cidade) return NextResponse.json({ error: "Informe a cidade do convidado." }, { status: 400 });
     if (!["diario", "semanal", "mensal"].includes(tipo)) return NextResponse.json({ error: "Tipo de convite inválido." }, { status: 400 });
+    if (ehFuncionario && !["diario", "semanal"].includes(tipo)) return NextResponse.json({ error: "A portaria pode cadastrar convites diários ou de 7 dias." }, { status: 403 });
     if (!["pix", "dinheiro"].includes(pagamento)) return NextResponse.json({ error: "Forma de pagamento inválida." }, { status: 400 });
+    if (ehFuncionario && pagamento !== "pix") return NextResponse.json({ error: "A portaria deve encaminhar o comprovante PIX para aprovação da administração. Recebimentos em dinheiro são restritos à administração." }, { status: 403 });
     if (!Number.isFinite(valor) || valor < 0) return NextResponse.json({ error: "Valor inválido." }, { status: 400 });
     if (pagamento === "dinheiro" && !conta_id) return NextResponse.json({ error: "Selecione a conta de recebimento." }, { status: 400 });
     if (arquivo && !(arquivo instanceof File)) return NextResponse.json({ error: "Comprovante inválido." }, { status: 400 });
@@ -116,7 +153,20 @@ export async function POST(request: Request) {
       mensagem: `Convite de ${nome} no valor de R$ ${valor.toFixed(2).replace(".", ",")} foi enviado para conferência.`,
       origem_tipo: "convite", origem_id: convite.id, lida: false,
     });
-    return NextResponse.json({ ok: true, convite: atualizado || convite, url: pub.publicUrl, aviso: ne ? `Convite salvo, mas a notificação não foi criada: ${ne.message}` : undefined });
+    const conviteResposta = ehFuncionario
+      ? {
+          id: convite.id,
+          socio_id: convite.socio_id,
+          nome_convidado: convite.nome_convidado,
+          cidade_convidado: convite.cidade_convidado,
+          data_inicio: convite.data_inicio,
+          data_fim: convite.data_fim,
+          tipo: convite.tipo,
+          status: convite.status,
+          created_at: convite.created_at,
+        }
+      : (atualizado || convite);
+    return NextResponse.json({ ok: true, convite: conviteResposta, aviso: ne ? `Convite salvo, mas a notificação não foi criada: ${ne.message}` : undefined });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Erro ao registrar convite." }, { status: 500 });
   }

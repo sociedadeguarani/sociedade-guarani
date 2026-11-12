@@ -144,7 +144,7 @@ export default function ConfirmacaoReserva({
               ) : (
                 <>
                   <div className="mt-3 rounded-xl bg-white p-3 text-sm">
-                    <div className="text-xs text-gray-500">Chave PIX · Banrisul</div>
+                    <div className="text-xs text-gray-500">Chave PIX · Sicredi</div>
                     <div className="break-all font-bold">{formatarChavePix(pix.chave_pix)}</div>
                     {pix.nome_recebedor && <div className="mt-1 text-xs text-gray-500">{pix.nome_recebedor}{pix.cidade ? ` · ${pix.cidade}` : ""}</div>}
                   </div>

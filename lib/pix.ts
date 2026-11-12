@@ -2,7 +2,10 @@
 export const CHAVE_PIX_BANRISUL = "+5555991817619";
 export const CHAVE_PIX_BANRISUL_EXIBICAO = "+55 (55) 99181-7619";
 
-/** Chave CNPJ antiga que estava configurada para a conta anterior. */
+/** Chave PIX CNPJ confirmada para recebimentos via Sicredi em Convites e Reservas. */
+export const CHAVE_PIX_SICREDI_CNPJ = "89.649.164/0001-58";
+
+/** Chave CNPJ identificada em códigos PIX históricos de eventos. */
 export const CHAVE_PIX_LEGADA_CNPJ = "89.649.164/0001-58";
 
 export function ehChavePixLegada(chave: string | null | undefined): boolean {
@@ -19,6 +22,9 @@ export function formatarChavePix(chave: string | null | undefined): string {
   const digitos = valor.replace(/\D/g, "");
   if (digitos === "5555991817619" || digitos === "55991817619") {
     return CHAVE_PIX_BANRISUL_EXIBICAO;
+  }
+  if (digitos === "89649164000158") {
+    return CHAVE_PIX_SICREDI_CNPJ;
   }
   return valor || CHAVE_PIX_BANRISUL_EXIBICAO;
 }

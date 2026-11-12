@@ -335,7 +335,7 @@ export default function ReservasPage() {
     }
     void (async () => {
       try {
-        const resposta = await fetch(`/api/configuracao-pix?valor=${encodeURIComponent(valor.toFixed(2))}`, { cache: "no-store" });
+        const resposta = await fetch(`/api/configuracao-pix?valor=${encodeURIComponent(valor.toFixed(2))}&destino=reservas`, { cache: "no-store" });
         const resultado = await resposta.json().catch(() => ({}));
         if (!ativo) return;
         setPix(resposta.ok && resultado?.config ? resultado.config : null);
