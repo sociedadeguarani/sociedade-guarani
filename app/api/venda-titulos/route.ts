@@ -35,6 +35,28 @@ const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "app
 const FORMAS_PAGAMENTO = new Set(["pix", "dinheiro", "transferencia", "boleto", "debito_em_conta", "cheque", "cartao", "outro"]);
 
 type ArquivoComprovante = { url: string; caminho: string };
+type ParcelaVendaInput = {
+  valor: number | string;
+  data_vencimento: string;
+  forma_pagamento: string;
+  conta_bancaria_id?: string | null;
+  recebido?: boolean;
+  data_pagamento?: string | null;
+};
+type ParcelaVendaRow = {
+  id: string;
+  numero: number;
+  valor: number;
+  descricao?: string;
+  data_vencimento: string;
+  situacao?: string;
+};
+type ContratoVendaRow = {
+  id: string;
+  codigo: string;
+  comprador_nome: string;
+  socio_id: string;
+};
 
 async function salvarComprovante(db: ReturnType<typeof getServiceClient>, arquivo: File | null, identificador: string): Promise<ArquivoComprovante | null> {
   if (!arquivo || arquivo.size <= 0) return null;
@@ -67,7 +89,7 @@ async function removerComprovante(db: ReturnType<typeof getServiceClient>, camin
 }
 
 async function criarMovimento(
-  db: ReturnType<typeof getServiceClient>, parcela: any, contrato: any,
+  db: ReturnType<typeof getServiceClient>, parcela: ParcelaVendaRow, contrato: ContratoVendaRow,
   userId: string, contaId: string, forma: string, data: string,
   comprovanteUrl: string | null = null,
 ) {
@@ -130,7 +152,7 @@ export async function POST(request: Request) {
   let caminhoComprovante: string | null = null;
   try {
     const contentType = request.headers.get("content-type") || "";
-    let body: Record<string, any>;
+    let body: Record<string, unknown>;
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       body = JSON.parse(String(form.get("dados") || "{}"));
@@ -150,7 +172,7 @@ export async function POST(request: Request) {
       const contaEntradaId = String(body.conta_entrada_id || "");
       const formaEntrada = String(body.forma_entrada || "pix");
       const dataEntrada = String(body.data_entrada || dataHoje());
-      const valores = Array.isArray(body.parcelas) ? body.parcelas : [];
+      const valores: ParcelaVendaInput[] = Array.isArray(body.parcelas) ? body.parcelas as ParcelaVendaInput[] : [];
       if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 7) {
         return erro("Informe associado, valor total e quantidade de parcelas válida.");
       }
@@ -165,8 +187,8 @@ export async function POST(request: Request) {
       if (socioError) throw socioError;
       if (!socio || socio.ativo === false) return erro("Associado não encontrado ou inativo.", 404);
 
-      const soma = valores.reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
-      if (valores.length !== quantidade || valores.some((p: any) =>
+      const soma = valores.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+      if (valores.length !== quantidade || valores.some((p) =>
         !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 ||
         !FORMAS_PAGAMENTO.has(String(p.forma_pagamento || "")) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(String(p.data_vencimento || ""))
@@ -190,7 +212,7 @@ export async function POST(request: Request) {
       }).select("*").single();
       if (contratoError) throw contratoError;
 
-      const parcelas = valores.map((p: any, i: number) => ({
+      const parcelas = valores.map((p, i) => ({
         venda_titulo_id: contrato.id, numero: i + 1, descricao: i === 0 ? "Entrada" : `Parcela ${i + 1}`,
         valor: Number(p.valor), data_vencimento: String(p.data_vencimento || dataVencimento(inicio, i)),
         situacao: p.recebido === true && i === 0 ? "pago" : "em_aberto",
@@ -207,13 +229,13 @@ export async function POST(request: Request) {
 
       // Registra a entrada como uma nova receita do Financeiro, sem depender de um lançamento prévio.
       if (registrarEntrada) {
-        const parcelaEntrada = (parcelasCriadas || []).find((p: any) => Number(p.numero) === 1);
+        const parcelaEntrada = ((parcelasCriadas || []) as ParcelaVendaRow[]).find((p) => Number(p.numero) === 1);
         if (!parcelaEntrada) throw new Error("A parcela de entrada não foi criada.");
         try {
           const comprovante = await salvarComprovante(db, arquivo, `entrada-${contrato.id}`);
           caminhoComprovante = comprovante?.caminho || null;
           const movimentoId = await criarMovimento(
-            db, parcelaEntrada, contrato, auth.usuario.id, contaEntradaId, formaEntrada, dataEntrada,
+            db, parcelaEntrada, contrato as ContratoVendaRow, auth.usuario.id, contaEntradaId, formaEntrada, dataEntrada,
             comprovante?.url || null,
           );
           const { error: vinculoErro } = await db.from("vendas_titulos_parcelas")
@@ -250,7 +272,7 @@ export async function POST(request: Request) {
           }
         }
       } catch (mensalidadeError) {
-        const primeiraParcela = (parcelasCriadas || []).find((p: any) => Number(p.numero) === 1);
+        const primeiraParcela = ((parcelasCriadas || []) as ParcelaVendaRow[]).find((p) => Number(p.numero) === 1);
         if (registrarEntrada && primeiraParcela?.id) {
           await db.from("movimentacoes_financeiras").delete()
             .eq("origem_tipo", "venda_titulo_parcela").eq("origem_id", primeiraParcela.id);
@@ -301,7 +323,7 @@ export async function POST(request: Request) {
           return erro("Esta parcela já foi baixada. Atualize a tela.", 409);
         }
         try {
-          const movimentoId = await criarMovimento(db, atualizada, contrato, auth.usuario.id, contaId, forma, data, comprovante?.url || null);
+          const movimentoId = await criarMovimento(db, atualizada as ParcelaVendaRow, contrato as ContratoVendaRow, auth.usuario.id, contaId, forma, data, comprovante?.url || null);
           const { error: vinculoErro } = await db.from("vendas_titulos_parcelas").update({ movimentacao_id: movimentoId }).eq("id", parcelaId);
           if (vinculoErro) throw vinculoErro;
           const { count: abertas, error: abertasError } = await db.from("vendas_titulos_parcelas")
