@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
-import { carregarMapaPrimeiraCompetenciaPaga } from "@/lib/primeiraCompetenciaPaga";
 import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 
 type LinhaMensalidadeAcesso = { id: string; valor: number | string | null; data_vencimento: string | null; competencia: string | null; situacao: string | null };
@@ -154,7 +153,6 @@ async function verificarMensalidadesAtrasadas(
   diaVencimento?: number | string | null,
 ) {
   const hoje = dataHojeBrasil();
-  const primeiraCompetenciaPaga = (await carregarMapaPrimeiraCompetenciaPaga(supabase, [socioId])).get(socioId);
   const { data, error } = await supabase
     .from("mensalidades")
     .select("id,valor,data_vencimento,competencia,situacao")
@@ -164,7 +162,7 @@ async function verificarMensalidadesAtrasadas(
   if (error) throw error;
 
   const itens = (data || []).filter((m: LinhaMensalidadeAcesso) =>
-    !mensalidadeRegistroAnteriorAAssociacao(dataAssociacao, m.competencia, m.data_vencimento, diaVencimento, primeiraCompetenciaPaga) &&
+    !mensalidadeRegistroAnteriorAAssociacao(dataAssociacao, m.competencia, m.data_vencimento, diaVencimento) &&
     !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
       String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     )
@@ -779,7 +777,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const validadeExameSocio = String(dependente?.exame_medico_validade || socio.exame_medico_validade || "").slice(0, 10) || null;
+    // Dependentes precisam ter validade de exame própria; não herdar a do titular.
+    const validadeExameSocio = String(
+      dependente ? dependente.exame_medico_validade || "" : socio.exame_medico_validade || ""
+    ).slice(0, 10) || null;
     const hojeExame = dataHojeBrasil();
     const exameEmDia = Boolean(validadeExameSocio && validadeExameSocio >= hojeExame);
     const exame = {
