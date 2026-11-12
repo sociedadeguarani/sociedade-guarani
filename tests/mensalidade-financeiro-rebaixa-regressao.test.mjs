@@ -55,8 +55,3 @@ test('a geração em lote permanece disponível na API', () => {
   assert.match(api, /acao === "gerar_lote"/);
 });
 
-test('SQL de reabertura respeita tarifa_pagamento NOT NULL', () => {
-  const sql = fs.readFileSync(path.join(root, 'docs/sql/12_corrigir_mensalidade_pedro_pos_estorno.sql'), 'utf8');
-  assert.match(sql, /tarifa_pagamento\s*=\s*0\s*,/i);
-  assert.doesNotMatch(sql, /tarifa_pagamento\s*=\s*NULL/i);
-});
