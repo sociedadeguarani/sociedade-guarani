@@ -81,6 +81,8 @@ type ParcelaForm = {
   data_vencimento: string;
   forma_pagamento: string;
   confirmar: boolean;
+  conta_bancaria_id: string;
+  data_pagamento: string;
 };
 
 const hoje = new Date().toISOString().slice(0, 10);
@@ -154,6 +156,8 @@ function criarParcelas(
       data_vencimento: vencimento.toISOString().slice(0, 10),
       forma_pagamento: forma,
       confirmar: i === 0,
+      conta_bancaria_id: "",
+      data_pagamento: hoje,
     };
   });
 }
@@ -626,7 +630,8 @@ export default function TemporadasPage() {
             data_vencimento: p.data_vencimento,
             forma_pagamento: p.forma_pagamento,
             confirmar: p.confirmar,
-            conta_bancaria_id: p.confirmar ? contaId || null : null,
+            conta_bancaria_id: p.confirmar ? p.conta_bancaria_id || contaId || null : null,
+            data_pagamento: p.confirmar ? p.data_pagamento || hoje : null,
           })),
         }),
       });
@@ -967,7 +972,7 @@ export default function TemporadasPage() {
               </label>
 
               <label>
-                <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Conta de recebimento</span>
+                <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Conta padrão (opcional)</span>
                 <select value={contaId} onChange={(e) => setContaId(e.target.value)} className="w-full rounded-xl border border-[#d5e0da] px-3 py-3">
                   <option value="">Selecione se houver recebimento confirmado</option>
                   {contas.filter((c) => c.ativo !== false).map((c) => (
@@ -983,7 +988,7 @@ export default function TemporadasPage() {
                 </div>
                 <div className="space-y-3">
                   {parcelas.map((p, i) => (
-                    <div key={i} className="grid gap-3 rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-3 md:grid-cols-[1.2fr_.8fr_1fr_1fr_auto]">
+                    <div key={i} className="grid gap-3 rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-3 md:grid-cols-2 xl:grid-cols-6">
                       <input value={p.descricao} onChange={(e) => editarParcela(i, "descricao", e.target.value)} className="rounded-lg border px-3 py-2 text-sm" />
                       <input value={p.valor} onChange={(e) => editarParcela(i, "valor", e.target.value.replace(",", "."))} inputMode="decimal" className="rounded-lg border px-3 py-2 text-sm font-bold" />
                       <input type="date" value={p.data_vencimento} onChange={(e) => editarParcela(i, "data_vencimento", e.target.value)} className="rounded-lg border px-3 py-2 text-sm" />
@@ -995,10 +1000,19 @@ export default function TemporadasPage() {
                         <option value="debito_em_conta">Débito</option>
                         <option value="transferencia">Transferência</option>
                       </select>
-                      <label className="flex items-center gap-2 text-xs font-bold text-[#50625a]">
-                        <input type="checkbox" checked={p.confirmar} onChange={(e) => editarParcela(i, "confirmar", e.target.checked)} />
-                        Recebida
-                      </label>
+                      <select required={p.confirmar && p.forma_pagamento !== "cheque"} value={p.conta_bancaria_id || (i === 0 ? contaId : "")} onChange={(e) => editarParcela(i, "conta_bancaria_id", e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+                        <option value="">{p.forma_pagamento === "cheque" ? "Conta (após compensar)" : "Conta de recebimento"}</option>
+                        {contas.filter((c) => c.ativo !== false).map((c) => (
+                          <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ""}</option>
+                        ))}
+                      </select>
+                      <div className="flex flex-col gap-1">
+                        <label className="flex items-center gap-2 text-xs font-bold text-[#50625a]">
+                          <input type="checkbox" checked={p.confirmar} onChange={(e) => editarParcela(i, "confirmar", e.target.checked)} />
+                          Recebida
+                        </label>
+                        {p.confirmar && <input aria-label="Data do recebimento" type="date" value={p.data_pagamento} onChange={(e) => editarParcela(i, "data_pagamento", e.target.value)} className="rounded-lg border px-2 py-1 text-xs" />}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -11,6 +11,7 @@ type ParcelaEntrada = {
   forma_pagamento: string;
   confirmar?: boolean;
   conta_bancaria_id?: string | null;
+  data_pagamento?: string | null;
 };
 
 type TemporadaRegistro = {
@@ -506,7 +507,7 @@ export async function POST(request: NextRequest) {
                   : p.confirmar
                     ? "pago"
                     : "pendente",
-              data_pagamento: p.confirmar ? new Date().toISOString().slice(0, 10) : null,
+              data_pagamento: p.confirmar ? String(p.data_pagamento || new Date().toISOString().slice(0, 10)) : null,
               conta_bancaria_id: p.confirmar ? p.conta_bancaria_id || null : null,
               cheque_numero: null,
               boleto_status:
@@ -519,27 +520,35 @@ export async function POST(request: NextRequest) {
 
         if (erroParcelas) throw erroParcelas;
 
-        const primeiraConfirmada = ((parcelasCriadas || []) as ParcelaCriadaRow[])
-          .find((parcela) => parcela.situacao === "pago");
-        if (primeiraConfirmada) {
-          if (!primeiraConfirmada.conta_bancaria_id) {
-            throw new Error("A parcela confirmada precisa de uma conta de recebimento.");
+        const confirmadas = ((parcelasCriadas || []) as ParcelaCriadaRow[])
+          .filter((parcela) => parcela.situacao === "pago");
+        for (const parcelaConfirmada of confirmadas) {
+          if (!parcelaConfirmada.conta_bancaria_id) {
+            throw new Error(`Selecione a conta de recebimento da ${parcelaConfirmada.numero}ª parcela confirmada.`);
           }
-
-          await criarMovimentacao(
+          const movimentacaoId = await criarMovimentacao(
             auth.db,
             temporada.id,
-            String(primeiraConfirmada.id),
+            String(parcelaConfirmada.id),
             null,
-            Number(primeiraConfirmada.valor),
-            String(primeiraConfirmada.forma_pagamento),
-            String(primeiraConfirmada.conta_bancaria_id),
-            String(primeiraConfirmada.data_pagamento),
+            Number(parcelaConfirmada.valor),
+            String(parcelaConfirmada.forma_pagamento),
+            String(parcelaConfirmada.conta_bancaria_id),
+            String(parcelaConfirmada.data_pagamento),
             auth.user.id,
             responsavelNome,
-            primeiraConfirmada.numero ?? "—"
+            parcelaConfirmada.numero ?? "—"
           );
+          const { error: erroVinculo } = await auth.db
+            .from("temporadas_parcelas")
+            .update({ movimentacao_id: movimentacaoId })
+            .eq("id", parcelaConfirmada.id)
+            .eq("temporada_id", temporada.id);
+          if (erroVinculo) throw erroVinculo;
+        }
 
+        const primeiraConfirmada = confirmadas[0] || null;
+        if (primeiraConfirmada) {
           const { error: atualiza } = await auth.db
             .from("temporadas")
             .update({
@@ -549,7 +558,6 @@ export async function POST(request: NextRequest) {
               data_pagamento: primeiraConfirmada.data_pagamento,
             })
             .eq("id", temporada.id);
-
           if (atualiza) throw atualiza;
 
           await auth.db
@@ -557,17 +565,18 @@ export async function POST(request: NextRequest) {
             .update({ matricula: codigo })
             .eq("temporada_id", temporada.id)
             .eq("papel", "titular");
-          await registrarAvisoPagamentoTemporada(auth.db, {
-            ...temporada,
-            codigo,
-            responsavel_nome: responsavelNome,
-          }, primeiraConfirmada, auth.user.id);
+          for (const parcelaConfirmada of confirmadas) {
+            await registrarAvisoPagamentoTemporada(auth.db, {
+              ...temporada,
+              codigo,
+              responsavel_nome: responsavelNome,
+            }, parcelaConfirmada, auth.user.id);
+          }
         } else {
           const { error: atualiza } = await auth.db
             .from("temporadas")
             .update({ codigo, matricula: null, situacao: "pendente" })
             .eq("id", temporada.id);
-
           if (atualiza) throw atualiza;
         }
 
@@ -575,8 +584,8 @@ export async function POST(request: NextRequest) {
           ok: true,
           temporada_id: temporada.id,
           codigo: primeiraConfirmada ? codigo : null,
-          message: primeiraConfirmada
-            ? "Temporada criada e primeira parcela lançada no Financeiro."
+          message: confirmadas.length
+            ? `${confirmadas.length} pagamento(s) confirmado(s) e lançado(s) no Financeiro.`
             : "Temporada criada. A matrícula TE será gerada na confirmação do pagamento.",
         });
       } catch (innerError) {

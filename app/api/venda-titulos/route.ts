@@ -32,7 +32,7 @@ function dataVencimento(inicio: string, meses: number) {
 
 const BUCKET_COMPROVANTES = "comprovantes-financeiro";
 const TIPOS_COMPROVANTE = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-const FORMAS_PAGAMENTO = new Set(["pix", "dinheiro", "transferencia", "boleto", "debito_em_conta", "cheque", "outro"]);
+const FORMAS_PAGAMENTO = new Set(["pix", "dinheiro", "transferencia", "boleto", "debito_em_conta", "cheque", "cartao", "outro"]);
 
 type ArquivoComprovante = { url: string; caminho: string };
 
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
       const formaEntrada = String(body.forma_entrada || "pix");
       const dataEntrada = String(body.data_entrada || dataHoje());
       const valores = Array.isArray(body.parcelas) ? body.parcelas : [];
-      if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 24) {
+      if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 7) {
         return erro("Informe associado, valor total e quantidade de parcelas válida.");
       }
       if (registrarEntrada && (!contaEntradaId || !/^\d{4}-\d{2}-\d{2}$/.test(dataEntrada) || !FORMAS_PAGAMENTO.has(formaEntrada))) {
@@ -166,8 +166,12 @@ export async function POST(request: Request) {
       if (!socio || socio.ativo === false) return erro("Associado não encontrado ou inativo.", 404);
 
       const soma = valores.reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
-      if (valores.length !== quantidade || valores.some((p: any) => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0) || Math.abs(soma - valorTotal) > 0.01) {
-        return erro("As parcelas precisam somar exatamente o valor total do título.");
+      if (valores.length !== quantidade || valores.some((p: any) =>
+        !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 ||
+        !FORMAS_PAGAMENTO.has(String(p.forma_pagamento || "")) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(String(p.data_vencimento || ""))
+      ) || Math.abs(soma - valorTotal) > 0.01) {
+        return erro("Confira valores, vencimentos e formas de pagamento. As parcelas precisam somar exatamente o valor total do título.");
       }
       const contaEntrada = registrarEntrada
         ? await db.from("contas_bancarias").select("id,ativo").eq("id", contaEntradaId).maybeSingle()
@@ -189,10 +193,10 @@ export async function POST(request: Request) {
       const parcelas = valores.map((p: any, i: number) => ({
         venda_titulo_id: contrato.id, numero: i + 1, descricao: i === 0 ? "Entrada" : `Parcela ${i + 1}`,
         valor: Number(p.valor), data_vencimento: String(p.data_vencimento || dataVencimento(inicio, i)),
-        situacao: registrarEntrada && i === 0 ? "pago" : "em_aberto",
-        data_pagamento: registrarEntrada && i === 0 ? dataEntrada : null,
-        forma_pagamento: registrarEntrada && i === 0 ? formaEntrada : null,
-        conta_bancaria_id: registrarEntrada && i === 0 ? contaEntradaId : null,
+        situacao: p.recebido === true && i === 0 ? "pago" : "em_aberto",
+        data_pagamento: p.recebido === true && i === 0 ? String(p.data_pagamento || dataEntrada) : null,
+        forma_pagamento: String(p.forma_pagamento || (i === 0 ? formaEntrada : "boleto")),
+        conta_bancaria_id: p.conta_bancaria_id ? String(p.conta_bancaria_id) : (i === 0 && registrarEntrada ? contaEntradaId : null),
         movimentacao_id: null,
       }));
       const { data: parcelasCriadas, error: parcelasError } = await db.from("vendas_titulos_parcelas").insert(parcelas).select("*");
