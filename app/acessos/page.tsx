@@ -68,6 +68,7 @@ type ResultadoAcessoLote = {
   sucesso: boolean;
   liberado: boolean;
   mensagem: string;
+  exame?: { status?: { texto?: string; cor?: string }; validade?: string | null } | null;
 };
 
 function chaveOpcaoAcesso(opcao: OpcaoBuscaAcesso) {
@@ -204,6 +205,7 @@ export default function AcessosPage() {
             mensagem: dados.liberado
               ? "Entrada registrada e liberada."
               : (dados.motivo_bloqueio || dados.acesso?.motivo_negacao || "Acesso registrado como bloqueado."),
+            exame: dados.exame ?? null,
           });
         } catch (erroPessoa) {
           falhas.push(pessoa);
@@ -560,12 +562,19 @@ export default function AcessosPage() {
                 <h2 className="text-lg font-black text-[#005a3c]">Resultado dos acessos</h2>
                 <span className="text-xs font-semibold text-gray-500">{resultadosLote.filter((item) => item.sucesso && item.liberado).length} liberado(s) · {resultadosLote.filter((item) => item.sucesso && !item.liberado).length} bloqueado(s) · {resultadosLote.filter((item) => !item.sucesso).length} falha(s)</span>
               </div>
+              <p className="mt-1 text-xs text-gray-500">A validade do exame controla o uso da água e das piscinas; não bloqueia, por si só, a entrada na sociedade.</p>
               <div className="mt-3 divide-y">
                 {resultadosLote.map((item) => (
                   <div key={item.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-bold text-[#17382c]">{item.nome} <span className="text-xs font-normal text-gray-500">{item.matricula || ""}</span></p>
                       <p className="text-sm text-gray-600">{item.mensagem}</p>
+                      {item.exame && (
+                        <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-semibold ${item.exame.status?.cor === "verde" ? "border-green-200 bg-green-50 text-green-800" : item.exame.status?.cor === "amarelo" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-red-200 bg-red-50 text-red-800"}`}>
+                          <span className="font-black">Exame médico: </span>{item.exame.status?.texto || "Não informado"}
+                          {item.exame.validade && <span> · Validade: {new Date(`${item.exame.validade}T12:00:00`).toLocaleDateString("pt-BR")}</span>}
+                        </div>
+                      )}
                     </div>
                     <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.sucesso && item.liberado ? "bg-green-100 text-green-800" : item.sucesso ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
                       {item.sucesso ? item.liberado ? "Liberado" : "Bloqueado" : "Falha"}
