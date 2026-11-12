@@ -32,28 +32,11 @@ export async function GET(request: Request) {
     const [{ data: convites, error: ce }, { data: socios, error: se }, { data: dependentes, error: de }] = await Promise.all([
       consultaConvites,
       db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,situacao").order("nome", { ascending: true }),
-      db.from("dependentes").select("id,socio_id,nome,matricula,parentesco,ativo").order("nome", { ascending: true }),
+      db.from("dependentes").select("id,socio_id,nome,matricula,parentesco,ativo").eq("ativo", true).order("nome", { ascending: true }),
     ]);
     if (ce) return NextResponse.json({ error: ce.message }, { status: 500 });
     if (se) return NextResponse.json({ error: se.message }, { status: 500 });
     if (de) return NextResponse.json({ error: de.message }, { status: 500 });
-
-    // A tabela socios guarda titulares e associados com matrícula própria;
-    // dependentes familiares ficam em dependentes e devem aparecer na mesma busca.
-    const pessoasBusca = [
-      ...(socios || []).map((socio) => ({ ...socio, tipo_registro: "socio" as const })),
-      ...(dependentes || [])
-        .filter((dependente) => dependente.ativo !== false && dependente.socio_id)
-        .map((dependente) => ({
-          id: String(dependente.id),
-          nome: String(dependente.nome || ""),
-          matricula: dependente.matricula || null,
-          responsavel_id: String(dependente.socio_id),
-          parentesco: dependente.parentesco || null,
-          situacao: "Ativo",
-          tipo_registro: "dependente" as const,
-        })),
-    ].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
 
     // Funcionários da portaria precisam identificar o associado responsável,
     // mas não devem consultar contas bancárias nem valores/comprovantes.
@@ -66,7 +49,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       convites: convites || [],
-      socios: pessoasBusca,
+      socios: socios || [],
+      dependentes: dependentes || [],
       contas,
       perfil: auth.usuario.perfil,
       podeGerenciarFinanceiro: !ehFuncionario,
@@ -89,6 +73,7 @@ export async function POST(request: Request) {
     const ehFuncionario = auth.usuario.perfil === "funcionario";
     const form = await request.formData();
     const socio_id = String(form.get("socio_id") || "").trim() || null;
+    const dependente_id = String(form.get("dependente_id") || "").trim() || null;
     const nome = String(form.get("nome") || "").trim();
     const documento = String(form.get("documento") || "").trim() || null;
     const cidade = String(form.get("cidade") || "").trim();
@@ -123,6 +108,15 @@ export async function POST(request: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       if (!socio) return NextResponse.json({ error: "Associado responsável não encontrado." }, { status: 404 });
     }
+    if (dependente_id) {
+      if (!socio_id) return NextResponse.json({ error: "Selecione o titular responsável pelo dependente." }, { status: 400 });
+      const { data: dependente, error } = await db.from("dependentes")
+        .select("id,socio_id,ativo").eq("id", dependente_id).maybeSingle();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (!dependente || dependente.socio_id !== socio_id || dependente.ativo === false) {
+        return NextResponse.json({ error: "Dependente não encontrado ou não vinculado ao titular selecionado." }, { status: 404 });
+      }
+    }
 
     if (pagamento === "dinheiro") {
       const { data: conta, error } = await db.from("contas_bancarias").select("id").eq("id", conta_id).eq("ativo", true).maybeSingle();
@@ -131,7 +125,7 @@ export async function POST(request: Request) {
     }
 
     const { data: convite, error: ce } = await db.from("convites").insert({
-      socio_id, nome_convidado: nome, documento_convidado: documento, cidade_convidado: cidade,
+      socio_id, dependente_id, nome_convidado: nome, documento_convidado: documento, cidade_convidado: cidade,
       data_inicio: inicio, data_fim: fim, tipo, valor,
       status: pagamento === "pix" ? "pendente" : "pago", forma_pagamento: pagamento,
       comprovante_url: null, comprovante_enviado_em: null,
@@ -144,7 +138,7 @@ export async function POST(request: Request) {
         conta_bancaria_id: conta_id, conta_destino_id: null, grupo_transferencia: null,
         tipo: "entrada", categoria: "Convite", descricao: `Convite - ${nome}`, valor,
         data_movimentacao: dataHoje(), forma_pagamento: "dinheiro", origem_tipo: "convite",
-        origem_id: convite.id, socio_id, dependente_id: null, comprovante_url: null,
+        origem_id: convite.id, socio_id, dependente_id, comprovante_url: null,
         conciliado: false, data_conciliacao: null, observacoes: "Pagamento em dinheiro registrado pela administração.",
       });
       if (me) {

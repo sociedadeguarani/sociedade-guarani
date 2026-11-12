@@ -439,29 +439,23 @@ export async function GET(request: Request) {
     if (status === "cancelada") query = query.eq("situacao", "cancelada");
     else if (status === "confirmada") query = query.in("situacao", ["confirmada", "utilizada"]);
     else if (status === "pendente") query = query.in("situacao", ["solicitada", "aguardando_pagamento"]);
+    if (/^\\d{4}-\\d{2}-\\d{2}$/.test(dataFiltro)) query = query.eq("data_reserva", dataFiltro);
+    if (/^\\d{4}-\\d{2}-\\d{2}$/.test(dataInicialFiltro)) query = query.gte("data_reserva", dataInicialFiltro);
+    if (/^\\d{4}-\\d{2}-\\d{2}$/.test(dataFinalFiltro)) query = query.lte("data_reserva", dataFinalFiltro);
 
-    // "todos" é apenas o valor visual da interface, nunca um UUID.
+    // "todos" é uma opção neutra da interface, não um UUID.
     if (espacoFiltro && espacoFiltro !== "todos") {
       if (!UUID_RE.test(espacoFiltro)) {
         return NextResponse.json({ error: "Espaço selecionado inválido." }, { status: 400 });
       }
       query = query.eq("espaco_id", espacoFiltro);
     }
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dataFiltro)) query = query.eq("data_reserva", dataFiltro);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dataInicialFiltro)) query = query.gte("data_reserva", dataInicialFiltro);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dataFinalFiltro)) query = query.lte("data_reserva", dataFinalFiltro);
-
     if (tipoPessoaFiltro === "socio" || tipoPessoaFiltro === "nao_socio") {
       query = query.eq("tipo_pessoa", tipoPessoaFiltro);
     }
-
-    if (pagamentoFiltro && pagamentoFiltro !== "todos") {
-      if (pagamentoFiltro === "sem_pagamento") {
-        query = query.is("tipo_pagamento", null);
-      } else if (["pix", "dinheiro", "transferencia", "debito_em_conta", "boleto", "cartao", "outro"].includes(pagamentoFiltro)) {
-        query = query.eq("tipo_pagamento", pagamentoFiltro);
-      }
+    if (pagamentoFiltro && pagamentoFiltro !== "todos" &&
+        ["pix", "dinheiro", "transferencia", "debito_em_conta", "boleto", "cartao", "outro"].includes(pagamentoFiltro)) {
+      query = query.eq("tipo_pagamento", pagamentoFiltro);
     }
 
     const [{ data, error }, { data: espacosDb, error: erroEspacos }] = await Promise.all([
