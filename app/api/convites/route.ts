@@ -29,12 +29,31 @@ export async function GET(request: Request) {
       ? db.from("convites").select("id,socio_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,status,created_at").order("created_at", { ascending: false })
       : db.from("convites").select("*").order("created_at", { ascending: false });
 
-    const [{ data: convites, error: ce }, { data: socios, error: se }] = await Promise.all([
+    const [{ data: convites, error: ce }, { data: socios, error: se }, { data: dependentes, error: de }] = await Promise.all([
       consultaConvites,
       db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,situacao").order("nome", { ascending: true }),
+      db.from("dependentes").select("id,socio_id,nome,matricula,parentesco,ativo").order("nome", { ascending: true }),
     ]);
     if (ce) return NextResponse.json({ error: ce.message }, { status: 500 });
     if (se) return NextResponse.json({ error: se.message }, { status: 500 });
+    if (de) return NextResponse.json({ error: de.message }, { status: 500 });
+
+    // A tabela socios guarda titulares e associados com matrícula própria;
+    // dependentes familiares ficam em dependentes e devem aparecer na mesma busca.
+    const pessoasBusca = [
+      ...(socios || []).map((socio) => ({ ...socio, tipo_registro: "socio" as const })),
+      ...(dependentes || [])
+        .filter((dependente) => dependente.ativo !== false && dependente.socio_id)
+        .map((dependente) => ({
+          id: String(dependente.id),
+          nome: String(dependente.nome || ""),
+          matricula: dependente.matricula || null,
+          responsavel_id: String(dependente.socio_id),
+          parentesco: dependente.parentesco || null,
+          situacao: "Ativo",
+          tipo_registro: "dependente" as const,
+        })),
+    ].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
 
     // Funcionários da portaria precisam identificar o associado responsável,
     // mas não devem consultar contas bancárias nem valores/comprovantes.
@@ -47,7 +66,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       convites: convites || [],
-      socios: socios || [],
+      socios: pessoasBusca,
       contas,
       perfil: auth.usuario.perfil,
       podeGerenciarFinanceiro: !ehFuncionario,
