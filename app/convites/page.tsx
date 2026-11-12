@@ -20,12 +20,12 @@ export default function ConvitesPage(){
  const [editandoId,setEditandoId]=useState<string|null>(null);
  const [cidadeOutra,setCidadeOutra]=useState("");
  const [convidadosForm,setConvidadosForm]=useState<ConvidadoForm[]>([{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
+ const valorConvidadoEfetivo=(c:ConvidadoForm)=>c.valor.trim()===""&&normalizarCidadeConvite(c.cidade)==="augusto pestana"?"30":c.valor;
  const totalConvidados=useMemo(()=>convidadosForm.reduce((s,c)=>s+Math.max(0,Number(String(valorConvidadoEfetivo(c)).replace(",","."))||0),0),[convidadosForm]);
  const atualizarConvidado=(index:number,patch:Partial<ConvidadoForm>)=>setConvidadosForm(atual=>atual.map((c,i)=>i===index?{...c,...patch}:c));
  const adicionarConvidado=()=>setConvidadosForm(atual=>atual.length>=50?atual:[...atual,{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
  const removerConvidado=(index:number)=>setConvidadosForm(atual=>atual.length<=1?atual:atual.filter((_,i)=>i!==index));
  const valorSugeridoConvidado=(cidade:string,banho:string,tipo:string="diario")=>normalizarCidadeConvite(cidade)==="augusto pestana"?"30":tipo==="semanal"?"120":banho==="com_banho"?"25":"15";
- const valorConvidadoEfetivo=(c:ConvidadoForm)=>c.valor.trim()===""&&normalizarCidadeConvite(c.cidade)==="augusto pestana"?"30":c.valor;
 
  const ehAugusto=form.cidade.trim().toLowerCase()==="augusto pestana";
   const pessoasAtivas = useMemo(() => sociosBusca.filter((p) => String(p.situacao || "").toLowerCase() !== "inativo"), [sociosBusca]);
