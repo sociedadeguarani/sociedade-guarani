@@ -638,28 +638,18 @@ export default function Page() {
       const mesesConsulta: number[] = [...new Set<number>(mesesSelecionados)].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
       if (mesesConsulta.length === 0) return;
 
-      // Faz uma consulta por competência para não atingir o limite de linhas
-      // da API quando vários meses são selecionados.
+      // Uma única chamada carrega todas as competências selecionadas.
+      // A API pagina internamente em blocos de 1.000 registros para não truncar
+      // o histórico quando o associado possui muitos lançamentos.
       const headers = await h();
-      const respostas = await Promise.all(mesesConsulta.map(async (mesConsulta) => {
-        const r = await fetch(
-          `/api/mensalidades/admin?ano=${ano}&mes=${mesConsulta}`,
-          { headers, cache: "no-store" }
-        );
-        const d = await r.json();
-        if (!r.ok) throw Error(d.error || `Erro ao carregar mensalidades de ${String(mesConsulta).padStart(2, "0")}/${ano}.`);
-        return d;
-      }));
+      const r = await fetch(
+        `/api/mensalidades/admin?ano=${ano}&meses=${mesesConsulta.join(",")}`,
+        { headers, cache: "no-store" }
+      );
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || `Erro ao carregar mensalidades de ${ano}.`);
 
-      const d = respostas[0] || {};
-      const mensalidadesUnicas = new Map<string, M>();
-      respostas.forEach((resposta) => {
-        (Array.isArray(resposta.mensalidades) ? resposta.mensalidades : []).forEach((item: M) => {
-          mensalidadesUnicas.set(String(item.id), item);
-        });
-      });
-
-      setLista([...mensalidadesUnicas.values()]);
+      setLista(Array.isArray(d.mensalidades) ? d.mensalidades : []);
       setSocios(d.socios || []);
       setConfigs(d.configuracoes || []);
       setTarifas(d.tarifas || []);
@@ -707,16 +697,14 @@ export default function Page() {
     void (async () => {
       let houveCriacao = false;
       try {
-        for (const mesItem of faltantes) {
-          const resposta = await fetch("/api/mensalidades/admin", {
-            method: "POST",
-            headers: await h(),
-            body: JSON.stringify({ acao: "gerar", ano, mes: mesItem }),
-          });
-          const dados = await resposta.json();
-          if (!resposta.ok) throw new Error(dados.error || `Não foi possível preparar ${String(mesItem).padStart(2, "0")}/${ano}.`);
-          houveCriacao = true;
-        }
+        const resposta = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: await h(),
+          body: JSON.stringify({ acao: "gerar_lote", ano, meses: faltantes }),
+        });
+        const dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados.error || `Não foi possível preparar as competências selecionadas de ${ano}.`);
+        houveCriacao = true;
         if (houveCriacao) await carregar();
       } catch (erro) {
         setErro(erro instanceof Error ? erro.message : "Não foi possível preparar as mensalidades automaticamente.");
