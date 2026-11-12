@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 
     const [{ data: convites, error: ce }, { data: socios, error: se }] = await Promise.all([
       consultaConvites,
-      db.from("socios").select("id,nome,matricula").order("nome", { ascending: true }),
+      db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,situacao").order("nome", { ascending: true }),
     ]);
     if (ce) return NextResponse.json({ error: ce.message }, { status: 500 });
     if (se) return NextResponse.json({ error: se.message }, { status: 500 });

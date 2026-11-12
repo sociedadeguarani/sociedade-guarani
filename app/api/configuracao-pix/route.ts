@@ -67,11 +67,11 @@ function gerarCopiaECola(chave: string, nome: string, cidade: string, valor: num
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const valor = Number(url.searchParams.get("valor") || 0);
-  const destinoReservas = url.searchParams.get("destino") === "reservas";
+  const destino = url.searchParams.get("destino");
+  const destinoSicredi = destino === "reservas" || destino === "convites";
 
   // Convites e Reservas usam o CNPJ confirmado do Sicredi para novos pagamentos.
-  // Para evitar alterar outros fluxos (ex.: Eventos e Mensalidades), o CNPJ é
-  // forçado apenas quando a chamada identifica destino=reservas.
+  // Os demais módulos preservam a configuração global vigente.
   let config: {
     id: string | null;
     chave_pix: string;
@@ -80,7 +80,7 @@ export async function GET(request: Request) {
     ativo: boolean;
   } = {
     id: null,
-    chave_pix: destinoReservas ? CHAVE_PIX_SICREDI_CNPJ : CHAVE_PIX_PADRAO,
+    chave_pix: destinoSicredi ? CHAVE_PIX_SICREDI_CNPJ : CHAVE_PIX_PADRAO,
     nome_recebedor: NOME_PADRAO,
     cidade: CIDADE_PADRAO,
     ativo: true,
@@ -107,9 +107,9 @@ export async function GET(request: Request) {
         const chaveSalva = String(data.chave_pix);
         config = {
           id: data.id ?? null,
-          // Reservas usam a chave CNPJ do Sicredi confirmada pela Sociedade.
-          // Outros consumidores do endpoint mantêm a configuração global atual.
-          chave_pix: destinoReservas
+          // Convites e Reservas usam o CNPJ do Sicredi; os demais consumidores
+          // mantêm a configuração global atual.
+          chave_pix: destinoSicredi
             ? CHAVE_PIX_SICREDI_CNPJ
             : ehChavePixLegada(chaveSalva) ? CHAVE_PIX_PADRAO : chaveSalva,
           nome_recebedor: String(data.nome_recebedor || NOME_PADRAO),
