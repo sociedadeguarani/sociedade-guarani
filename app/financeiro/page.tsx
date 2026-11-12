@@ -1154,6 +1154,12 @@ export default function FinanceiroPage() {
                 🧾 Contas a Pagar
               </button>
               <button
+                onClick={() => router.push("/financeiro/contas-a-receber")}
+                className="rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] hover:bg-[#eef7f2]"
+              >
+                💰 Contas a Receber
+              </button>
+              <button
                 onClick={() => setAbaFinanceira("contas")}
                 className={`rounded-xl border border-[#cfe3d8] px-4 py-3 text-sm font-bold ${abaFinanceira === "contas" ? "bg-[#e8f3ee] text-[#005a3c]" : "bg-white text-[#005a3c]"}`}
               >
