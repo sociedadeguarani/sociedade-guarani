@@ -65,7 +65,29 @@ export default function VendaTitulosPage() {
     finally { setCarregando(false); }
   }, [requisicao]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => {
+    let ativo = true;
+
+    const inicializar = async () => {
+      try {
+        const data = await requisicao("/api/venda-titulos");
+        if (!ativo) return;
+        setErro("");
+        setContratos(data.contratos || []);
+        setSocios(data.socios || []);
+        setContas(data.contas || []);
+      } catch (e) {
+        if (ativo) setErro(e instanceof Error ? e.message : "Erro ao carregar vendas.");
+      } finally {
+        if (ativo) setCarregando(false);
+      }
+    };
+
+    void inicializar();
+    return () => {
+      ativo = false;
+    };
+  }, [requisicao]);
 
 
 
