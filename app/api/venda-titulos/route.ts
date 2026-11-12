@@ -67,17 +67,37 @@ export async function GET(request: Request) {
 
     const movimentoSocio = String(searchParams.get("socio_id") || "");
     let entradas: any[] = [];
+    let outrasEntradas: any[] = [];
     if (movimentoSocio) {
+      const socioSelecionado = (sociosResult.data || []).find((item: any) => String(item.id) === movimentoSocio);
+      if (!socioSelecionado) return erro("Associado selecionado não foi encontrado.", 404);
+
       const { data, error } = await db.from("movimentacoes_financeiras")
-        .select("id,descricao,valor,data_movimentacao,conta_bancaria_id,forma_pagamento")
-        .eq("socio_id", movimentoSocio).eq("tipo", "entrada")
-        .order("data_movimentacao", { ascending: false }).limit(50);
+        .select("id,socio_id,descricao,valor,data_movimentacao,conta_bancaria_id,forma_pagamento,origem_tipo,origem_id")
+        .eq("tipo", "entrada")
+        .order("data_movimentacao", { ascending: false }).limit(500);
       if (error) throw error;
-      entradas = data || [];
+
+      const normalizar = (valor: unknown) => String(valor || "")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+      const nome = normalizar(socioSelecionado.nome);
+      const tokensNome = nome.split(/\s+/).filter((token: string) => token.length >= 3);
+      const todos = data || [];
+      entradas = todos.filter((movimento: any) => {
+        if (String(movimento.socio_id || "") === movimentoSocio) return true;
+        if (movimento.socio_id) return false;
+        const descricao = normalizar(movimento.descricao);
+        const encontrados = tokensNome.filter((token: string) => descricao.includes(token)).length;
+        return tokensNome.length > 0 && encontrados >= Math.min(2, tokensNome.length);
+      });
+      outrasEntradas = todos.filter((movimento: any) =>
+        !movimento.socio_id && !entradas.some((entrada: any) => entrada.id === movimento.id)
+      ).slice(0, 100);
     }
     return NextResponse.json({
       contratos: contratosResult.data || [], socios: sociosResult.data || [],
-      contas: contasResult.data || [], entradas, competencia_atual: competenciaAtual(),
+      contas: contasResult.data || [], entradas, outras_entradas: outrasEntradas,
+      competencia_atual: competenciaAtual(),
     });
   } catch (e) {
     return erro(e instanceof Error ? e.message : "Erro ao carregar vendas de títulos.", 500);
@@ -98,6 +118,7 @@ export async function POST(request: Request) {
       const inicio = String(body.primeiro_vencimento || dataHoje());
       const entradaPaga = body.entrada_paga === true;
       const movimentoEntradaId = String(body.movimentacao_entrada_id || "");
+      const confirmarEntradaSemVinculo = body.confirmar_entrada_sem_vinculo === true;
       const valores = Array.isArray(body.parcelas) ? body.parcelas : [];
       if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 24) {
         return erro("Informe associado, valor total e quantidade de parcelas válida.");
@@ -116,13 +137,22 @@ export async function POST(request: Request) {
       let movimentoEntrada: any = null;
       if (entradaPaga) {
         const { data, error } = await db.from("movimentacoes_financeiras")
-          .select("id,socio_id,tipo,valor,conta_bancaria_id,forma_pagamento,data_movimentacao")
+          .select("id,socio_id,tipo,valor,conta_bancaria_id,forma_pagamento,data_movimentacao,descricao")
           .eq("id", movimentoEntradaId).maybeSingle();
         if (error) throw error;
         const primeira = valores[0];
-        if (!data || data.tipo !== "entrada" || data.socio_id !== socioId || Math.abs(Number(data.valor) - Number(primeira.valor)) > 0.01) {
+        if (!data || data.tipo !== "entrada" ||
+            (data.socio_id && data.socio_id !== socioId) ||
+            Math.abs(Number(data.valor) - Number(primeira.valor)) > 0.01) {
           return erro("O lançamento selecionado não corresponde ao associado e ao valor da entrada.");
         }
+        if (!data.socio_id && !confirmarEntradaSemVinculo) {
+          return erro("Confirme que o lançamento sem associado vinculado é realmente a entrada deste comprador.");
+        }
+        const { data: jaVinculada, error: erroVinculo } = await db.from("vendas_titulos_parcelas")
+          .select("id").eq("movimentacao_id", movimentoEntradaId).maybeSingle();
+        if (erroVinculo) throw erroVinculo;
+        if (jaVinculada) return erro("Este lançamento financeiro já está vinculado a outra venda de título.", 409);
         movimentoEntrada = data;
       }
 
