@@ -52,7 +52,7 @@ async function criarMovimento(db: ReturnType<typeof getServiceClient>, parcela: 
 
 export async function GET(request: Request) {
   const auth = await exigirAdministrador(request);
-  if ("error" in auth) return erro(auth.error, auth.status);
+  if ("error" in auth) return erro(String(auth.error || "Acesso não autorizado."), auth.status ?? 401);
   const db = getServiceClient();
   const { searchParams } = new URL(request.url);
   try {
@@ -86,7 +86,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const auth = await exigirAdministrador(request);
-  if ("error" in auth) return erro(auth.error, auth.status);
+  if ("error" in auth) return erro(String(auth.error || "Acesso não autorizado."), auth.status ?? 401);
   const db = getServiceClient();
   try {
     const body = await request.json();

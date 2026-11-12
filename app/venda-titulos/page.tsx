@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import MenuLateralPadrao from "../components/MenuLateralPadrao";
-import CabecalhoPadrao from "../components/CabecalhoPadrao";
+import MenuLateralPadrao from "@/app/components/MenuLateralPadrao";
+import CabecalhoPadrao from "@/app/components/CabecalhoPadrao";
 import { FileText, Plus, RefreshCw, CheckCircle2, Search, X } from "lucide-react";
 
 type Socio = { id: string; nome: string; matricula: string | number | null; cpf: string | null; possui_mensalidade: boolean | null; valor_mensalidade: number | null };
