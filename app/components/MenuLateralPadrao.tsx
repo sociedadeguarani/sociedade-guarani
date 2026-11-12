@@ -16,6 +16,7 @@ import {
   DoorOpen,
   Wallet,
   Umbrella,
+  FileText,
   BarChart3,
   Boxes,
   UserCog,
@@ -120,6 +121,12 @@ const ITENS_MENU: readonly ItemMenu[] = [
     permissao: "menu.temporadas",
     rota: "/temporadas",
     icone: Umbrella,
+    perfis: ["administrador", "administrador_master"],
+  },
+  {
+    nome: "Venda de Títulos",
+    rota: "/venda-titulos",
+    icone: FileText,
     perfis: ["administrador", "administrador_master"],
   },
   {
