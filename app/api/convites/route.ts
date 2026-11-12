@@ -75,15 +75,28 @@ export async function GET(request: Request) {
 
     // Usa a mesma regra da tela Carteirinhas: dependentes podem estar na tabela
     // dependentes ou como Sócio Dependente na tabela socios. Não filtra ativo=NULL.
-    let dependentesResult = await db.from("dependentes")
+    const dependentesComMigracao = await db.from("dependentes")
       .select("id,socio_id,nome,matricula,parentesco,ativo,migrado_para_socio_id")
       .order("nome", { ascending: true });
-    if (dependentesResult.error && /migrado_para_socio_id/i.test(dependentesResult.error.message)) {
-      dependentesResult = await db.from("dependentes")
+
+    // Algumas instalações ainda não possuem a coluna de migração. Mantemos
+    // os dois formatos em variáveis separadas para o TypeScript não tentar
+    // atribuir respostas PostgREST com formatos de linha diferentes.
+    let dependentesRows: DependenteBuscaRow[] = [];
+    if (dependentesComMigracao.error && /migrado_para_socio_id/i.test(dependentesComMigracao.error.message)) {
+      const dependentesSemMigracao = await db.from("dependentes")
         .select("id,socio_id,nome,matricula,parentesco,ativo")
         .order("nome", { ascending: true });
+      if (dependentesSemMigracao.error) {
+        return NextResponse.json({ error: dependentesSemMigracao.error.message }, { status: 500 });
+      }
+      dependentesRows = (dependentesSemMigracao.data || []) as DependenteBuscaRow[];
+    } else {
+      if (dependentesComMigracao.error) {
+        return NextResponse.json({ error: dependentesComMigracao.error.message }, { status: 500 });
+      }
+      dependentesRows = (dependentesComMigracao.data || []) as DependenteBuscaRow[];
     }
-    if (dependentesResult.error) return NextResponse.json({ error: dependentesResult.error.message }, { status: 500 });
 
     const socios = (sociosBrutos || []) as SocioBuscaRow[];
     // Quando a mesma pessoa aparece em socios como titular e como dependente antigo,
@@ -105,7 +118,7 @@ export async function GET(request: Request) {
       const chave = chavePessoa(socio.nome, socio.matricula);
       return socioTitularPorChave.get(chave)?.id || id;
     };
-    const dependentesTabela = ((dependentesResult.data || []) as DependenteBuscaRow[])
+    const dependentesTabela = dependentesRows
       .filter((d) => d.ativo !== false && Boolean(d.socio_id) && !d.migrado_para_socio_id)
       .filter((d) => !chavesTitulares.has(chavePessoa(d.nome, d.matricula)));
     const chavesDependentesTabela = new Set(
