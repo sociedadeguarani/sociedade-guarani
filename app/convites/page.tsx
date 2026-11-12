@@ -20,11 +20,12 @@ export default function ConvitesPage(){
  const [editandoId,setEditandoId]=useState<string|null>(null);
  const [cidadeOutra,setCidadeOutra]=useState("");
  const [convidadosForm,setConvidadosForm]=useState<ConvidadoForm[]>([{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
- const totalConvidados=useMemo(()=>convidadosForm.reduce((s,c)=>s+Math.max(0,Number(String(c.valor).replace(",","."))||0),0),[convidadosForm]);
+ const totalConvidados=useMemo(()=>convidadosForm.reduce((s,c)=>s+Math.max(0,Number(String(valorConvidadoEfetivo(c)).replace(",","."))||0),0),[convidadosForm]);
  const atualizarConvidado=(index:number,patch:Partial<ConvidadoForm>)=>setConvidadosForm(atual=>atual.map((c,i)=>i===index?{...c,...patch}:c));
  const adicionarConvidado=()=>setConvidadosForm(atual=>atual.length>=50?atual:[...atual,{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
  const removerConvidado=(index:number)=>setConvidadosForm(atual=>atual.length<=1?atual:atual.filter((_,i)=>i!==index));
  const valorSugeridoConvidado=(cidade:string,banho:string,tipo:string="diario")=>normalizarCidadeConvite(cidade)==="augusto pestana"?"30":tipo==="semanal"?"120":banho==="com_banho"?"25":"15";
+ const valorConvidadoEfetivo=(c:ConvidadoForm)=>c.valor.trim()===""&&normalizarCidadeConvite(c.cidade)==="augusto pestana"?"30":c.valor;
 
  const ehAugusto=form.cidade.trim().toLowerCase()==="augusto pestana";
   const pessoasAtivas = useMemo(() => sociosBusca.filter((p) => String(p.situacao || "").toLowerCase() !== "inativo"), [sociosBusca]);
@@ -127,7 +128,7 @@ async function salvar(){
  }
  const fd=new FormData();
  fd.append("socio_id",form.socio_id);fd.append("dependente_id",form.dependente_id);fd.append("inicio",form.inicio);fd.append("fim",form.fim);fd.append("tipo",form.tipo);fd.append("pagamento",form.pagamento);
- fd.append("convidados",JSON.stringify(convidadosForm.map(c=>({nome:c.nome.trim(),documento:c.documento.trim(),cidade:c.cidade==="__OUTRA__"?"":c.cidade.trim(),banho:c.banho,valor:Number(String(c.valor).replace(",","."))}))));
+ fd.append("convidados",JSON.stringify(convidadosForm.map(c=>({nome:c.nome.trim(),documento:c.documento.trim(),cidade:c.cidade==="__OUTRA__"?"":c.cidade.trim(),banho:c.banho,valor:Number(String(valorConvidadoEfetivo(c)).replace(",","."))}))));
  if(arquivo)fd.append("arquivo",arquivo);
  const r=await apiFetch("/api/convites",{method:"POST",body:fd});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"Não foi possível registrar os convites.");
  const operador=await operadorAtual();const socio=socios.find(x=>x.id===form.socio_id);const agora=new Date().toLocaleString("pt-BR");const totalGrupo=convidadosForm.reduce((s,c)=>s+Number(String(c.valor).replace(",",".")),0);
@@ -194,8 +195,8 @@ async function salvar(){
    <div><label className="mb-1 block text-xs font-bold">Cidade *</label><select value={convidado.cidade==="__OUTRA__" || (convidado.cidade && !["Augusto Pestana","Ijuí","Jóia","Eugênio de Castro"].includes(convidado.cidade)) ? "__outra__" : convidado.cidade} onChange={e=>{const cidade=e.target.value==="__outra__"?"__OUTRA__":e.target.value;const banho=normalizarCidadeConvite(cidade)==="augusto pestana"?"sem_banho":"com_banho";atualizarConvidado(index,{cidade,banho,valor:valorSugeridoConvidado(cidade,banho,form.tipo)})}} className="w-full rounded-xl border px-3 py-2.5"><option value="">Selecione a cidade</option><option value="Augusto Pestana">Augusto Pestana</option><option value="Ijuí">Ijuí</option><option value="Jóia">Jóia</option><option value="Eugênio de Castro">Eugênio de Castro</option><option value="__outra__">Outra cidade...</option></select>{(convidado.cidade==="__OUTRA__" || (convidado.cidade && !["Augusto Pestana","Ijuí","Jóia","Eugênio de Castro"].includes(convidado.cidade))) && <input value={convidado.cidade==="__OUTRA__"?"":convidado.cidade} onChange={e=>{const cidade=e.target.value;atualizarConvidado(index,{cidade,valor:valorSugeridoConvidado(cidade,convidado.banho,form.tipo)})}} placeholder="Digite o nome da cidade" className="mt-2 w-full rounded-xl border px-3 py-2.5"/>}</div>
    <div><label className="mb-1 block text-xs font-bold">Acesso</label><select value={ap?"sem_banho":convidado.banho} disabled={ap} onChange={e=>{const banho=e.target.value as "com_banho"|"sem_banho";atualizarConvidado(index,{banho,valor:valorSugeridoConvidado(convidado.cidade,banho,form.tipo)})}} className="w-full rounded-xl border px-3 py-2.5 disabled:bg-gray-100"><option value="com_banho">Com banho — R$ 25,00</option><option value="sem_banho">Somente parque — R$ 15,00</option></select></div>
   </div>
-  <div><label className="mb-1 block text-xs font-bold">Valor deste convidado (R$)</label><input type="number" min="0" step="0.01" value={convidado.valor} readOnly={!podeGerenciarFinanceiro} onChange={e=>atualizarConvidado(index,{valor:e.target.value})} className="w-full rounded-xl border px-3 py-2.5 read-only:bg-gray-50"/></div>
-  {ap&&<p className="text-xs text-amber-700">Augusto Pestana: R$ 30,00 sugeridos, somente parque. O valor pode ser editado pela administração.</p>}
+  <div><label className="mb-1 block text-xs font-bold">Valor deste convidado (R$)</label><input type="number" min="0" step="0.01" value={valorConvidadoEfetivo(convidado)} readOnly={!podeGerenciarFinanceiro} onChange={e=>atualizarConvidado(index,{valor:e.target.value})} className="w-full rounded-xl border px-3 py-2.5 read-only:bg-gray-50"/></div>
+  {ap&&<p className="text-xs text-amber-700">Augusto Pestana: R$ 30,00, somente parque e sem banho. O valor pode ser editado pela administração.</p>}
  </div>
 })}
 <div className="rounded-xl bg-[#eef7f2] p-3 text-sm"><div className="flex justify-between"><span>{convidadosForm.length} convidado(s)</span><b>Total do grupo: {moeda(totalConvidados)}</b></div><p className="mt-1 text-xs text-gray-500">Cada pessoa terá seu próprio registro, cidade, CPF, acesso e valor.</p></div>
