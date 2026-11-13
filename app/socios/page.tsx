@@ -500,46 +500,50 @@ export default function Home() {
       return;
     }
 
-    // Reserva automaticamente a próxima letra livre da família. Isso evita
-    // atribuir novamente a matrícula B quando já existe uma filha/filho B.
     const matriculaResponsavel = String(responsavel.matricula ?? "").trim().toUpperCase();
-    const baseFamiliar = /[A-Z]$/.test(matriculaResponsavel)
-      ? matriculaResponsavel.slice(0, -1)
-      : matriculaResponsavel;
-    if (!baseFamiliar) {
+    if (!matriculaResponsavel) {
       setMensagem("O responsável precisa ter uma matrícula cadastrada antes de incluir dependentes.");
       return;
     }
-    const sufixosOcupados = new Set<string>();
 
-    for (const registro of socios) {
-      const matricula = String(registro.matricula ?? "").trim().toUpperCase();
-      if (
-        matricula.startsWith(baseFamiliar) &&
-        matricula.length === baseFamiliar.length + 1
-      ) {
-        sufixosOcupados.add(matricula.slice(-1));
-      }
+    // Somente o titular usa a base familiar sem a letra final (ex.: SC0021A -> SC0021).
+    // Um sócio dependente que constituiu família mantém sua matrícula completa como base,
+    // evitando misturar os dependentes da família de origem com os da nova família.
+    const ehSocioDependente = String(responsavel.tipo_socio || "").startsWith("dependente_") ||
+      String(responsavel.categoria || "").toLowerCase().includes("dependente");
+    const baseFamiliar = !ehSocioDependente && /[A-Z]$/.test(matriculaResponsavel)
+      ? matriculaResponsavel.slice(0, -1)
+      : matriculaResponsavel;
+
+    // Consulta no banco, não apenas na lista carregada na tela, para incluir
+    // registros que estejam fora da página/filtro atual.
+    const { data: sociosDaFamilia, error: erroSociosFamilia } = await supabase
+      .from("socios")
+      .select("matricula")
+      .ilike("matricula", `${baseFamiliar}%`);
+    if (erroSociosFamilia) {
+      setMensagem("Não foi possível conferir as matrículas da família. Tente novamente.");
+      return;
     }
 
-    // Considera também dependentes antigos ainda gravados na tabela legada.
-    const { data: dependentesLegados } = await supabase
+    const { data: dependentesLegados, error: erroDependentesLegados } = await supabase
       .from("dependentes")
       .select("matricula")
       .eq("socio_id", responsavel.id);
-    for (const registro of dependentesLegados || []) {
+    if (erroDependentesLegados) {
+      setMensagem("Não foi possível conferir os dependentes antigos. Nenhuma matrícula foi reservada.");
+      return;
+    }
+
+    const sufixosOcupados = new Set<string>();
+    for (const registro of [...(sociosDaFamilia || []), ...(dependentesLegados || [])]) {
       const matricula = String(registro.matricula ?? "").trim().toUpperCase();
-      if (
-        matricula.startsWith(baseFamiliar) &&
-        matricula.length === baseFamiliar.length + 1
-      ) {
+      if (matricula.startsWith(baseFamiliar) && matricula.length === baseFamiliar.length + 1) {
         sufixosOcupados.add(matricula.slice(-1));
       }
     }
 
-    const proximaLetra = "BCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find(
-      (letra) => !sufixosOcupados.has(letra)
-    );
+    const proximaLetra = "BCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find((letra) => !sufixosOcupados.has(letra));
     if (!proximaLetra) {
       setMensagem("Não há mais letras disponíveis para esta família. Verifique as matrículas antes de cadastrar.");
       return;
@@ -554,9 +558,6 @@ export default function Home() {
       categoria: "Dependente",
       responsavel_id: responsavel.id,
       parentesco: "Filho(a)",
-      // Novo dependente começa sem mensalidade. Se passar a pagar,
-      // o cadastro pode ser alterado para mensalidade = SIM e então
-      // ele aparecerá automaticamente na guia Sócios.
       possui_mensalidade: false,
       valor_mensalidade: 0,
       data_associacao: new Date().toISOString().split("T")[0],

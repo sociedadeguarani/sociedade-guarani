@@ -659,9 +659,7 @@ export default function DependentesPage() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {!somenteConsulta && (
-                  <span className="text-sm font-medium text-slate-500">
-                    Para cadastrar, acesse <strong>Sócios</strong> e use <strong>+ Dependente</strong> no responsável.
-                  </span>
+                  <span className="text-sm font-medium text-slate-500">Para cadastrar, acesse <strong>Sócios</strong> e use <strong>+ Dependente</strong> no responsável.</span>
                 )}
               </div>
             </div>

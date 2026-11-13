@@ -15,6 +15,13 @@ const moeda = (v: number) => Number(v || 0).toLocaleString("pt-BR", { style: "cu
 const dataBr = (v?: string | null) => v ? v.slice(0,10).split("-").reverse().join("/") : "—";
 const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
+function somarMeses(data: string, meses: number) {
+  const [ano, mes, dia] = data.split("-").map(Number);
+  const base = new Date(Date.UTC(ano, mes - 1 + meses, 1));
+  const ultimoDia = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}-${String(Math.min(dia, ultimoDia)).padStart(2, "0")}`;
+}
+
 export default function VendaTitulosPage() {
   const [contratos, setContratos] = useState<Contrato[]>([]);
   const [socios, setSocios] = useState<Socio[]>([]);
@@ -23,8 +30,10 @@ export default function VendaTitulosPage() {
   const [buscaSocio, setBuscaSocio] = useState("");
   const [valorTotal, setValorTotal] = useState("1500");
   const [valorEntrada, setValorEntrada] = useState("500");
-  const [quantidade, setQuantidade] = useState("3");
-  const [primeiroVencimento, setPrimeiroVencimento] = useState(hoje);
+  // Quantidade de parcelas restantes, além da entrada. O limite de 6 mantém
+  // o total de registros (entrada + parcelas) dentro do limite aceito pela API.
+  const [quantidade, setQuantidade] = useState("2");
+  const [datasVencimento, setDatasVencimento] = useState<string[]>([hoje, somarMeses(hoje, 1), somarMeses(hoje, 2)]);
   const [registrarEntrada, setRegistrarEntrada] = useState(true);
   const [formaEntrada, setFormaEntrada] = useState("pix");
   const [contaEntrada, setContaEntrada] = useState("");
@@ -101,15 +110,32 @@ export default function VendaTitulosPage() {
   function gerarValores() {
     const total = Number(valorTotal.replace(",", "."));
     const entrada = Number(valorEntrada.replace(",", "."));
-    const qtd = Math.max(1, Math.min(24, Number(quantidade)));
-    const restante = total - entrada;
-    if (total <= 0 || entrada <= 0 || entrada > total || qtd < 1 || (qtd === 1 && Math.abs(restante) > 0.009)) throw new Error("Confira o valor total, a entrada e a quantidade de parcelas.");
+    const qtd = Math.max(0, Math.min(6, Number(quantidade)));
+    const restante = Number((total - entrada).toFixed(2));
+    if (total <= 0 || entrada <= 0 || entrada > total || !Number.isInteger(Number(quantidade)) || qtd !== Number(quantidade) || (restante > 0.009 && qtd < 1)) {
+      throw new Error("Confira o valor total, a entrada e a quantidade de parcelas restantes.");
+    }
     const valores = [entrada];
-    if (qtd > 1) {
-      const base = Math.floor((restante / (qtd - 1)) * 100) / 100;
-      for (let i=1;i<qtd;i++) valores.push(i === qtd - 1 ? Number((restante - base * (qtd - 2)).toFixed(2)) : base);
+    if (restante > 0.009) {
+      const base = Math.floor((restante / qtd) * 100) / 100;
+      for (let i = 0; i < qtd; i++) {
+        valores.push(i === qtd - 1 ? Number((restante - base * (qtd - 1)).toFixed(2)) : base);
+      }
     }
     return valores;
+  }
+
+  function alterarQuantidade(valor: string) {
+    setQuantidade(valor);
+    const qtd = Math.max(0, Math.min(6, Number(valor) || 0));
+    const totalDatas = qtd + 1;
+    setDatasVencimento((atuais) => {
+      const proximas = atuais.slice(0, totalDatas);
+      while (proximas.length < totalDatas) {
+        proximas.push(somarMeses(proximas[proximas.length - 1] || hoje, 1));
+      }
+      return proximas;
+    });
   }
 
   async function criarVenda(event: React.FormEvent) {
@@ -119,17 +145,25 @@ export default function VendaTitulosPage() {
       const valores = gerarValores();
       if (registrarEntrada && !contaEntrada) throw new Error("Selecione o banco ou caixa que recebeu a entrada.");
       if (comprovanteEntrada && comprovanteEntrada.size > 8 * 1024 * 1024) throw new Error("O comprovante deve ter até 8 MB.");
-      const parcelas = valores.map((valor, i) => {
-        const d = new Date(`${primeiroVencimento}T12:00:00`);
-        d.setDate(d.getDate() + (30 * i));
-        return { valor, data_vencimento: d.toISOString().slice(0,10) };
-      });
+      if (datasVencimento.length < valores.length || datasVencimento.slice(0, valores.length).some((data) => !/^\d{4}-\d{2}-\d{2}$/.test(data))) {
+        throw new Error("Informe o vencimento de cada parcela.");
+      }
+      const parcelas = valores.map((valor, i) => ({
+        valor,
+        data_vencimento: datasVencimento[i],
+        // Parcelas futuras ficam inicialmente como boleto em aberto; a forma
+        // efetiva será registrada quando cada recebimento for baixado.
+        forma_pagamento: i === 0 ? formaEntrada : "boleto",
+        recebido: i === 0 && registrarEntrada,
+        data_pagamento: i === 0 && registrarEntrada ? dataEntrada : null,
+        conta_bancaria_id: i === 0 && registrarEntrada ? contaEntrada : null,
+      }));
       setSalvando(true);
       const formData = new FormData();
       formData.append("dados", JSON.stringify({
         acao: "criar", socio_id: socioId,
         valor_total: Number(valorTotal.replace(",", ".")),
-        quantidade_parcelas: valores.length, primeiro_vencimento: primeiroVencimento,
+        quantidade_parcelas: valores.length, primeiro_vencimento: datasVencimento[0],
         parcelas, registrar_entrada: registrarEntrada,
         forma_entrada: formaEntrada, conta_entrada_id: registrarEntrada ? contaEntrada : null,
         data_entrada: dataEntrada, observacoes,
@@ -139,6 +173,7 @@ export default function VendaTitulosPage() {
       setSucesso(resultado.message || "Venda de título cadastrada com sucesso.");
       setModalNovo(false); setSocioId(""); setBuscaSocio(""); setObservacoes(""); setComprovanteEntrada(null);
       setContaEntrada(""); setRegistrarEntrada(true); setFormaEntrada("pix"); setDataEntrada(hoje);
+      setQuantidade("2"); setDatasVencimento([hoje, somarMeses(hoje, 1), somarMeses(hoje, 2)]);
       await carregar();
     } catch (e) { setErro(e instanceof Error ? e.message : "Erro ao cadastrar venda."); }
     finally { setSalvando(false); }
@@ -178,8 +213,15 @@ export default function VendaTitulosPage() {
   {modalNovo && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3"><form onSubmit={criarVenda} className="max-h-[92vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
     <div className="flex items-center justify-between"><h2 className="text-lg font-black">Nova venda de título</h2><button type="button" onClick={()=>setModalNovo(false)}><X/></button></div>
     <div><label className="mb-1 block text-xs font-bold">Buscar associado comprador</label><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><input value={buscaSocio} onChange={e=>{setBuscaSocio(e.target.value);setSocioId("");}} placeholder="Digite nome, matrícula ou CPF..." className="w-full rounded-xl border p-3 pl-9 text-sm"/></div>{buscaSocio && <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border">{sociosFiltrados.map(s=><button type="button" key={s.id} onClick={()=>{setSocioId(s.id);setBuscaSocio(`${s.nome}${s.matricula?` — ${s.matricula}`:""}`);}} className="block w-full border-b p-3 text-left text-sm hover:bg-emerald-50"><b>{s.nome}</b><span className="ml-2 text-xs text-slate-500">Matrícula {s.matricula || "—"}</span></button>)}</div>}{socioSelecionado && <p className="mt-1 text-xs text-emerald-700">Associado selecionado · Mensalidade: {socioSelecionado.possui_mensalidade ? moeda(Number(socioSelecionado.valor_mensalidade||0)) : "Não configurada no cadastro"}</p>}</div>
-    <div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 block text-xs font-bold">Valor total do título (R$)</label><input type="number" min="0.01" step="0.01" value={valorTotal} onChange={e=>setValorTotal(e.target.value)} className="w-full rounded-xl border p-3"/></div><div><label className="mb-1 block text-xs font-bold">Entrada (R$)</label><input type="number" min="0" step="0.01" value={valorEntrada} onChange={e=>setValorEntrada(e.target.value)} className="w-full rounded-xl border p-3"/></div><div><label className="mb-1 block text-xs font-bold">Quantidade de parcelas</label><input type="number" min="1" max="24" value={quantidade} onChange={e=>setQuantidade(e.target.value)} className="w-full rounded-xl border p-3"/></div></div>
-    <div><label className="mb-1 block text-xs font-bold">Vencimento da entrada / primeira parcela</label><input type="date" value={primeiroVencimento} onChange={e=>setPrimeiroVencimento(e.target.value)} className="w-full rounded-xl border p-3"/></div>
+    <div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 block text-xs font-bold">Valor total do título (R$)</label><input type="number" min="0.01" step="0.01" value={valorTotal} onChange={e=>setValorTotal(e.target.value)} className="w-full rounded-xl border p-3"/></div><div><label className="mb-1 block text-xs font-bold">Entrada (R$)</label><input type="number" min="0.01" step="0.01" value={valorEntrada} onChange={e=>setValorEntrada(e.target.value)} className="w-full rounded-xl border p-3"/></div><div><label className="mb-1 block text-xs font-bold">Parcelas após a entrada</label><input type="number" min="0" max="6" value={quantidade} onChange={e=>alterarQuantidade(e.target.value)} className="w-full rounded-xl border p-3"/><p className="mt-1 text-[11px] text-slate-500">Além da entrada, até 6 parcelas.</p></div></div>
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div><h3 className="text-sm font-bold text-slate-800">Vencimentos</h3><p className="text-xs text-slate-500">Defina a data de cada parcela. As datas sugeridas podem ser alteradas individualmente.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: Number(quantidade) + 1 }, (_, i) => i).map((i) => (
+          <div key={i}><label className="mb-1 block text-xs font-bold">{i === 0 ? "Vencimento da entrada" : `Vencimento da parcela ${i}`}</label><input required type="date" value={datasVencimento[i] || ""} onChange={e=>setDatasVencimento(atual=>atual.map((data,index)=>index===i?e.target.value:data))} className="w-full rounded-xl border bg-white p-3"/></div>
+        ))}
+      </div>
+    </div>
     <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
       <label className="flex items-start gap-2 text-sm font-semibold text-slate-800">
         <input type="checkbox" className="mt-0.5" checked={registrarEntrada} onChange={e=>setRegistrarEntrada(e.target.checked)}/>
