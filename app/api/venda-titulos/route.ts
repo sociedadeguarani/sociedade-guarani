@@ -348,6 +348,10 @@ export async function POST(request: Request) {
     }
     return erro("Ação não reconhecida.");
   } catch (e) {
-    return erro(e instanceof Error ? e.message : "Erro ao processar venda de título.", 500);
+    // Supabase/PostgREST pode retornar erros como objetos simples, não como Error.
+    // Registrar o objeto completo no log do servidor para diagnóstico no Vercel,
+    // sem expor detalhes internos do banco ao navegador.
+    console.error("[api/venda-titulos][POST] Falha ao processar venda:", e);
+    return erro("Erro ao processar venda de título. Consulte os logs do servidor para identificar a causa.", 500);
   }
 }
