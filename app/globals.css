@@ -101,3 +101,66 @@ button {
 .label { display:block; margin-bottom:0.375rem; font-size:0.875rem; font-weight:700; color:#334155; }
 .input { width:100%; border:1px solid #d6e1dc; border-radius:0.75rem; background:white; padding:0.75rem 1rem; outline:none; }
 .input:focus { border-color:#005a3c; box-shadow:0 0 0 2px rgba(0,90,60,.08); }
+
+/* Ajustes de usabilidade em telas pequenas para o sistema administrativo. */
+@media (max-width: 767px) {
+  main,
+  section,
+  article,
+  form {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* Mantém todas as colunas acessíveis sem alargar a página inteira. */
+  .overflow-x-auto {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border-radius: 0.75rem;
+  }
+
+  .overflow-x-auto table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .overflow-x-auto th,
+  .overflow-x-auto td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: middle;
+  }
+
+  /* Modais permanecem inteiros na viewport e rolam por dentro. */
+  .fixed.inset-0 {
+    align-items: flex-start;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.5rem;
+  }
+
+  .fixed.inset-0 > div {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+
+  /* Evita campos e botões comprimidos em formulários com colunas. */
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  button,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+}

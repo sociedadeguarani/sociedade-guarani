@@ -757,7 +757,14 @@ export default function Page() {
   }, [socios]);
 
   const tipoCobranca = useCallback((m: M) => {
-    const pagamento = normalizarPagamento(m.tipo_pagamento || m.socio?.tipo_pagamento);
+    // A classificação da mensalidade deve refletir a preferência atual do
+    // cadastro do associado. A forma usada em uma baixa (ex.: PIX pontual)
+    // permanece no lançamento/histórico, mas não altera o banco padrão.
+    const pagamentoCadastro = normalizarPagamento(m.socio?.tipo_pagamento);
+    const contaCadastroId = m.socio?.conta_bancaria_id;
+    const pagamento = pagamentoCadastro || (contaCadastroId
+      ? "debito_em_conta"
+      : normalizarPagamento(m.tipo_pagamento));
 
     // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
     if (pagamento === "pix") return "pix";
@@ -786,7 +793,7 @@ export default function Page() {
     // Também inferimos pelo banco quando o tipo_pagamento veio vazio,
     // usando primeiro a conta gravada na própria mensalidade e depois
     // a conta atual do associado.
-    const contaId = m.conta_pagadora_id || m.socio?.conta_bancaria_id;
+    const contaId = m.socio?.conta_bancaria_id || m.conta_pagadora_id;
     const conta = contasPorId.get(String(contaId));
     const banco = normalizarBanco(`${conta?.nome || ""} ${conta?.banco || ""}`);
 
