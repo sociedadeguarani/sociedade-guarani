@@ -529,7 +529,7 @@ export default function Home() {
     const { data: dependentesLegados, error: erroDependentesLegados } = await supabase
       .from("dependentes")
       .select("matricula")
-      .eq("socio_id", responsavel.id);
+      .ilike("matricula", `${baseFamiliar}%`);
     if (erroDependentesLegados) {
       setMensagem("Não foi possível conferir os dependentes antigos. Nenhuma matrícula foi reservada.");
       return;
@@ -729,8 +729,23 @@ export default function Home() {
 
         if (erroConsultaMatricula) throw erroConsultaMatricula;
         if (matriculaExistente) {
-          setMensagem("Esta matrícula já está cadastrada. Informe uma matrícula diferente.");
+          setMensagem(`A matrícula ${matriculaDigitada} já está cadastrada. A próxima letra disponível será sugerida ao incluir o dependente.`);
           return;
+        }
+
+        // Matrículas de dependentes legados também ocupam a sequência familiar.
+        if (form.responsavel_id) {
+          const { data: dependenteExistente, error: erroDependenteExistente } = await supabase
+            .from("dependentes")
+            .select("id")
+            .ilike("matricula", matriculaDigitada)
+            .limit(1)
+            .maybeSingle();
+          if (erroDependenteExistente) throw erroDependenteExistente;
+          if (dependenteExistente) {
+            setMensagem(`A matrícula ${matriculaDigitada} já está cadastrada entre os dependentes desta família. Confira a próxima letra disponível.`);
+            return;
+          }
         }
       }
 

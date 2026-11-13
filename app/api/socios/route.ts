@@ -261,6 +261,37 @@ export async function POST(request: Request) {
     if (!nome) return NextResponse.json({ error: "Informe o nome completo do associado." }, { status: 400 });
     if (cpf && cpf.length < 6) return NextResponse.json({ error: "Informe um CPF válido com pelo menos 6 números." }, { status: 400 });
     const ehDependente = Boolean(responsavelId);
+
+    // Uma matrícula familiar fica reservada mesmo quando o registro antigo
+    // está na tabela dependentes, e não somente em socios.
+    if (ehDependente && matricula) {
+      const { data: socioComMatricula, error: erroSocioMatricula } = await auth.supabase
+        .from("socios")
+        .select("id")
+        .ilike("matricula", matricula)
+        .limit(1)
+        .maybeSingle();
+      if (erroSocioMatricula) {
+        return NextResponse.json({ error: `Não foi possível validar a matrícula: ${erroBanco(erroSocioMatricula)}` }, { status: 500 });
+      }
+      if (socioComMatricula) {
+        return NextResponse.json({ error: `A matrícula ${matricula} já está cadastrada. Verifique a próxima letra disponível para esta família.` }, { status: 409 });
+      }
+
+      const { data: dependenteComMatricula, error: erroDependenteMatricula } = await auth.supabase
+        .from("dependentes")
+        .select("id")
+        .ilike("matricula", matricula)
+        .limit(1)
+        .maybeSingle();
+      if (erroDependenteMatricula) {
+        return NextResponse.json({ error: `Não foi possível validar a matrícula dos dependentes: ${erroBanco(erroDependenteMatricula)}` }, { status: 500 });
+      }
+      if (dependenteComMatricula) {
+        return NextResponse.json({ error: `A matrícula ${matricula} já está cadastrada entre os dependentes. Verifique a próxima letra disponível.` }, { status: 409 });
+      }
+    }
+
     const possuiMensalidade = ehDependente
       ? dependenteTemMensalidade({
           categoria: body.categoria,
