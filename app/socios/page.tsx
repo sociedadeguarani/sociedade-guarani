@@ -493,10 +493,55 @@ export default function Home() {
     setMensagem("");
   }
 
-  function novoDependente(responsavel: Socio) {
+  async function novoDependente(responsavel: Socio) {
     if (somenteConsulta) return;
     if (!podeTerDependentes(responsavel.tipo_socio)) {
       setMensagem("Este tipo de sócio não possui dependentes.");
+      return;
+    }
+
+    // Reserva automaticamente a próxima letra livre da família. Isso evita
+    // atribuir novamente a matrícula B quando já existe uma filha/filho B.
+    const matriculaResponsavel = String(responsavel.matricula ?? "").trim().toUpperCase();
+    const baseFamiliar = /[A-Z]$/.test(matriculaResponsavel)
+      ? matriculaResponsavel.slice(0, -1)
+      : matriculaResponsavel;
+    if (!baseFamiliar) {
+      setMensagem("O responsável precisa ter uma matrícula cadastrada antes de incluir dependentes.");
+      return;
+    }
+    const sufixosOcupados = new Set<string>();
+
+    for (const registro of socios) {
+      const matricula = String(registro.matricula ?? "").trim().toUpperCase();
+      if (
+        matricula.startsWith(baseFamiliar) &&
+        matricula.length === baseFamiliar.length + 1
+      ) {
+        sufixosOcupados.add(matricula.slice(-1));
+      }
+    }
+
+    // Considera também dependentes antigos ainda gravados na tabela legada.
+    const { data: dependentesLegados } = await supabase
+      .from("dependentes")
+      .select("matricula")
+      .eq("socio_id", responsavel.id);
+    for (const registro of dependentesLegados || []) {
+      const matricula = String(registro.matricula ?? "").trim().toUpperCase();
+      if (
+        matricula.startsWith(baseFamiliar) &&
+        matricula.length === baseFamiliar.length + 1
+      ) {
+        sufixosOcupados.add(matricula.slice(-1));
+      }
+    }
+
+    const proximaLetra = "BCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find(
+      (letra) => !sufixosOcupados.has(letra)
+    );
+    if (!proximaLetra) {
+      setMensagem("Não há mais letras disponíveis para esta família. Verifique as matrículas antes de cadastrar.");
       return;
     }
 
@@ -504,6 +549,7 @@ export default function Home() {
     setBuscaResponsavel(responsavel.nome);
     setForm({
       ...socioInicial,
+      matricula: `${baseFamiliar}${proximaLetra}`,
       tipo_socio: tipoDependenteParaResponsavel(responsavel.tipo_socio),
       categoria: "Dependente",
       responsavel_id: responsavel.id,

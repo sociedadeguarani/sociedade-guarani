@@ -442,31 +442,6 @@ export default function DependentesPage() {
     void Promise.resolve().then(carregarDados);
   }, [carregarDados]);
 
-  function abrirNovo() {
-    if (somenteConsulta) return;
-    setEditando(null);
-    setFotoArquivo(null);
-    setForm({
-      socio_id: filtroSocio,
-      nome: "",
-      cpf: "",
-      data_nascimento: "",
-      exame_medico_validade: "",
-      parentesco: "",
-      telefone: "",
-      ativo: true,
-      possui_mensalidade: false,
-      valor_mensalidade: 0,
-      dia_vencimento: 10,
-      tipo_pagamento: "pix",
-      situacao_financeira: "isento",
-      data_ultimo_pagamento: "",
-    });
-    setErro("");
-    setSucesso("");
-    setModalAberto(true);
-  }
-
   function abrirEdicao(d: Dependente) {
     if (somenteConsulta) return;
     setEditando(d);
@@ -503,6 +478,10 @@ export default function DependentesPage() {
   async function salvarDependente(e: React.FormEvent) {
     e.preventDefault();
     if (somenteConsulta) return;
+    if (!editando) {
+      setErro("Novos dependentes devem ser cadastrados pela tela Sócios, usando o botão + Dependente do responsável.");
+      return;
+    }
 
     setErro("");
     setSucesso("");
@@ -680,7 +659,9 @@ export default function DependentesPage() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {!somenteConsulta && (
-                  <button onClick={abrirNovo} className="w-full rounded-xl bg-[#005A3C] px-4 py-3 text-sm font-extrabold text-white shadow-sm hover:bg-[#003D2B] sm:w-auto sm:px-5">+ Novo Dependente</button>
+                  <span className="text-sm font-medium text-slate-500">
+                    Para cadastrar, acesse <strong>Sócios</strong> e use <strong>+ Dependente</strong> no responsável.
+                  </span>
                 )}
               </div>
             </div>
