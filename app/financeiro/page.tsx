@@ -186,25 +186,55 @@ function mensalidadeQuitadaOuIsenta(item: Mensalidade) {
 
 async function buscarMensalidadesPaginadas(): Promise<Mensalidade[]> {
   const tamanhoLote = 1000;
-  const todas: Mensalidade[] = [];
+  const paginasPorLote = 4;
+  const colunas = "id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,data_pagamento,motivo,observacoes";
+  const criarConsulta = () => supabase
+    .from("mensalidades")
+    .select(colunas)
+    .order("competencia", { ascending: false })
+    .order("id", { ascending: false });
 
-  // Supabase pode limitar uma consulta a 1.000 linhas. Percorremos o histórico
-  // inteiro, em ordem estável, para não confundir pagamentos antigos com dívida.
-  for (let offset = 0; offset < 100_000; offset += tamanhoLote) {
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,data_pagamento,motivo,observacoes")
-      .order("competencia", { ascending: false })
-      .order("id", { ascending: false })
-      .range(offset, offset + tamanhoLote - 1);
+  // A primeira página traz a contagem exata. As páginas restantes são buscadas
+  // em pequenos lotes paralelos, evitando dezenas de viagens sequenciais ao banco.
+  const primeira = await supabase
+    .from("mensalidades")
+    .select(colunas, { count: "exact" })
+    .order("competencia", { ascending: false })
+    .order("id", { ascending: false })
+    .range(0, tamanhoLote - 1);
 
-    if (error) throw error;
-    const lote = (data || []) as Mensalidade[];
-    todas.push(...lote);
-    if (lote.length < tamanhoLote) return todas;
+  if (primeira.error) throw primeira.error;
+  const todas = [...((primeira.data || []) as Mensalidade[])];
+  const total = primeira.count;
+  if (total === null) {
+    // Fallback conservador caso o provedor não retorne a contagem exata.
+    for (let offset = todas.length; offset < 100_000; offset += tamanhoLote) {
+      const { data, error } = await criarConsulta().range(offset, offset + tamanhoLote - 1);
+      if (error) throw error;
+      const lote = (data || []) as Mensalidade[];
+      todas.push(...lote);
+      if (lote.length < tamanhoLote) return todas;
+    }
+    throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
+  }
+  if (total > 100_000) {
+    throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
   }
 
-  throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
+  for (let inicioLote = tamanhoLote; inicioLote < total; inicioLote += tamanhoLote * paginasPorLote) {
+    const offsets = Array.from(
+      { length: Math.min(paginasPorLote, Math.ceil((total - inicioLote) / tamanhoLote)) },
+      (_, indice) => inicioLote + indice * tamanhoLote
+    );
+    const paginas = await Promise.all(offsets.map(async (offset) => {
+      const { data, error } = await criarConsulta().range(offset, Math.min(offset + tamanhoLote - 1, total - 1));
+      if (error) throw error;
+      return (data || []) as Mensalidade[];
+    }));
+    for (const pagina of paginas) todas.push(...pagina);
+  }
+
+  return todas;
 }
 
 function chaveCompetencia(valor: string | null | undefined) {
@@ -663,17 +693,13 @@ export default function FinanceiroPage() {
     if (inadimplenciaCarregada || carregandoInadimplencia) return;
     setCarregandoInadimplencia(true);
     try {
-      try {
-        const configuracao = await apiFinanceiro("/api/configuracoes/acessos", { method: "GET" });
-        setPoliticaInadimplencia(normalizarPoliticaInadimplencia(configuracao?.politica));
-      } catch {
-        setPoliticaInadimplencia(POLITICA_INADIMPLENCIA_PADRAO);
-      }
-      const [sociosResult, dependentesResult, mensalidadesCompletas] = await Promise.all([
+      const [configuracao, sociosResult, dependentesResult, mensalidadesCompletas] = await Promise.all([
+        apiFinanceiro("/api/configuracoes/acessos", { method: "GET" }).catch(() => null),
         supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,ativo,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,data_associacao,remido,tipo_socio,categoria").order("matricula", { ascending: true }),
         supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
         buscarMensalidadesPaginadas(),
       ]);
+      setPoliticaInadimplencia(normalizarPoliticaInadimplencia(configuracao?.politica));
       if (sociosResult.error) throw sociosResult.error;
       if (dependentesResult.error) throw dependentesResult.error;
       setSocios((sociosResult.data || []) as Socio[]);
@@ -1216,7 +1242,7 @@ export default function FinanceiroPage() {
                 ["aluguéis", "🏠", "Aluguéis"],
                 ["entradas", "💵", "Entradas"],
                 ["saidas", "💸", "Saídas"],
-                ["inadimplencia", "🚨", `Inadimplência${quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
+                ["inadimplencia", "🚨", `Inadimplência${carregandoInadimplencia ? " (…)" : quantidadeAtrasados > 0 ? ` (${quantidadeAtrasados})` : ""}`],
                 ["contas", "🏦", "Contas bancárias"],
                 ["fluxo", "📊", "Fluxo de caixa"],
               ].map(([id, icone, label]) => (
@@ -1244,27 +1270,27 @@ export default function FinanceiroPage() {
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                 <Resumo
                   titulo="Pessoas monitoradas"
-                  valor={String(monitoramentoPessoas.length)}
+                  valor={carregandoInadimplencia ? "…" : String(monitoramentoPessoas.length)}
                   subtitulo="Associados e dependentes com mensalidade própria"
                 />
                 <Resumo
                   titulo="Com competências vencidas"
-                  valor={String(quantidadeAtrasados)}
+                  valor={carregandoInadimplencia ? "…" : String(quantidadeAtrasados)}
                   subtitulo="Inclui quem está na tolerância de acesso"
                 />
                 <Resumo
                   titulo={`${politicaInadimplencia.meses_atencao}–${politicaInadimplencia.meses_bloqueio - 1} meses`}
-                  valor={String(amarelos)}
+                  valor={carregandoInadimplencia ? "…" : String(amarelos)}
                   subtitulo="Faixa de atenção"
                 />
                 <Resumo
                   titulo={`${politicaInadimplencia.meses_bloqueio}+ meses`}
-                  valor={String(vermelhos)}
+                  valor={carregandoInadimplencia ? "…" : String(vermelhos)}
                   subtitulo="Bloqueio da entrada"
                 />
                 <Resumo
                   titulo="Valor total devido"
-                  valor={formatarMoeda(valorTotalDevido)}
+                  valor={carregandoInadimplencia ? "Carregando…" : formatarMoeda(valorTotalDevido)}
                   subtitulo="Mensalidades vencidas"
                 />
               </div>
@@ -1272,14 +1298,16 @@ export default function FinanceiroPage() {
               <div className={`rounded-2xl border p-5 ${vermelhos > 0 ? "border-red-200 bg-red-50" : amarelos > 0 ? "border-amber-200 bg-amber-50" : "border-green-200 bg-green-50"}`}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className={`text-lg font-extrabold ${vermelhos > 0 ? "text-red-700" : amarelos > 0 ? "text-amber-700" : "text-green-700"}`}>
-                      {vermelhos > 0
-                        ? `🔴 ${vermelhos} pessoa(s) com entrada bloqueada`
-                        : amarelos > 0
-                          ? `🟡 ${amarelos} pessoa(s) em faixa de atenção`
-                          : quantidadeAtrasados > 0
-                            ? `🟢 ${quantidadeAtrasados} pessoa(s) com saldo vencido dentro da tolerância de acesso`
-                            : "✓ Nenhuma mensalidade vencida"}
+                    <p className={`text-lg font-extrabold ${carregandoInadimplencia ? "text-[#005a3c]" : vermelhos > 0 ? "text-red-700" : amarelos > 0 ? "text-amber-700" : "text-green-700"}`}>
+                      {carregandoInadimplencia
+                        ? "Carregando situação das mensalidades…"
+                        : vermelhos > 0
+                          ? `🔴 ${vermelhos} pessoa(s) com entrada bloqueada`
+                          : amarelos > 0
+                            ? `🟡 ${amarelos} pessoa(s) em faixa de atenção`
+                            : quantidadeAtrasados > 0
+                              ? `🟢 ${quantidadeAtrasados} pessoa(s) com saldo vencido dentro da tolerância de acesso`
+                              : "✓ Nenhuma mensalidade vencida"}
                     </p>
                     <p className="mt-1 text-sm text-gray-600">
                       🟢 0–{politicaInadimplencia.meses_atencao - 1} competências · 🟡 {politicaInadimplencia.meses_atencao}–{politicaInadimplencia.meses_bloqueio - 1} · 🔴 {politicaInadimplencia.meses_bloqueio}+ competências.
@@ -1342,7 +1370,12 @@ export default function FinanceiroPage() {
                   </span>
                 </div>
 
-                {inadimplenciaDetalhada.length === 0 ? (
+                {carregandoInadimplencia ? (
+                  <div role="status" aria-live="polite" className="rounded-xl bg-[#f7faf8] p-10 text-center text-sm font-semibold text-[#005a3c]">
+                    <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#b8d8c8] border-t-[#005a3c] align-[-3px]" />
+                    Carregando associados, dependentes e histórico de mensalidades…
+                  </div>
+                ) : inadimplenciaDetalhada.length === 0 ? (
                   <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
                     <div className="text-4xl">✅</div>
                     <p className="mt-3 font-bold text-gray-700">
