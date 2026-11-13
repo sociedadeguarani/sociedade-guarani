@@ -329,8 +329,8 @@ export async function POST(request: Request) {
       : tipo === "diario"
         ? banhoInformado === "com_banho"
         : tipo === "semanal" ? true : null;
-    // Preço diário é definido no servidor: Augusto Pestana paga R$ 25 sem banho;
-    // outras cidades pagam R$ 25 com banho ou R$ 15 sem banho.
+    // Preço diário definido no servidor: Augusto Pestana paga R$ 30, somente parque;
+    // outras cidades pagam R$ 25 com banho ou R$ 15 somente parque.
     const valor = tipo === "diario"
       ? calcularValorDiario(cidade, banhoInformado)
       : ehFuncionario
@@ -346,7 +346,6 @@ export async function POST(request: Request) {
     if (tipo === "diario" && !["com_banho", "sem_banho"].includes(banhoInformado)) return NextResponse.json({ error: "Selecione se o convite inclui banho." }, { status: 400 });
     if (tipo === "diario" && cidadeNormalizada === "augusto pestana" && banhoInformado !== "sem_banho") return NextResponse.json({ error: "Convites de Augusto Pestana permitem somente parque, sem banho." }, { status: 400 });
     if (!Number.isFinite(valor) || valor < 0) return NextResponse.json({ error: "Valor inválido." }, { status: 400 });
-    if (pagamento === "dinheiro" && !conta_id) return NextResponse.json({ error: "Selecione a conta de recebimento." }, { status: 400 });
     if (arquivo && !(arquivo instanceof File)) return NextResponse.json({ error: "Comprovante inválido." }, { status: 400 });
     if (arquivo instanceof File && (!TIPOS.includes(arquivo.type) || arquivo.size > 8 * 1024 * 1024)) return NextResponse.json({ error: "Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB." }, { status: 400 });
     if (pagamento === "dinheiro" && arquivo instanceof File && !["image/jpeg", "image/png", "image/webp"].includes(arquivo.type)) return NextResponse.json({ error: "Para pagamento em dinheiro, anexe uma foto JPG, PNG ou WEBP do recibo." }, { status: 400 });

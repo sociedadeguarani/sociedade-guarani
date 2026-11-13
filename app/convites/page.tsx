@@ -10,7 +10,7 @@ type Dependente={id:string;socio_id:string|null;nome:string;matricula:number|str
 type Recibo={id:string;numero:string;tipo:string;nome:string;matricula:number|string|null;detalhe:string;periodo:string;valor:number;pagamento:string;operador:string;dataHora:string;status:string};
 type ConvidadoForm={nome:string;documento:string;cidade:string;banho:"com_banho"|"sem_banho";valor:string};
 const hoje=()=>new Date().toISOString().slice(0,10);
-const normalizarCidadeConvite=(v:string)=>v.normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").trim().toLowerCase();
+const normalizarCidadeConvite=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase();
  const CIDADES=["Augusto Pestana","Ijuí","Jóia","Eugênio de Castro","Boa Vista do Cadeado"]; const moeda=(v:number)=>Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); const dataBR=(v:string|null)=>v?v.slice(0,10).split("-").reverse().join("/"):"—";
 export default function ConvitesPage(){
  const [convites,setConvites]=useState<Convite[]>([]),[socios,setSocios]=useState<Socio[]>([]),[sociosBusca,setSociosBusca]=useState<Socio[]>([]),[dependentes,setDependentes]=useState<Dependente[]>([]),[contas,setContas]=useState<Conta[]>([]),[busca,setBusca]=useState(""),[buscaSocio,setBuscaSocio]=useState(""),[abrir,setAbrir]=useState(false),[mensagem,setMensagem]=useState(""),[salvando,setSalvando]=useState(false),[enviando,setEnviando]=useState<string|null>(null),[arquivo,setArquivo]=useState<File|null>(null);
@@ -20,7 +20,7 @@ export default function ConvitesPage(){
  const [editandoId,setEditandoId]=useState<string|null>(null);
  const [cidadeOutra,setCidadeOutra]=useState("");
  const [convidadosForm,setConvidadosForm]=useState<ConvidadoForm[]>([{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
- const valorConvidadoEfetivo=(c:ConvidadoForm)=>normalizarCidadeConvite(c.cidade)==="augusto pestana"&&(c.valor.trim()===""||c.valor==="15"||c.valor==="25")?"30":c.valor;
+ const valorConvidadoEfetivo=(c:ConvidadoForm)=>c.valor;
  const totalConvidados=useMemo(()=>convidadosForm.reduce((s,c)=>s+Math.max(0,Number(String(valorConvidadoEfetivo(c)).replace(",","."))||0),0),[convidadosForm]);
  const atualizarConvidado=(index:number,patch:Partial<ConvidadoForm>)=>setConvidadosForm(atual=>atual.map((c,i)=>i===index?{...c,...patch}:c));
  const adicionarConvidado=()=>setConvidadosForm(atual=>atual.length>=50?atual:[...atual,{nome:"",documento:"",cidade:"",banho:"com_banho",valor:"25"}]);
