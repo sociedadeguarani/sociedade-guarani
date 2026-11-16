@@ -345,10 +345,34 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    const qr = String(body?.qr || "").trim();
-    const socioId = String(body?.socio_id || "").trim();
-    const matricula = matriculaTemporadaNormalizada(body?.matricula);
+    let qr = String(body?.qr || "").trim();
+    let socioId = String(body?.socio_id || "").trim();
+    let matricula = matriculaTemporadaNormalizada(body?.matricula);
     let dependenteId = String(body?.dependente_id || "").trim();
+
+    // O leitor da tela Acessos recebe o conteúdo literal do QR. Muitas
+    // carteirinhas armazenam uma URL completa (/acessos/validar?id=...);
+    // extraímos os parâmetros antes de aplicar as regras normais de acesso.
+    if (qr && !socioId && !dependenteId && !matricula) {
+      try {
+        const urlQr = new URL(qr, request.url);
+        socioId = String(
+          urlQr.searchParams.get("socio_id") ||
+          urlQr.searchParams.get("id") || ""
+        ).trim();
+        dependenteId = String(urlQr.searchParams.get("dependente_id") || "").trim();
+        matricula = matriculaTemporadaNormalizada(
+          urlQr.searchParams.get("matricula") || urlQr.searchParams.get("codigo") || ""
+        );
+        const qrInterno = urlQr.searchParams.get("qr");
+        if (!socioId && !dependenteId && !matricula && qrInterno) {
+          // Permite QR que encapsula outro identificador Guarani.
+          qr = qrInterno;
+        }
+      } catch {
+        // QR não é URL: os formatos guarani:* e matrículas seguem abaixo.
+      }
+    }
     const supabase = getServiceClient();
 
     let id = socioId;

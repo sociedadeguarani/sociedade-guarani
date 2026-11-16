@@ -203,6 +203,9 @@ export async function POST(request: Request) {
 
       const hoje = dataHoje();
       const comp = competenciaAtual();
+      // A coluna mensalidades.competencia é do tipo DATE; gravamos o primeiro
+      // dia do mês, mantendo YYYY-MM apenas para textos e mensagens.
+      const competenciaData = `${comp}-01`;
       const codigo = `VT-${Date.now().toString().slice(-8)}`;
       const { data: contrato, error: contratoError } = await db.from("vendas_titulos").insert({
         codigo, socio_id: socioId, comprador_nome: socio.nome, comprador_cpf: socio.cpf || null,
@@ -255,12 +258,12 @@ export async function POST(request: Request) {
       try {
         if (socio.possui_mensalidade === true && Number(socio.valor_mensalidade || 0) > 0) {
           const { data: mensalidadeExistente, error: mensalidadeBuscaError } = await db.from("mensalidades")
-            .select("id").eq("socio_id", socioId).eq("competencia", comp).is("dependente_id", null).maybeSingle();
+            .select("id").eq("socio_id", socioId).eq("competencia", competenciaData).is("dependente_id", null).maybeSingle();
           if (mensalidadeBuscaError) throw mensalidadeBuscaError;
           if (!mensalidadeExistente) {
             const dia = Math.min(28, Math.max(1, Number(socio.dia_vencimento || 10)));
             const { error: mensalidadeInsertError } = await db.from("mensalidades").insert({
-              socio_id: socioId, competencia: comp, valor: Number(socio.valor_mensalidade),
+              socio_id: socioId, competencia: competenciaData, valor: Number(socio.valor_mensalidade),
               valor_base: Number(socio.valor_mensalidade), tarifa_pagamento: 0, multa: 0, juros: 0,
               desconto: 0, total_cobrado: Number(socio.valor_mensalidade), dias_atraso: 0,
               data_vencimento: `${comp}-` + String(dia).padStart(2, "0"),
