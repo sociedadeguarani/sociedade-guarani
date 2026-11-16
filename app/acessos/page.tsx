@@ -45,9 +45,12 @@ type Resultado = {
 
 type OpcaoBuscaAcesso = {
   id: string;
-  tipo: "socio" | "dependente";
+  tipo: "socio" | "dependente" | "temporada";
   socio_id: string;
   dependente_id: string | null;
+  temporada_id?: string | null;
+  temporada_participante_id?: string | null;
+  qr?: string;
   nome: string;
   matricula: string | null;
   situacao: string | null;
@@ -171,9 +174,11 @@ export default function AcessosPage() {
       // Envia um registro por pessoa, em sequência, para preservar as regras
       // individuais de inadimplência, exame e autorização da portaria.
       for (const pessoa of selecionados) {
-        const payload = pessoa.tipo === "dependente" && pessoa.dependente_id
-          ? { socio_id: pessoa.socio_id, dependente_id: pessoa.dependente_id }
-          : { socio_id: pessoa.socio_id };
+        const payload = pessoa.tipo === "temporada" && pessoa.qr
+          ? { qr: pessoa.qr }
+          : pessoa.tipo === "dependente" && pessoa.dependente_id
+            ? { socio_id: pessoa.socio_id, dependente_id: pessoa.dependente_id }
+            : { socio_id: pessoa.socio_id };
         try {
           const resposta = await fetch("/api/acessos", {
             method: "POST",
@@ -236,18 +241,21 @@ export default function AcessosPage() {
     if (!termo) return;
 
     const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const pareceQr = /^(guarani:|https?:\/\/)/i.test(termo) || /\/acessos\/validar/i.test(termo);
     const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
-    // A busca por nome é automática e mostra sugestões enquanto o operador digita.
-    // O botão/Enter fica reservado à consulta direta por matrícula.
-    if (pareceMatricula) await validar({ matricula: termo });
+    // Leitores USB de QR funcionam como teclado: enviam o conteúdo no campo e
+    // pressionam Enter. Encaminhamos o conteúdo original à mesma validação da câmera.
+    if (pareceQr) await validar({ qr: termo });
+    else if (pareceMatricula) await validar({ matricula: termo });
   }
 
   useEffect(() => {
     const termo = matricula.trim();
     const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const pareceQr = /^(guarani:|https?:\/\/)/i.test(termo) || /\/acessos\/validar/i.test(termo);
     const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
 
-    if (!termo || pareceMatricula || termo.length < 3) return;
+    if (!termo || pareceQr || pareceMatricula || termo.length < 3) return;
 
     let cancelado = false;
     const timeout = window.setTimeout(async () => {
@@ -270,7 +278,7 @@ export default function AcessosPage() {
         if (cancelado) return;
         const grupos = Array.isArray(dados.grupos) ? dados.grupos as GrupoBuscaAcesso[] : [];
         setGruposBusca(grupos);
-        setMensagemBusca(grupos.length ? "" : `Nenhum associado ou dependente ativo encontrado para “${termo}”.`);
+        setMensagemBusca(grupos.length ? "" : `Nenhum associado, dependente ou participante de temporada ativa encontrado para “${termo}”.`);
       } catch (e) {
         if (!cancelado) {
           setGruposBusca([]);
@@ -307,7 +315,7 @@ export default function AcessosPage() {
     setErro("");
     setResultado(null);
     if (!("BarcodeDetector" in window)) {
-      setErro("Seu navegador não oferece leitura automática de QR Code. Use a matrícula ou abra a câmera do celular e leia o QR Code da carteirinha.");
+      setErro("A leitura automática de QR não está disponível neste navegador. Use um leitor USB de QR conectado ao computador e deixe o campo de busca selecionado, ou consulte pela matrícula.");
       return;
     }
     try {
@@ -366,7 +374,7 @@ export default function AcessosPage() {
             <div className="min-w-0 rounded-2xl border border-[#dce8e1] bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-3">
                 <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
-                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Buscar associado ou dependente</h2><p className="text-sm leading-5 text-gray-500">Digite a matrícula ou parte do nome.</p></div>
+                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Buscar associado, dependente ou temporada</h2><p className="text-sm leading-5 text-gray-500">Digite a matrícula, parte do nome ou use um leitor USB de QR neste campo.</p></div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="relative mt-4 sm:mt-5">
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
@@ -380,23 +388,23 @@ export default function AcessosPage() {
                       setBuscandoOpcoes(false);
                       setErro("");
                     }}
-                    placeholder="Digite o nome ou matrícula..."
+                    placeholder="Nome, matrícula ou leitura do QR..."
                     autoComplete="off"
                     aria-label="Buscar por nome ou matrícula"
                     inputMode="search"
                     className="min-h-14 w-full min-w-0 flex-1 rounded-xl border border-[#bdcec4] px-4 py-3 text-base outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/15 sm:w-auto"
                   />
-                  {(/^[0-9]+$/.test(matricula.trim()) || /^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim())) && (
-                    <button type="submit" disabled={carregando || !matricula.trim()} className="min-h-12 w-full rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50 sm:w-auto">Consultar matrícula</button>
+                  {(/^[0-9]+$/.test(matricula.trim()) || /^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim()) || /^(guarani:|https?:\/\/)/i.test(matricula.trim()) || /\/acessos\/validar/i.test(matricula.trim())) && (
+                    <button type="submit" disabled={carregando || !matricula.trim()} className="min-h-12 w-full rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50 sm:w-auto">{/^(guarani:|https?:\/\/)/i.test(matricula.trim()) || /\/acessos\/validar/i.test(matricula.trim()) ? "Validar QR recebido" : "Consultar matrícula"}</button>
                   )}
                 </div>
                 {buscandoOpcoes && (
-                  <p className="mt-2 px-1 text-xs font-semibold text-gray-500">Buscando associados e dependentes...</p>
+                  <p className="mt-2 px-1 text-xs font-semibold text-gray-500">Buscando associados, dependentes e temporadas ativas...</p>
                 )}
                 {gruposBusca.length > 0 && (
                   <div className="mt-2 max-h-[52vh] overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white shadow-lg sm:max-h-[30rem]">
                     <div className="sticky top-0 z-10 border-b bg-[#f5faf7] px-3 py-3 text-xs font-bold leading-5 text-gray-600">
-                      <p>{gruposBusca.length} família(s) encontrada(s). Marque as caixas das pessoas que entrarão.</p>
+                      <p>{gruposBusca.length} grupo(s) encontrado(s). Marque as pessoas que entrarão.</p>
                       <p className="mt-1 font-medium text-[#547264]">A lista permanece aberta enquanto você seleciona. A entrada só é registrada no botão abaixo.</p>
                     </div>
                     {gruposBusca.map((grupo) => {
@@ -405,10 +413,11 @@ export default function AcessosPage() {
                       const familiaCompletaSelecionada = quantidadeSelecionadaNaFamilia === familia.length;
                       const titularSelecionado = opcaoEstaSelecionada(grupo.titular);
                       const checkboxTitularId = `acesso-${chaveOpcaoAcesso(grupo.titular).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                      const grupoTemporada = grupo.titular.tipo === "temporada";
                       return (
-                        <div key={grupo.titular.id} className="border-b border-gray-200 p-2.5 last:border-b-0 sm:p-3">
+                        <div key={chaveOpcaoAcesso(grupo.titular)} className="border-b border-gray-200 p-2.5 last:border-b-0 sm:p-3">
                           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-                            <span className="text-[10px] font-black uppercase tracking-wide text-gray-400">Grupo familiar</span>
+                            <span className="text-[10px] font-black uppercase tracking-wide text-gray-400">{grupoTemporada ? "Temporada ativa" : "Grupo familiar"}</span>
                             <label className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-lg border border-[#b9d9c7] bg-[#f5faf7] px-3 py-2 text-xs font-black text-[#005a3c]">
                               <input
                                 type="checkbox"
@@ -416,9 +425,9 @@ export default function AcessosPage() {
                                 disabled={carregando || registrandoSelecionados}
                                 onChange={() => alternarSelecaoFamilia(grupo)}
                                 className="h-5 w-5 shrink-0 accent-[#005a3c]"
-                                aria-label={`Selecionar todos da família ${grupo.titular.nome}`}
+                                aria-label={grupoTemporada ? `Selecionar todos os participantes de ${grupo.titular.nome}` : `Selecionar todos da família ${grupo.titular.nome}`}
                               />
-                              <span>{familiaCompletaSelecionada ? "Família selecionada" : "Selecionar família toda"}</span>
+                              <span>{familiaCompletaSelecionada ? (grupoTemporada ? "Todos selecionados" : "Família selecionada") : (grupoTemporada ? "Selecionar todos" : "Selecionar família toda")}</span>
                               <span className="font-semibold text-[#547264]">{quantidadeSelecionadaNaFamilia}/{familia.length}</span>
                             </label>
                           </div>
@@ -436,10 +445,10 @@ export default function AcessosPage() {
                               className="h-6 w-6 shrink-0 accent-[#005a3c]"
                             />
                             <span className="min-w-0 flex-1">
-                              <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">Responsável da família</span>
+                              <span className="mb-0.5 block text-[10px] font-black uppercase tracking-wide text-[#005a3c]">{grupoTemporada ? "Titular da temporada" : "Responsável da família"}</span>
                               <span className="block break-words font-black text-[#17382c]">{grupo.titular.nome}</span>
                               <span className="mt-0.5 block text-xs text-gray-500">
-                                {grupo.titular.matricula || "Sem matrícula"} · Responsável familiar
+                                {grupo.titular.matricula || "Sem matrícula"} · {grupoTemporada ? "Carteirinha de temporada" : "Responsável familiar"}
                               </span>
                             </span>
                             {titularSelecionado && <CheckCircle2 className="h-5 w-5 shrink-0 text-[#005a3c]" aria-hidden="true" />}
@@ -447,7 +456,7 @@ export default function AcessosPage() {
 
                           {grupo.membros.length > 0 && (
                             <div className="ml-2 mt-2 border-l-2 border-[#d5e7dd] pl-2 sm:ml-3 sm:pl-3">
-                              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">Dependentes e familiares</p>
+                              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-gray-400">{grupoTemporada ? "Demais participantes" : "Dependentes e familiares"}</p>
                               <div className="space-y-1">
                                 {grupo.membros.map((opcao) => {
                                   const selecionado = opcaoEstaSelecionada(opcao);
@@ -469,7 +478,7 @@ export default function AcessosPage() {
                                       <span className="min-w-0 flex-1">
                                         <span className="block break-words text-sm font-bold text-[#17382c]">{opcao.nome}</span>
                                         <span className="mt-0.5 block text-xs leading-4 text-gray-500">
-                                          {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
+                                          {opcao.matricula || "Sem matrícula própria"} · {opcao.tipo === "temporada" ? (opcao.parentesco || "Participante da temporada") : opcao.tipo === "dependente" ? `Dependente${opcao.parentesco ? ` · ${opcao.parentesco}` : ""}` : (opcao.parentesco || opcao.categoria || "Associado da família")}
                                         </span>
                                       </span>
                                       {selecionado && <CheckCircle2 className="h-5 w-5 shrink-0 text-[#005a3c]" aria-hidden="true" />}
@@ -533,13 +542,13 @@ export default function AcessosPage() {
             <div className="min-w-0 rounded-2xl border bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-3">
                 <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Camera /></div>
-                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera traseira do celular.</p></div>
+                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Ler QR Code</h2><p className="text-sm text-gray-500">Use a câmera compatível ou um leitor USB.</p></div>
               </div>
               {!suportaLeituraQr ? (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-5 text-amber-800 sm:mt-5">
-                  Este navegador (comum em iPhone) não permite ler QR Code direto no site.
-                  Abra o <b>app de Câmera do celular</b> e aponte para o QR Code da carteirinha —
-                  ele vai abrir esta página automaticamente e já registrar o acesso.
+                  A leitura pela câmera não está disponível neste navegador. Para usar o QR neste computador,
+                  conecte um <b>leitor USB de QR Code</b>, clique no campo de busca à esquerda e leia a carteirinha.
+                  O código será recebido como texto e validado pelas mesmas regras de acesso.
                 </div>
               ) : !cameraAberta ? (
                 <button onClick={iniciarCamera} className="mt-4 min-h-14 w-full touch-manipulation rounded-xl border-2 border-[#005a3c] px-4 py-3 text-base font-black text-[#005a3c] sm:mt-5">📷 Abrir câmera e ler QR Code</button>

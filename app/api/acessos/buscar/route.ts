@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
+import { dataHojeBrasil } from "@/lib/politicaInadimplencia";
 
 type SocioBusca = {
   id: string;
@@ -25,9 +26,12 @@ type DependenteBusca = {
 
 type ResultadoBusca = {
   id: string;
-  tipo: "socio" | "dependente";
+  tipo: "socio" | "dependente" | "temporada";
   socio_id: string;
   dependente_id: string | null;
+  temporada_id?: string | null;
+  temporada_participante_id?: string | null;
+  qr?: string;
   nome: string;
   matricula: string | null;
   situacao: string | null;
@@ -39,6 +43,29 @@ type ResultadoBusca = {
 type GrupoBusca = {
   titular: ResultadoBusca;
   membros: ResultadoBusca[];
+};
+
+type TemporadaBusca = {
+  id: string;
+  codigo: string | null;
+  matricula: string | null;
+  tipo: string | null;
+  modalidade: string | null;
+  inicio: string | null;
+  fim: string | null;
+  situacao: string | null;
+  responsavel_nome: string | null;
+};
+
+type ParticipanteTemporadaBusca = {
+  id: string;
+  temporada_id: string;
+  papel: string | null;
+  matricula: string | null;
+  nome: string | null;
+  cpf: string | null;
+  parentesco: string | null;
+  foto_url: string | null;
 };
 
 function socioEstaAtivo(situacao: string | null | undefined) {
@@ -141,7 +168,7 @@ export async function GET(request: Request) {
 
     // O conjunto de sócios é leve (cadastros, sem histórico financeiro) e permite
     // montar o mesmo agrupamento familiar usado na tela de Carteirinhas.
-    const [sociosResult, dependentesEncontradosResult] = await Promise.all([
+    const [sociosResult, dependentesEncontradosResult, temporadasResult, participantesEncontradosResult] = await Promise.all([
       supabase
         .from("socios")
         .select("id,nome,matricula,cpf,situacao,categoria,responsavel_id,parentesco")
@@ -151,9 +178,20 @@ export async function GET(request: Request) {
         .select("id,socio_id,nome,matricula,cpf,parentesco,ativo,migrado_para_socio_id")
         .ilike("nome", `%${termo}%`)
         .limit(50),
+      supabase
+        .from("temporadas")
+        .select("id,codigo,matricula,tipo,modalidade,inicio,fim,situacao,responsavel_nome")
+        .limit(5000),
+      supabase
+        .from("temporadas_participantes")
+        .select("id,temporada_id,papel,matricula,nome,cpf,parentesco,foto_url")
+        .ilike("nome", `%${termo}%`)
+        .limit(200),
     ]);
 
     if (sociosResult.error) throw sociosResult.error;
+    if (temporadasResult.error) throw temporadasResult.error;
+    if (participantesEncontradosResult.error) throw participantesEncontradosResult.error;
 
     let dependentesEncontrados = (dependentesEncontradosResult.data || []) as unknown as DependenteBusca[];
     if (dependentesEncontradosResult.error) {
@@ -315,6 +353,78 @@ export async function GET(request: Request) {
       const membros = [...membrosPorChave.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }));
 
       grupos.push({ titular: criarOpcaoSocio(titular), membros });
+    }
+
+    // Temporadas ativas não são sócios/dependentes: consultamos titulares e
+    // participantes próprios para que também apareçam na busca da portaria.
+    const hoje = dataHojeBrasil();
+    const temporadasAtivas = ((temporadasResult.data || []) as unknown as TemporadaBusca[]).filter((temporada) => {
+      const inicio = String(temporada.inicio || "").slice(0, 10);
+      const fim = String(temporada.fim || "").slice(0, 10);
+      return String(temporada.situacao || "").toLowerCase() === "ativa" && (!inicio || inicio <= hoje) && (!fim || fim >= hoje);
+    });
+    const temporadasAtivasPorId = new Map(temporadasAtivas.map((temporada) => [String(temporada.id), temporada]));
+    const participantesQueCorrespondem = (participantesEncontradosResult.data || []) as unknown as ParticipanteTemporadaBusca[];
+    const idsTemporadasCorrespondentes = new Set(
+      participantesQueCorrespondem
+        .filter((participante) => temporadasAtivasPorId.has(String(participante.temporada_id)))
+        .map((participante) => String(participante.temporada_id)),
+    );
+    const temporadasCorrespondentes = temporadasAtivas.filter((temporada) =>
+      normalizar(temporada.responsavel_nome).includes(termoNormalizado) ||
+      matriculaNormalizada(temporada.matricula || temporada.codigo).toLowerCase().includes(termoNormalizado) ||
+      idsTemporadasCorrespondentes.has(String(temporada.id)),
+    );
+
+    const participantesPorTemporada = new Map<string, ParticipanteTemporadaBusca[]>();
+    for (const lote of emLotes(temporadasCorrespondentes.map((temporada) => String(temporada.id)), 100)) {
+      if (!lote.length) continue;
+      const { data, error } = await supabase
+        .from("temporadas_participantes")
+        .select("id,temporada_id,papel,matricula,nome,cpf,parentesco,foto_url")
+        .in("temporada_id", lote)
+        .limit(5000);
+      if (error) throw error;
+      for (const participante of (data || []) as unknown as ParticipanteTemporadaBusca[]) {
+        const idTemporada = String(participante.temporada_id);
+        const lista = participantesPorTemporada.get(idTemporada) || [];
+        lista.push(participante);
+        participantesPorTemporada.set(idTemporada, lista);
+      }
+    }
+
+    const criarOpcaoTemporada = (
+      temporada: TemporadaBusca,
+      participante: ParticipanteTemporadaBusca | null,
+      ehTitular = false,
+    ): ResultadoBusca => {
+      const participanteId = participante?.id ? String(participante.id) : null;
+      return {
+        id: participanteId || String(temporada.id),
+        tipo: "temporada",
+        socio_id: "",
+        dependente_id: null,
+        temporada_id: String(temporada.id),
+        temporada_participante_id: participanteId,
+        qr: participanteId ? `guarani:temporada-participante:${participanteId}` : `guarani:temporada:${temporada.id}`,
+        nome: String(participante?.nome || temporada.responsavel_nome || "Responsável da temporada"),
+        matricula: participante?.matricula || temporada.matricula || temporada.codigo || null,
+        situacao: temporada.situacao || "ativa",
+        categoria: temporada.tipo || "Temporada",
+        socio_nome: temporada.responsavel_nome || null,
+        parentesco: ehTitular ? "Titular da temporada" : participante?.parentesco || "Participante da temporada",
+      };
+    };
+
+    for (const temporada of temporadasCorrespondentes) {
+      const participantes = participantesPorTemporada.get(String(temporada.id)) || [];
+      const titular = participantes.find((participante) => String(participante.papel || "").toLowerCase() === "titular") || null;
+      const titularOpcao = criarOpcaoTemporada(temporada, titular, true);
+      const membros = participantes
+        .filter((participante) => participante.id !== titular?.id && String(participante.papel || "").toLowerCase() !== "titular")
+        .map((participante) => criarOpcaoTemporada(temporada, participante))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }));
+      grupos.push({ titular: titularOpcao, membros });
     }
 
     grupos.sort((a, b) => a.titular.nome.localeCompare(b.titular.nome, "pt-BR", { sensitivity: "base" }));

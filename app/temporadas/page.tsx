@@ -421,11 +421,13 @@ export default function TemporadasPage() {
       if (upload.error) throw upload.error;
 
       const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
+      const fotoComVersao = new URL(urlData.publicUrl);
+      fotoComVersao.searchParams.set("v", String(Date.now()));
       const accessToken = await token();
       const resposta = await fetch("/api/temporadas", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "atualizar_foto_participante", temporada_id: abrirParticipantes.id, participante_id: participanteId, foto_url: urlData.publicUrl }),
+        body: JSON.stringify({ acao: "atualizar_foto_participante", temporada_id: abrirParticipantes.id, participante_id: participanteId, foto_url: fotoComVersao.toString() }),
       });
       const resultado = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a foto.");

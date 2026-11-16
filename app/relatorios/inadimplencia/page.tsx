@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
+import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 
 type Socio = {
   id: string;
@@ -330,6 +331,18 @@ export default function InadimplenciaPage() {
           ? socio
           : null;
       if (m.dependente_id && !dependente && !pessoaSocio) continue;
+
+      // Lançamentos antigos podem continuar ligados ao cadastro atual após a
+      // promoção de dependente a titular. Não conte competências anteriores à
+      // data de associação/vigência do próprio cadastro, como no caso de quem
+      // passou a pagar mensalidade individual somente a partir de 10/2026.
+      const socioDaCobranca = pessoaSocio || (!dependente ? socio : null);
+      if (socioDaCobranca && mensalidadeRegistroAnteriorAAssociacao(
+        socioDaCobranca.data_associacao,
+        m.competencia || m.data_vencimento,
+        m.data_vencimento,
+        socioDaCobranca.dia_vencimento,
+      )) continue;
       const pessoaId = pessoaSocio?.id || dependente?.id || socio?.id;
       if (!pessoaId) continue;
       if (pessoaSocio && !grupos.has(pessoaSocio.id)) continue;
