@@ -836,11 +836,9 @@ export default function TemporadasPage() {
                           <button onClick={() => abrirEdicaoTemporada(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#d5e0da] bg-white px-3 py-2 text-xs font-bold text-[#005a3c] hover:bg-[#f4f7f5]">
                             <Pencil className="h-4 w-4" /> Editar
                           </button>
-                          {t.tipo === "temporada_familiar" && (
-                            <button onClick={() => abrirParticipantesModal(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#f2bb91] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#b65308] hover:bg-[#fff0e3]">
-                              <UserPlus className="h-4 w-4" /> Dependentes
-                            </button>
-                          )}
+                          <button onClick={() => abrirParticipantesModal(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#f2bb91] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#b65308] hover:bg-[#fff0e3]">
+                            <UserPlus className="h-4 w-4" /> {t.tipo === "temporada_familiar" ? "Dependentes / fotos" : "Foto do titular"}
+                          </button>
                           {t.situacao === "ativa" && (
                             <button onClick={() => void gerarCarteirinhas(t)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#005a3c] px-3 py-2 text-xs font-bold text-white hover:bg-[#003d2b]">
                               <CreditCard className="h-4 w-4" /> Carteirinhas
@@ -1053,7 +1051,7 @@ export default function TemporadasPage() {
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b p-5">
               <div>
-                <h2 className="text-lg font-black text-[#005a3c]">Dependentes da temporada</h2>
+                <h2 className="text-lg font-black text-[#005a3c]">{abrirParticipantes.tipo === "temporada_individual" ? "Foto do titular da temporada" : "Dependentes e fotos da temporada"}</h2>
                 <p className="text-sm text-[#718078]">{abrirParticipantes.responsavel_nome} · {abrirParticipantes.codigo || "Temporada pendente"}</p>
               </div>
               <button onClick={() => setAbrirParticipantes(null)}><X /></button>
@@ -1078,8 +1076,8 @@ export default function TemporadasPage() {
               </div>
 
               <div>
-                <h3 className="mb-3 font-black text-[#17382c]">Participantes cadastrados</h3>
-                <div className="space-y-2">
+                {abrirParticipantes.tipo === "temporada_familiar" && <h3 className="mb-3 font-black text-[#17382c]">Participantes cadastrados</h3>}
+                {abrirParticipantes.tipo === "temporada_familiar" && <div className="space-y-2">
                   {(abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").length === 0 ? (
                     <div className="rounded-xl border border-dashed border-[#d5e0da] p-4 text-sm text-[#718078]">Nenhum dependente cadastrado ainda.</div>
                   ) : (
@@ -1102,10 +1100,10 @@ export default function TemporadasPage() {
                       </div>
                     ))
                   )}
-                </div>
+                </div>}
               </div>
 
-              <div className="rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-4">
+              {abrirParticipantes.tipo === "temporada_familiar" && <div className="rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-4">
                 <h3 className="font-black text-[#005a3c]">+ Adicionar dependente</h3>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <label>
@@ -1130,7 +1128,7 @@ export default function TemporadasPage() {
                 <button onClick={() => void adicionarParticipante()} disabled={salvando} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">
                   <UserPlus className="h-4 w-4" /> Adicionar dependente
                 </button>
-              </div>
+              </div>}
             </div>
 
             <div className="flex justify-end border-t p-5">
