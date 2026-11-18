@@ -20,6 +20,8 @@ test('resumo SQL preserva a regra da primeira mensalidade efetivamente paga', ()
   assert.match(sql, /s\.data_associacao IS NULL/);
   assert.match(sql, /'pago', 'paga', 'paid', 'quitado'/);
   assert.match(sql, /data_associacao_efetiva/);
+  assert.match(sql, /competencia_associacao/);
+  assert.match(sql, /l\\.competencia_associacao IS NULL/);
   assert.match(sql, /dia_vencimento/);
 });
 
