@@ -6,14 +6,14 @@ import { supabase } from "@/lib/supabaseClient";
 import { CHAVE_PIX_SICREDI_CNPJ, formatarChavePix } from "@/lib/pix";
 type Convite={id:string;socio_id:string|null;dependente_id?:string|null;nome_convidado:string;documento_convidado?:string|null;cidade_convidado:string|null;data_inicio:string;data_fim:string|null;tipo:"diario"|"semanal"|"mensal";valor?:number;banho_incluido?:boolean|null;status:"pendente"|"pago"|"utilizado"|"cancelado";forma_pagamento?:string|null;comprovante_url?:string|null;created_at:string};
 type Socio={id:string;nome:string;matricula:number|string|null;responsavel_id?:string|null;parentesco?:string|null;situacao?:string|null;tipo_socio?:string|null;categoria?:string|null};
-type Dependente={id:string;socio_id:string|null;nome:string;matricula:number|string|null;parentesco?:string|null;ativo?:boolean|null;source?:"dependentes"|"socios";source_socio_id?:string|null}; type Conta={id:string;nome:string;banco:string|null};
+type Dependente={id:string;socio_id:string|null;nome:string;matricula:number|string|null;parentesco?:string|null;ativo?:boolean|null;source?:"dependentes"|"socios";source_socio_id?:string|null};
 type Recibo={id:string;numero:string;tipo:string;nome:string;matricula:number|string|null;detalhe:string;periodo:string;valor:number;pagamento:string;operador:string;dataHora:string;status:string};
 type ConvidadoForm={nome:string;documento:string;cidade:string;banho:"com_banho"|"sem_banho";valor:string};
 const hoje=()=>new Date().toISOString().slice(0,10);
 const normalizarCidadeConvite=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase();
  const CIDADES=["Augusto Pestana","Ijuí","Jóia","Eugênio de Castro","Boa Vista do Cadeado"]; const moeda=(v:number)=>Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); const dataBR=(v:string|null)=>v?v.slice(0,10).split("-").reverse().join("/"):"—";
 export default function ConvitesPage(){
- const [convites,setConvites]=useState<Convite[]>([]),[socios,setSocios]=useState<Socio[]>([]),[sociosBusca,setSociosBusca]=useState<Socio[]>([]),[dependentes,setDependentes]=useState<Dependente[]>([]),[contas,setContas]=useState<Conta[]>([]),[busca,setBusca]=useState(""),[buscaSocio,setBuscaSocio]=useState(""),[abrir,setAbrir]=useState(false),[mensagem,setMensagem]=useState(""),[salvando,setSalvando]=useState(false),[enviando,setEnviando]=useState<string|null>(null),[arquivo,setArquivo]=useState<File|null>(null);
+ const [convites,setConvites]=useState<Convite[]>([]),[socios,setSocios]=useState<Socio[]>([]),[sociosBusca,setSociosBusca]=useState<Socio[]>([]),[dependentes,setDependentes]=useState<Dependente[]>([]),[busca,setBusca]=useState(""),[buscaSocio,setBuscaSocio]=useState(""),[abrir,setAbrir]=useState(false),[mensagem,setMensagem]=useState(""),[salvando,setSalvando]=useState(false),[enviando,setEnviando]=useState<string|null>(null),[arquivo,setArquivo]=useState<File|null>(null);
  const [podeGerenciarFinanceiro,setPodeGerenciarFinanceiro]=useState(false);
  const [form,setForm]=useState({socio_id:"",dependente_id:"",nome:"",documento:"",cidade:"",inicio:hoje(),fim:"",tipo:"diario",banho:"com_banho",valor:"25",pagamento:"pix",conta_id:""});
  const [recibo,setRecibo]=useState<Recibo|null>(null);
@@ -68,7 +68,6 @@ export default function ConvitesPage(){
    setSocios(dados.socios || []);
    setSociosBusca(dados.socios_busca || dados.socios || []);
    setDependentes(dados.dependentes || []);
-   setContas(dados.contas || []);
    setPodeGerenciarFinanceiro(dados.podeGerenciarFinanceiro === true);
    if (dados.podeGerenciarFinanceiro !== true) setForm(atual => ({...atual, pagamento:"pix", conta_id:""}));
   } catch (erro) {
@@ -179,7 +178,7 @@ async function salvar(){
 </div>{editandoId?<>
 <div><label className="mb-1 block text-sm font-bold">Nome do convidado</label><input value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} className="w-full rounded-xl border px-4 py-3"/></div>
 <div><label className="mb-1 block text-sm font-bold">Documento / CPF</label><input value={form.documento} onChange={e=>setForm({...form,documento:e.target.value})} className="w-full rounded-xl border px-4 py-3"/></div>
-<div><label className="mb-1 block text-sm font-bold">Cidade</label><input value={cidadeOutra||form.cidade} onChange={e=>{setCidadeOutra(e.target.value);setForm({...form,cidade:e.target.value})}} placeholder="Digite a cidade" className="w-full rounded-xl border px-4 py-3"/></div>
+<div><label className="mb-1 block text-sm font-bold">Cidade</label><input value={cidadeOutra||form.cidade} onChange={e=>{setCidadeOutra(e.target.value);atualizarCidade(e.target.value)}} placeholder="Digite a cidade" className="w-full rounded-xl border px-4 py-3"/></div>
 </>:<div className="md:col-span-2 space-y-3">
 <div className="flex items-center justify-between"><label className="text-sm font-bold">Convidados</label><span className="text-xs text-gray-500">{convidadosForm.length} pessoa(s)</span></div>
 {convidadosForm.map((convidado,index)=>{

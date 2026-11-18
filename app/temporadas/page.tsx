@@ -398,8 +398,8 @@ export default function TemporadasPage() {
     }
   }
 
-  async function salvarFotoParticipante(participanteId: string, arquivo: File) {
-    if (!abrirParticipantes || !arquivo) return;
+  async function salvarFotoParticipante(temporada: Temporada, participanteId: string, arquivo: File) {
+    if (!temporada || !arquivo) return;
     if (!arquivo.type.startsWith("image/")) {
       setMensagem("Selecione um arquivo de imagem (JPG, PNG ou WEBP).");
       return;
@@ -422,12 +422,12 @@ export default function TemporadasPage() {
 
       const { data: urlData } = supabase.storage.from("fotos-associados").getPublicUrl(caminho);
       const fotoComVersao = new URL(urlData.publicUrl);
-      fotoComVersao.searchParams.set("v", String(Date.now()));
+      fotoComVersao.searchParams.set("v", `${arquivo.lastModified}-${arquivo.size}`);
       const accessToken = await token();
       const resposta = await fetch("/api/temporadas", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ acao: "atualizar_foto_participante", temporada_id: abrirParticipantes.id, participante_id: participanteId, foto_url: fotoComVersao.toString() }),
+        body: JSON.stringify({ acao: "atualizar_foto_participante", temporada_id: temporada.id, participante_id: participanteId, foto_url: fotoComVersao.toString() }),
       });
       const resultado = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a foto.");
@@ -435,9 +435,10 @@ export default function TemporadasPage() {
       await carregar();
       const recarregar = await fetch("/api/temporadas", { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
       const dados = await recarregar.json().catch(() => ({}));
-      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === abrirParticipantes.id);
+      const t = (dados?.temporadas || []).find((x: Temporada) => x.id === temporada.id);
       if (t) {
-        setAbrirParticipantes(t);
+        setTemporadaEditando((atual) => atual?.id === t.id ? t : atual);
+        setAbrirParticipantes((atual) => atual?.id === t.id ? t : atual);
         setAbrirCarteirinhas((atual) => atual?.id === t.id ? t : atual);
       }
       setMensagem("Foto do participante salva com sucesso.");
@@ -836,9 +837,11 @@ export default function TemporadasPage() {
                           <button onClick={() => abrirEdicaoTemporada(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#d5e0da] bg-white px-3 py-2 text-xs font-bold text-[#005a3c] hover:bg-[#f4f7f5]">
                             <Pencil className="h-4 w-4" /> Editar
                           </button>
-                          <button onClick={() => abrirParticipantesModal(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#f2bb91] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#b65308] hover:bg-[#fff0e3]">
-                            <UserPlus className="h-4 w-4" /> {t.tipo === "temporada_familiar" ? "Dependentes / fotos" : "Foto do titular"}
-                          </button>
+                          {t.tipo === "temporada_familiar" && (
+                            <button onClick={() => abrirParticipantesModal(t)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#f2bb91] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#b65308] hover:bg-[#fff0e3]">
+                              <UserPlus className="h-4 w-4" /> Dependentes
+                            </button>
+                          )}
                           {t.situacao === "ativa" && (
                             <button onClick={() => void gerarCarteirinhas(t)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#005a3c] px-3 py-2 text-xs font-bold text-white hover:bg-[#003d2b]">
                               <CreditCard className="h-4 w-4" /> Carteirinhas
@@ -925,6 +928,28 @@ export default function TemporadasPage() {
                     <input type="email" value={responsavelEmail} onChange={(e) => setResponsavelEmail(e.target.value)} placeholder="email@exemplo.com" className="w-full rounded-xl border border-[#d5e0da] px-3 py-3" />
                   </label>
                 </div>
+                {modoCadastro === "editar" && tipo === "temporada_individual" && (() => {
+                  const titular = (temporadaEditando?.participantes || []).find((p) => p.papel === "titular");
+                  return (
+                    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#f2d4bd] bg-white/80 p-3">
+                      <div className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-[#ead8ca] bg-[#fff3e8]">
+                        {titular?.foto_url ? (
+                          <Image src={titular.foto_url} alt={responsavelNome || "Foto do responsável"} width={64} height={80} unoptimized className="h-full w-full object-cover" />
+                        ) : <div className="grid h-full place-items-center text-2xl">👤</div>}
+                      </div>
+                      <div className="min-w-[180px] flex-1">
+                        <p className="text-sm font-extrabold text-[#8d430d]">Foto do responsável</p>
+                        <p className="mt-1 text-xs text-[#7b6b60]">A foto será usada na carteirinha da temporada individual. JPG, PNG ou WEBP, até 5 MB.</p>
+                        {titular?.id ? (
+                          <label className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-[#e8b58e] bg-[#fff8f2] px-3 py-2 text-xs font-bold text-[#a94c08] hover:bg-[#fff0e3]">
+                            {salvando ? "Salvando foto..." : titular.foto_url ? "Trocar foto" : "Adicionar foto"}
+                            <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(temporadaEditando!, titular.id!, file); e.currentTarget.value = ""; }} />
+                          </label>
+                        ) : <p className="mt-2 text-xs font-semibold text-red-700">Registro do titular não encontrado nesta temporada. Atualize a lista e tente novamente.</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -1051,7 +1076,7 @@ export default function TemporadasPage() {
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b p-5">
               <div>
-                <h2 className="text-lg font-black text-[#005a3c]">{abrirParticipantes.tipo === "temporada_individual" ? "Foto do titular da temporada" : "Dependentes e fotos da temporada"}</h2>
+                <h2 className="text-lg font-black text-[#005a3c]">Dependentes da temporada</h2>
                 <p className="text-sm text-[#718078]">{abrirParticipantes.responsavel_nome} · {abrirParticipantes.codigo || "Temporada pendente"}</p>
               </div>
               <button onClick={() => setAbrirParticipantes(null)}><X /></button>
@@ -1066,7 +1091,7 @@ export default function TemporadasPage() {
                   const titular = (abrirParticipantes.participantes || []).find((p) => p.papel === "titular");
                   return titular?.id ? <div className="mt-3 flex items-center gap-3">
                     <div className="h-16 w-12 overflow-hidden rounded-lg bg-orange-50">{titular.foto_url ? <Image src={titular.foto_url} alt={titular.nome || "Titular"} width={48} height={64} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
-                    <label className="cursor-pointer rounded-lg border border-[#d5e0da] px-3 py-2 text-xs font-bold hover:bg-white">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(titular.id!, file); e.currentTarget.value = ""; }} /></label>
+                    <label className="cursor-pointer rounded-lg border border-[#d5e0da] px-3 py-2 text-xs font-bold hover:bg-white">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(abrirParticipantes, titular.id!, file); e.currentTarget.value = ""; }} /></label>
                     <div className="block text-xs font-bold text-[#718078]">Validade do exame médico
                       <input type="date" value={validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? ""} disabled={salvando} onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [titular.id!]: e.target.value }))} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-2 text-sm text-[#17382c]" />
                       <button type="button" disabled={salvando} onClick={() => void salvarValidadeExame(titular.id!, validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? "")} className="mt-2 rounded-lg bg-[#006044] px-3 py-2 text-xs font-black text-white disabled:opacity-50">{salvando ? "Salvando..." : "Salvar exame do titular"}</button>
@@ -1076,8 +1101,8 @@ export default function TemporadasPage() {
               </div>
 
               <div>
-                {abrirParticipantes.tipo === "temporada_familiar" && <h3 className="mb-3 font-black text-[#17382c]">Participantes cadastrados</h3>}
-                {abrirParticipantes.tipo === "temporada_familiar" && <div className="space-y-2">
+                <h3 className="mb-3 font-black text-[#17382c]">Participantes cadastrados</h3>
+                <div className="space-y-2">
                   {(abrirParticipantes.participantes || []).filter((p) => p.papel !== "titular").length === 0 ? (
                     <div className="rounded-xl border border-dashed border-[#d5e0da] p-4 text-sm text-[#718078]">Nenhum dependente cadastrado ainda.</div>
                   ) : (
@@ -1087,7 +1112,7 @@ export default function TemporadasPage() {
                           <div className="h-14 w-11 shrink-0 overflow-hidden rounded-lg bg-orange-50">{p.foto_url ? <Image src={p.foto_url} alt={p.nome || "Dependente"} width={44} height={56} unoptimized className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">👤</div>}</div>
                           <div className="min-w-0"><p className="font-bold">{p.nome}</p><p className="text-xs text-[#718078]">{p.parentesco || "Dependente"} {p.matricula ? `· ${p.matricula}` : "· matrícula após pagamento"}</p>
                             {p.id && <div className="mt-2 flex flex-wrap items-end gap-2">
-                              <label className="inline-block cursor-pointer rounded-lg border px-2 py-1 text-xs font-bold hover:bg-[#f9fbfa]">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(p.id!, file); e.currentTarget.value = ""; }} /></label>
+                              <label className="inline-block cursor-pointer rounded-lg border px-2 py-1 text-xs font-bold hover:bg-[#f9fbfa]">Adicionar/trocar foto<input type="file" accept="image/*" className="hidden" disabled={salvando} onChange={(e) => { const file = e.target.files?.[0]; if (file) void salvarFotoParticipante(abrirParticipantes, p.id!, file); e.currentTarget.value = ""; }} /></label>
                               <div className="text-xs font-bold text-[#718078]">Validade do exame médico<input type="date" value={validadeExameRascunho[p.id!] ?? p.exame_medico_validade ?? ""} disabled={salvando} onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [p.id!]: e.target.value }))} className="mt-1 block rounded-lg border border-[#d5e0da] px-2 py-1.5 text-sm text-[#17382c]" /><button type="button" disabled={salvando} onClick={() => void salvarValidadeExame(p.id!, validadeExameRascunho[p.id!] ?? p.exame_medico_validade ?? "")} className="mt-2 rounded-lg bg-[#006044] px-3 py-2 text-xs font-black text-white disabled:opacity-50">{salvando ? "Salvando..." : "Salvar exame"}</button></div>
                             </div>}
                           </div>
@@ -1100,10 +1125,10 @@ export default function TemporadasPage() {
                       </div>
                     ))
                   )}
-                </div>}
+                </div>
               </div>
 
-              {abrirParticipantes.tipo === "temporada_familiar" && <div className="rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-4">
+              <div className="rounded-2xl border border-[#dfe9e3] bg-[#f9fbfa] p-4">
                 <h3 className="font-black text-[#005a3c]">+ Adicionar dependente</h3>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <label>
@@ -1128,7 +1153,7 @@ export default function TemporadasPage() {
                 <button onClick={() => void adicionarParticipante()} disabled={salvando} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#005a3c] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">
                   <UserPlus className="h-4 w-4" /> Adicionar dependente
                 </button>
-              </div>}
+              </div>
             </div>
 
             <div className="flex justify-end border-t p-5">

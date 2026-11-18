@@ -213,12 +213,10 @@ export async function POST(request: Request) {
       if (!TIPOS.includes(arquivo.type) || arquivo.size > 8 * 1024 * 1024) return NextResponse.json({ error: "Comprovante inválido. Use JPG, PNG, WEBP ou PDF até 8 MB." }, { status: 400 });
       if (pagamento === "dinheiro" && !["image/jpeg", "image/png", "image/webp"].includes(arquivo.type)) return NextResponse.json({ error: "Para pagamento em dinheiro, anexe uma foto JPG, PNG ou WEBP do recibo." }, { status: 400 });
 
-      let socioSelecionadoDb: SocioBuscaRow | null = null;
       if (socio_id) {
         const { data: socio, error } = await db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,situacao,tipo_socio,categoria,cpf").eq("id", socio_id).maybeSingle();
         if (error) return NextResponse.json({ error: error.message }, { status: 500 });
         if (!socio) return NextResponse.json({ error: "Associado responsável não encontrado." }, { status: 404 });
-        socioSelecionadoDb = socio as SocioBuscaRow;
       }
       if (dependente_id) {
         if (!socio_id) return NextResponse.json({ error: "Selecione o titular responsável pelo dependente." }, { status: 400 });
