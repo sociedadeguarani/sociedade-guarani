@@ -43,6 +43,7 @@ AS $$
     SELECT
       m.id,
       m.socio_id,
+      NULLIF(LEFT(m.competencia::text, 7), '') AS competencia_associacao,
       COALESCE(
         NULLIF(LEFT(m.competencia::text, 7), ''),
         TO_CHAR(m.data_vencimento::date, 'YYYY-MM')
@@ -77,11 +78,44 @@ AS $$
     SELECT *
     FROM mensalidades_base AS l
     WHERE l.data_associacao_efetiva IS NULL
-       OR l.competencia_ref IS NULL
-       OR l.competencia_ref !~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
-       OR l.competencia_ref > TO_CHAR(l.data_associacao_efetiva, 'YYYY-MM')
+       OR l.competencia_associacao IS NULL
+       OR l.competencia_associacao !~ '^[0-9]{4}-(0[1-9]|1[0-2])
+         AND EXTRACT(DAY FROM l.data_associacao_efetiva)::integer <= COALESCE(l.dia_vencimento, 10)
+       )
+  ),
+  resumo AS (
+    SELECT
+      l.socio_id,
+      COUNT(DISTINCT l.competencia_ref) FILTER (
+        WHERE l.vencimento_efetivo < p_hoje
+          AND LOWER(TRIM(COALESCE(l.situacao, ''))) NOT IN (
+            'pago', 'paga', 'paid', 'quitado', 'quitada',
+            'recebido', 'recebida', 'baixado', 'baixada',
+            'confirmado', 'confirmada', 'compensado', 'compensada',
+            'isento', 'isenta', 'cancelado', 'cancelada'
+          )
+          AND l.competencia_ref ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
+      )::integer AS quantidade_atraso,
+      COUNT(l.id) > 0 AS possui_lancamentos
+    FROM mensalidades_validas AS l
+    GROUP BY l.socio_id
+  )
+  SELECT
+    ids.socio_id,
+    COALESCE(resumo.quantidade_atraso, 0)::integer,
+    COALESCE(resumo.possui_lancamentos, false)
+  FROM ids
+  LEFT JOIN resumo ON resumo.socio_id = ids.socio_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.socios_resumo_inadimplencia_v1(uuid[], date)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.socios_resumo_inadimplencia_v1(uuid[], date)
+  TO service_role;
+
+       OR l.competencia_associacao > TO_CHAR(l.data_associacao_efetiva, 'YYYY-MM')
        OR (
-         l.competencia_ref = TO_CHAR(l.data_associacao_efetiva, 'YYYY-MM')
+         l.competencia_associacao = TO_CHAR(l.data_associacao_efetiva, 'YYYY-MM')
          AND EXTRACT(DAY FROM l.data_associacao_efetiva)::integer <= COALESCE(l.dia_vencimento, 10)
        )
   ),
