@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "@/app/components/MenuLateralPadrao";
 import CabecalhoPadrao from "@/app/components/CabecalhoPadrao";
-import { FileText, Plus, RefreshCw, CheckCircle2, Search, X } from "lucide-react";
+import { FileText, Plus, RefreshCw, CheckCircle2, Search, X, CalendarDays } from "lucide-react";
 
 type Socio = { id: string; nome: string; matricula: string | number | null; cpf: string | null; possui_mensalidade: boolean | null; valor_mensalidade: number | null };
 type Conta = { id: string; nome: string; banco?: string | null };
@@ -42,6 +42,8 @@ export default function VendaTitulosPage() {
   const [observacoes, setObservacoes] = useState("");
   const [modalNovo, setModalNovo] = useState(false);
   const [parcelaBaixa, setParcelaBaixa] = useState<Parcela | null>(null);
+  const [contratoEditandoDatas, setContratoEditandoDatas] = useState<Contrato | null>(null);
+  const [datasEdicao, setDatasEdicao] = useState<Record<string, string>>({});
   const [contaBaixa, setContaBaixa] = useState("");
   const [formaBaixa, setFormaBaixa] = useState("pix");
   const [dataBaixa, setDataBaixa] = useState(hoje);
@@ -182,6 +184,45 @@ export default function VendaTitulosPage() {
     finally { setSalvando(false); }
   }
 
+  function abrirEdicaoDatas(contrato: Contrato) {
+    setErro("");
+    setSucesso("");
+    setContratoEditandoDatas(contrato);
+    setDatasEdicao(Object.fromEntries((contrato.parcelas || []).map((parcela) => [parcela.id, String(parcela.data_vencimento || "").slice(0, 10)])));
+  }
+
+  async function salvarDatasVencimento(event: React.FormEvent) {
+    event.preventDefault();
+    if (!contratoEditandoDatas) return;
+    setErro("");
+    setSucesso("");
+    const alteracoes = (contratoEditandoDatas.parcelas || [])
+      .filter((parcela) => datasEdicao[parcela.id] !== String(parcela.data_vencimento || "").slice(0, 10))
+      .map((parcela) => ({ parcela_id: parcela.id, data_vencimento: datasEdicao[parcela.id] || "" }));
+    if (alteracoes.length === 0) {
+      setContratoEditandoDatas(null);
+      return;
+    }
+    if (alteracoes.some((item) => !/^\d{4}-\d{2}-\d{2}$/.test(item.data_vencimento))) {
+      setErro("Informe uma data de vencimento válida para cada parcela alterada.");
+      return;
+    }
+    setSalvando(true);
+    try {
+      const resultado = await requisicao("/api/venda-titulos", {
+        method: "POST",
+        body: JSON.stringify({ acao: "atualizar_vencimentos", venda_titulo_id: contratoEditandoDatas.id, vencimentos: alteracoes }),
+      });
+      setSucesso(resultado.message || "Vencimentos atualizados com sucesso.");
+      setContratoEditandoDatas(null);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao atualizar vencimentos.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function baixarParcela(event: React.FormEvent) {
     event.preventDefault(); if (!parcelaBaixa) return;
     setErro(""); setSucesso(""); setSalvando(true);
@@ -207,12 +248,18 @@ export default function VendaTitulosPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between"><h2 className="font-bold text-slate-800">Contratos cadastrados</h2><button onClick={() => { setCarregando(true); void carregar(); }} className="rounded-lg border px-3 py-2 text-sm"><RefreshCw size={15} className="mr-2 inline"/>Atualizar</button></div>
         {carregando ? <p className="p-8 text-center text-slate-500">Carregando...</p> : contratos.length === 0 ? <p className="p-8 text-center text-slate-500">Nenhuma venda de título cadastrada.</p> : <div className="space-y-4">{contratos.map(c=><div key={c.id} className="rounded-xl border border-slate-200 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold text-emerald-700">{c.codigo}</p><h3 className="font-bold text-slate-800">{c.comprador_nome}</h3><p className="text-xs text-slate-500">Contrato em {dataBr(c.data_contratacao)} · {c.parcelas?.length || 0} parcelas</p></div><p className="text-lg font-black text-slate-800">{moeda(c.valor_total)}</p></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold text-emerald-700">{c.codigo}</p><h3 className="font-bold text-slate-800">{c.comprador_nome}</h3><p className="text-xs text-slate-500">Contrato em {dataBr(c.data_contratacao)} · {c.parcelas?.length || 0} parcelas</p><button type="button" onClick={() => abrirEdicaoDatas(c)} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50"><CalendarDays size={14}/> Editar datas</button></div><p className="text-lg font-black text-slate-800">{moeda(c.valor_total)}</p></div>
           <div className="mt-3 grid gap-2 md:grid-cols-3">{(c.parcelas || []).sort((a,b)=>a.numero-b.numero).map(p=><div key={p.id} className="rounded-lg bg-slate-50 p-3"><div className="flex justify-between gap-2"><b className="text-sm">{p.descricao}</b><b className="text-sm">{moeda(p.valor)}</b></div><p className="mt-1 text-xs text-slate-500">Vencimento: {dataBr(p.data_vencimento)}</p>{p.situacao==="pago" && <p className="mt-1 text-[11px] text-slate-500">Recebido em {dataBr(p.data_pagamento)}{p.forma_pagamento?` · ${p.forma_pagamento.toUpperCase().replace(/_/g, " ")}`:""}{p.conta_bancaria_id?` · ${contas.find(c=>c.id===p.conta_bancaria_id)?.nome || "Conta"}`:""}</p>}{p.situacao!=="pago" && p.forma_pagamento==="debito_em_conta" && <p className="mt-1 text-[11px] text-slate-500">Previsto: Débito em conta{p.conta_bancaria_id?` · ${contas.find(c=>c.id===p.conta_bancaria_id)?.nome || "Conta"}`:""}</p>}<div className="mt-2 flex items-center justify-between"><span className={`rounded-full px-2 py-1 text-xs font-bold ${p.situacao==="pago"?"bg-emerald-100 text-emerald-700":"bg-amber-100 text-amber-700"}`}>{p.situacao==="pago"?"Pago":"Em aberto"}</span>{p.situacao!=="pago" && <button onClick={()=>{setParcelaBaixa(p);setContaBaixa(p.conta_bancaria_id || "");setFormaBaixa(p.forma_pagamento || "pix");setDataBaixa(hoje);setComprovanteBaixa(null);}} className="rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-bold text-white">Receber</button>}</div></div>)}</div>
         </div>)}</div>}
       </div>
     </div>
   </main>
+  {contratoEditandoDatas && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-3"><form onSubmit={salvarDatasVencimento} className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+    <div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-black">Editar datas dos vencimentos</h2><p className="text-xs text-slate-500">{contratoEditandoDatas.comprador_nome} · {contratoEditandoDatas.codigo}</p></div><button type="button" onClick={() => setContratoEditandoDatas(null)}><X/></button></div>
+    <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Altere somente as datas de vencimento. Valores, parcelas pagas, datas reais de recebimento e lançamentos do Financeiro serão preservados.</p>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{(contratoEditandoDatas.parcelas || []).slice().sort((a,b)=>a.numero-b.numero).map((parcela) => <div key={parcela.id}><label className="mb-1 block text-xs font-bold">{parcela.descricao || (parcela.numero === 1 ? "Entrada" : `Parcela ${parcela.numero}`)}{parcela.situacao === "pago" ? " · paga" : ""}</label><input required type="date" value={datasEdicao[parcela.id] || ""} onChange={(e) => setDatasEdicao((atual) => ({ ...atual, [parcela.id]: e.target.value }))} className="w-full rounded-xl border p-3"/><p className="mt-1 text-[11px] text-slate-500">{moeda(Number(parcela.valor || 0))}</p></div>)}</div>
+    <div className="flex justify-end gap-2"><button type="button" onClick={() => setContratoEditandoDatas(null)} className="rounded-xl border px-4 py-2">Cancelar</button><button disabled={salvando} className="rounded-xl bg-emerald-800 px-5 py-2 font-bold text-white disabled:opacity-50">{salvando ? "Salvando..." : "Salvar datas"}</button></div>
+  </form></div>}
   {modalNovo && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3"><form onSubmit={criarVenda} className="max-h-[92vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
     <div className="flex items-center justify-between"><h2 className="text-lg font-black">Nova venda de título</h2><button type="button" onClick={()=>setModalNovo(false)}><X/></button></div>
     <div><label className="mb-1 block text-xs font-bold">Buscar associado comprador</label><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><input value={buscaSocio} onChange={e=>{setBuscaSocio(e.target.value);setSocioId("");}} placeholder="Digite nome, matrícula ou CPF..." className="w-full rounded-xl border p-3 pl-9 text-sm"/></div>{buscaSocio && <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border">{sociosFiltrados.map(s=><button type="button" key={s.id} onClick={()=>{setSocioId(s.id);setBuscaSocio(`${s.nome}${s.matricula?` — ${s.matricula}`:""}`);}} className="block w-full border-b p-3 text-left text-sm hover:bg-emerald-50"><b>{s.nome}</b><span className="ml-2 text-xs text-slate-500">Matrícula {s.matricula || "—"}</span></button>)}</div>}{socioSelecionado && <p className="mt-1 text-xs text-emerald-700">Associado selecionado · Mensalidade: {socioSelecionado.possui_mensalidade ? moeda(Number(socioSelecionado.valor_mensalidade||0)) : "Não configurada no cadastro"}</p>}</div>

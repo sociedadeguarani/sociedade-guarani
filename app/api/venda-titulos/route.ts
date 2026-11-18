@@ -293,6 +293,56 @@ export async function POST(request: Request) {
       });
     }
 
+    if (acao === "atualizar_vencimentos") {
+      const vendaTituloId = String(body.venda_titulo_id || "");
+      const vencimentosRaw = Array.isArray(body.vencimentos) ? body.vencimentos : [];
+      if (!vendaTituloId || vencimentosRaw.length === 0) {
+        return erro("Informe a venda e ao menos uma data de vencimento para atualizar.");
+      }
+
+      const vencimentos = vencimentosRaw.map((item) => {
+        const registro = item && typeof item === "object" ? item as Record<string, unknown> : {};
+        return { parcela_id: String(registro.parcela_id || ""), data_vencimento: String(registro.data_vencimento || "") };
+      });
+      const ids = vencimentos.map((item) => item.parcela_id);
+      const dataValida = (valor: string) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+        const data = new Date(`${valor}T00:00:00.000Z`);
+        return Number.isFinite(data.getTime()) && data.toISOString().slice(0, 10) === valor;
+      };
+      if (vencimentos.some((item) => !item.parcela_id || !dataValida(item.data_vencimento)) || new Set(ids).size !== ids.length) {
+        return erro("Confira as datas informadas. Cada parcela deve ter uma data válida e única.");
+      }
+
+      const { data: contrato, error: contratoError } = await db.from("vendas_titulos")
+        .select("id,situacao").eq("id", vendaTituloId).maybeSingle();
+      if (contratoError) throw contratoError;
+      if (!contrato) return erro("Venda de título não encontrada.", 404);
+      if (["cancelado", "cancelada"].includes(String(contrato.situacao || "").toLowerCase())) {
+        return erro("Não é possível alterar vencimentos de uma venda cancelada.", 409);
+      }
+
+      const { data: parcelasContrato, error: parcelasError } = await db.from("vendas_titulos_parcelas")
+        .select("id").eq("venda_titulo_id", vendaTituloId);
+      if (parcelasError) throw parcelasError;
+      const idsPermitidos = new Set((parcelasContrato || []).map((item) => String(item.id)));
+      if (ids.some((id) => !idsPermitidos.has(id))) {
+        return erro("Uma ou mais parcelas não pertencem a esta venda.", 409);
+      }
+
+      for (const item of vencimentos) {
+        const { error: atualizacaoError } = await db.from("vendas_titulos_parcelas")
+          .update({ data_vencimento: item.data_vencimento })
+          .eq("id", item.parcela_id).eq("venda_titulo_id", vendaTituloId);
+        if (atualizacaoError) throw atualizacaoError;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: "Datas de vencimento atualizadas. Os recebimentos e lançamentos já registrados no Financeiro foram preservados.",
+      });
+    }
+
     if (acao === "baixar_parcela") {
       const parcelaId = String(body.parcela_id || "");
       const contaId = String(body.conta_bancaria_id || "");
