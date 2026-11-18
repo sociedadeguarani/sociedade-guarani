@@ -64,9 +64,12 @@ AS $$
           ELSE TO_DATE(primeira.competencia || '-01', 'YYYY-MM-DD')
         END
       ) AS data_associacao_efetiva,
-      COALESCE(
-        EXTRACT(DAY FROM m.data_vencimento::date)::integer,
-        LEAST(GREATEST(COALESCE(s.dia_vencimento, 10)::integer, 1), 28)
+      LEAST(
+        GREATEST(
+          COALESCE(EXTRACT(DAY FROM m.data_vencimento::date)::integer, COALESCE(s.dia_vencimento, 10)::integer),
+          1
+        ),
+        28
       ) AS dia_vencimento,
       m.situacao
     FROM public.mensalidades AS m
