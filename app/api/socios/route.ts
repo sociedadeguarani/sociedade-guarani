@@ -240,7 +240,6 @@ export async function GET(request: Request) {
         }
       }
     }
-    }
 
     const socioPorMatricula = new Map(
       registros.map((socio) => [String(socio.matricula || "").trim().toUpperCase(), socio])
