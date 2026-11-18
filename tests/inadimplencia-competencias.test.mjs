@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
-const financeiro = readFileSync(new URL('app/financeiro/page.tsx', root), 'utf8');
+const financeiro = readFileSync(new URL('lib/financeiroInadimplencia.ts', root), 'utf8');
 const relatorio = readFileSync(new URL('app/relatorios/inadimplencia/page.tsx', root), 'utf8');
 
 test('Financeiro calcula competências virtuais desde a associação ou primeiro pagamento', () => {
-  assert.match(financeiro, /const apuracaoPorPessoa = useMemo/);
+  assert.match(financeiro, /export function apurarResumoInadimplencia/);
   assert.match(financeiro, /const inicioCadastral = chaveCompetencia\(pessoa\.data_associacao\)/);
   assert.match(financeiro, /const primeiroPago = registros[\s\S]{0,180}\.filter\(mensalidadePaga\)/);
   assert.match(financeiro, /const inicio = inicioCadastral \|\| primeiroPago/);

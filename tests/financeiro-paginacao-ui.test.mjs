@@ -44,31 +44,35 @@ test('Financeiro oferece filtros de situação verde, amarelo e vermelho e mostr
   assert.match(page, /\["amarelo"/);
   assert.match(page, /\["vermelho"/);
   assert.match(page, /monitoramentoPessoas/);
-  assert.match(page, /const meses = apuracao\?\.meses \|\| 0/);
+  assert.match(page, /nivelAtraso\(item\.meses, politicaInadimplencia\)/);
 });
 
 test('apuração automática usa data de associação ou primeira mensalidade paga, sem exigir geração da competência', () => {
-  assert.match(page, /pessoa\.data_associacao/);
-  assert.match(page, /const primeiroPago = registros/);
-  assert.match(page, /cursor\.setMonth\(cursor\.getMonth\(\) \+ 1\)/);
-  assert.match(page, /competenciasDevidas\.push\(chave\)/);
+  const apuracao = readFileSync(new URL('lib/financeiroInadimplencia.ts', root), 'utf8');
+  assert.match(apuracao, /pessoa\.data_associacao/);
+  assert.match(apuracao, /const primeiroPago = registros/);
+  assert.match(apuracao, /cursor\.setMonth\(cursor\.getMonth\(\) \+ 1\)/);
+  assert.match(apuracao, /competenciasDevidas\.push\(chave\)/);
 });
 
 test('histórico legado de dependente é reconciliado pelo CPF e status pago/baixado é reconhecido', () => {
-  assert.match(page, /sociosPorCpf\.get\(cpfDependente\)/);
-  assert.match(page, /mensalidadeQuitadaOuIsenta/);
-  assert.match(page, /"baixado"/);
-  assert.match(page, /"paga"/);
+  const apuracao = readFileSync(new URL('lib/financeiroInadimplencia.ts', root), 'utf8');
+  assert.match(apuracao, /sociosPorCpf\.get\(cpfDependente\)/);
+  assert.match(apuracao, /mensalidadeQuitadaOuIsenta/);
+  assert.match(apuracao, /"baixado"/);
+  assert.match(apuracao, /"paga"/);
 });
 
 test('histórico de mensalidades do Financeiro é paginado acima de 1.000 linhas para localizar pagamentos antigos', () => {
-  assert.match(page, /async function buscarMensalidadesPaginadas/);
-  assert.match(page, /\.range\(offset, offset \+ tamanhoLote - 1\)/);
-  assert.match(page, /if \(lote\.length < tamanhoLote\) return todas/);
-  assert.match(page, /\.order\("id", \{ ascending: false \}\)/);
+  const api = readFileSync(new URL('app/api/financeiro/inadimplencia/route.ts', root), 'utf8');
+  assert.match(api, /async function buscarMensalidadesPaginadas/);
+  assert.match(api, /\.range\(offset, offset \+ TAMANHO_PAGINA - 1\)/);
+  assert.match(api, /if \(lote\.length < TAMANHO_PAGINA\) return todas/);
+  assert.match(api, /\.order\("id", \{ ascending: false \}\)/);
 });
 
 test('primeira competência de referência usa pagamento efetivo, não isenção ou cancelamento', () => {
-  assert.match(page, /function mensalidadePaga/);
-  assert.match(page, /\.filter\(mensalidadePaga\)/);
+  const apuracao = readFileSync(new URL('lib/financeiroInadimplencia.ts', root), 'utf8');
+  assert.match(apuracao, /function mensalidadePaga/);
+  assert.match(apuracao, /\.filter\(mensalidadePaga\)/);
 });
