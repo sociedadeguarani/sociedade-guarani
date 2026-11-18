@@ -5,55 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
-import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
+import { classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 import { Campo, Modal, Resumo } from "./components/FinanceiroUI";
-
-type Socio = {
-  id: string;
-  matricula: string | number | null;
-  nome: string;
-  cpf: string | null;
-  whatsapp: string | null;
-  telefone: string | null;
-  foto_url: string | null;
-  situacao: string | null;
-  responsavel_id: string | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
-  data_associacao: string | null;
-  remido: boolean | null;
-  tipo_socio: string | null;
-  categoria: string | null;
-  ativo: boolean | null;
-};
-
-type Dependente = {
-  id: string;
-  socio_id: string;
-  nome: string;
-  cpf: string | null;
-  telefone: string | null;
-  ativo: boolean | null;
-  possui_mensalidade: boolean | null;
-  valor_mensalidade: number | null;
-  dia_vencimento: number | null;
-  tipo_pagamento: string | null;
-};
-
-type Mensalidade = {
-  id: string;
-  socio_id: string;
-  dependente_id: string | null;
-  competencia: string;
-  valor: number;
-  data_vencimento: string | null;
-  situacao: string | null;
-  data_pagamento?: string | null;
-  motivo?: string | null;
-  observacoes?: string | null;
-};
 
 type PessoaFinanceira = {
   chave: string;
@@ -69,6 +22,13 @@ type PessoaFinanceira = {
   dia_vencimento: number;
   tipo_pagamento: string;
   data_associacao: string | null;
+};
+
+type ResumoPessoaInadimplencia = {
+  pessoa: PessoaFinanceira;
+  meses: number;
+  valorDevido: number;
+  competencias: string[];
 };
 
 type ContaBancaria = {
@@ -170,93 +130,6 @@ function normalizarStatusMensalidade(valor: unknown) {
     .trim();
 }
 
-function mensalidadePaga(item: Mensalidade) {
-  return Boolean(item.data_pagamento) || new Set([
-    "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
-    "baixado", "baixada", "compensado", "compensada",
-  ]).has(normalizarStatusMensalidade(item.situacao));
-}
-
-function mensalidadeQuitadaOuIsenta(item: Mensalidade) {
-  const situacao = normalizarStatusMensalidade(item.situacao);
-  return mensalidadePaga(item) || new Set([
-    "isento", "isenta", "cancelado", "cancelada",
-  ]).has(situacao);
-}
-
-async function buscarMensalidadesPaginadas(): Promise<Mensalidade[]> {
-  const tamanhoLote = 1000;
-  const paginasPorLote = 4;
-  const colunas = "id,socio_id,dependente_id,competencia,valor,data_vencimento,situacao,data_pagamento,motivo,observacoes";
-  const criarConsulta = () => supabase
-    .from("mensalidades")
-    .select(colunas)
-    .order("competencia", { ascending: false })
-    .order("id", { ascending: false });
-
-  // A primeira página traz a contagem exata. As páginas restantes são buscadas
-  // em pequenos lotes paralelos, evitando dezenas de viagens sequenciais ao banco.
-  const primeira = await supabase
-    .from("mensalidades")
-    .select(colunas, { count: "exact" })
-    .order("competencia", { ascending: false })
-    .order("id", { ascending: false })
-    .range(0, tamanhoLote - 1);
-
-  if (primeira.error) throw primeira.error;
-  const todas = [...((primeira.data || []) as Mensalidade[])];
-  const total = primeira.count;
-  if (total === null) {
-    // Fallback conservador caso o provedor não retorne a contagem exata.
-    for (let offset = todas.length; offset < 100_000; offset += tamanhoLote) {
-      const { data, error } = await criarConsulta().range(offset, offset + tamanhoLote - 1);
-      if (error) throw error;
-      const lote = (data || []) as Mensalidade[];
-      todas.push(...lote);
-      if (lote.length < tamanhoLote) return todas;
-    }
-    throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
-  }
-  if (total > 100_000) {
-    throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
-  }
-
-  for (let inicioLote = tamanhoLote; inicioLote < total; inicioLote += tamanhoLote * paginasPorLote) {
-    const offsets = Array.from(
-      { length: Math.min(paginasPorLote, Math.ceil((total - inicioLote) / tamanhoLote)) },
-      (_, indice) => inicioLote + indice * tamanhoLote
-    );
-    const paginas = await Promise.all(offsets.map(async (offset) => {
-      const { data, error } = await criarConsulta().range(offset, Math.min(offset + tamanhoLote - 1, total - 1));
-      if (error) throw error;
-      return (data || []) as Mensalidade[];
-    }));
-    for (const pagina of paginas) todas.push(...pagina);
-  }
-
-  return todas;
-}
-
-function chaveCompetencia(valor: string | null | undefined) {
-  if (!valor) return "";
-  const bruto = String(valor).slice(0, 10);
-  if (/^\d{4}-\d{2}/.test(bruto)) return bruto.slice(0, 7);
-  const brasileiro = bruto.match(/^(\d{2})\/(\d{4})$/);
-  return brasileiro ? `${brasileiro[2]}-${brasileiro[1]}` : "";
-}
-
-function competenciaPorExtenso(chave: string) {
-  const [ano, mes] = chave.split("-");
-  return `${mes}/${ano}`;
-}
-
-function vencimentoDaCompetencia(chave: string, dia: number) {
-  const [ano, mes] = chave.split("-").map(Number);
-  const ultimoDia = new Date(ano, mes, 0).getDate();
-  const diaValido = Math.min(Math.max(dia || 10, 1), 28, ultimoDia);
-  return `${chave}-${String(diaValido).padStart(2, "0")}`;
-}
-
 function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
   const nivel = classificarMesesAtraso(meses, politica);
   if (nivel === "vermelho") {
@@ -282,9 +155,7 @@ function nivelAtraso(meses: number, politica: PoliticaInadimplencia) {
 
 export default function FinanceiroPage() {
   const router = useRouter();
-  const [socios, setSocios] = useState<Socio[]>([]);
-  const [dependentes, setDependentes] = useState<Dependente[]>([]);
-  const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
+  const [resumoInadimplencia, setResumoInadimplencia] = useState<ResumoPessoaInadimplencia[]>([]);
   const [politicaInadimplencia, setPoliticaInadimplencia] = useState<PoliticaInadimplencia>(POLITICA_INADIMPLENCIA_PADRAO);
   const [mensagem, setMensagem] = useState("");
   const [busca, setBusca] = useState("");
@@ -358,211 +229,14 @@ export default function FinanceiroPage() {
   const [mostrarConciliacaoEmLote, setMostrarConciliacaoEmLote] = useState(false);
   const [salvandoConciliacaoEmLote, setSalvandoConciliacaoEmLote] = useState(false);
 
-  const pessoas = useMemo<PessoaFinanceira[]>(() => {
-    const responsaveis = new Map<string, Socio>(
-      socios.map((s) => [s.id, s] as [string, Socio])
-    );
-    const cpfsSociosDependentes = new Set(
-      socios
-        .filter((s) => Boolean(s.responsavel_id) && s.cpf)
-        .map((s) => s.cpf!.replace(/\D/g, ""))
-        .filter(Boolean)
-    );
-    const resultado: PessoaFinanceira[] = [];
-
-    for (const s of socios) {
-      const tipoNormalizado = normalizarStatusMensalidade(s.tipo_socio);
-      const categoriaNormalizada = normalizarStatusMensalidade(s.categoria);
-      const remido = s.remido === true || tipoNormalizado.includes("remido") || categoriaNormalizada.includes("remido");
-      const temporario = tipoNormalizado.includes("temporada") || categoriaNormalizada.includes("temporada") || tipoNormalizado.includes("transitorio") || categoriaNormalizada.includes("transitorio");
-      if (s.situacao?.toLowerCase() === "inativo" || s.ativo === false) continue;
-      if (remido || temporario || !s.possui_mensalidade) continue;
-
-      resultado.push({
-        chave: `socio:${s.id}`,
-        socio_id: s.id,
-        dependente_id: null,
-        nome: s.nome,
-        matricula: s.matricula,
-        cpf: s.cpf,
-        foto_url: s.foto_url,
-        responsavel_nome: s.responsavel_id
-          ? responsaveis.get(s.responsavel_id)?.nome || null
-          : null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(s.valor_mensalidade || 0),
-        dia_vencimento: Number(s.dia_vencimento || 10),
-        tipo_pagamento: s.tipo_pagamento || "pix",
-        data_associacao: s.data_associacao || null,
-      });
-    }
-
-    for (const d of dependentes) {
-      if (d.ativo === false || !d.possui_mensalidade) continue;
-
-      const responsavel = responsaveis.get(d.socio_id);
-
-      // Evita duplicação quando o mesmo dependente já estiver
-      // cadastrado também na tabela socios com a mesma pessoa.
-      const cpfDependente = d.cpf?.replace(/\D/g, "");
-      const duplicado = Boolean(
-        cpfDependente &&
-          cpfsSociosDependentes.has(cpfDependente)
-      );
-
-      if (duplicado) continue;
-
-      resultado.push({
-        chave: `dependente:${d.id}`,
-        socio_id: d.socio_id,
-        dependente_id: d.id,
-        nome: d.nome,
-        matricula: responsavel?.matricula || null,
-        cpf: d.cpf,
-        foto_url: null,
-        responsavel_nome: responsavel?.nome || null,
-        possui_mensalidade: true,
-        valor_mensalidade: Number(d.valor_mensalidade || 0),
-        dia_vencimento: Number(d.dia_vencimento || 10),
-        tipo_pagamento: d.tipo_pagamento || "pix",
-        data_associacao: null,
-      });
-    }
-
-    return resultado;
-  }, [socios, dependentes]);
-
-  // Vincula cada mensalidade à pessoa que realmente paga. Registros antigos
-  // podem guardar o dependente_id mesmo depois de essa pessoa ter sido migrada
-  // para a tabela socios; nesse caso, o CPF permite reencontrar seu cadastro atual.
-  const lancamentosPorPessoa = useMemo(() => {
-    const map = new Map<string, Mensalidade[]>();
-    const pessoasValidas = new Set(pessoas.map((p) => p.chave));
-    const sociosPorCpf = new Map<string, Socio>();
-    for (const socio of socios) {
-      const cpf = String(socio.cpf || "").replace(/\D/g, "");
-      if (cpf) sociosPorCpf.set(cpf, socio);
-    }
-    const dependentesPorId = new Map<string, Dependente>(
-      dependentes.map((d) => [String(d.id), d] as const)
-    );
-
-    for (const mensalidade of mensalidades) {
-      let chave = `socio:${mensalidade.socio_id}`;
-      if (mensalidade.dependente_id) {
-        const dependente = dependentesPorId.get(String(mensalidade.dependente_id));
-        const cpfDependente = String(dependente?.cpf || "").replace(/\D/g, "");
-        const socioMigrado = cpfDependente ? sociosPorCpf.get(cpfDependente) : null;
-        if (socioMigrado && pessoasValidas.has(`socio:${socioMigrado.id}`)) {
-          chave = `socio:${socioMigrado.id}`;
-        } else if (pessoasValidas.has(`dependente:${mensalidade.dependente_id}`)) {
-          chave = `dependente:${mensalidade.dependente_id}`;
-        }
-      }
-
-      if (!pessoasValidas.has(chave)) continue;
-
-      const lista = map.get(chave);
-      if (lista) lista.push(mensalidade);
-      else map.set(chave, [mensalidade]);
-    }
-    return map;
-  }, [mensalidades, pessoas, socios, dependentes]);
-
-  // Apuração automática: não depende de existir uma linha mensalidade gerada
-  // para cada competência. Usa data_associacao; se ausente, a primeira
-  // competência paga é a referência e a cobrança começa no mês seguinte.
-  const apuracaoPorPessoa = useMemo(() => {
-    const resultado = new Map<string, { meses: number; competencias: string[]; valorDevido: number; lancamentos: Mensalidade[] }>();
-    const hoje = dataHojeBrasil();
-    const mesAtual = hoje.slice(0, 7);
-
-    for (const pessoa of pessoas) {
-      const registros = lancamentosPorPessoa.get(pessoa.chave) || [];
-      const inicioCadastral = chaveCompetencia(pessoa.data_associacao);
-      const primeiroPago = registros
-        .filter(mensalidadePaga)
-        .map((item) => chaveCompetencia(item.competencia || item.data_vencimento))
-        .filter(Boolean)
-        .sort()[0] || "";
-      const temDataAssociacao = Boolean(inicioCadastral);
-      const inicio = inicioCadastral || primeiroPago;
-      const porCompetencia = new Map<string, Mensalidade[]>();
-
-      for (const registro of registros) {
-        const chave = chaveCompetencia(registro.competencia || registro.data_vencimento);
-        if (!chave) continue;
-        const atual = porCompetencia.get(chave) || [];
-        atual.push(registro);
-        porCompetencia.set(chave, atual);
-      }
-
-      const competenciasDevidas: string[] = [];
-      const lancamentosDevidos: Mensalidade[] = [];
-      let valorDevido = 0;
-
-      // Se não houver data de associação nem histórico de pagamento, não
-      // inventa início de vínculo: considera apenas cobranças reais existentes.
-      if (!inicio) {
-        for (const [chave, itens] of porCompetencia) {
-          const quitada = itens.some(mensalidadeQuitadaOuIsenta);
-          const dataVencimento = itens.find((m) => m.data_vencimento)?.data_vencimento || vencimentoDaCompetencia(chave, pessoa.dia_vencimento);
-          if (quitada || dataVencimento >= hoje) continue;
-          competenciasDevidas.push(chave);
-          lancamentosDevidos.push(...itens);
-          valorDevido += Math.max(...itens.map((item) => Number(item.valor || 0)), 0);
-        }
-      } else {
-        const [anoInicio, mesInicio] = inicio.split("-").map(Number);
-        const cursor = new Date(anoInicio, mesInicio - 1, 1);
-        // A primeira competência paga, quando usada como referência, já está quitada.
-        if (!temDataAssociacao) cursor.setMonth(cursor.getMonth() + 1);
-
-        while (cursor.getFullYear() < 2100) {
-          const chave = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
-          if (chave > mesAtual) break;
-          const itens = porCompetencia.get(chave) || [];
-          const vencimentoRegistrado = itens.find((item) => item.data_vencimento)?.data_vencimento?.slice(0, 10);
-          const vencimento = vencimentoRegistrado || vencimentoDaCompetencia(chave, pessoa.dia_vencimento);
-          const [anoVencimento, mesVencimento] = chave.split("-").map(Number);
-          const [anoAssociacao, mesAssociacao, diaAssociacao] = String(pessoa.data_associacao || "").slice(0, 10).split("-").map(Number);
-          const associacaoDepoisDoVencimento = temDataAssociacao && anoAssociacao === anoVencimento && mesAssociacao === mesVencimento && Number.isFinite(diaAssociacao) && diaAssociacao > Number(vencimento.slice(8, 10));
-          const jaVenceu = vencimento < hoje && !associacaoDepoisDoVencimento;
-          const quitada = itens.some(mensalidadeQuitadaOuIsenta);
-
-          if (jaVenceu && !quitada) {
-            competenciasDevidas.push(chave);
-            if (itens.length) {
-              lancamentosDevidos.push(...itens.filter((item) => !mensalidadeQuitadaOuIsenta(item)));
-              valorDevido += Math.max(...itens.filter((item) => !mensalidadeQuitadaOuIsenta(item)).map((item) => Number(item.valor || 0)), 0);
-            } else {
-              valorDevido += Number(pessoa.valor_mensalidade || 0);
-            }
-          }
-          cursor.setMonth(cursor.getMonth() + 1);
-        }
-      }
-
-      competenciasDevidas.sort();
-      resultado.set(pessoa.chave, {
-        meses: competenciasDevidas.length,
-        competencias: competenciasDevidas.map(competenciaPorExtenso).reverse(),
-        valorDevido: Number(valorDevido.toFixed(2)),
-        lancamentos: lancamentosDevidos.sort((a, b) => String(b.competencia || "").localeCompare(String(a.competencia || ""))),
-      });
-    }
-    return resultado;
-  }, [pessoas, lancamentosPorPessoa]);
-
-  const monitoramentoPessoas = useMemo(() => pessoas.map((pessoa) => {
-    const apuracao = apuracaoPorPessoa.get(pessoa.chave);
-    const meses = apuracao?.meses || 0;
-    return { pessoa, meses, nivel: nivelAtraso(meses, politicaInadimplencia) };
-  }), [pessoas, apuracaoPorPessoa, politicaInadimplencia]);
+  const monitoramentoPessoas = useMemo(() => resumoInadimplencia.map((item) => ({
+    ...item,
+    nivel: nivelAtraso(item.meses, politicaInadimplencia),
+  })), [resumoInadimplencia, politicaInadimplencia]);
 
   const atrasoPessoas = monitoramentoPessoas.filter((item) => item.meses > 0);
   const quantidadeAtrasados = atrasoPessoas.length;
-  const valorTotalDevido = Array.from(apuracaoPorPessoa.values()).reduce(
+  const valorTotalDevido = monitoramentoPessoas.reduce(
     (total, item) => total + item.valorDevido,
     0
   );
@@ -573,9 +247,11 @@ export default function FinanceiroPage() {
   const inadimplenciaDetalhada = useMemo(() => {
     const termo = busca.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     return monitoramentoPessoas
-      .filter((item) => filtroInadimplencia === "todos" || (filtroInadimplencia === "verde" && item.nivel.ponto === "bg-green-500") || (filtroInadimplencia === "amarelo" && item.nivel.ponto === "bg-yellow-500") || (filtroInadimplencia === "vermelho" && item.nivel.ponto === "bg-red-500"))
+      .filter((item) => filtroInadimplencia === "todos" ||
+        (filtroInadimplencia === "verde" && item.nivel.ponto === "bg-green-500") ||
+        (filtroInadimplencia === "amarelo" && item.nivel.ponto === "bg-yellow-500") ||
+        (filtroInadimplencia === "vermelho" && item.nivel.ponto === "bg-red-500"))
       .map((item) => {
-        const apuracao = apuracaoPorPessoa.get(item.pessoa.chave);
         const nome = item.pessoa.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const responsavel = String(item.pessoa.responsavel_nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const matricula = String(item.pessoa.matricula || "").toLowerCase();
@@ -583,15 +259,12 @@ export default function FinanceiroPage() {
         const correspondeBusca = !termo || nome.includes(termo) || matricula.includes(termo) || cpf.includes(termo) || responsavel.includes(termo);
         return {
           ...item,
-          lancamentos: apuracao?.lancamentos || [],
-          valorDevido: apuracao?.valorDevido || 0,
-          competencias: apuracao?.competencias || [],
-          ultimaCompetencia: apuracao?.competencias?.[0] || null,
+          ultimaCompetencia: item.competencias[0] || null,
           correspondeBusca,
         };
       })
       .filter((item) => item.correspondeBusca);
-  }, [monitoramentoPessoas, apuracaoPorPessoa, busca, filtroInadimplencia]);
+  }, [monitoramentoPessoas, busca, filtroInadimplencia]);
 
   const [inadimplenciaCarregada, setInadimplenciaCarregada] = useState(false);
   const [carregandoInadimplencia, setCarregandoInadimplencia] = useState(false);
@@ -693,24 +366,14 @@ export default function FinanceiroPage() {
     if (inadimplenciaCarregada || carregandoInadimplencia) return;
     setCarregandoInadimplencia(true);
     try {
-      const [configuracao, sociosResult, dependentesResult, mensalidadesCompletas] = await Promise.all([
-        apiFinanceiro("/api/configuracoes/acessos", { method: "GET" }).catch(() => null),
-        supabase.from("socios").select("id,matricula,nome,cpf,foto_url,situacao,ativo,responsavel_id,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento,data_associacao,remido,tipo_socio,categoria").order("matricula", { ascending: true }),
-        supabase.from("dependentes").select("id,socio_id,nome,cpf,ativo,possui_mensalidade,valor_mensalidade,dia_vencimento,tipo_pagamento").order("nome", { ascending: true }),
-        buscarMensalidadesPaginadas(),
-      ]);
-      setPoliticaInadimplencia(normalizarPoliticaInadimplencia(configuracao?.politica));
-      if (sociosResult.error) throw sociosResult.error;
-      if (dependentesResult.error) throw dependentesResult.error;
-      setSocios((sociosResult.data || []) as Socio[]);
-      setDependentes((dependentesResult.data || []) as Dependente[]);
-      setMensalidades(mensalidadesCompletas);
+      const resultado = await apiFinanceiro("/api/financeiro/inadimplencia", { method: "GET" });
+      setPoliticaInadimplencia(normalizarPoliticaInadimplencia(resultado.politica || POLITICA_INADIMPLENCIA_PADRAO));
+      setResumoInadimplencia((resultado.pessoas || []) as ResumoPessoaInadimplencia[]);
       setInadimplenciaCarregada(true);
     } catch (error) {
       setMensagem(
-        `Não foi possível carregar a inadimplência. ${
-          error instanceof Error ? error.message : "Erro desconhecido."
-        }`
+        "Não foi possível carregar a inadimplência. " +
+        (error instanceof Error ? error.message : "Erro desconhecido.")
       );
     } finally {
       setCarregandoInadimplencia(false);
@@ -1373,7 +1036,7 @@ export default function FinanceiroPage() {
                 {carregandoInadimplencia ? (
                   <div role="status" aria-live="polite" className="rounded-xl bg-[#f7faf8] p-10 text-center text-sm font-semibold text-[#005a3c]">
                     <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#b8d8c8] border-t-[#005a3c] align-[-3px]" />
-                    Carregando associados, dependentes e histórico de mensalidades…
+                    Calculando resumo das mensalidades…
                   </div>
                 ) : inadimplenciaDetalhada.length === 0 ? (
                   <div className="rounded-xl bg-[#f7faf8] p-10 text-center">
