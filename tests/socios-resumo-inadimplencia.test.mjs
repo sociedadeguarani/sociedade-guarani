@@ -23,6 +23,7 @@ test('resumo SQL preserva a regra da primeira mensalidade efetivamente paga', ()
   assert.match(sql, /competencia_associacao/);
   assert.match(sql, /competencia_associacao IS NULL/);
   assert.match(sql, /dia_vencimento/);
+  assert.match(sql, /LEAST\([\s\S]{0,180}GREATEST\([\s\S]{0,140}EXTRACT\(DAY FROM m\.data_vencimento/);
 });
 
 test('resumo SQL preserva vencimento legado sem data e protege a função por service_role', () => {
