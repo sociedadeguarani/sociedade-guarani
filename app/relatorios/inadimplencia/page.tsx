@@ -5,44 +5,12 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
-import { dataHojeBrasil, classificarMesesAtraso, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
-import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
-
-type Socio = {
-  id: string;
-  matricula: string | number | null;
-  nome: string;
-  cpf: string | null;
-  data_associacao: string | null;
-  valor_mensalidade: number | string | null;
-  dia_vencimento: number | null;
-  possui_mensalidade: boolean | null;
-  tipo_socio: string | null;
-  categoria: string | null;
-  situacao: string | null;
-  remido: boolean | null;
-  ativo: boolean | null;
-};
-
-type Dependente = {
-  id: string;
-  socio_id: string;
-  nome: string;
-  cpf: string | null;
-  ativo: boolean | null;
-  possui_mensalidade: boolean | null;
-};
-
-type Mensalidade = {
-  id: string;
-  socio_id: string | null;
-  dependente_id: string | null;
-  competencia: string | null;
-  data_vencimento: string | null;
-  valor: number | string | null;
-  situacao: string | null;
-  data_pagamento?: string | null;
-};
+import {
+  classificarMesesAtraso,
+  normalizarPoliticaInadimplencia,
+  POLITICA_INADIMPLENCIA_PADRAO,
+  type PoliticaInadimplencia,
+} from "@/lib/politicaInadimplencia";
 
 type Inadimplente = {
   pessoaId: string;
@@ -56,6 +24,24 @@ type Inadimplente = {
   nivel: "verde" | "amarelo" | "vermelho";
 };
 
+type PessoaResumoServidor = {
+  pessoa: {
+    chave: string;
+    socio_id: string;
+    nome: string;
+    matricula: string | number | null;
+    responsavel_nome: string | null;
+  };
+  meses: number;
+  valorDevido: number;
+  competencias: string[];
+};
+
+type DadosInadimplencia = {
+  pessoas: PessoaResumoServidor[];
+  politica: PoliticaInadimplencia;
+};
+
 function moeda(valor: number | string | null | undefined) {
   return Number(valor || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -63,111 +49,50 @@ function moeda(valor: number | string | null | undefined) {
   });
 }
 
-function competenciaBR(valor: string | null | undefined) {
-  if (!valor) return "—";
-  const partes = valor.slice(0, 10).split("-");
-  if (partes.length < 2) return valor;
-  return `${partes[1]}/${partes[0]}`;
-}
-
-function normalizarSituacao(valor: unknown) {
-  return String(valor || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-function isPago(m: Mensalidade) {
-  return Boolean(m.data_pagamento) || ["pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida", "baixado", "baixada", "compensado", "compensada"].includes(normalizarSituacao(m.situacao));
-}
-
-function isIsento(m: Mensalidade) {
-  return ["isento", "isenta", "cancelado", "cancelada"].includes(normalizarSituacao(m.situacao));
-}
-
-type DadosInadimplencia = {
-  socios: Socio[];
-  dependentes: Dependente[];
-  mensalidades: Mensalidade[];
-  politicaInadimplencia: PoliticaInadimplencia;
-};
-
-async function buscarMensalidadesPaginadas(): Promise<Mensalidade[]> {
-  const tamanhoLote = 1000;
-  const todas: Mensalidade[] = [];
-
-  // A apuração usa o histórico completo; o limite padrão do Supabase pode
-  // ocultar pagamentos antigos e classificar associados em dia como devedores.
-  for (let offset = 0; offset < 100_000; offset += tamanhoLote) {
-    const { data, error } = await supabase
-      .from("mensalidades")
-      .select("id,socio_id,dependente_id,competencia,data_vencimento,valor,situacao,data_pagamento")
-      .order("data_vencimento", { ascending: false })
-      .order("id", { ascending: false })
-      .range(offset, offset + tamanhoLote - 1);
-
-    if (error) throw new Error(error.message);
-    const lote = (data || []) as Mensalidade[];
-    todas.push(...lote);
-    if (lote.length < tamanhoLote) return todas;
-  }
-
-  throw new Error("O histórico de mensalidades excedeu o limite de segurança de 100.000 registros.");
-}
-
-/** Busca os dados sem atualizar estado React; pode ser chamada pelo efeito ou pelo botão Atualizar. */
 async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
-  const [sociosResult, dependentesResult, mensalidadesCompletas] =
-    await Promise.all([
-      supabase
-        .from("socios")
-        .select("id,matricula,nome,cpf,data_associacao,valor_mensalidade,dia_vencimento,possui_mensalidade,tipo_socio,categoria,situacao,remido,ativo")
-        .order("nome"),
-      supabase
-        .from("dependentes")
-        .select("id,socio_id,nome,cpf,ativo,possui_mensalidade")
-        .eq("ativo", true)
-        .order("nome"),
-      buscarMensalidadesPaginadas(),
-    ]);
+  const { data: authData } = await supabase.auth.getSession();
+  const token = authData.session?.access_token;
+  if (!token) throw new Error("Sessão expirada.");
 
-  if (sociosResult.error) throw new Error(sociosResult.error.message);
-  if (dependentesResult.error) throw new Error(dependentesResult.error.message);
-
-  let politicaInadimplencia = POLITICA_INADIMPLENCIA_PADRAO;
-  try {
-    const { data: authData } = await supabase.auth.getSession();
-    const token = authData.session?.access_token;
-    if (token) {
-      const policyResponse = await fetch("/api/configuracoes/acessos", {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      const policyJson = await policyResponse.json().catch(() => ({}));
-      if (policyResponse.ok) {
-        politicaInadimplencia = normalizarPoliticaInadimplencia(
-          policyJson?.politica
-        );
-      }
-    }
-  } catch {
-    // Mantém a política padrão caso a configuração não possa ser consultada.
+  const response = await fetch("/api/financeiro/inadimplencia", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const resultado = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(resultado?.error || "Não foi possível carregar o relatório de inadimplência.");
   }
+
+  const politica = normalizarPoliticaInadimplencia(
+    resultado?.politica || POLITICA_INADIMPLENCIA_PADRAO,
+  );
+  const pessoas = Array.isArray(resultado?.pessoas)
+    ? resultado.pessoas as PessoaResumoServidor[]
+    : [];
 
   return {
-    socios: (sociosResult.data || []) as Socio[],
-    dependentes: (dependentesResult.data || []) as Dependente[],
-    mensalidades: mensalidadesCompletas,
-    politicaInadimplencia,
+    politica,
+    pessoas: pessoas.map((item) => {
+      const meses = Math.max(0, Number(item.meses || 0));
+      return {
+        pessoaId: item.pessoa.chave,
+        socioId: item.pessoa.socio_id,
+        nome: item.pessoa.nome,
+        matricula: item.pessoa.matricula != null ? String(item.pessoa.matricula) : "—",
+        responsavel: item.pessoa.responsavel_nome || "Titular",
+        meses,
+        valor: Number(item.valorDevido || 0),
+        competencias: Array.isArray(item.competencias) ? item.competencias : [],
+        nivel: classificarMesesAtraso(meses, politica),
+      };
+    }),
   };
 }
 
 export default function InadimplenciaPage() {
   const router = useRouter();
-  const [socios, setSocios] = useState<Socio[]>([]);
-  const [dependentes, setDependentes] = useState<Dependente[]>([]);
-  const [mensalidades, setMensalidades] = useState<Mensalidade[]>([]);
+  const [inadimplentes, setInadimplentes] = useState<Inadimplente[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState<"todos" | "verde" | "amarelo" | "vermelho">("todos");
@@ -179,10 +104,8 @@ export default function InadimplenciaPage() {
     setErro("");
     try {
       const dados = await buscarDadosInadimplencia();
-      setSocios(dados.socios);
-      setDependentes(dados.dependentes);
-      setMensalidades(dados.mensalidades);
-      setPoliticaInadimplencia(dados.politicaInadimplencia);
+      setInadimplentes(dados.pessoas);
+      setPoliticaInadimplencia(dados.politica);
     } catch (error: unknown) {
       setErro(
         error instanceof Error
@@ -197,14 +120,11 @@ export default function InadimplenciaPage() {
   useEffect(() => {
     let ativo = true;
 
-    // O efeito só atualiza estado após a Promise de busca concluir; evita setState síncrono no efeito.
     void buscarDadosInadimplencia()
       .then((dados) => {
         if (!ativo) return;
-        setSocios(dados.socios);
-        setDependentes(dados.dependentes);
-        setMensalidades(dados.mensalidades);
-        setPoliticaInadimplencia(dados.politicaInadimplencia);
+        setInadimplentes(dados.pessoas);
+        setPoliticaInadimplencia(dados.politica);
       })
       .catch((error: unknown) => {
         if (!ativo) return;
@@ -222,269 +142,6 @@ export default function InadimplenciaPage() {
       ativo = false;
     };
   }, []);
-
-  const socioMap = useMemo(
-    () => new Map(socios.map((s) => [s.id, s])),
-    [socios]
-  );
-
-  const socioPorCpf = useMemo(() => {
-    const mapa = new Map<string, Socio>();
-    for (const socio of socios) {
-      const cpf = String(socio.cpf || "").replace(/\D/g, "");
-      if (cpf) mapa.set(cpf, socio);
-    }
-    return mapa;
-  }, [socios]);
-
-  const socioElegivel = (socio: Socio) => {
-    const tipo = normalizarSituacao(socio.tipo_socio);
-    const categoria = normalizarSituacao(socio.categoria);
-    const situacao = normalizarSituacao(socio.situacao);
-    const remido = socio.remido === true || tipo.includes("remido") || categoria.includes("remido");
-    const temporada = tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio");
-    const ativo = socio.ativo !== false && !["inativo", "cancelado", "cancelada"].includes(situacao);
-    return ativo && !remido && !temporada && socio.possui_mensalidade === true;
-  };
-
-  const dependenteMap = useMemo(
-    () => new Map(dependentes.map((d) => [d.id, d])),
-    [dependentes]
-  );
-
-  const responsaveis = useMemo(
-    () =>
-      new Map(
-        dependentes.map((d) => [
-          d.id,
-          socioMap.get(d.socio_id)?.nome || "Responsável não localizado",
-        ])
-      ),
-    [dependentes, socioMap]
-  );
-
-  const hoje = useMemo(() => dataHojeBrasil(), []);
-
-  const inadimplentes = useMemo<Inadimplente[]>(() => {
-    const grupos = new Map<
-      string,
-      {
-        pessoaId: string;
-        socioId: string;
-        nome: string;
-        matricula: string;
-        responsavel: string;
-        competencias: Set<string>;
-        valor: number;
-      }
-    >();
-
-    // Começa com todas as pessoas cadastradas para que quem está em dia
-    // também apareça no relatório para conferência.
-    for (const socio of socios) {
-      if (!socioElegivel(socio)) continue;
-      grupos.set(socio.id, {
-        pessoaId: socio.id,
-        socioId: socio.id,
-        nome: socio.nome,
-        matricula: socio.matricula != null ? String(socio.matricula) : "—",
-        responsavel: "Titular",
-        competencias: new Set<string>(),
-        valor: 0,
-      });
-    }
-
-    // Mantém compatibilidade com dependentes do modelo antigo.
-    for (const dependente of dependentes) {
-      if (dependente.ativo === false || dependente.possui_mensalidade !== true) continue;
-      const cpfDependente = String(dependente.cpf || "").replace(/\D/g, "");
-      const socioMigrado = cpfDependente ? socioPorCpf.get(cpfDependente) : null;
-      if (socioMigrado && socioElegivel(socioMigrado)) continue;
-      grupos.set(dependente.id, {
-        pessoaId: dependente.id,
-        socioId: dependente.socio_id,
-        nome: dependente.nome,
-        matricula: socioMap.get(dependente.socio_id)?.matricula != null
-          ? String(socioMap.get(dependente.socio_id)?.matricula)
-          : "—",
-        responsavel: responsaveis.get(dependente.id) || "—",
-        competencias: new Set<string>(),
-        valor: 0,
-      });
-    }
-
-    for (const m of mensalidades) {
-      if (!m.data_vencimento || m.data_vencimento.slice(0, 10) >= hoje) continue;
-      if (isPago(m) || isIsento(m)) continue;
-
-      const dependente = m.dependente_id
-        ? dependenteMap.get(m.dependente_id)
-        : null;
-      const socio = m.socio_id ? socioMap.get(m.socio_id) : null;
-      const cpfDependente = String(dependente?.cpf || "").replace(/\D/g, "");
-      const socioMigrado = cpfDependente ? socioPorCpf.get(cpfDependente) : null;
-      // Se o cadastro antigo do dependente já foi removido, mas o socio_id
-      // está vinculado diretamente ao sócio atual, preserva o histórico nele.
-      const pessoaSocio = socioMigrado && socioElegivel(socioMigrado)
-        ? socioMigrado
-        : !dependente && socio && socioElegivel(socio)
-          ? socio
-          : null;
-      if (m.dependente_id && !dependente && !pessoaSocio) continue;
-
-      // Lançamentos antigos podem continuar ligados ao cadastro atual após a
-      // promoção de dependente a titular. Não conte competências anteriores à
-      // data de associação/vigência do próprio cadastro, como no caso de quem
-      // passou a pagar mensalidade individual somente a partir de 10/2026.
-      const socioDaCobranca = pessoaSocio || (!dependente ? socio : null);
-      if (socioDaCobranca && mensalidadeRegistroAnteriorAAssociacao(
-        socioDaCobranca.data_associacao,
-        m.competencia || m.data_vencimento,
-        m.data_vencimento,
-        socioDaCobranca.dia_vencimento,
-      )) continue;
-      const pessoaId = pessoaSocio?.id || dependente?.id || socio?.id;
-      if (!pessoaId) continue;
-      if (pessoaSocio && !grupos.has(pessoaSocio.id)) continue;
-      if (!pessoaSocio && dependente && (dependente.ativo === false || dependente.possui_mensalidade !== true)) continue;
-      if (!pessoaSocio && !dependente && socio && !socioElegivel(socio)) continue;
-
-      if (!grupos.has(pessoaId)) {
-        grupos.set(pessoaId, {
-          pessoaId,
-          socioId: m.socio_id || dependente?.socio_id || pessoaId,
-          nome: pessoaSocio?.nome || dependente?.nome || socio?.nome || "Pessoa",
-          matricula: pessoaSocio?.matricula != null ? String(pessoaSocio.matricula) : socio?.matricula != null ? String(socio.matricula) : "—",
-          responsavel: pessoaSocio ? (socioMap.get(pessoaSocio.id)?.nome || "—") : dependente
-            ? responsaveis.get(dependente.id) || "—"
-            : "Titular",
-          competencias: new Set<string>(),
-          valor: 0,
-        });
-      }
-
-      const grupo = grupos.get(pessoaId)!;
-      const comp = competenciaBR(m.competencia || m.data_vencimento);
-
-      if (!grupo.competencias.has(comp)) {
-        grupo.competencias.add(comp);
-        grupo.valor += Number(m.valor || 0);
-      }
-    }
-
-    // Apuração virtual: o relatório não depende mais de mensalidades terem sido
-    // previamente geradas. Usa data de associação; se estiver ausente, toma
-    // a primeira competência paga como início do histórico de cobrança.
-    const normalizarStatus = (valor: unknown) =>
-      String(valor || "")
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .trim();
-
-    const statusQuitadoOuIsento = (registro: Mensalidade) =>
-      Boolean(registro.data_pagamento) || [
-        "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
-        "baixado", "baixada", "compensado", "compensada", "isento", "isenta",
-        "cancelado", "cancelada",
-      ].includes(normalizarStatus(registro.situacao));
-
-    const statusPago = (registro: Mensalidade) =>
-      Boolean(registro.data_pagamento) || [
-        "pago", "paga", "paid", "quitado", "quitada", "recebido", "recebida",
-        "baixado", "baixada", "compensado", "compensada",
-      ].includes(normalizarStatus(registro.situacao));
-
-    const chaveCompetencia = (valor: string | null | undefined) => {
-      if (!valor) return "";
-      const raw = valor.slice(0, 10);
-      if (/^\d{4}-\d{2}/.test(raw)) return raw.slice(0, 7);
-      const br = raw.match(/^(\d{2})\/(\d{4})$/);
-      return br ? `${br[2]}-${br[1]}` : "";
-    };
-
-    const competenciaParaBR = (chave: string) => {
-      const [ano, mes] = chave.split("-");
-      return `${mes}/${ano}`;
-    };
-
-    const mesAtual = hoje.slice(0, 7);
-
-    for (const socio of socios) {
-      const tipo = String(socio.tipo_socio || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const categoria = String(socio.categoria || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const situacaoSocio = String(socio.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const ehRemido = socio.remido === true || tipo.includes("remido") || categoria.includes("remido");
-      const ehTemporada = tipo.includes("temporada") || categoria.includes("temporada") || tipo.includes("transitorio") || categoria.includes("transitorio");
-      const ativo = !["inativo", "cancelado", "cancelada"].includes(situacaoSocio);
-      const cobraMensalidade = socio.possui_mensalidade === true || String(socio.possui_mensalidade || "").toLowerCase() === "true";
-
-      if (ehRemido || ehTemporada || !ativo || !cobraMensalidade) continue;
-
-      const cpfSocio = String(socio.cpf || "").replace(/\D/g, "");
-      const rowsSocio = mensalidades.filter((m) => {
-        if (String(m.socio_id || "") !== String(socio.id)) return false;
-        if (!m.dependente_id) return true;
-        const dependente = dependenteMap.get(m.dependente_id);
-        // O socio_id da consulta já é o ID do cadastro atual. Se o registro
-        // legado do dependente não existe mais, mantém o lançamento nesse sócio.
-        if (!dependente) return true;
-        const cpfDependente = String(dependente.cpf || "").replace(/\D/g, "");
-        // Histórico antigo de uma pessoa migrada para socios: vincula ao CPF atual.
-        return Boolean(cpfSocio && cpfDependente && cpfDependente === cpfSocio);
-      });
-      const paidKeys = rowsSocio
-        .filter((m) => statusPago(m))
-        .map((m) => chaveCompetencia(m.competencia || m.data_vencimento))
-        .filter(Boolean)
-        .sort();
-
-      let inicio = chaveCompetencia(socio.data_associacao);
-      if (!inicio) inicio = paidKeys[0] || "";
-      if (!inicio || !/^\d{4}-\d{2}$/.test(inicio)) continue;
-
-      const valorMensal = Number(socio.valor_mensalidade || 0);
-      if (!(valorMensal > 0)) continue;
-
-      const diaVencimento = Math.min(28, Math.max(1, Number(socio.dia_vencimento || 10)));
-      const cursor = new Date(`${inicio}-01T00:00:00`);
-
-      while (cursor.toISOString().slice(0, 7) <= mesAtual) {
-        const chave = cursor.toISOString().slice(0, 7);
-        const compBR = competenciaParaBR(chave);
-        const ultimoDia = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
-        const dia = Math.min(diaVencimento, ultimoDia);
-        const vencimento = `${chave}-${String(dia).padStart(2, "0")}`;
-        const [anoAssociacao, mesAssociacao, diaAssociacao] = String(socio.data_associacao || "").slice(0, 10).split("-").map(Number);
-        const associacaoDepoisDoVencimento = Boolean(socio.data_associacao) && anoAssociacao === cursor.getFullYear() && mesAssociacao === cursor.getMonth() + 1 && Number.isFinite(diaAssociacao) && diaAssociacao > dia;
-        if (vencimento < hoje && !associacaoDepoisDoVencimento) {
-          const existentes = rowsSocio.filter((m) => chaveCompetencia(m.competencia || m.data_vencimento) === chave);
-          const algumaQuitada = existentes.some((m) => statusQuitadoOuIsento(m));
-          if (!algumaQuitada) {
-            const grupo = grupos.get(socio.id);
-            if (grupo && !grupo.competencias.has(compBR)) {
-              grupo.competencias.add(compBR);
-              const valorExistente = existentes.reduce((sum, m) => sum + Number(m.valor || 0), 0);
-              grupo.valor += valorExistente > 0 ? valorExistente : valorMensal;
-            }
-          }
-        }
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
-    }
-
-    return Array.from(grupos.values())
-      .map((g) => {
-        const meses = g.competencias.size;
-        return {
-          ...g,
-          competencias: Array.from(g.competencias),
-          meses,
-          nivel: classificarMesesAtraso(meses, politicaInadimplencia),
-        };
-      })
-      .sort((a, b) => b.meses - a.meses || a.nome.localeCompare(b.nome));
-  }, [mensalidades, socios, dependentes, socioMap, socioPorCpf, dependenteMap, responsaveis, hoje, politicaInadimplencia]);
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();

@@ -16,10 +16,9 @@ test('Financeiro calcula competências virtuais desde a associação ou primeiro
   assert.match(financeiro, /competenciasDevidas\.push\(chave\)/);
 });
 
-test('relatório de inadimplência usa primeira competência paga quando não há data de associação', () => {
-  assert.match(relatorio, /const paidKeys = rowsSocio[\s\S]{0,180}\.filter\(\(m\) => statusPago\(m\)\)/);
-  assert.match(relatorio, /let inicio = chaveCompetencia\(socio\.data_associacao\)/);
-  assert.match(relatorio, /if \(!inicio\) inicio = paidKeys\[0\] \|\| ""/);
-  assert.match(relatorio, /if \(!inicio \|\| !\/\^\\d\{4\}-\\d\{2\}\$\/\.test\(inicio\)\) continue/);
-  assert.match(relatorio, /statusQuitadoOuIsento\(m\)/);
+test('relatório utiliza o resultado único da apuração que preserva a primeira competência paga', () => {
+  assert.match(financeiro, /const primeiroPago = registros[\s\S]{0,180}\.filter\(mensalidadePaga\)/);
+  assert.match(financeiro, /const inicio = inicioCadastral \|\| primeiroPago/);
+  assert.match(relatorio, /fetch\("\/api\/financeiro\/inadimplencia"/);
+  assert.match(relatorio, /valor: Number\(item\.valorDevido \|\| 0\)/);
 });
