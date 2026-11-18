@@ -173,8 +173,8 @@ export async function POST(request: Request) {
       const formaEntrada = String(body.forma_entrada || "pix");
       const dataEntrada = String(body.data_entrada || dataHoje());
       const valores: ParcelaVendaInput[] = Array.isArray(body.parcelas) ? body.parcelas as ParcelaVendaInput[] : [];
-      if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 7) {
-        return erro("Informe associado, valor total e quantidade de parcelas válida.");
+      if (!socioId || !Number.isFinite(valorTotal) || valorTotal <= 0 || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 10) {
+        return erro("Informe associado, valor total e quantidade de parcelas válida (até 10 parcelas).");
       }
       if (registrarEntrada && (!contaEntradaId || !/^\d{4}-\d{2}-\d{2}$/.test(dataEntrada) || !FORMAS_PAGAMENTO.has(formaEntrada))) {
         return erro("Para lançar a entrada, informe a forma de pagamento, a conta/banco que recebeu e a data do recebimento.");
