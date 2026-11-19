@@ -613,6 +613,9 @@ export default function RelatoriosPage() {
           </div>
 
           <div className="nao-imprimir flex flex-wrap gap-2">
+            <button onClick={() => router.push("/relatorios/resumo-financeiro")} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm">
+              Resumo mensal / anual
+            </button>
             <button onClick={() => void carregar()} disabled={carregando} className="rounded-xl border border-[#cbd9d2] bg-white px-5 py-3 text-sm font-bold text-[#005a3c] shadow-sm disabled:opacity-60">
               {carregando ? "Atualizando..." : "↻ Gerar / Atualizar relatório"}
             </button>
