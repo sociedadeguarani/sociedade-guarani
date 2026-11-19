@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 const TAMANHO_PAGINA = 1000;
 const TAMANHO_LOTE_SOCIOS = 200;
+const CONCORRENCIA_CONSULTAS = 4;
 
 type Socio = {
   id: string;
@@ -71,6 +72,11 @@ type ResumoMensalidade = {
   possui_lancamentos: boolean | null;
 };
 
+type ResultadoConsulta<T> = {
+  data: T[] | null;
+  error: { message: string } | null;
+};
+
 function normalizar(valor: unknown): string {
   return String(valor ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
@@ -91,15 +97,44 @@ function ehTitular(matricula: unknown): boolean {
   return String(matricula ?? "").trim().toUpperCase().endsWith("A");
 }
 
-async function consultarTodas<T>(consulta: (inicio: number, fim: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+/**
+ * Mantém a paginação completa, mas busca até quatro páginas simultaneamente.
+ * A primeira página é isolada para evitar consultas extras em tabelas pequenas.
+ */
+async function consultarTodas<T>(
+  consulta: (inicio: number, fim: number) => Promise<ResultadoConsulta<T>>,
+): Promise<T[]> {
   const registros: T[] = [];
-  for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-    const { data, error } = await consulta(inicio, inicio + TAMANHO_PAGINA - 1);
-    if (error) throw new Error(error.message);
-    const pagina = data || [];
-    registros.push(...pagina);
-    if (pagina.length < TAMANHO_PAGINA) break;
+  const primeira = await consulta(0, TAMANHO_PAGINA - 1);
+  if (primeira.error) throw new Error(primeira.error.message);
+
+  const primeiraPagina = primeira.data || [];
+  registros.push(...primeiraPagina);
+  if (primeiraPagina.length < TAMANHO_PAGINA) return registros;
+
+  const tamanhoLote = TAMANHO_PAGINA * CONCORRENCIA_CONSULTAS;
+  for (let inicioLote = TAMANHO_PAGINA; ; inicioLote += tamanhoLote) {
+    const offsets = Array.from(
+      { length: CONCORRENCIA_CONSULTAS },
+      (_, indice) => inicioLote + indice * TAMANHO_PAGINA,
+    );
+    const paginas = await Promise.all(offsets.map(async (inicio) => {
+      const { data, error } = await consulta(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw new Error(error.message);
+      return data || [];
+    }));
+
+    let encontrouFim = false;
+    for (const pagina of paginas) {
+      registros.push(...pagina);
+      if (pagina.length < TAMANHO_PAGINA) {
+        encontrouFim = true;
+        break;
+      }
+    }
+    if (encontrouFim) break;
   }
+
   return registros;
 }
 
@@ -107,6 +142,36 @@ async function carregarPolitica(db: ReturnType<typeof getServiceClient>): Promis
   const { data, error } = await db.from("configuracoes_acessos").select("meses_atencao,meses_bloqueio").eq("id", 1).maybeSingle();
   if (error) return POLITICA_INADIMPLENCIA_PADRAO;
   return normalizarPoliticaInadimplencia(data || POLITICA_INADIMPLENCIA_PADRAO);
+}
+
+async function carregarResumoMensalidades(
+  db: ReturnType<typeof getServiceClient>,
+  ids: string[],
+  hoje: string,
+): Promise<ResumoMensalidade[]> {
+  const lotes: string[][] = [];
+  for (let inicio = 0; inicio < ids.length; inicio += TAMANHO_LOTE_SOCIOS) {
+    lotes.push(ids.slice(inicio, inicio + TAMANHO_LOTE_SOCIOS));
+  }
+
+  const resumo: ResumoMensalidade[] = [];
+  // Limita a concorrência a quatro RPCs, preservando a ordem e evitando
+  // abrir simultaneamente um número ilimitado de consultas ao banco.
+  for (let inicioLote = 0; inicioLote < lotes.length; inicioLote += CONCORRENCIA_CONSULTAS) {
+    const resultados = await Promise.all(
+      lotes.slice(inicioLote, inicioLote + CONCORRENCIA_CONSULTAS).map(async (lote) => {
+        const { data, error } = await db.rpc("dependentes_resumo_inadimplencia_v2", {
+          p_socio_ids: lote,
+          p_hoje: hoje,
+        });
+        if (error) throw new Error(`Falha ao resumir mensalidades: ${error.message}`);
+        return (data || []) as ResumoMensalidade[];
+      }),
+    );
+    for (const resultado of resultados) resumo.push(...resultado);
+  }
+
+  return resumo;
 }
 
 export async function GET(request: Request) {
@@ -123,39 +188,47 @@ export async function GET(request: Request) {
     const permissoes = Array.isArray(auth.usuario.permissoes) ? auth.usuario.permissoes : [];
     const podeVerFinanceiro = perfil === "administrador_master" || permissoes.includes("socios.ver_financeiro");
     const podeVerExameMedico = perfil === "administrador_master" || permissoes.includes("socios.ver_exame_medico");
-    const politica = podeVerFinanceiro ? await carregarPolitica(db) : POLITICA_INADIMPLENCIA_PADRAO;
     const hoje = dataHojeBrasil();
 
     const colunasSocio = ["id", "matricula", "nome", "situacao", "responsavel_id", "tipo_socio", "categoria", "parentesco", "cpf", "data_nascimento", "telefone", "whatsapp", "foto_url", "data_associacao"];
     if (podeVerExameMedico) colunasSocio.push("exame_medico_validade");
     if (podeVerFinanceiro) colunasSocio.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento");
 
-    const socios = await consultarTodas<Socio>(async (inicio, fim) => {
+    const buscarSocios = () => consultarTodas<Socio>(async (inicio, fim) => {
       let query = db.from("socios").select(colunasSocio.join(",")).order("nome").range(inicio, fim);
       if (perfil === "associado") query = query.or(`id.eq.${auth.usuario.socio_id},responsavel_id.eq.${auth.usuario.socio_id}`);
-      return await query as unknown as { data: Socio[] | null; error: { message: string } | null };
+      return await query as unknown as ResultadoConsulta<Socio>;
     });
 
     const colunasDependente = ["id", "socio_id", "matricula", "foto_url", "nome", "cpf", "data_nascimento", "parentesco", "telefone", "whatsapp", "ativo", "created_at", "migrado_para_socio_id"];
     if (podeVerExameMedico) colunasDependente.push("exame_medico_validade");
     if (podeVerFinanceiro) colunasDependente.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento", "tipo_pagamento", "situacao_financeira", "data_ultimo_pagamento");
 
-    let dependentesDb: DependenteDb[];
-    try {
-      dependentesDb = await consultarTodas<DependenteDb>(async (inicio, fim) => {
-        let query = db.from("dependentes").select(colunasDependente.join(",")).order("nome").range(inicio, fim);
-        if (perfil === "associado") query = query.eq("socio_id", auth.usuario.socio_id);
-        return await query as unknown as { data: DependenteDb[] | null; error: { message: string } | null };
-      });
-    } catch (error) {
-      if (!/migrado_para_socio_id/i.test(error instanceof Error ? error.message : String(error))) throw error;
-      const colunasCompatibilidade = colunasDependente.filter((coluna) => coluna !== "migrado_para_socio_id");
-      dependentesDb = await consultarTodas<DependenteDb>(async (inicio, fim) => {
-        let query = db.from("dependentes").select(colunasCompatibilidade.join(",")).order("nome").range(inicio, fim);
-        if (perfil === "associado") query = query.eq("socio_id", auth.usuario.socio_id);
-        return await query as unknown as { data: DependenteDb[] | null; error: { message: string } | null };
-      });
-    }
+    const buscarDependentes = async (): Promise<DependenteDb[]> => {
+      try {
+        return await consultarTodas<DependenteDb>(async (inicio, fim) => {
+          let query = db.from("dependentes").select(colunasDependente.join(",")).order("nome").range(inicio, fim);
+          if (perfil === "associado") query = query.eq("socio_id", auth.usuario.socio_id);
+          return await query as unknown as ResultadoConsulta<DependenteDb>;
+        });
+      } catch (error) {
+        if (!/migrado_para_socio_id/i.test(error instanceof Error ? error.message : String(error))) throw error;
+        const colunasCompatibilidade = colunasDependente.filter((coluna) => coluna !== "migrado_para_socio_id");
+        return await consultarTodas<DependenteDb>(async (inicio, fim) => {
+          let query = db.from("dependentes").select(colunasCompatibilidade.join(",")).order("nome").range(inicio, fim);
+          if (perfil === "associado") query = query.eq("socio_id", auth.usuario.socio_id);
+          return await query as unknown as ResultadoConsulta<DependenteDb>;
+        });
+      }
+    };
+
+    // Política, sócios e dependentes são independentes: iniciamos as consultas
+    // juntas em vez de esperar uma tabela terminar para consultar a próxima.
+    const [politica, socios, dependentesDb] = await Promise.all([
+      podeVerFinanceiro ? carregarPolitica(db) : Promise.resolve(POLITICA_INADIMPLENCIA_PADRAO),
+      buscarSocios(),
+      buscarDependentes(),
+    ]);
 
     const dependentesBase = dependentesDb.filter((d) => !ehTitular(d.matricula) && !d.migrado_para_socio_id);
     const chaves = new Set(dependentesBase.flatMap((d) => [normalizar(d.nome), normalizar(d.matricula)]).filter(Boolean));
@@ -171,16 +244,9 @@ export async function GET(request: Request) {
     // O PostgreSQL agrega o histórico de mensalidades por sócio. A API recebe
     // somente a quantidade de competências em atraso, os dias e a existência
     // de histórico; evita transferir centenas/milhares de linhas ao servidor Next.
-    const resumoMensalidades: ResumoMensalidade[] = [];
-    for (let inicio = 0; inicio < idsComCobranca.length; inicio += TAMANHO_LOTE_SOCIOS) {
-      const lote = idsComCobranca.slice(inicio, inicio + TAMANHO_LOTE_SOCIOS);
-      const { data, error } = await db.rpc("dependentes_resumo_inadimplencia_v2", {
-        p_socio_ids: lote,
-        p_hoje: hoje,
-      });
-      if (error) throw new Error(`Falha ao resumir mensalidades: ${error.message}`);
-      resumoMensalidades.push(...((data || []) as ResumoMensalidade[]));
-    }
+    const resumoMensalidades = podeVerFinanceiro
+      ? await carregarResumoMensalidades(db, idsComCobranca, hoje)
+      : [];
     const atrasos = new Map(resumoMensalidades.map((item) => [String(item.socio_id || ""), {
       quantidade: Number(item.quantidade_atraso || 0),
       dias: Number(item.dias_atraso || 0),
@@ -237,29 +303,29 @@ export async function GET(request: Request) {
       // não dependa de um status calculado para o próprio dependente.
       const titular = sociosPorId.get(String(s.responsavel_id));
       return ({
-      id: `socio:${s.id}`,
-      socio_id: String(s.responsavel_id),
-      matricula: s.matricula,
-      foto_url: s.foto_url,
-      nome: s.nome,
-      cpf: s.cpf,
-      data_nascimento: s.data_nascimento,
-      exame_medico_validade: s.exame_medico_validade,
-      parentesco: s.parentesco || null,
-      telefone: s.telefone || s.whatsapp || null,
-      ativo: normalizar(s.situacao) !== "inativo",
-      created_at: null,
-      possui_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? false : s.possui_mensalidade === true,
-      valor_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(s.valor_mensalidade || 0),
-      dia_vencimento: s.dia_vencimento ?? 10,
-      tipo_pagamento: s.tipo_pagamento,
-      situacao_financeira: s.situacao_financeira,
-      data_ultimo_pagamento: s.data_ultimo_pagamento,
-      financeiro_status: titular?.financeiro_status || s.financeiro_status || "restrito",
-      meses_atraso: Number(titular?.meses_atraso ?? s.meses_atraso ?? 0),
-      source: "socios",
-      source_socio_id: String(s.id),
-    });
+        id: `socio:${s.id}`,
+        socio_id: String(s.responsavel_id),
+        matricula: s.matricula,
+        foto_url: s.foto_url,
+        nome: s.nome,
+        cpf: s.cpf,
+        data_nascimento: s.data_nascimento,
+        exame_medico_validade: s.exame_medico_validade,
+        parentesco: s.parentesco || null,
+        telefone: s.telefone || s.whatsapp || null,
+        ativo: normalizar(s.situacao) !== "inativo",
+        created_at: null,
+        possui_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? false : s.possui_mensalidade === true,
+        valor_mensalidade: String(s.matricula || "").trim().toUpperCase().endsWith("B") ? 0 : Number(s.valor_mensalidade || 0),
+        dia_vencimento: s.dia_vencimento ?? 10,
+        tipo_pagamento: s.tipo_pagamento,
+        situacao_financeira: s.situacao_financeira,
+        data_ultimo_pagamento: s.data_ultimo_pagamento,
+        financeiro_status: titular?.financeiro_status || s.financeiro_status || "restrito",
+        meses_atraso: Number(titular?.meses_atraso ?? s.meses_atraso ?? 0),
+        source: "socios",
+        source_socio_id: String(s.id),
+      });
     });
 
     return NextResponse.json({
