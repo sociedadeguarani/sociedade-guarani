@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
 import Image from "next/image";
 
 type InstallChoice = {
@@ -13,27 +14,59 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<InstallChoice>;
 };
 
+type DeviceKind = "android" | "ios" | "other";
+
+function subscribeDevice() {
+  return () => undefined;
+}
+
+function getDeviceSnapshot(): DeviceKind {
+  if (typeof navigator === "undefined") return "other";
+  const agente = navigator.userAgent || "";
+  const ehIos = /iPad|iPhone|iPod/i.test(agente) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (ehIos) return "ios";
+  if (/Android/i.test(agente)) return "android";
+  return "other";
+}
+
+function getStandaloneSnapshot() {
+  if (typeof window === "undefined") return false;
+  const navegador = window.navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia("(display-mode: standalone)").matches || Boolean(navegador.standalone);
+}
+
+function subscribeStandalone(onChange: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  const media = window.matchMedia("(display-mode: standalone)");
+  media.addEventListener("change", onChange);
+  window.addEventListener("appinstalled", onChange);
+  return () => {
+    media.removeEventListener("change", onChange);
+    window.removeEventListener("appinstalled", onChange);
+  };
+}
+
 export default function PwaInstallPrompt() {
-  const [dispositivoMovel, setDispositivoMovel] = useState(false);
-  const [ios, setIos] = useState(false);
-  const [instalada, setInstalada] = useState(false);
+  const pathname = usePathname();
+  const dispositivo = useSyncExternalStore(subscribeDevice, getDeviceSnapshot, () => "other");
+  const instaladaNoSistema = useSyncExternalStore(
+    subscribeStandalone,
+    getStandaloneSnapshot,
+    () => false,
+  );
+  const ios = dispositivo === "ios";
+  const [instaladaPeloEvento, setInstaladaPeloEvento] = useState(false);
   const [dispensada, setDispensada] = useState(false);
   const [instrucoesAbertas, setInstrucoesAbertas] = useState(false);
   const [promptInstalacao, setPromptInstalacao] = useState<BeforeInstallPromptEvent | null>(null);
   const [instalando, setInstalando] = useState(false);
 
+  const instalada = instaladaNoSistema || instaladaPeloEvento;
+  const estaNaTelaLogin = pathname === "/login";
+
   useEffect(() => {
     const navegador = window.navigator;
-    const agente = navegador.userAgent || "";
-    const ehAndroid = /Android/i.test(agente);
-    const ehIos = /iPad|iPhone|iPod/i.test(agente) ||
-      (navegador.platform === "MacIntel" && navegador.maxTouchPoints > 1);
-    const modoStandalone = window.matchMedia("(display-mode: standalone)").matches ||
-      ("standalone" in navegador && Boolean((navegador as Navigator & { standalone?: boolean }).standalone));
-
-    setDispositivoMovel(ehAndroid || ehIos);
-    setIos(ehIos);
-    setInstalada(modoStandalone);
 
     // O service worker só oferece um aviso estático quando falta conexão.
     // Nenhuma rota autenticada, API, credencial ou dado pessoal é armazenado.
@@ -48,7 +81,7 @@ export default function PwaInstallPrompt() {
       setPromptInstalacao(evento as BeforeInstallPromptEvent);
     };
     const appInstalado = () => {
-      setInstalada(true);
+      setInstaladaPeloEvento(true);
       setPromptInstalacao(null);
       setInstrucoesAbertas(false);
     };
@@ -62,7 +95,7 @@ export default function PwaInstallPrompt() {
     };
   }, []);
 
-  async function instalar() {
+  const instalar = useCallback(async () => {
     if (!promptInstalacao) {
       setInstrucoesAbertas(true);
       return;
@@ -73,7 +106,7 @@ export default function PwaInstallPrompt() {
       await promptInstalacao.prompt();
       const escolha = await promptInstalacao.userChoice;
       if (escolha.outcome === "accepted") {
-        setInstalada(true);
+        setInstaladaPeloEvento(true);
         setDispensada(true);
       }
       setPromptInstalacao(null);
@@ -83,54 +116,59 @@ export default function PwaInstallPrompt() {
     } finally {
       setInstalando(false);
     }
-  }
+  }, [promptInstalacao]);
 
   useEffect(() => {
     const abrirInstalacao = () => {
-      if (promptInstalacao) {
-        void instalar();
-      } else {
-        setInstrucoesAbertas(true);
-      }
+      void instalar();
     };
 
     window.addEventListener("guarani:open-install", abrirInstalacao);
     return () => window.removeEventListener("guarani:open-install", abrirInstalacao);
-  }, [promptInstalacao]);
+  }, [instalar]);
 
-  if ((!dispositivoMovel || instalada || dispensada) && !instrucoesAbertas) return null;
+  const mostrarAviso = !instalada && !dispensada &&
+    (dispositivo !== "other" || estaNaTelaLogin);
 
   return (
     <>
-      <aside className="fixed inset-x-3 bottom-3 z-[100] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-[#cfe0d7] bg-white p-3 shadow-2xl md:hidden">
-        <Image
-          src="/apple-icon-guarani.png"
-          alt=""
-          width={44}
-          height={44}
-          className="h-11 w-11 shrink-0 rounded-xl"
-        />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-extrabold text-[#003d2b]">Instale o Guarani</p>
-          <p className="text-xs text-slate-500">Acesse pelo ícone na tela do celular.</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void instalar()}
-          disabled={instalando}
-          className="shrink-0 rounded-xl bg-[#005a3c] px-3 py-2.5 text-xs font-extrabold text-white disabled:opacity-60"
-        >
-          {instalando ? "Abrindo…" : promptInstalacao ? "Instalar" : "Como instalar"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setDispensada(true)}
-          aria-label="Fechar aviso de instalação"
-          className="ml-[-4px] self-start rounded-lg px-1.5 py-1 text-lg leading-none text-slate-400"
-        >
-          ×
-        </button>
-      </aside>
+      {mostrarAviso && (
+        <aside className={`fixed inset-x-3 bottom-3 z-[100] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-[#cfe0d7] bg-white p-3 shadow-2xl ${estaNaTelaLogin ? "" : "md:hidden"}`}>
+          <Image
+            src="/apple-icon-guarani.png"
+            alt=""
+            width={44}
+            height={44}
+            className="h-11 w-11 shrink-0 rounded-xl"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-extrabold text-[#003d2b]">
+              {estaNaTelaLogin ? "Instalar aplicativo Guarani" : "Instale o Guarani"}
+            </p>
+            <p className="text-xs text-slate-500">
+              {estaNaTelaLogin
+                ? "Tenha o Guarani com um ícone na tela inicial do celular."
+                : "Acesse pelo ícone na tela do celular."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void instalar()}
+            disabled={instalando}
+            className="shrink-0 rounded-xl bg-[#005a3c] px-3 py-2.5 text-xs font-extrabold text-white disabled:opacity-60"
+          >
+            {instalando ? "Abrindo…" : promptInstalacao ? "Instalar" : "Como instalar"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDispensada(true)}
+            aria-label="Fechar aviso de instalação"
+            className="ml-[-4px] self-start rounded-lg px-1.5 py-1 text-lg leading-none text-slate-400"
+          >
+            ×
+          </button>
+        </aside>
+      )}
 
       {instrucoesAbertas && (
         <div
@@ -156,12 +194,16 @@ export default function PwaInstallPrompt() {
                 <li>Toque em <strong>Compartilhar</strong> (ícone do quadrado com seta).</li>
                 <li>Escolha <strong>Adicionar à Tela de Início</strong> e confirme.</li>
               </ol>
-            ) : (
+            ) : dispositivo === "android" ? (
               <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
                 <li>No Chrome, toque no menu de três pontos (⋮).</li>
                 <li>Escolha <strong>Instalar app</strong> ou <strong>Adicionar à tela inicial</strong>.</li>
                 <li>Confirme. O ícone Guarani aparecerá junto dos outros aplicativos.</li>
               </ol>
+            ) : (
+              <p className="text-sm leading-6 text-slate-700">
+                Para instalar, abra este mesmo endereço no celular: use o <strong>Chrome no Android</strong> ou o <strong>Safari no iPhone</strong>. A opção de instalação aparecerá no próprio celular.
+              </p>
             )}
             <p className="mt-4 rounded-xl bg-[#f1f7f4] p-3 text-xs leading-5 text-slate-600">
               O sistema continua exigindo internet e seu login normal. Dados de associados e informações financeiras não ficam disponíveis offline.

@@ -8,7 +8,9 @@ const prompt = readFileSync(new URL("../app/components/PwaInstallPrompt.tsx", im
 const worker = readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
 const offline = readFileSync(new URL("../public/offline.html", import.meta.url), "utf8");
 const installPage = readFileSync(new URL("../app/instalar/page.tsx", import.meta.url), "utf8");
-const iconRoute = readFileSync(new URL("../app/pwa-icon-512/route.tsx", import.meta.url), "utf8");
+const icon192 = readFileSync(new URL("../app/pwa-icon-192/route.tsx", import.meta.url), "utf8");
+const icon512 = readFileSync(new URL("../app/pwa-icon-512/route.tsx", import.meta.url), "utf8");
+const iconMaskable = readFileSync(new URL("../app/pwa-icon-maskable-512/route.tsx", import.meta.url), "utf8");
 
 test("manifesto define identidade, início e modo de aplicativo independente", () => {
   assert.match(manifest, /name:\s*"Sociedade Recreativa Guarani"/);
@@ -28,7 +30,7 @@ test("layout registra manifesto e carrega o componente de instalação", () => {
   assert.match(layout, /themeColor:\s*"#003D2B"/);
 });
 
-test("componente oferece instalação Android e instruções de adicionar à tela inicial no iOS", () => {
+test("componente oferece instalação Android, instruções iOS e botão também na tela de login", () => {
   assert.match(prompt, /beforeinstallprompt/);
   assert.match(prompt, /appinstalled/);
   assert.match(prompt, /Instalar/);
@@ -36,7 +38,18 @@ test("componente oferece instalação Android e instruções de adicionar à tel
   assert.match(prompt, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(prompt, /apple-icon-guarani\.png/);
   assert.match(prompt, /guarani:open-install/);
-  assert.match(prompt, /if \(promptInstalacao\) \{\s*void instalar\(\);/);
+  assert.match(prompt, /const estaNaTelaLogin = pathname === "\/login"/);
+  assert.match(prompt, /Instalar aplicativo Guarani/);
+  assert.match(prompt, /Tenha o Guarani com um ícone na tela inicial do celular/);
+  assert.match(prompt, /dispositivo === "android"/);
+  assert.match(prompt, /abra este mesmo endereço no celular/);
+});
+
+test("detecção de dispositivo e instalação não fazem setState síncrono dentro de useEffect", () => {
+  assert.match(prompt, /useSyncExternalStore/);
+  assert.match(prompt, /getDeviceSnapshot/);
+  assert.match(prompt, /getStandaloneSnapshot/);
+  assert.doesNotMatch(prompt, /setDispositivoMovel|setIos|setInstalada\(modoStandalone\)/);
 });
 
 test("service worker não armazena API, sessão ou respostas autenticadas", () => {
@@ -50,14 +63,17 @@ test("service worker não armazena API, sessão ou respostas autenticadas", () =
   assert.match(offline, /não ficam disponíveis sem conexão/i);
 });
 
-
 test("o sistema oferece página pública de instalação com botão no próprio site", () => {
   assert.match(installPage, /Instalar aplicativo/);
   assert.match(installPage, /guarani:open-install/);
   assert.match(installPage, /apple-icon-guarani\.png/);
 });
 
-test("ícones PWA são derivados do ícone oficial do sistema", () => {
-  assert.match(iconRoute, /apple-icon-guarani\.png/);
-  assert.match(iconRoute, /ImageResponse/);
+test("ícones PWA usam o escudo oficial e têm texto alternativo", () => {
+  for (const route of [icon192, icon512, iconMaskable]) {
+    assert.match(route, /apple-icon-guarani\.png/);
+    assert.match(route, /ImageResponse/);
+    assert.match(route, /alt="Escudo oficial da Sociedade Recreativa Guarani"/);
+    assert.match(route, /eslint-disable @next\/next\/no-img-element/);
+  }
 });
