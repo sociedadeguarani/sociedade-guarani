@@ -38,7 +38,7 @@ type PessoaResumoServidor = {
 };
 
 type DadosInadimplencia = {
-  pessoas: PessoaResumoServidor[];
+  pessoas: Inadimplente[];
   politica: PoliticaInadimplencia;
 };
 
@@ -73,7 +73,7 @@ async function buscarDadosInadimplencia(): Promise<DadosInadimplencia> {
 
   return {
     politica,
-    pessoas: pessoas.map((item) => {
+    pessoas: pessoas.map<Inadimplente>((item) => {
       const meses = Math.max(0, Number(item.meses || 0));
       return {
         pessoaId: item.pessoa.chave,
