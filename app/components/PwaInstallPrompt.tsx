@@ -85,13 +85,26 @@ export default function PwaInstallPrompt() {
     }
   }
 
-  if (!dispositivoMovel || instalada || dispensada) return null;
+  useEffect(() => {
+    const abrirInstalacao = () => {
+      if (promptInstalacao) {
+        void instalar();
+      } else {
+        setInstrucoesAbertas(true);
+      }
+    };
+
+    window.addEventListener("guarani:open-install", abrirInstalacao);
+    return () => window.removeEventListener("guarani:open-install", abrirInstalacao);
+  }, [promptInstalacao]);
+
+  if ((!dispositivoMovel || instalada || dispensada) && !instrucoesAbertas) return null;
 
   return (
     <>
       <aside className="fixed inset-x-3 bottom-3 z-[100] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-[#cfe0d7] bg-white p-3 shadow-2xl md:hidden">
         <Image
-          src="/pwa-icon-192.png"
+          src="/apple-icon-guarani.png"
           alt=""
           width={44}
           height={44}
@@ -131,7 +144,7 @@ export default function PwaInstallPrompt() {
             className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
           >
             <div className="mb-3 flex items-center gap-3">
-              <Image src="/pwa-icon-192.png" alt="" width={48} height={48} className="h-12 w-12 rounded-xl" />
+              <Image src="/apple-icon-guarani.png" alt="" width={48} height={48} className="h-12 w-12 rounded-xl" />
               <div>
                 <h2 id="guarani-install-title" className="text-lg font-black text-[#003d2b]">Adicionar o Guarani</h2>
                 <p className="text-xs text-slate-500">O aplicativo ficará com um ícone na tela inicial.</p>

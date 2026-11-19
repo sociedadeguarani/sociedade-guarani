@@ -6,9 +6,7 @@
 const CACHE_NAME = "guarani-pwa-static-v1";
 const STATIC_ASSETS = [
   "/offline.html",
-  "/pwa-icon-192.png",
-  "/pwa-icon-512.png",
-  "/pwa-icon-maskable-512.png",
+  "/apple-icon-guarani.png",
 ];
 
 self.addEventListener("install", (event) => {
