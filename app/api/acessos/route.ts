@@ -800,11 +800,12 @@ export async function POST(request: Request) {
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
 
     etapa = "buscando sócio";
-    let { data: socio, error: socioError } = await supabase
+    const { data: socioInicial, error: socioError } = await supabase
       .from("socios")
       .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
       .eq("id", id).maybeSingle();
     if (socioError) throw socioError;
+    let socio = socioInicial;
 
     // QR antigos de dependentes às vezes guardavam o ID da tabela dependentes
     // no parâmetro `id`. Se não existir em socios, resolvemos a pessoa pelo ID antigo.

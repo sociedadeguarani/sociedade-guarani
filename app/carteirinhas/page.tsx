@@ -143,7 +143,9 @@ export default function CarteirinhasPage(): JSX.Element {
 
   useEffect(() => {
     let ativo = true;
-    setOrigemQr(window.location.origin);
+    queueMicrotask(() => {
+      if (ativo) setOrigemQr(window.location.origin);
+    });
     (async () => {
       const { supabase } = await import("@/lib/supabaseClient");
       const { data: { session } } = await supabase.auth.getSession();

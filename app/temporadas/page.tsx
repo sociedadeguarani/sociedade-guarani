@@ -261,11 +261,17 @@ export default function TemporadasPage() {
   }, [router, token]);
 
   useEffect(() => {
-    setOrigemQr(window.location.origin);
+    let ativo = true;
+    queueMicrotask(() => {
+      if (ativo) setOrigemQr(window.location.origin);
+    });
     const agendamento = window.setTimeout(() => {
       void carregar();
     }, 0);
-    return () => window.clearTimeout(agendamento);
+    return () => {
+      ativo = false;
+      window.clearTimeout(agendamento);
+    };
   }, [carregar]);
 
   useEffect(() => {
