@@ -286,11 +286,23 @@ function normalizarBanco(valor: unknown) {
     .replace(/banco\s+banrisul/g, "banrisul");
 }
 
+function ehCobrancaBoleto(valor: unknown) {
+  return normalizarTexto(valor).replace(/[\s-]+/g, "_").startsWith("boleto");
+}
+
+function encontrarContaSicredi(contas: ContaBancariaResumo[]) {
+  return (contas || []).find((conta) =>
+    normalizarBanco(`${conta.nome || ""} ${conta.banco || ""}`).includes("sicredi")
+  ) || null;
+}
+
 function chaveTarifa(
   tipoPagamento: unknown,
   contaBancaria: ContaBancariaResumo | null
 ) {
   const tipo = normalizarTexto(tipoPagamento);
+
+  if (tipo.startsWith("boleto")) return "boleto";
 
   const aliases: Record<string, string> = {
     banrisul: "banrisul",
@@ -517,6 +529,7 @@ export async function GET(request: Request) {
       configuracoesResult,
       tarifasResult,
       cobrancasResult,
+      contasResult,
     ] = await Promise.all([
       db
         .from("socios")
@@ -539,6 +552,11 @@ export async function GET(request: Request) {
         .eq("ativo", true)
         .order("created_at", { ascending: false })
         .limit(1),
+      db
+        .from("contas_bancarias")
+        .select("id,nome,banco")
+        .eq("ativo", true)
+        .order("nome"),
     ]);
 
     const { data: socios, error: erroSocios } = sociosResult;
@@ -546,6 +564,7 @@ export async function GET(request: Request) {
     const { data: configuracoes, error: erroConfiguracoes } = configuracoesResult;
     const { data: tarifas, error: erroTarifas } = tarifasResult;
     const { data: cobrancas, error: erroCobrancas } = cobrancasResult;
+    const { data: contas, error: erroContas } = contasResult;
 
     if (erroSocios) throw erroSocios;
     if (erroMensalidades) throw erroMensalidades;
@@ -561,6 +580,7 @@ export async function GET(request: Request) {
     if (erroConfiguracoes) throw erroConfiguracoes;
     if (erroTarifas) throw erroTarifas;
     if (erroCobrancas) throw erroCobrancas;
+    if (erroContas) throw erroContas;
 
     const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
       db,
@@ -578,10 +598,50 @@ export async function GET(request: Request) {
       sociosComDataReferencia.map((s: SocioMensalidadeRow): [string, SocioMensalidadeRow] => [String(s.id), s])
     );
 
-    const mensalidadesComSocio = mensalidadesCompletas.map((m: MensalidadeRow) => ({
-      ...atualizarSituacaoAtraso(m),
-      socio: mapaSocios.get(String(m.socio_id)) || null,
-    }));
+    const mapaContas = new Map<string, ContaBancariaResumo>(
+      ((contas || []) as ContaBancariaResumo[]).map((conta) => [String(conta.id), conta])
+    );
+
+    const mensalidadesComSocio = mensalidadesCompletas.map((m: MensalidadeRow) => {
+      const mensalidadeAtualizada = atualizarSituacaoAtraso(m);
+      const socio = mapaSocios.get(String(m.socio_id)) || null;
+
+      // Lançamentos ainda em aberto acompanham a forma de cobrança atual do
+      // associado. A tarifa antiga permanece somente nos pagamentos já feitos
+      // e no histórico; trocar de débito bancário para boleto não deve manter
+      // a tarifa do banco anterior.
+      if (
+        socio?.tipo_pagamento &&
+        (mensalidadeAtualizada.situacao === "em_aberto" || mensalidadeAtualizada.situacao === "em_atraso")
+      ) {
+        const contaTarifaId = socio.conta_bancaria_id || mensalidadeAtualizada.conta_pagadora_id || null;
+        const contaTarifa = contaTarifaId ? mapaContas.get(String(contaTarifaId)) || null : null;
+        const tarifaAtual = valorTarifa(
+          (tarifas || []) as ConfiguracaoTarifaRow[],
+          socio.tipo_pagamento,
+          contaTarifa,
+        );
+        const valorBase = Number(mensalidadeAtualizada.valor_base ?? mensalidadeAtualizada.valor ?? 0);
+        const multa = Number(mensalidadeAtualizada.multa || 0);
+        const juros = Number(mensalidadeAtualizada.juros || 0);
+        const desconto = Number(mensalidadeAtualizada.desconto || 0);
+
+        return {
+          ...mensalidadeAtualizada,
+          tipo_pagamento: tipoPagamentoPersistivel(socio.tipo_pagamento),
+          tarifa_pagamento: Number(tarifaAtual.toFixed(2)),
+          total_cobrado: Number(Math.max(0, valorBase + tarifaAtual + multa + juros - desconto).toFixed(2)),
+          // Boleto não usa a conta de débito antiga do associado. O destino
+          // do recebimento será escolhido como Sicredi (ou manualmente) na baixa.
+          conta_pagadora_id: ehCobrancaBoleto(socio.tipo_pagamento)
+            ? null
+            : socio.conta_bancaria_id || mensalidadeAtualizada.conta_pagadora_id || null,
+          socio,
+        };
+      }
+
+      return { ...mensalidadeAtualizada, socio };
+    });
 
     return NextResponse.json({
       socios: sociosComDataReferencia,
@@ -681,7 +741,8 @@ export async function POST(request: Request) {
       const { data: contasBancarias, error: erroContas } = await db
         .from("contas_bancarias")
         .select("id,nome,banco")
-        .eq("ativo", true);
+        .eq("ativo", true)
+        .order("nome");
 
       if (erroContas) throw erroContas;
 
@@ -1216,7 +1277,7 @@ export async function POST(request: Request) {
 
       const { data: sociosBaixa, error: erroSociosBaixa } = await db
         .from("socios")
-        .select("id,nome,matricula,conta_bancaria_id,responsavel_id,data_associacao,dia_vencimento")
+        .select("id,nome,matricula,conta_bancaria_id,tipo_pagamento,responsavel_id,data_associacao,dia_vencimento")
         .in("id", socioIds);
 
       if (erroSociosBaixa) throw erroSociosBaixa;
@@ -1250,6 +1311,7 @@ export async function POST(request: Request) {
 
       // Não permite marcar como pago sem uma conta de destino definida.
       const contaRecebimentoSelecionada = String(body.conta_recebimento_id || "").trim();
+      const contaSicredi = encontrarContaSicredi((contasBancarias || []) as ContaBancariaResumo[]);
       if (
         contaRecebimentoSelecionada &&
         !mapaContas.has(contaRecebimentoSelecionada)
@@ -1260,19 +1322,37 @@ export async function POST(request: Request) {
         );
       }
 
-      const semConta = registrosParaBaixar.filter((r: MensalidadeRow) => {
-        const socio = mapaSociosBaixa.get(String(r.socio_id));
-        return !contaRecebimentoSelecionada && !r.conta_pagadora_id && !socio?.conta_bancaria_id;
-      });
+      const formaPagamentoOriginalDoRegistro = (registro: MensalidadeRow) => {
+        const socio = mapaSociosBaixa.get(String(registro.socio_id));
+        return tipoPagamento || socio?.tipo_pagamento || registro.tipo_pagamento || "dinheiro";
+      };
+
+      const contaDestinoDoRegistro = (registro: MensalidadeRow) => {
+        const socio = mapaSociosBaixa.get(String(registro.socio_id));
+        const formaPagamentoAtual = formaPagamentoOriginalDoRegistro(registro);
+
+        if (contaRecebimentoSelecionada) return contaRecebimentoSelecionada;
+        if (ehCobrancaBoleto(formaPagamentoAtual)) return contaSicredi?.id || null;
+        return registro.conta_pagadora_id || socio?.conta_bancaria_id || null;
+      };
+
+      const semConta = registrosParaBaixar.filter((registro: MensalidadeRow) =>
+        !contaDestinoDoRegistro(registro)
+      );
 
       if (semConta.length > 0) {
+        const existemBoletosSemContaSicredi = semConta.some((registro: MensalidadeRow) =>
+          ehCobrancaBoleto(formaPagamentoOriginalDoRegistro(registro))
+        );
         const nomes = semConta
           .map((r: MensalidadeRow) => mapaSociosBaixa.get(String(r.socio_id))?.nome || r.socio_id)
           .join(", ");
 
         return NextResponse.json(
           {
-            error: `Não foi possível registrar a entrada financeira. Cadastre a conta bancária de: ${nomes}.`,
+            error: existemBoletosSemContaSicredi
+              ? `Não encontrei uma conta Sicredi ativa para receber o(s) boleto(s). Selecione outra conta de recebimento na baixa ou cadastre a conta Sicredi. Associado(s): ${nomes}.`
+              : `Não foi possível registrar a entrada financeira. Cadastre a conta bancária de: ${nomes}.`,
           },
           { status: 400 }
         );
@@ -1449,14 +1529,15 @@ export async function POST(request: Request) {
 
       for (const registro of registrosParaBaixar) {
         const socio = mapaSociosBaixa.get(String(registro.socio_id));
-        const contaId =
-          body.conta_recebimento_id ||
-          registro.conta_pagadora_id ||
-          socio?.conta_bancaria_id ||
-          null;
+        const tipoPagamentoOriginal = formaPagamentoOriginalDoRegistro(registro);
+        const formaPagamento = tipoPagamentoPersistivel(tipoPagamentoOriginal) || "dinheiro";
+        const contaId = contaDestinoDoRegistro(registro);
 
-        const formaPagamento =
-          tipoPagamento || registro.tipo_pagamento || "dinheiro";
+        // A tarifa segue a forma de cobrança atual (ou a exceção informada
+        // nesta baixa), não a conta em que o dinheiro foi recebido. Para
+        // débito em conta, a instituição vem do banco vinculado ao associado.
+        const contaTarifaId = socio?.conta_bancaria_id || registro.conta_pagadora_id || null;
+        const contaTarifa = contaTarifaId ? mapaContas.get(String(contaTarifaId)) || null : null;
 
         const valorBase = Number(
           registro.valor_base ?? registro.valor ?? 0
@@ -1466,7 +1547,7 @@ export async function POST(request: Request) {
           valorBase,
           registro.data_vencimento || null,
           String(dataPagamento),
-          valorTarifa(tarifas || [], formaPagamento, contaId ? mapaContas.get(String(contaId)) || null : null),
+          valorTarifa(tarifas || [], tipoPagamentoOriginal, contaTarifa),
           regraCobranca
         );
 

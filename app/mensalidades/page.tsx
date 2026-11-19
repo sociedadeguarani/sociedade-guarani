@@ -262,6 +262,16 @@ function normalizarBanco(valor: unknown): string {
     .replace(/[\s_-]+/g, " ");
 }
 
+function ehBoletoMensalidade(item: Pick<M, "tipo_pagamento" | "socio">) {
+  const pagamentoCadastro = normalizarPagamento(item.socio?.tipo_pagamento);
+  const pagamento = pagamentoCadastro || (
+    item.socio?.conta_bancaria_id
+      ? "debito_em_conta"
+      : normalizarPagamento(item.tipo_pagamento)
+  );
+  return pagamento.startsWith("boleto");
+}
+
 function situacaoVisual(item: M) {
   const competencia = String(item.competencia || "").slice(0, 7);
   if (
@@ -409,6 +419,11 @@ export default function Page() {
   const [processandoBaixa, setProcessandoBaixa] = useState(false);
   const [pagamentoMensalidade, setPagamentoMensalidade] = useState<M | null>(null);
 
+  const contaRecebimentoSicredi = useMemo(
+    () => contas.find((conta) => normalizarBanco(`${conta.nome || ""} ${conta.banco || ""}`).includes("sicredi")) || null,
+    [contas]
+  );
+
   // Índice reutilizável evita varrer a lista de contas em cada linha filtrada.
   const contasPorId = useMemo(
     () => new Map(contas.map((conta) => [String(conta.id), conta] as const)),
@@ -460,6 +475,7 @@ export default function Page() {
 
   async function abrirDetalhesSocio(item: M) {
     setSocioSelecionado(item);
+    setContaRecebimentoSelecionada("");
     setMesesHistoricoSelecionadosBaixa([]);
     setAnoHistoricoSocio(ano);
     setTipoBaixaSelecionada("pago");
@@ -480,11 +496,20 @@ export default function Page() {
     if (!registro || registro.situacao === "pago" || registro.situacao === "isento" || String(registro.id).startsWith("virtual-")) {
       return;
     }
-    setMesesHistoricoSelecionadosBaixa((atuais) =>
-      atuais.includes(numeroMes)
-        ? atuais.filter((m) => m !== numeroMes)
-        : [...atuais, numeroMes].sort((a, b) => a - b)
-    );
+    setMesesHistoricoSelecionadosBaixa((atuais) => {
+      if (atuais.includes(numeroMes)) {
+        const proximos = atuais.filter((m) => m !== numeroMes);
+        if (proximos.length === 0) setContaRecebimentoSelecionada("");
+        return proximos;
+      }
+
+      if (atuais.length === 0) {
+        setContaRecebimentoSelecionada(
+          ehBoletoMensalidade(registro) ? contaRecebimentoSicredi?.id || "" : ""
+        );
+      }
+      return [...atuais, numeroMes].sort((a, b) => a - b);
+    });
   }
 
   async function baixarMesesDoHistorico() {
@@ -496,7 +521,10 @@ export default function Page() {
       setErro("Selecione pelo menos uma mensalidade gerada e ainda não paga.");
       return;
     }
-    if (!contaRecebimentoSelecionada) {
+    const somenteBoletos = registros.every(ehBoletoMensalidade);
+    const contaDestino = contaRecebimentoSelecionada ||
+      (somenteBoletos ? contaRecebimentoSicredi?.id || "" : "");
+    if (!contaDestino) {
       setErro("Selecione a conta bancária de recebimento antes de dar baixa nos meses selecionados.");
       return;
     }
@@ -514,7 +542,7 @@ export default function Page() {
           acao: "baixar",
           ids: registros.map((item) => item.id),
           data_pagamento: new Date().toISOString().slice(0, 10),
-          conta_recebimento_id: contaRecebimentoSelecionada,
+          conta_recebimento_id: contaDestino,
         }),
       });
       const d = await r.json();
@@ -658,6 +686,7 @@ export default function Page() {
       const { data: contasData } = await supabase
         .from("contas_bancarias")
         .select("id,nome,banco")
+        .eq("ativo", true)
         .order("nome");
 
       setContas(contasData || []);
@@ -768,7 +797,7 @@ export default function Page() {
 
     // PIX/Boleto continuam sendo identificados diretamente pelo lançamento.
     if (pagamento === "pix") return "pix";
-    if (pagamento === "boleto") return "boleto";
+    if (pagamento.startsWith("boleto")) return "boleto";
     if (pagamento === "dinheiro") return "dinheiro";
     if (pagamento === "transferencia") return "transferencia";
     if (pagamento === "outro") return "outro";
@@ -1006,7 +1035,11 @@ export default function Page() {
 
     for (const item of selecionadasBaixa) {
       const socio = socioPorId.get(String(item.socio_id));
-      const contaId = contaRecebimentoSelecionada || item.conta_pagadora_id || socio?.conta_bancaria_id || "";
+      const contaId = contaRecebimentoSelecionada || (
+        tipoCobranca(item) === "boleto"
+          ? contaRecebimentoSicredi?.id || ""
+          : item.conta_pagadora_id || socio?.conta_bancaria_id || ""
+      );
       const conta = contasPorId.get(String(contaId));
       const nomeConta = conta?.nome || "Conta não identificada";
       const chave = String(contaId || nomeConta);
@@ -1033,7 +1066,7 @@ export default function Page() {
       totalCobrado,
       contas: Array.from(porConta.values()).sort((a, b) => a.nome.localeCompare(b.nome)),
     };
-  }, [selecionadasBaixa, socioPorId, contasPorId, contaRecebimentoSelecionada]);
+  }, [selecionadasBaixa, socioPorId, contasPorId, contaRecebimentoSelecionada, contaRecebimentoSicredi, tipoCobranca]);
 
 
   async function confirmarBaixaSelecionadas() {
@@ -1046,7 +1079,9 @@ export default function Page() {
     if (tipoBaixaSelecionada === "pago") {
       const semConta = !contaRecebimentoSelecionada && selecionadasBaixa.some((item) => {
         const socio = socioPorId.get(String(item.socio_id));
-        const contaId = item.conta_pagadora_id || socio?.conta_bancaria_id;
+        const contaId = tipoCobranca(item) === "boleto"
+          ? contaRecebimentoSicredi?.id
+          : item.conta_pagadora_id || socio?.conta_bancaria_id;
         return !contaId || !contasPorId.has(String(contaId));
       });
       if (semConta) {
@@ -1478,6 +1513,10 @@ export default function Page() {
                     disabled={!selecionadasBaixa.length}
                     onClick={() => {
                       setTipoBaixaSelecionada("pago");
+                      const somenteBoletos = selecionadasBaixa.every((item) => tipoCobranca(item) === "boleto");
+                      setContaRecebimentoSelecionada(
+                        somenteBoletos ? contaRecebimentoSicredi?.id || "" : ""
+                      );
                       setAbrirConfirmacaoBaixa(true);
                     }}
                     className="w-full rounded-xl bg-[#005a3c] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"
@@ -2288,12 +2327,12 @@ export default function Page() {
                   onChange={(e) => setContaRecebimentoSelecionada(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm font-semibold"
                 >
-                  <option value="">Usar conta cadastrada do associado (quando identificada)</option>
+                          <option value="">Conta padrão (Sicredi para boletos; conta cadastrada para débito)</option>
                   {contas.map((conta) => (
                     <option key={conta.id} value={conta.id}>{conta.nome}{conta.banco ? ` — ${conta.banco}` : ""}</option>
                   ))}
                 </select>
-                <p className="mt-2 text-xs text-gray-500">Escolha Banrisul, Sicredi ou outra conta cadastrada. A seleção será aplicada a todas as mensalidades desta baixa.</p>
+                <p className="mt-2 text-xs text-gray-500">Boletos usam o Sicredi automaticamente quando cadastrado. Você pode escolher outra conta; a seleção será aplicada a todas as mensalidades desta baixa.</p>
                 <div className="mt-3 divide-y rounded-lg bg-gray-50 px-3">
                   {resumoBaixa.contas.map((conta) => (
                     <div key={`${conta.nome}-${conta.banco || ""}`} className="flex items-center justify-between gap-3 py-3 text-sm">
