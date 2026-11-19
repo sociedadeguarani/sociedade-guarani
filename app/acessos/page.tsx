@@ -26,6 +26,7 @@ type Resultado = {
   temporada?: { id?: string; codigo?: string | null; inicio?: string | null; fim?: string | null } | null;
   liberado?: boolean;
   acesso?: { data_hora_entrada?: string; data_hora_saida?: string | null; autorizado?: boolean; motivo_negacao?: string | null };
+  duplicado?: boolean;
   mensalidade?: { texto: string; cor: string } | null;
   exame?: { status?: { texto: string; cor: string }; validade?: string | null; verificado?: boolean } | null;
   uso_agua?: { permitido: boolean; texto: string; validade?: string | null; observacao?: string } | null;
@@ -70,6 +71,7 @@ type ResultadoAcessoLote = {
   matricula: string | null;
   sucesso: boolean;
   liberado: boolean;
+  duplicado?: boolean;
   mensagem: string;
   exame?: { status?: { texto?: string; cor?: string }; validade?: string | null } | null;
 };
@@ -99,8 +101,11 @@ export default function AcessosPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number | null>(null);
+  const qrEmProcessamentoRef = useRef(false);
+  const qrsLidosAteRef = useRef(new Map<string, number>());
+  const audioContextRef = useRef<AudioContext | null>(null);
 
-  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string; dependente_id?: string }) {
+  async function validar(dados: { matricula?: string; qr?: string; socio_id?: string; dependente_id?: string }): Promise<Resultado | null> {
     setErro("");
     setGruposBusca([]);
     setMensagemBusca("");
@@ -111,19 +116,37 @@ export default function AcessosPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.push("/login?redirect=/acessos");
-        return;
+        return null;
       }
-      const r = await fetch("/api/acessos", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(dados),
-        cache: "no-store",
-      });
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        throw new Error("Sem conexão com a internet. O acesso não foi confirmado; verifique o Wi-Fi da portaria.");
+      }
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 20000);
+      let r: Response;
+      try {
+        r = await fetch("/api/acessos", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(dados),
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } catch (erroFetch) {
+        if (controller.signal.aborted) {
+          throw new Error("A internet da portaria demorou mais de 20 segundos para responder. O sistema não confirmou o resultado. Confira a conexão antes de tentar novamente.");
+        }
+        throw erroFetch;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Não foi possível registrar o acesso.");
-      setResultado(d);
+      setResultado(d as Resultado);
+      return d as Resultado;
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao validar carteirinha.");
+      return null;
     } finally {
       setCarregando(false);
     }
@@ -207,9 +230,12 @@ export default function AcessosPage() {
             matricula: pessoa.matricula,
             sucesso: true,
             liberado: Boolean(dados.liberado),
-            mensagem: dados.liberado
-              ? "Entrada registrada e liberada."
-              : (dados.motivo_bloqueio || dados.acesso?.motivo_negacao || "Acesso registrado como bloqueado."),
+            duplicado: Boolean(dados.duplicado),
+            mensagem: dados.duplicado
+              ? `Acesso já registrado${dados.acesso?.data_hora_entrada ? ` às ${new Date(dados.acesso.data_hora_entrada).toLocaleTimeString("pt-BR")}` : ""}. Sem duplicar.`
+              : dados.liberado
+                ? "Entrada registrada e liberada."
+                : (dados.motivo_bloqueio || dados.acesso?.motivo_negacao || "Acesso registrado como bloqueado."),
             exame: dados.exame ?? null,
           });
         } catch (erroPessoa) {
@@ -240,26 +266,49 @@ export default function AcessosPage() {
     const termo = matricula.trim();
     if (!termo) return;
 
-    const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const pareceQr = /^(guarani:|https?:\/\/|socio:|dependente:|matricula:)/i.test(termo)
       || /\/acessos\/(validar|qr\/)/i.test(termo)
       || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
-    const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
-    // Leitores USB de QR funcionam como teclado: enviam o conteúdo no campo e
-    // pressionam Enter. Encaminhamos o conteúdo original à mesma validação da câmera.
-    if (pareceQr) await validar({ qr: termo });
-    else if (pareceMatricula) await validar({ matricula: termo });
+    // QR em URL/UUID registra automaticamente. Nome/matrícula apenas pesquisam;
+    // o porteiro seleciona as pessoas e confirma o lote abaixo.
+    if (pareceQr) {
+      await validar({ qr: termo });
+      return;
+    }
+    if (termo.length < 3) return;
+
+    setBuscandoOpcoes(true);
+    setMensagemBusca("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/login?redirect=/acessos");
+        return;
+      }
+      const resposta = await fetch(`/api/acessos/buscar?q=${encodeURIComponent(termo)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const dados = await resposta.json();
+      if (!resposta.ok) throw new Error(dados.error || "Não foi possível pesquisar associados.");
+      const grupos = Array.isArray(dados.grupos) ? dados.grupos as GrupoBuscaAcesso[] : [];
+      setGruposBusca(grupos);
+      setMensagemBusca(grupos.length ? "" : `Nenhum associado, dependente ou participante de temporada ativa encontrado para “${termo}”.`);
+    } catch (e) {
+      setGruposBusca([]);
+      setMensagemBusca(e instanceof Error ? e.message : "Erro ao pesquisar associado.");
+    } finally {
+      setBuscandoOpcoes(false);
+    }
   }
 
   useEffect(() => {
     const termo = matricula.trim();
-    const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const pareceQr = /^(guarani:|https?:\/\/|socio:|dependente:|matricula:)/i.test(termo)
       || /\/acessos\/(validar|qr\/)/i.test(termo)
       || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
-    const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
 
-    if (!termo || pareceQr || pareceMatricula || termo.length < 3) return;
+    if (!termo || pareceQr || termo.length < 3) return;
 
     let cancelado = false;
     const timeout = window.setTimeout(async () => {
@@ -310,14 +359,46 @@ export default function AcessosPage() {
   function pararCamera() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     animationRef.current = null;
+    qrEmProcessamentoRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setCameraAberta(false);
   }
 
+  function emitirSom(liberado: boolean) {
+    try {
+      const contexto = audioContextRef.current || new AudioContext();
+      audioContextRef.current = contexto;
+      if (contexto.state === "suspended") void contexto.resume();
+      const oscilador = contexto.createOscillator();
+      const volume = contexto.createGain();
+      oscilador.type = "sine";
+      oscilador.frequency.value = liberado ? 880 : 220;
+      volume.gain.setValueAtTime(0.0001, contexto.currentTime);
+      volume.gain.exponentialRampToValueAtTime(0.12, contexto.currentTime + 0.02);
+      volume.gain.exponentialRampToValueAtTime(0.0001, contexto.currentTime + 0.22);
+      oscilador.connect(volume);
+      volume.connect(contexto.destination);
+      oscilador.start();
+      oscilador.stop(contexto.currentTime + 0.24);
+    } catch {
+      // O retorno visual continua disponível em navegadores sem áudio Web Audio.
+    }
+  }
+
   async function iniciarCamera() {
     setErro("");
     setResultado(null);
+    if (!navigator.onLine) {
+      setErro("A portaria está sem internet. Conecte-se ao Wi-Fi antes de iniciar a leitura; o QR não pode ser validado offline.");
+      return;
+    }
+    try {
+      audioContextRef.current = audioContextRef.current || new AudioContext();
+      if (audioContextRef.current.state === "suspended") await audioContextRef.current.resume();
+    } catch {
+      // O som é complementar; a resposta visual permanece disponível.
+    }
     if (!("BarcodeDetector" in window)) {
       setErro("A leitura automática de QR não está disponível neste navegador. Use um leitor USB de QR conectado ao computador e deixe o campo de busca selecionado, ou consulte pela matrícula.");
       return;
@@ -337,15 +418,41 @@ export default function AcessosPage() {
       const detector = new Detector({ formats: ["qr_code"] });
       const ler = async () => {
         if (!videoRef.current || !streamRef.current) return;
+        if (qrEmProcessamentoRef.current) {
+          animationRef.current = requestAnimationFrame(ler);
+          return;
+        }
         try {
           const codes = await detector.detect(videoRef.current);
-          const valor = codes?.[0]?.rawValue;
+          const valor = codes?.[0]?.rawValue?.trim();
           if (valor) {
-            pararCamera();
-            await validar({ qr: valor });
+            const agora = Date.now();
+            for (const [codigoLido, expiracao] of qrsLidosAteRef.current) {
+              if (expiracao <= agora) qrsLidosAteRef.current.delete(codigoLido);
+            }
+            const ignorarAte = qrsLidosAteRef.current.get(valor) || 0;
+            if (ignorarAte > agora) {
+              animationRef.current = requestAnimationFrame(ler);
+              return;
+            }
+
+            qrEmProcessamentoRef.current = true;
+            const resposta = await validar({ qr: valor });
+            // Evita que o mesmo cartão parado na frente da câmera gere várias
+            // tentativas. Em caso de erro, o porteiro pode liberar uma nova tentativa.
+            qrsLidosAteRef.current.set(valor, Date.now() + 120000);
+            emitirSom(Boolean(resposta?.liberado));
+            window.setTimeout(() => {
+              setResultado(null);
+              if (resposta) setErro("");
+              qrEmProcessamentoRef.current = false;
+              if (streamRef.current) animationRef.current = requestAnimationFrame(ler);
+            }, 2800);
             return;
           }
-        } catch {}
+        } catch {
+          // Pequenas falhas transitórias do detector não encerram a câmera.
+        }
         animationRef.current = requestAnimationFrame(ler);
       };
       animationRef.current = requestAnimationFrame(ler);
@@ -378,7 +485,7 @@ export default function AcessosPage() {
             <div className="min-w-0 rounded-2xl border border-[#dce8e1] bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-3">
                 <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ee] text-[#005a3c]"><Search /></div>
-                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Buscar associado, dependente ou temporada</h2><p className="text-sm leading-5 text-gray-500">Digite a matrícula, parte do nome ou use um leitor USB de QR neste campo.</p></div>
+                <div className="min-w-0"><h2 className="text-lg font-black sm:text-xl">Buscar associado, dependente ou temporada</h2><p className="text-sm leading-5 text-gray-500">Pesquise por nome ou matrícula. Marque uma ou várias pessoas; a confirmação registra os acessos.</p></div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); void consultarPorNomeOuMatricula(); }} className="relative mt-4 sm:mt-5">
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
@@ -399,7 +506,7 @@ export default function AcessosPage() {
                     className="min-h-14 w-full min-w-0 flex-1 rounded-xl border border-[#bdcec4] px-4 py-3 text-base outline-none focus:border-[#005a3c] focus:ring-2 focus:ring-[#005a3c]/15 sm:w-auto"
                   />
                   {(/^[0-9]+$/.test(matricula.trim()) || /^(SP|SC|SD|ST|TE)\d/i.test(matricula.trim()) || /^(guarani:|https?:\/\/)/i.test(matricula.trim()) || /\/acessos\/validar/i.test(matricula.trim())) && (
-                    <button type="submit" disabled={carregando || !matricula.trim()} className="min-h-12 w-full rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50 sm:w-auto">{/^(guarani:|https?:\/\/)/i.test(matricula.trim()) || /\/acessos\/validar/i.test(matricula.trim()) ? "Validar QR recebido" : "Consultar matrícula"}</button>
+                    <button type="submit" disabled={carregando || !matricula.trim()} className="min-h-12 w-full rounded-xl bg-[#005a3c] px-5 py-3 font-black text-white disabled:opacity-50 sm:w-auto">{/^(guarani:|https?:\/\/)/i.test(matricula.trim()) || /\/acessos\/validar/i.test(matricula.trim()) ? "Registrar QR recebido" : "Buscar matrícula"}</button>
                   )}
                 </div>
                 {buscandoOpcoes && (
@@ -559,7 +666,7 @@ export default function AcessosPage() {
               ) : (
                 <div className="mt-5">
                   <div className="overflow-hidden rounded-2xl bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-[4/3] max-h-[55svh] w-full object-cover sm:aspect-video" /></div>
-                  <p className="mt-2 text-center text-xs font-semibold text-gray-500">Aponte para o QR Code da carteirinha.</p>
+                  <p className="mt-2 text-center text-xs font-semibold text-gray-500">Aponte para o QR Code. O acesso é registrado automaticamente; a câmera fica pronta para a próxima carteirinha.</p>
                   <button onClick={pararCamera} className="mt-3 min-h-14 w-full touch-manipulation rounded-xl border border-[#bdcec4] px-4 py-3 font-bold">Fechar câmera</button>
                 </div>
               )}
@@ -573,7 +680,7 @@ export default function AcessosPage() {
             <section className="rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-black text-[#005a3c]">Resultado dos acessos</h2>
-                <span className="text-xs font-semibold text-gray-500">{resultadosLote.filter((item) => item.sucesso && item.liberado).length} liberado(s) · {resultadosLote.filter((item) => item.sucesso && !item.liberado).length} bloqueado(s) · {resultadosLote.filter((item) => !item.sucesso).length} falha(s)</span>
+                <span className="text-xs font-semibold text-gray-500">{resultadosLote.filter((item) => item.sucesso && item.liberado && !item.duplicado).length} liberado(s) · {resultadosLote.filter((item) => item.duplicado).length} repetido(s) · {resultadosLote.filter((item) => item.sucesso && !item.liberado && !item.duplicado).length} bloqueado(s) · {resultadosLote.filter((item) => !item.sucesso).length} falha(s)</span>
               </div>
               <p className="mt-1 text-xs text-gray-500">A validade do exame controla o uso da água e das piscinas; não bloqueia, por si só, a entrada na sociedade.</p>
               <div className="mt-3 divide-y">
@@ -589,8 +696,8 @@ export default function AcessosPage() {
                         </div>
                       )}
                     </div>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.sucesso && item.liberado ? "bg-green-100 text-green-800" : item.sucesso ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
-                      {item.sucesso ? item.liberado ? "Liberado" : "Bloqueado" : "Falha"}
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.duplicado ? "bg-amber-100 text-amber-800" : item.sucesso && item.liberado ? "bg-green-100 text-green-800" : item.sucesso ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
+                      {item.duplicado ? "Já registrado" : item.sucesso ? item.liberado ? "Liberado" : "Bloqueado" : "Falha"}
                     </span>
                   </div>
                 ))}
@@ -598,7 +705,7 @@ export default function AcessosPage() {
             </section>
           )}
           {carregando && <div className="rounded-2xl border bg-white p-5 text-center shadow-sm sm:p-8"><Clock3 className="mx-auto h-9 w-9 animate-pulse text-[#005a3c]" /><p className="mt-3 font-bold">Validando carteirinha...</p></div>}
-          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 sm:p-5"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p></div>}
+          {erro && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 sm:p-5"><XCircle className="h-8 w-8" /><p className="mt-2 font-black">Não foi possível validar</p><p className="text-sm font-medium">{erro}</p>{cameraAberta && <button type="button" onClick={() => { qrsLidosAteRef.current.clear(); setErro(""); }} className="mt-3 min-h-11 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-black text-red-800">Tentar novamente com a mesma carteirinha</button>}</div>}
 
           {resultado?.socio && (
             <section className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${resultado.liberado ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
@@ -611,10 +718,10 @@ export default function AcessosPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {resultado.liberado ? <CheckCircle2 className="h-12 w-12 text-green-700" /> : <XCircle className="h-12 w-12 text-red-700" />}
-                  <div className="min-w-0"><div className={`text-xl font-black sm:text-2xl ${resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
+                  <div className="min-w-0"><div className={`text-xl font-black sm:text-2xl ${resultado.duplicado ? "text-amber-800" : resultado.liberado ? "text-green-800" : "text-red-800"}`}>{resultado.duplicado ? "ACESSO JÁ REGISTRADO" : resultado.liberado ? "ENTRADA LIBERADA" : "ACESSO BLOQUEADO"}</div><p className="text-sm font-semibold">{resultado.acesso?.data_hora_entrada ? `Registrado em ${new Date(resultado.acesso.data_hora_entrada).toLocaleString("pt-BR")}` : ""}</p></div>
                 </div>
               </div>
-              <div className="mt-5 rounded-xl bg-white/70 p-4 text-sm font-semibold"><ShieldCheck className="mr-2 inline h-4 w-4" />A consulta registra automaticamente o acesso na portaria.</div>
+              <div className={`mt-5 rounded-xl p-4 text-sm font-semibold ${resultado.duplicado ? "bg-amber-100 text-amber-900" : "bg-white/70"}`}><ShieldCheck className="mr-2 inline h-4 w-4" />{resultado.duplicado ? "Esta carteirinha já tinha sido lida nos últimos 2 minutos. O sistema preservou o primeiro registro e evitou uma duplicidade." : "Acesso processado automaticamente pela portaria."}</div>
               {!resultado.liberado && (resultado.motivo_bloqueio || resultado.acesso?.motivo_negacao) && (
                 <div className="mt-3 rounded-xl border border-red-300 bg-red-100 p-4 text-sm font-bold text-red-900">
                   Motivo do bloqueio da entrada: {resultado.motivo_bloqueio || resultado.acesso?.motivo_negacao}

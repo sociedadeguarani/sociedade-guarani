@@ -628,31 +628,52 @@ export async function POST(request: Request) {
           ? `Entrada bloqueada: ${parcelasAtrasadas.quantidade} parcela(s) vencida(s) e não paga(s), total de ${parcelasAtrasadas.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
           : null;
 
-      etapa = "registrando acesso de temporada";
-
-      // O acesso de temporada usa a nova coluna temporada_id. A coluna
-      // socio_id permanece nula, pois temporada não cria sócio.
-      const { data: acesso, error: acessoError } = await supabase
+      etapa = "verificando leitura repetida da temporada";
+      const participanteIdReal = participante?.id && !String(participante.id).startsWith("temporada:")
+        ? String(participante.id)
+        : null;
+      const inicioJanelaDuplicidade = new Date(Date.now() - 120000).toISOString();
+      let consultaAcessoRecente = supabase
         .from("acessos_sociedade")
-        .insert({
-          socio_id: null,
-          dependente_id: null,
-          temporada_id: temporadaId,
-          temporada_participante_id: participante?.id && !String(participante.id).startsWith("temporada:") ? participante.id : null,
-          registrado_por: auth.usuario.id,
-          autorizado,
-          motivo_negacao: motivoNegacao,
-        })
-        .select(
-          "id,socio_id,dependente_id,temporada_id,temporada_participante_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao"
-        )
-        .single();
+        .select("id,socio_id,dependente_id,temporada_id,temporada_participante_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao")
+        .eq("temporada_id", temporadaId)
+        .gte("data_hora_entrada", inicioJanelaDuplicidade)
+        .order("data_hora_entrada", { ascending: false })
+        .limit(1);
+      consultaAcessoRecente = participanteIdReal
+        ? consultaAcessoRecente.eq("temporada_participante_id", participanteIdReal)
+        : consultaAcessoRecente.is("temporada_participante_id", null);
+      const { data: acessoTemporadaRecente, error: acessoRecenteError } = await consultaAcessoRecente.maybeSingle();
+      if (acessoRecenteError) throw acessoRecenteError;
 
-      if (acessoError) throw acessoError;
+      let acesso = acessoTemporadaRecente;
+      const duplicado = Boolean(acessoTemporadaRecente);
+      if (!acesso) {
+        etapa = "registrando acesso de temporada";
+        // O acesso de temporada usa temporada_id; não cria vínculo fictício de sócio.
+        const { data: novoAcesso, error: acessoError } = await supabase
+          .from("acessos_sociedade")
+          .insert({
+            socio_id: null,
+            dependente_id: null,
+            temporada_id: temporadaId,
+            temporada_participante_id: participanteIdReal,
+            registrado_por: auth.usuario.id,
+            autorizado,
+            motivo_negacao: motivoNegacao,
+          })
+          .select(
+            "id,socio_id,dependente_id,temporada_id,temporada_participante_id,data_hora_entrada,data_hora_saida,autorizado,motivo_negacao"
+          )
+          .single();
+        if (acessoError) throw acessoError;
+        acesso = novoAcesso;
+      }
+      const acessoLiberado = acesso?.autorizado ?? autorizado;
 
       // Temporada não usa mensalidade. Qualquer parcela vencida e não paga
       // bloqueia a entrada e gera aviso administrativo, sem expor valores ao funcionário.
-      const alertaDiretoriaEnviado = parcelasAtrasadas.atrasado
+      const alertaDiretoriaEnviado = !duplicado && parcelasAtrasadas.atrasado
         ? await avisarAdministradoresParcelasTemporada(
             supabase,
             { nome: participante.nome || temporadaNormalizada.responsavel_nome || "Responsável da Temporada", matricula: matriculaResponsavel, codigo: temporadaNormalizada.codigo },
@@ -665,7 +686,7 @@ export async function POST(request: Request) {
         id: temporadaNormalizada.id,
         matricula: participante.matricula || matriculaResponsavel,
         nome: participante.nome,
-        situacao: autorizado ? "ativa" : temporadaNormalizada.situacao,
+        situacao: acessoLiberado ? "ativa" : temporadaNormalizada.situacao,
         categoria: "Temporada",
         foto_url: participante.foto_url || null,
       };
@@ -682,7 +703,7 @@ export async function POST(request: Request) {
               : parcelasAtrasadas.atrasado
                 ? "Parcelas da Temporada pendentes — entrada bloqueada"
                 : "Parcelas em dia — entrada liberada",
-            cor: autorizado ? "verde" : "vermelho",
+            cor: acessoLiberado ? "verde" : "vermelho",
           };
       const inadimplenciaTemporada = ehAdministracao
         ? {
@@ -698,14 +719,16 @@ export async function POST(request: Request) {
             atrasado: parcelasAtrasadas.atrasado,
             bloqueiaEntrada: parcelasAtrasadas.atrasado,
             precisaAlerta: parcelasAtrasadas.atrasado,
-            status: { texto: autorizado ? "Entrada liberada" : "Acesso bloqueado", cor: autorizado ? "verde" : "vermelho" },
+            status: { texto: acessoLiberado ? "Entrada liberada" : "Acesso bloqueado", cor: acessoLiberado ? "verde" : "vermelho" },
           };
       return NextResponse.json({
         perfil_operador: auth.usuario.perfil,
         alerta_diretoria_enviado: alertaDiretoriaEnviado,
         acesso: {
           ...acesso,
-          motivo_negacao: ehAdministracao || autorizado ? acesso.motivo_negacao : "Entrada bloqueada. Comunique a diretoria.",
+          motivo_negacao: ehAdministracao || acessoLiberado
+            ? (duplicado ? acesso?.motivo_negacao : motivoNegacao)
+            : "Entrada bloqueada. Comunique a diretoria.",
         },
         temporada: ehAdministracao ? temporadaNormalizada : {
           id: temporadaNormalizada.id,
@@ -721,8 +744,9 @@ export async function POST(request: Request) {
         participante: ehAdministracao ? participante : undefined,
         socio: socioResposta,
         dependente: null,
-        liberado: autorizado,
-        status_temporada: autorizado ? "ativa" : parcelasAtrasadas.atrasado ? "bloqueada" : "inativa",
+        liberado: acessoLiberado,
+        duplicado,
+        status_temporada: acessoLiberado ? "ativa" : parcelasAtrasadas.atrasado ? "bloqueada" : "inativa",
         parcelas_atrasadas: ehAdministracao ? parcelasAtrasadas : { atrasado: parcelasAtrasadas.atrasado },
         exame: {
           status: statusExame,
@@ -735,7 +759,9 @@ export async function POST(request: Request) {
           validade: validadeExame,
           observacao: "A validade do exame controla somente o uso da água; não bloqueia a entrada no parque.",
         },
-        motivo_bloqueio: ehAdministracao || autorizado ? motivoNegacao : "Entrada bloqueada. Comunique a diretoria.",
+        motivo_bloqueio: ehAdministracao || acessoLiberado
+          ? (duplicado ? acesso?.motivo_negacao : motivoNegacao)
+          : "Entrada bloqueada. Comunique a diretoria.",
         mensalidade: mensalidadeTemporada,
         inadimplencia: inadimplenciaTemporada,
       });
@@ -879,25 +905,47 @@ export async function POST(request: Request) {
         ? `Entrada bloqueada: ${inadimplenciaSocio.quantidade} competência(s) vencida(s) e não paga(s); a política bloqueia a partir de ${inadimplenciaSocio.mesesBloqueio}, total de ${inadimplenciaSocio.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`
         : null;
 
-    etapa = "registrando acesso";
-    const { data: acesso, error: acessoError } = await supabase
+    etapa = "verificando leitura repetida do associado";
+    const inicioJanelaDuplicidade = new Date(Date.now() - 120000).toISOString();
+    let consultaAcessoRecente = supabase
       .from("acessos_sociedade")
-      .insert({
-        socio_id: socio.id,
-        dependente_id: dependenteId || null,
-        registrado_por: auth.usuario.id,
-        autorizado,
-        motivo_negacao: motivoNegacao,
-      })
       .select("id,socio_id,dependente_id,data_hora_entrada,autorizado,motivo_negacao")
-      .single();
-    if (acessoError) throw acessoError;
+      .eq("socio_id", socio.id)
+      .gte("data_hora_entrada", inicioJanelaDuplicidade)
+      .order("data_hora_entrada", { ascending: false })
+      .limit(1);
+    consultaAcessoRecente = dependenteId
+      ? consultaAcessoRecente.eq("dependente_id", dependenteId)
+      : consultaAcessoRecente.is("dependente_id", null);
+    const { data: acessoPessoaRecente, error: acessoRecenteError } = await consultaAcessoRecente.maybeSingle();
+    if (acessoRecenteError) throw acessoRecenteError;
+
+    let acesso = acessoPessoaRecente;
+    const duplicado = Boolean(acessoPessoaRecente);
+    if (!acesso) {
+      etapa = "registrando acesso";
+      const { data: novoAcesso, error: acessoError } = await supabase
+        .from("acessos_sociedade")
+        .insert({
+          socio_id: socio.id,
+          dependente_id: dependenteId || null,
+          registrado_por: auth.usuario.id,
+          autorizado,
+          motivo_negacao: motivoNegacao,
+        })
+        .select("id,socio_id,dependente_id,data_hora_entrada,autorizado,motivo_negacao")
+        .single();
+      if (acessoError) throw acessoError;
+      acesso = novoAcesso;
+    }
+    const acessoLiberado = acesso?.autorizado ?? autorizado;
+    const motivoNegacaoEfetivo = duplicado ? acesso?.motivo_negacao : motivoNegacao;
 
     etapa = "verificando mensalidades";
     const statusMensalidadeSocio = inadimplenciaSocio.status;
     const statusMensalidadeDependente = dependente ? inadimplenciaSocio.status : null;
     let alertaDiretoriaEnviado: boolean | undefined;
-    if (inadimplenciaSocio.precisaAlerta) {
+    if (!duplicado && inadimplenciaSocio.precisaAlerta) {
       etapa = "gerando aviso de inadimplência";
       alertaDiretoriaEnviado = await avisarAdministradoresInadimplencia(
         supabase,
@@ -949,8 +997,8 @@ export async function POST(request: Request) {
           precisaAlerta: inadimplenciaSocio.precisaAlerta,
           status: inadimplenciaSocio.status,
         };
-    const motivoNegacaoResposta = ehAdministracao || !motivoNegacao
-      ? motivoNegacao
+    const motivoNegacaoResposta = ehAdministracao || !motivoNegacaoEfetivo
+      ? motivoNegacaoEfetivo
       : "Entrada bloqueada por política da sociedade. Consulte a diretoria.";
 
     return NextResponse.json({
@@ -962,7 +1010,8 @@ export async function POST(request: Request) {
       },
       socio: socioResposta,
       dependente: dependenteResposta,
-      liberado: autorizado,
+      liberado: acessoLiberado,
+      duplicado,
       motivo_bloqueio: motivoNegacaoResposta,
       exame,
       mensalidade: dependente ? statusMensalidadeDependente : statusMensalidadeSocio,

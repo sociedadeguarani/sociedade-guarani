@@ -157,7 +157,7 @@ export async function GET(request: Request) {
   if ("response" in auth) return auth.response;
 
   const termoOriginal = new URL(request.url).searchParams.get("q") || "";
-  const termo = termoOriginal.trim().replace(/[%_]/g, "").replace(/\s+/g, " ").slice(0, 80);
+  const termo = termoOriginal.trim().replace(/[%_(),]/g, "").replace(/\s+/g, " ").slice(0, 80);
   if (termo.length < 3) {
     return NextResponse.json({ error: "Digite pelo menos 3 letras para pesquisar pelo nome." }, { status: 400 });
   }
@@ -176,7 +176,7 @@ export async function GET(request: Request) {
       supabase
         .from("dependentes")
         .select("id,socio_id,nome,matricula,cpf,parentesco,ativo,migrado_para_socio_id")
-        .ilike("nome", `%${termo}%`)
+        .or(`nome.ilike.%${termo}%,matricula.ilike.%${termo}%`)
         .limit(50),
       supabase
         .from("temporadas")
@@ -185,7 +185,7 @@ export async function GET(request: Request) {
       supabase
         .from("temporadas_participantes")
         .select("id,temporada_id,papel,matricula,nome,cpf,parentesco,foto_url")
-        .ilike("nome", `%${termo}%`)
+        .or(`nome.ilike.%${termo}%,matricula.ilike.%${termo}%`)
         .limit(200),
     ]);
 
@@ -199,7 +199,7 @@ export async function GET(request: Request) {
         const compatibilidade = await supabase
           .from("dependentes")
           .select("id,socio_id,nome,matricula,cpf,parentesco,ativo")
-          .ilike("nome", `%${termo}%`)
+          .or(`nome.ilike.%${termo}%,matricula.ilike.%${termo}%`)
           .limit(50);
         if (compatibilidade.error) throw compatibilidade.error;
         dependentesEncontrados = (compatibilidade.data || []) as unknown as DependenteBusca[];
