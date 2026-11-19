@@ -217,6 +217,7 @@ export default function TemporadasPage() {
   const [pagamentoConta, setPagamentoConta] = useState("");
   const [chequeNumero, setChequeNumero] = useState("");
   const [pagamentoComprovante, setPagamentoComprovante] = useState<File | null>(null);
+  const [origemQr, setOrigemQr] = useState("");
 
   const token = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -260,6 +261,7 @@ export default function TemporadasPage() {
   }, [router, token]);
 
   useEffect(() => {
+    setOrigemQr(window.location.origin);
     const agendamento = window.setTimeout(() => {
       void carregar();
     }, 0);
@@ -1193,7 +1195,7 @@ export default function TemporadasPage() {
                       <div className="min-w-0"><p className="text-lg font-black text-[#17382c]">{p.nome || "Participante"}</p><p className="mt-1 text-sm font-black text-[#005a3c]">{p.matricula || "Matrícula pendente"}</p><p className="mt-1 text-xs text-[#718078]">{p.parentesco || (p.papel === "titular" ? "Titular" : "Dependente")}</p><p className="mt-1 text-xs text-[#718078]">Validade: {dataBr(abrirCarteirinhas.inicio)} até {dataBr(abrirCarteirinhas.fim)}</p></div>
                     </div>
                     <div className={`mt-4 rounded-lg p-2 text-center text-xs font-black ${statusCartao.bloqueada ? "bg-red-100 text-red-700" : statusCartao.ativa ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>{statusCartao.texto}</div>
-                    <div className="mt-4 flex items-center justify-center border-t border-[#f2bb91] pt-4"><QRCodeSVG value={p.id ? `guarani:temporada-participante:${p.id}` : `guarani:temporada:${abrirCarteirinhas.id}`} size={112} includeMargin /></div>
+                    <div className="mt-4 flex items-center justify-center border-t border-[#f2bb91] pt-4"><QRCodeSVG value={`${origemQr}/acessos/validar?q=${encodeURIComponent(p.id ? `guarani:temporada-participante:${p.id}` : `guarani:temporada:${abrirCarteirinhas.id}`)}`} size={112} includeMargin /></div>
                   </div>
                 </div>;
               })}

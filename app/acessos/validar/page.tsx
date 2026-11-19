@@ -42,19 +42,23 @@ export default function ValidarCarteiraPage() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const params = new URLSearchParams(window.location.search);
-        const id = params.get("id") || "";
-        const dependenteId = params.get("dependente_id") || "";
-        if (!id && !dependenteId) throw new Error("QR Code sem identificação do associado.");
+        const possuiIdentificador = [
+          "id", "socio_id", "i", "dependente_id", "d", "matricula", "codigo", "m",
+          "qr", "q", "temporada_id", "temporada_participante_id",
+        ].some((chave) => Boolean(params.get(chave)));
+        if (!possuiIdentificador) throw new Error("QR Code sem identificação do associado.");
+        const destino = `${window.location.pathname}${window.location.search}`;
         if (!session) {
-          const destino = `/acessos/validar?${id ? `id=${encodeURIComponent(id)}` : ""}${id && dependenteId ? "&" : ""}${dependenteId ? `dependente_id=${encodeURIComponent(dependenteId)}` : ""}`;
           router.replace(`/login?redirect=${encodeURIComponent(destino)}`);
           return;
         }
 
+        // Encaminha a URL completa para a API reconhecer os formatos atuais e
+        // antigos, inclusive QR de temporada e códigos baseados em matrícula.
         const r = await fetch("/api/acessos", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ socio_id: id || undefined, dependente_id: dependenteId || undefined }),
+          body: JSON.stringify({ qr: window.location.href }),
           cache: "no-store",
         });
         const d = await r.json() as ResultadoValidacao & { error?: string };

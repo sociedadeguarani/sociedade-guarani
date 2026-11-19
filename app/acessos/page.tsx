@@ -241,7 +241,9 @@ export default function AcessosPage() {
     if (!termo) return;
 
     const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const pareceQr = /^(guarani:|https?:\/\/)/i.test(termo) || /\/acessos\/validar/i.test(termo);
+    const pareceQr = /^(guarani:|https?:\/\/|socio:|dependente:|matricula:)/i.test(termo)
+      || /\/acessos\/(validar|qr\/)/i.test(termo)
+      || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
     const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
     // Leitores USB de QR funcionam como teclado: enviam o conteúdo no campo e
     // pressionam Enter. Encaminhamos o conteúdo original à mesma validação da câmera.
@@ -252,7 +254,9 @@ export default function AcessosPage() {
   useEffect(() => {
     const termo = matricula.trim();
     const codigo = termo.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const pareceQr = /^(guarani:|https?:\/\/)/i.test(termo) || /\/acessos\/validar/i.test(termo);
+    const pareceQr = /^(guarani:|https?:\/\/|socio:|dependente:|matricula:)/i.test(termo)
+      || /\/acessos\/(validar|qr\/)/i.test(termo)
+      || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termo);
     const pareceMatricula = /^\d+$/.test(codigo) || /^(SP|SC|SD|ST|TE)\d/.test(codigo);
 
     if (!termo || pareceQr || pareceMatricula || termo.length < 3) return;

@@ -250,20 +250,20 @@ export default function ImprimirCarteirinhasPage() {
       itens.push({
         id: String(raiz.id), nome: raiz.nome, matricula: String(raiz.matricula || "—"), cpf: formatarCpf(raiz.cpf),
         fotoUrl: raiz.foto_url || "", tipo: rotuloCategoria(raiz), detalhe: "Titular",
-        qrValue: `${baseUrl}/acessos/validar?id=${encodeURIComponent(raiz.id)}`,
+        qrValue: `${baseUrl}/acessos/validar?i=${encodeURIComponent(raiz.id)}&m=${encodeURIComponent(String(raiz.matricula || ""))}`,
       });
       for (const membro of familia.membrosSocios) {
         itens.push({
           id: String(membro.id), nome: membro.nome, matricula: String(membro.matricula || "—"), cpf: formatarCpf(membro.cpf),
           fotoUrl: membro.foto_url || "", tipo: rotuloCategoria(membro), detalhe: membro.parentesco || "Familiar",
-          qrValue: `${baseUrl}/acessos/validar?id=${encodeURIComponent(membro.id)}`,
+          qrValue: `${baseUrl}/acessos/validar?i=${encodeURIComponent(membro.id)}&m=${encodeURIComponent(String(membro.matricula || ""))}`,
         });
       }
       for (const dependente of familia.dependentes) {
         itens.push({
           id: String(dependente.id), nome: dependente.nome, matricula: String(dependente.matricula || "—"), cpf: formatarCpf(dependente.cpf),
           fotoUrl: dependente.foto_url || "", tipo: rotuloDependente(raiz), detalhe: dependente.parentesco || "Familiar",
-          qrValue: `${baseUrl}/acessos/validar?dependente_id=${encodeURIComponent(dependente.id)}`,
+          qrValue: `${baseUrl}/acessos/validar?d=${encodeURIComponent(dependente.id)}&m=${encodeURIComponent(String(dependente.matricula || ""))}`,
         });
       }
     }

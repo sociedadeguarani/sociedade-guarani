@@ -2,10 +2,44 @@ import { NextResponse } from "next/server";
 import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { mensalidadeRegistroAnteriorAAssociacao } from "@/lib/competenciaAssociacao";
 import { dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
+import { ehUuidQr, interpretarQrAcesso, normalizarMatriculaQr } from "@/lib/qrAcesso";
 
 type LinhaMensalidadeAcesso = { id: string; valor: number | string | null; data_vencimento: string | null; competencia: string | null; situacao: string | null };
 type LinhaParcelaTemporada = { id: string; numero: number | null; descricao: string | null; valor: number | string | null; data_vencimento: string | null; situacao: string | null };
 type ParticipanteTemporadaAcesso = { id: string; temporada_id: string; papel: string | null; matricula: string | null; nome: string; cpf: string | null; telefone: string | null; parentesco: string | null; foto_url: string | null; exame_medico_validade: string | null };
+
+type DependenteQrAcesso = {
+  id: string;
+  socio_id: string;
+  nome: string;
+  situacao_financeira?: string | null;
+  exame_medico_validade?: string | null;
+  ativo: boolean | null;
+  migrado_para_socio_id?: string | null;
+};
+
+async function buscarDependentePorQr(
+  supabase: ReturnType<typeof getServiceClient>,
+  filtro: { id?: string; matricula?: string; somenteAtivos?: boolean },
+): Promise<DependenteQrAcesso | null> {
+  const consultar = async (incluirMigracao: boolean) => {
+    const colunas = incluirMigracao
+      ? "id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo,migrado_para_socio_id"
+      : "id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo";
+    let query = supabase.from("dependentes").select(colunas);
+    if (filtro.id) query = query.eq("id", filtro.id);
+    else if (filtro.matricula) query = query.eq("matricula", filtro.matricula);
+    if (filtro.somenteAtivos) query = query.eq("ativo", true);
+    return query.maybeSingle();
+  };
+
+  let resultado = await consultar(true);
+  if (resultado.error && /migrado_para_socio_id/i.test(resultado.error.message || "")) {
+    resultado = await consultar(false);
+  }
+  if (resultado.error) throw resultado.error;
+  return (resultado.data || null) as unknown as DependenteQrAcesso | null;
+}
 
 function mensagemErro(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
@@ -332,10 +366,6 @@ async function verificarParcelasTemporadaAtrasadas(
   };
 }
 
-function matriculaTemporadaNormalizada(valor: unknown) {
-  return String(valor || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 export async function POST(request: Request) {
   const auth = await requireRoles(request, ["administrador", "administrador_master", "funcionario"]);
   if ("response" in auth) return auth.response;
@@ -345,56 +375,60 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    let qr = String(body?.qr || "").trim();
-    let socioId = String(body?.socio_id || "").trim();
-    let matricula = matriculaTemporadaNormalizada(body?.matricula);
-    let dependenteId = String(body?.dependente_id || "").trim();
-
-    // O leitor da tela Acessos recebe o conteúdo literal do QR. Muitas
-    // carteirinhas armazenam uma URL completa (/acessos/validar?id=...);
-    // extraímos os parâmetros antes de aplicar as regras normais de acesso.
-    if (qr && !socioId && !dependenteId && !matricula) {
-      try {
-        const urlQr = new URL(qr, request.url);
-        socioId = String(
-          urlQr.searchParams.get("socio_id") ||
-          urlQr.searchParams.get("id") || ""
-        ).trim();
-        dependenteId = String(urlQr.searchParams.get("dependente_id") || "").trim();
-        matricula = matriculaTemporadaNormalizada(
-          urlQr.searchParams.get("matricula") || urlQr.searchParams.get("codigo") || ""
-        );
-        const qrInterno = urlQr.searchParams.get("qr");
-        if (!socioId && !dependenteId && !matricula && qrInterno) {
-          // Permite QR que encapsula outro identificador Guarani.
-          qr = qrInterno;
-        }
-      } catch {
-        // QR não é URL: os formatos guarani:* e matrículas seguem abaixo.
-      }
-    }
-    const supabase = getServiceClient();
-
+    const qr = String(body?.qr || "").trim();
+    const identificadorQr = interpretarQrAcesso(qr, request.url);
+    let socioId = String(body?.socio_id || body?.id || identificadorQr.socioId || "").trim();
+    let matricula = normalizarMatriculaQr(body?.matricula || identificadorQr.matricula);
+    let dependenteId = String(body?.dependente_id || identificadorQr.dependenteId || "").trim();
     let id = socioId;
-    let temporadaId = "";
-    let temporadaParticipanteId = "";
-    let dependente: { id: string; socio_id: string; nome: string; situacao_financeira?: string | null; exame_medico_validade?: string | null; ativo: boolean | null } | null = null;
+    let temporadaId = String(body?.temporada_id || identificadorQr.temporadaId || "").trim();
+    let temporadaParticipanteId = String(body?.temporada_participante_id || identificadorQr.temporadaParticipanteId || "").trim();
+    let dependente: DependenteQrAcesso | null = null;
 
-    if (!id && qr.startsWith("guarani:socio:")) {
-      id = qr.replace("guarani:socio:", "");
+    // Compatibilidade com identificadores sintéticos usados em telas antigas
+    // de dependentes: socio:<uuid> sempre identifica uma pessoa da tabela socios.
+    if (socioId.toLowerCase().startsWith("guarani:socio:")) {
+      socioId = socioId.slice("guarani:socio:".length).trim();
+      id = socioId;
+    } else if (socioId.toLowerCase().startsWith("guarani:dependente:")) {
+      dependenteId = socioId.slice("guarani:dependente:".length).trim();
+      socioId = "";
+      id = "";
+    } else if (socioId.toLowerCase().startsWith("guarani:matricula:")) {
+      matricula = matricula || normalizarMatriculaQr(socioId.slice("guarani:matricula:".length));
+      socioId = "";
+      id = "";
+    } else if (socioId.toLowerCase().startsWith("socio:")) {
+      socioId = socioId.slice("socio:".length).trim();
+      id = socioId;
+    } else if (socioId.toLowerCase().startsWith("dependente:")) {
+      dependenteId = socioId.slice("dependente:".length).trim();
+      socioId = "";
+      id = "";
+    } else if (socioId.toLowerCase().startsWith("matricula:")) {
+      matricula = matricula || normalizarMatriculaQr(socioId.slice("matricula:".length));
+      socioId = "";
+      id = "";
+    }
+    if (dependenteId.toLowerCase().startsWith("socio:")) {
+      id = dependenteId.slice("socio:".length).trim();
+      socioId = id;
+      dependenteId = "";
     }
 
-    if (!dependenteId && qr.startsWith("guarani:dependente:")) {
-      dependenteId = qr.replace("guarani:dependente:", "");
+    // Antes, alguns cartões guardavam a matrícula no parâmetro `id` ou
+    // `dependente_id`. Não consultar UUID com texto de matrícula evita erro SQL.
+    if (socioId && !ehUuidQr(socioId)) {
+      matricula = matricula || normalizarMatriculaQr(socioId);
+      socioId = "";
+      id = "";
+    }
+    if (dependenteId && !ehUuidQr(dependenteId)) {
+      matricula = matricula || normalizarMatriculaQr(dependenteId);
+      dependenteId = "";
     }
 
-    if (!temporadaId && qr.startsWith("guarani:temporada:")) {
-      temporadaId = qr.replace("guarani:temporada:", "");
-    }
-
-    if (!temporadaParticipanteId && qr.startsWith("guarani:temporada-participante:")) {
-      temporadaParticipanteId = qr.replace("guarani:temporada-participante:", "");
-    }
+    const supabase = getServiceClient();
 
     // QR antigo/novo pode apontar diretamente para a matrícula da temporada.
     // Isso permite que a carteirinha TE funcione sem transformar o responsável
@@ -710,18 +744,19 @@ export async function POST(request: Request) {
     if (!id && !dependenteId && matricula) {
       etapa = "buscando matrícula de associado ou dependente";
       // Dependentes familiares possuem matrícula própria na tabela dependentes.
-      // Consultá-los antes de socios evita o falso 404 visto na portaria (ex.: SD0024B).
-      const { data: dependentePorMatricula, error: dependenteMatriculaError } = await supabase
-        .from("dependentes")
-        .select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo")
-        .eq("matricula", matricula)
-        .eq("ativo", true)
-        .maybeSingle();
-      if (dependenteMatriculaError) throw dependenteMatriculaError;
+      // Se já foram promovidos, o QR antigo deve apontar ao novo cadastro em socios.
+      const dependentePorMatricula = await buscarDependentePorQr(supabase, {
+        matricula,
+        somenteAtivos: true,
+      });
       if (dependentePorMatricula) {
-        dependenteId = String(dependentePorMatricula.id);
-        dependente = dependentePorMatricula;
-        id = String(dependentePorMatricula.socio_id);
+        if (dependentePorMatricula.migrado_para_socio_id) {
+          id = String(dependentePorMatricula.migrado_para_socio_id);
+        } else {
+          dependenteId = String(dependentePorMatricula.id);
+          dependente = dependentePorMatricula;
+          id = String(dependentePorMatricula.socio_id);
+        }
       } else {
         const { data: socioPorMatricula, error: matriculaError } = await supabase
           .from("socios")
@@ -735,29 +770,102 @@ export async function POST(request: Request) {
             { status: 404 }
           );
         }
-        id = socioPorMatricula.id;
+        id = String(socioPorMatricula.id);
       }
     }
 
     if (dependenteId) {
       etapa = "buscando dependente";
-      const { data: dep, error: depError } = await supabase
-        .from("dependentes").select("id,socio_id,nome,situacao_financeira,exame_medico_validade,ativo").eq("id", dependenteId).maybeSingle();
-      if (depError) throw depError;
-      if (!dep || dep.ativo === false) return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
-      dependente = dep;
-      id = String(dep.socio_id);
+      let dep = await buscarDependentePorQr(supabase, { id: dependenteId });
+      // Alguns QR antigos tinham o ID anterior e também a matrícula impressa.
+      if (!dep && matricula) {
+        dep = await buscarDependentePorQr(supabase, { matricula, somenteAtivos: true });
+      }
+      if (!dep) {
+        return NextResponse.json({ error: "Dependente não encontrado. Confira o cadastro ou atualize o QR Code." }, { status: 404 });
+      }
+      if (dep.migrado_para_socio_id) {
+        id = String(dep.migrado_para_socio_id);
+        dependenteId = "";
+      } else {
+        if (dep.ativo === false) {
+          return NextResponse.json({ error: "Dependente não encontrado ou inativo." }, { status: 404 });
+        }
+        dependente = dep;
+        id = String(dep.socio_id);
+        dependenteId = String(dep.id);
+      }
     }
 
     if (!id) return NextResponse.json({ error: "QR Code inválido ou sem identificação do associado." }, { status: 400 });
 
     etapa = "buscando sócio";
-    const { data: socio, error: socioError } = await supabase
+    let { data: socio, error: socioError } = await supabase
       .from("socios")
       .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
       .eq("id", id).maybeSingle();
     if (socioError) throw socioError;
-    if (!socio) return NextResponse.json({ error: "Associado não encontrado." }, { status: 404 });
+
+    // QR antigos de dependentes às vezes guardavam o ID da tabela dependentes
+    // no parâmetro `id`. Se não existir em socios, resolvemos a pessoa pelo ID antigo.
+    if (!socio && ehUuidQr(id)) {
+      const dependenteLegado = await buscarDependentePorQr(supabase, { id });
+      if (dependenteLegado && (dependenteLegado.ativo !== false || dependenteLegado.migrado_para_socio_id)) {
+        if (dependenteLegado.migrado_para_socio_id) {
+          id = String(dependenteLegado.migrado_para_socio_id);
+        } else {
+          dependente = dependenteLegado;
+          dependenteId = String(dependenteLegado.id);
+          id = String(dependenteLegado.socio_id);
+        }
+        const resultadoSocio = await supabase
+          .from("socios")
+          .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
+          .eq("id", id).maybeSingle();
+        if (resultadoSocio.error) throw resultadoSocio.error;
+        socio = resultadoSocio.data;
+      }
+    }
+
+    // O UUID pode ter sido substituído numa correção cadastral. Os QR novos
+    // incluem a matrícula como segunda chave para recuperar o cadastro correto.
+    if (!socio && matricula) {
+      const dependenteAlternativo = await buscarDependentePorQr(supabase, {
+        matricula,
+        somenteAtivos: true,
+      });
+      if (dependenteAlternativo) {
+        if (dependenteAlternativo.migrado_para_socio_id) {
+          id = String(dependenteAlternativo.migrado_para_socio_id);
+          dependente = null;
+          dependenteId = "";
+        } else {
+          id = String(dependenteAlternativo.socio_id);
+          dependente = dependenteAlternativo;
+          dependenteId = String(dependenteAlternativo.id);
+        }
+        const resultadoSocio = await supabase
+          .from("socios")
+          .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
+          .eq("id", id).maybeSingle();
+        if (resultadoSocio.error) throw resultadoSocio.error;
+        socio = resultadoSocio.data;
+      } else {
+        const resultadoSocio = await supabase
+          .from("socios")
+          .select("id,matricula,nome,cpf,tipo_socio,categoria,situacao,situacao_financeira,foto_url,exame_medico_validade,data_associacao,dia_vencimento")
+          .eq("matricula", matricula).maybeSingle();
+        if (resultadoSocio.error) throw resultadoSocio.error;
+        if (resultadoSocio.data) {
+          socio = resultadoSocio.data;
+          id = String(resultadoSocio.data.id);
+          dependente = null;
+          dependenteId = "";
+        }
+      }
+    }
+
+    if (!socio) return NextResponse.json({ error: "Associado não encontrado. Confira o cadastro ou atualize o QR Code da carteirinha." }, { status: 404 });
 
     const situacao = String(socio.situacao || "").toLowerCase();
     const socioAtivo = ["ativo", "ativa", "em_dia"].includes(situacao) || !situacao;
