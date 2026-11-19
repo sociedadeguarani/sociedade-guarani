@@ -3,14 +3,8 @@ import { getServiceClient, requireRoles } from "@/lib/guaraniAuth";
 import { classificarStatusFinanceiroCarteirinha, dataHojeBrasil, normalizarPoliticaInadimplencia, POLITICA_INADIMPLENCIA_PADRAO, type PoliticaInadimplencia } from "@/lib/politicaInadimplencia";
 import { mensalidadeRegistroAnteriorAAssociacao, obterPrimeiraCompetenciaPaga } from "@/lib/competenciaAssociacao";
 
-// The selected column list is built dynamically according to permissions. The
-// generated Supabase type cannot infer that runtime string, so narrow only the
-// fields needed for family grouping before using the query result.
-type SocioGrupoFamiliar = {
-  id: string;
-  responsavel_id: string | null;
-};
-
+// The selected column list is built dynamically according to permissions.
+// Narrow the fields used by the family and financial calculations below.
 type MensalidadeCarteirinha = {
   socio_id: string | null;
   competencia: string | null;
@@ -181,6 +175,37 @@ function emLotes<T>(lista: T[], tamanho = 100): T[][] {
   return lotes;
 }
 
+const TAMANHO_PAGINA_CADASTROS = 1000;
+
+type ResultadoPagina<T> = {
+  data: T[] | null;
+  error: { message: string } | null;
+};
+
+/**
+ * Lê todas as páginas de uma consulta sem depender do limite máximo do PostgREST.
+ * A consulta precisa manter uma ordenação estável antes de aplicar range().
+ */
+async function consultarTodas<T>(
+  consultarPagina: (inicio: number, fim: number) => Promise<ResultadoPagina<T>>,
+): Promise<T[]> {
+  const registros: T[] = [];
+
+  for (let inicio = 0; ; inicio += TAMANHO_PAGINA_CADASTROS) {
+    const { data, error } = await consultarPagina(
+      inicio,
+      inicio + TAMANHO_PAGINA_CADASTROS - 1,
+    );
+    if (error) throw new Error(error.message);
+
+    const pagina = data || [];
+    registros.push(...pagina);
+    if (pagina.length < TAMANHO_PAGINA_CADASTROS) break;
+  }
+
+  return registros;
+}
+
 function dataHoje() {
   return dataHojeBrasil();
 }
@@ -225,60 +250,45 @@ export async function GET(request: Request) {
     if (podeVerFinanceiro) colunasBase.push("possui_mensalidade", "valor_mensalidade", "dia_vencimento");
     const base = colunasBase.join(",");
 
-    let socios: SocioCarteirinha[] = [];
-
-    if (auth.usuario.perfil === "associado") {
-      const { data: proprioRaw, error: proprioError } = await supabase
+    const todosSocios = await consultarTodas<SocioCarteirinha>(async (inicio, fim) => {
+      const { data, error } = await supabase
         .from("socios")
         .select(base)
-        .eq("id", auth.usuario.socio_id)
-        .maybeSingle();
+        .order("nome")
+        .order("id")
+        .range(inicio, fim);
+      return {
+        data: (data || []) as unknown as SocioCarteirinha[],
+        error,
+      };
+    });
 
-      if (proprioError) throw proprioError;
-      const proprio = proprioRaw as unknown as SocioGrupoFamiliar | null;
+    let socios: SocioCarteirinha[] = todosSocios;
 
+    if (auth.usuario.perfil === "associado") {
+      const proprio = todosSocios.find((socio) => String(socio.id) === String(auth.usuario.socio_id));
       if (proprio) {
-        const { data: todosRaw, error: todosError } = await supabase
-          .from("socios")
-          .select(base)
-          .order("nome")
-          .limit(5000);
-
-        if (todosError) throw todosError;
-        const todos = (todosRaw || []) as unknown as SocioGrupoFamiliar[];
-
         const familia = new Set<string>([String(proprio.id)]);
         let mudou = true;
 
         while (mudou) {
           mudou = false;
-
-          for (const s of todos) {
+          for (const socio of todosSocios) {
             if (
-              s.responsavel_id &&
-              familia.has(String(s.responsavel_id)) &&
-              !familia.has(String(s.id))
+              socio.responsavel_id &&
+              familia.has(String(socio.responsavel_id)) &&
+              !familia.has(String(socio.id))
             ) {
-              familia.add(String(s.id));
+              familia.add(String(socio.id));
               mudou = true;
             }
           }
         }
 
-        socios = todos.filter((s) =>
-          familia.has(String(s.id))
-        );
+        socios = todosSocios.filter((socio) => familia.has(String(socio.id)));
+      } else {
+        socios = [];
       }
-    } else {
-      const { data, error } = await supabase
-        .from("socios")
-        .select(base)
-        .order("nome")
-        .limit(5000);
-
-      if (error) throw error;
-
-      socios = (data || []) as unknown as SocioCarteirinha[];
     }
 
     const ids = socios
@@ -389,11 +399,17 @@ export async function GET(request: Request) {
     // A coluna de rastreamento da migração é adicionada por uma migração SQL
     // separada. Enquanto o banco ainda não a tiver (por exemplo, em publicação
     // parcial), as carteirinhas e a tela Dependentes devem continuar funcionando.
-    const consultarDependentes = async (colunas: string[]) => {
+    const consultarDependentesPagina = async (
+      colunas: string[],
+      inicio: number,
+      fim: number,
+    ): Promise<ResultadoPagina<DependenteCarteirinha>> => {
       let query = supabase
         .from("dependentes")
         .select(colunas.join(","))
-        .order("nome");
+        .order("nome")
+        .order("id")
+        .range(inicio, fim);
 
       if (!modoDependentes) {
         query = query.eq("ativo", true);
@@ -405,21 +421,29 @@ export async function GET(request: Request) {
         query = query.eq("socio_id", auth.usuario.socio_id);
       }
 
-      return query;
+      const { data, error } = await query;
+      return {
+        data: (data || []) as unknown as DependenteCarteirinha[],
+        error,
+      };
     };
 
-    let { data: dependentesDb, error: dependentesError } = await consultarDependentes(colunasDependente);
-    if (
-      dependentesError &&
-      /migrado_para_socio_id/i.test(`${dependentesError.message || ""} ${dependentesError.details || ""}`)
-    ) {
+    const consultarDependentesTodas = (colunas: string[]) =>
+      consultarTodas<DependenteCarteirinha>((inicio, fim) =>
+        consultarDependentesPagina(colunas, inicio, fim)
+      );
+
+    let dependentesDb: DependenteCarteirinha[];
+    try {
+      dependentesDb = await consultarDependentesTodas(colunasDependente);
+    } catch (error) {
+      if (!/migrado_para_socio_id/i.test(error instanceof Error ? error.message : String(error))) throw error;
       console.warn(
         "A coluna dependentes.migrado_para_socio_id ainda não existe; carregando em modo compatível até aplicar a migração SQL."
       );
       const colunasCompatibilidade = colunasDependente.filter((coluna) => coluna !== "migrado_para_socio_id");
-      ({ data: dependentesDb, error: dependentesError } = await consultarDependentes(colunasCompatibilidade));
+      dependentesDb = await consultarDependentesTodas(colunasCompatibilidade);
     }
-    if (dependentesError) throw dependentesError;
 
     const sociosPorId = new Map(resultado.map((s) => [String(s.id), s]));
     // Evita imprimir duas carteirinhas para a mesma pessoa quando um cadastro

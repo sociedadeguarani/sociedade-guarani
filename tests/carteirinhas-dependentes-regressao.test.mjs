@@ -28,3 +28,19 @@ test('edição de dependente normaliza IDs sintéticos socio:<uuid> antes de gra
   assert.match(dependentesPage, /const socioIdNormalizado = normalizarIdSocio\(form\.socio_id\)/);
   assert.match(dependentesPage, /socio_id: socioIdNormalizado/);
 });
+
+
+test('API de carteirinhas pagina todos os sócios e dependentes acima do limite padrão do PostgREST', () => {
+  assert.match(carteirinhasApi, /const TAMANHO_PAGINA_CADASTROS = 1000/);
+  assert.match(carteirinhasApi, /async function consultarTodas/);
+  assert.match(carteirinhasApi, /\.range\(inicio, fim\)/);
+  assert.match(carteirinhasApi, /consultarTodas<SocioCarteirinha>/);
+  assert.match(carteirinhasApi, /consultarDependentesTodas\(colunasDependente\)/);
+  assert.doesNotMatch(carteirinhasApi, /\.limit\(5000\)/);
+});
+
+test('consulta familiar de associado filtra a família depois de carregar todas as páginas', () => {
+  assert.match(carteirinhasApi, /const todosSocios = await consultarTodas<SocioCarteirinha>/);
+  assert.match(carteirinhasApi, /todosSocios\.find\(\(socio\) => String\(socio\.id\) === String\(auth\.usuario\.socio_id\)\)/);
+  assert.match(carteirinhasApi, /socios = todosSocios\.filter\(\(socio\) => familia\.has\(String\(socio\.id\)\)\)/);
+});
