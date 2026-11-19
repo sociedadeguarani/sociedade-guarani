@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,6 +16,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sociedade Guarani",
   description: "Sistema de gestão da Sociedade Recreativa Guarani — S.R.G.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Guarani",
+  },
   icons: {
     icon: [
       {
@@ -40,6 +47,7 @@ export const viewport: Viewport = {
   minimumScale: 1,
   maximumScale: 5,
   userScalable: true,
+  themeColor: "#003D2B",
 };
 
 export default function RootLayout({
@@ -52,7 +60,10 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <PwaInstallPrompt />
+      </body>
     </html>
   );
 }
