@@ -29,6 +29,31 @@ type DependenteBuscaRow = {
   migrado_para_socio_id?: string | null;
 };
 
+type ResultadoPagina<T> = {
+  data: T[] | null;
+  error: { message: string } | null;
+};
+
+const TAMANHO_PAGINA_CONVITES = 1000;
+
+/** Carrega todos os registros necessários à busca, sem truncar no limite do PostgREST. */
+async function consultarTodas<T>(
+  consultarPagina: (inicio: number, fim: number) => Promise<ResultadoPagina<T>>,
+): Promise<T[]> {
+  const registros: T[] = [];
+  for (let inicio = 0; ; inicio += TAMANHO_PAGINA_CONVITES) {
+    const { data, error } = await consultarPagina(
+      inicio,
+      inicio + TAMANHO_PAGINA_CONVITES - 1,
+    );
+    if (error) throw new Error(error.message);
+    const pagina = data || [];
+    registros.push(...pagina);
+    if (pagina.length < TAMANHO_PAGINA_CONVITES) break;
+  }
+  return registros;
+}
+
 function normalizar(valor: unknown) {
   return String(valor ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
@@ -56,46 +81,54 @@ export async function GET(request: Request) {
     const auth = await requireRoles(
       request,
       ["funcionario", "administrador", "administrador_master"],
-      ["menu.convites", "convites.comprar"],
+      "menu.convites",
     );
     if ("response" in auth) return auth.response;
 
     const db = auth.supabase;
     const ehFuncionario = auth.usuario.perfil === "funcionario";
+    // Consultar a lista de associados exige apenas acesso à tela.
+    // A permissão de comprar convites é validada separadamente no POST.
+    const podeComprarConvites = auth.usuario.perfil === "administrador_master" ||
+      auth.usuario.perfil === "administrador" ||
+      auth.usuario.permissoes?.includes("convites.comprar") === true;
     const consultaConvites = ehFuncionario
       ? db.from("convites").select("id,socio_id,dependente_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,banho_incluido,status,created_at").order("created_at", { ascending: false })
       : db.from("convites").select("*").order("created_at", { ascending: false });
 
-    const [{ data: convites, error: ce }, { data: sociosBrutos, error: se }] = await Promise.all([
+    const [resultadoConvites, sociosBrutos] = await Promise.all([
       consultaConvites,
-      db.from("socios").select("id,nome,matricula,responsavel_id,parentesco,situacao,tipo_socio,categoria,cpf").order("nome", { ascending: true }),
+      consultarTodas<SocioBuscaRow>(async (inicio, fim) => await db.from("socios")
+        .select("id,nome,matricula,responsavel_id,parentesco,situacao,tipo_socio,categoria,cpf")
+        .order("nome", { ascending: true })
+        .order("id", { ascending: true })
+        .range(inicio, fim)),
     ]);
-    if (ce) return NextResponse.json({ error: ce.message }, { status: 500 });
-    if (se) return NextResponse.json({ error: se.message }, { status: 500 });
+    if (resultadoConvites.error) return NextResponse.json({ error: resultadoConvites.error.message }, { status: 500 });
+    const convites = resultadoConvites.data || [];
 
     // Usa a mesma regra da tela Carteirinhas: dependentes podem estar na tabela
     // dependentes ou como Sócio Dependente na tabela socios. Não filtra ativo=NULL.
-    const dependentesComMigracao = await db.from("dependentes")
-      .select("id,socio_id,nome,matricula,parentesco,ativo,migrado_para_socio_id")
-      .order("nome", { ascending: true });
-
-    // Algumas instalações ainda não possuem a coluna de migração. Mantemos
-    // os dois formatos em variáveis separadas para o TypeScript não tentar
-    // atribuir respostas PostgREST com formatos de linha diferentes.
+    // Usa a mesma regra da tela Carteirinhas: dependentes podem estar na tabela
+    // dependentes ou como Sócio Dependente na tabela socios. Não filtra ativo=NULL.
+    // A consulta é paginada para não esconder famílias após o limite de 1.000 linhas.
     let dependentesRows: DependenteBuscaRow[] = [];
-    if (dependentesComMigracao.error && /migrado_para_socio_id/i.test(dependentesComMigracao.error.message)) {
-      const dependentesSemMigracao = await db.from("dependentes")
+    try {
+      dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
+        .select("id,socio_id,nome,matricula,parentesco,ativo,migrado_para_socio_id")
+        .order("nome", { ascending: true })
+        .order("id", { ascending: true })
+        .range(inicio, fim));
+    } catch (erro) {
+      const mensagemErro = erro instanceof Error ? erro.message : String(erro);
+      // Algumas instalações ainda não possuem a coluna de migração. Mantemos
+      // compatibilidade sem descartar nenhuma página dos dependentes.
+      if (!/migrado_para_socio_id/i.test(mensagemErro)) throw erro;
+      dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
         .select("id,socio_id,nome,matricula,parentesco,ativo")
-        .order("nome", { ascending: true });
-      if (dependentesSemMigracao.error) {
-        return NextResponse.json({ error: dependentesSemMigracao.error.message }, { status: 500 });
-      }
-      dependentesRows = (dependentesSemMigracao.data || []) as DependenteBuscaRow[];
-    } else {
-      if (dependentesComMigracao.error) {
-        return NextResponse.json({ error: dependentesComMigracao.error.message }, { status: 500 });
-      }
-      dependentesRows = (dependentesComMigracao.data || []) as DependenteBuscaRow[];
+        .order("nome", { ascending: true })
+        .order("id", { ascending: true })
+        .range(inicio, fim));
     }
 
     const socios = (sociosBrutos || []) as SocioBuscaRow[];
@@ -166,6 +199,7 @@ export async function GET(request: Request) {
       contas,
       perfil: auth.usuario.perfil,
       podeGerenciarFinanceiro: !ehFuncionario,
+      podeComprarConvites,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Erro ao carregar convites." }, { status: 500 });
