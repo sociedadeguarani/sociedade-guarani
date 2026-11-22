@@ -58,6 +58,28 @@ function normalizar(valor: unknown) {
   return String(valor ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
+type ConviteComBanho = {
+  banho_incluido?: boolean | null;
+  cidade_convidado?: string | null;
+  tipo?: string | null;
+  valor?: number | string | null;
+};
+
+/**
+ * Algumas versões do banco não possuem convites.banho_incluido.
+ * Nesse caso, recompõe o indicador usando os dados que já são persistidos.
+ */
+function normalizarConvite<T extends ConviteComBanho>(convite: T): T & { banho_incluido: boolean | null } {
+  let banho = typeof convite.banho_incluido === "boolean" ? convite.banho_incluido : null;
+  if (banho === null) {
+    const cidade = normalizar(convite.cidade_convidado);
+    if (cidade === "augusto pestana") banho = false;
+    else if (convite.tipo === "semanal") banho = true;
+    else if (convite.tipo === "diario") banho = Number(convite.valor || 0) >= 25;
+  }
+  return { ...convite, banho_incluido: banho };
+}
+
 function chavePessoa(nome: unknown, matricula: unknown) {
   const nomeNormalizado = normalizar(nome);
   const matriculaNormalizada = String(matricula ?? "").trim().toUpperCase();
@@ -93,7 +115,7 @@ export async function GET(request: Request) {
       auth.usuario.perfil === "administrador" ||
       auth.usuario.permissoes?.includes("convites.comprar") === true;
     const consultaConvites = ehFuncionario
-      ? db.from("convites").select("id,socio_id,dependente_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,banho_incluido,status,created_at").order("created_at", { ascending: false })
+      ? db.from("convites").select("id,socio_id,dependente_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,valor,status,created_at").order("created_at", { ascending: false })
       : db.from("convites").select("*").order("created_at", { ascending: false });
 
     const [resultadoConvites, sociosBrutos] = await Promise.all([
@@ -192,7 +214,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      convites: convites || [],
+      convites: (convites || []).map((convite) => normalizarConvite(convite)),
       socios,
       socios_busca: sociosBusca,
       dependentes,
@@ -288,7 +310,6 @@ export async function POST(request: Request) {
         return {
           socio_id, dependente_id, nome_convidado: nome, documento_convidado: documento,
           cidade_convidado: cidade, data_inicio: inicio, data_fim: fim, tipo, valor,
-          banho_incluido: cidadeNormalizada === "augusto pestana" ? false : tipo === "diario" ? banho === "com_banho" : tipo === "semanal" ? true : null,
           status: pagamento === "pix" ? "pendente" : "pago", forma_pagamento: pagamento,
           comprovante_url: null, comprovante_enviado_em: null,
           comprovante_status: pagamento === "pix" ? "pendente" : "aprovado", motivo_recusa: null,
@@ -340,7 +361,7 @@ export async function POST(request: Request) {
         }));
         await db.from("notificacoes_admin").insert(notificacoes);
       }
-      return NextResponse.json({ ok: true, id: ids[0], convites: atualizados || criados, total: linhas.reduce((s, c) => s + c.valor, 0) });
+      return NextResponse.json({ ok: true, id: ids[0], convites: (atualizados || criados || []).map((convite) => normalizarConvite(convite)), total: linhas.reduce((s, c) => s + c.valor, 0) });
     }
     const socio_id = String(form.get("socio_id") || "").trim() || null;
     const dependente_id = String(form.get("dependente_id") || "").trim() || null;
@@ -438,7 +459,6 @@ export async function POST(request: Request) {
       data_fim: fim,
       tipo,
       valor,
-      banho_incluido: banhoIncluido,
       status: pagamento === "pix" ? "pendente" : "pago",
       forma_pagamento: pagamento,
       comprovante_url: null,
@@ -496,9 +516,9 @@ export async function POST(request: Request) {
           id: convite.id, socio_id: convite.socio_id, dependente_id: convite.dependente_id,
           nome_convidado: convite.nome_convidado, cidade_convidado: convite.cidade_convidado,
           data_inicio: convite.data_inicio, data_fim: convite.data_fim, tipo: convite.tipo,
-          status: convite.status, banho_incluido: convite.banho_incluido, created_at: convite.created_at,
+          status: convite.status, banho_incluido: normalizarConvite(convite).banho_incluido, created_at: convite.created_at,
         }
-      : (atualizado || convite);
+      : normalizarConvite(atualizado || convite);
     return NextResponse.json({ ok: true, id: convite.id, convite: conviteResposta, aviso: ne ? `Convite salvo, mas a notificação não foi criada: ${ne.message}` : undefined });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Erro ao registrar convite." }, { status: 500 });

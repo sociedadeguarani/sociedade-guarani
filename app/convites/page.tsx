@@ -122,7 +122,7 @@ async function salvar(){
  if(!editandoId&&form.pagamento==="dinheiro"&&arquivo&&!["image/jpeg","image/png","image/webp"].includes(arquivo.type))return setMensagem("Para pagamento em dinheiro, anexe uma foto JPG, PNG ou WEBP do recibo.");
  setSalvando(true);setMensagem("");try{
  if(editandoId){
-   const {error}=await supabase.from("convites").update({socio_id:form.socio_id||null,dependente_id:form.dependente_id||null,banho_incluido:form.cidade.trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()==="augusto pestana"?false:form.tipo==="diario"?form.banho==="com_banho":form.tipo==="semanal"?true:null,nome_convidado:form.nome.trim(),documento_convidado:form.documento.trim()||null,cidade_convidado:cidadeFinal,data_inicio:form.inicio,data_fim:form.tipo==="diario"?null:(form.fim||null),tipo:form.tipo,valor:form.tipo==="diario"?Number(valorRegra(cidadeFinal,form.tipo,form.banho)):Number(form.valor||0),forma_pagamento:form.pagamento}).eq("id",editandoId);
+   const {error}=await supabase.from("convites").update({socio_id:form.socio_id||null,dependente_id:form.dependente_id||null,nome_convidado:form.nome.trim(),documento_convidado:form.documento.trim()||null,cidade_convidado:cidadeFinal,data_inicio:form.inicio,data_fim:form.tipo==="diario"?null:(form.fim||null),tipo:form.tipo,valor:form.tipo==="diario"?Number(valorRegra(cidadeFinal,form.tipo,form.banho)):Number(form.valor||0),forma_pagamento:form.pagamento}).eq("id",editandoId);
    if(error)throw error;
    const operador=await operadorAtual();
    await registrarAvisoAdministrativo("✏️ Convite alterado",`O convite de ${form.nome.trim()} foi alterado por ${operador}. Cidade: ${cidadeFinal}. Data: ${dataBR(form.inicio)}. Valor: ${moeda(Number(form.valor||0))}.`);
