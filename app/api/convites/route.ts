@@ -111,20 +111,26 @@ export async function GET(request: Request) {
     const ehFuncionario = auth.usuario.perfil === "funcionario";
     // Consultar a lista de associados exige apenas acesso à tela.
     // A permissão de comprar convites é validada separadamente no POST.
-    const podeComprarConvites = auth.usuario.perfil === "administrador_master" ||
-      auth.usuario.perfil === "administrador" ||
+    const perfilAdministrador = auth.usuario.perfil === "administrador_master" ||
+      auth.usuario.perfil === "administrador";
+    const podeComprarConvites = perfilAdministrador ||
       auth.usuario.permissoes?.includes("convites.comprar") === true;
+    const podeConsultarSocios = perfilAdministrador ||
+      auth.usuario.permissoes?.includes("socios.consultar") === true;
     const consultaConvites = ehFuncionario
       ? db.from("convites").select("id,socio_id,dependente_id,nome_convidado,cidade_convidado,data_inicio,data_fim,tipo,valor,status,created_at").order("created_at", { ascending: false })
       : db.from("convites").select("*").order("created_at", { ascending: false });
 
+    const consultaSocios = podeConsultarSocios
+      ? consultarTodas<SocioBuscaRow>(async (inicio, fim) => await db.from("socios")
+          .select("id,nome,matricula,responsavel_id,parentesco,situacao,tipo_socio,categoria,cpf")
+          .order("nome", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim))
+      : Promise.resolve([] as SocioBuscaRow[]);
     const [resultadoConvites, sociosBrutos] = await Promise.all([
       consultaConvites,
-      consultarTodas<SocioBuscaRow>(async (inicio, fim) => await db.from("socios")
-        .select("id,nome,matricula,responsavel_id,parentesco,situacao,tipo_socio,categoria,cpf")
-        .order("nome", { ascending: true })
-        .order("id", { ascending: true })
-        .range(inicio, fim)),
+      consultaSocios,
     ]);
     if (resultadoConvites.error) return NextResponse.json({ error: resultadoConvites.error.message }, { status: 500 });
     const convites = resultadoConvites.data || [];
@@ -135,22 +141,23 @@ export async function GET(request: Request) {
     // dependentes ou como Sócio Dependente na tabela socios. Não filtra ativo=NULL.
     // A consulta é paginada para não esconder famílias após o limite de 1.000 linhas.
     let dependentesRows: DependenteBuscaRow[] = [];
-    try {
-      dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
-        .select("id,socio_id,nome,matricula,parentesco,ativo,migrado_para_socio_id")
-        .order("nome", { ascending: true })
-        .order("id", { ascending: true })
-        .range(inicio, fim));
-    } catch (erro) {
-      const mensagemErro = erro instanceof Error ? erro.message : String(erro);
-      // Algumas instalações ainda não possuem a coluna de migração. Mantemos
-      // compatibilidade sem descartar nenhuma página dos dependentes.
-      if (!/migrado_para_socio_id/i.test(mensagemErro)) throw erro;
-      dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
-        .select("id,socio_id,nome,matricula,parentesco,ativo")
-        .order("nome", { ascending: true })
-        .order("id", { ascending: true })
-        .range(inicio, fim));
+    if (podeConsultarSocios) {
+      try {
+        dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
+          .select("id,socio_id,nome,matricula,parentesco,ativo,migrado_para_socio_id")
+          .order("nome", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim));
+      } catch (erro) {
+        const mensagemErro = erro instanceof Error ? erro.message : String(erro);
+        // Algumas instalações ainda não possuem a coluna de migração.
+        if (!/migrado_para_socio_id/i.test(mensagemErro)) throw erro;
+        dependentesRows = await consultarTodas<DependenteBuscaRow>(async (inicio, fim) => await db.from("dependentes")
+          .select("id,socio_id,nome,matricula,parentesco,ativo")
+          .order("nome", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim));
+      }
     }
 
     const socios = (sociosBrutos || []) as SocioBuscaRow[];
@@ -221,6 +228,7 @@ export async function GET(request: Request) {
       contas,
       perfil: auth.usuario.perfil,
       podeGerenciarFinanceiro: !ehFuncionario,
+      podeConsultarSocios,
       podeComprarConvites,
     });
   } catch (e) {
@@ -233,7 +241,7 @@ export async function POST(request: Request) {
     const auth = await requireRoles(
       request,
       ["funcionario", "administrador", "administrador_master"],
-      ["menu.convites", "convites.comprar"],
+      ["menu.convites", "convites.comprar", "socios.consultar"],
     );
     if ("response" in auth) return auth.response;
 
