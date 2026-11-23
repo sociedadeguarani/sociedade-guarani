@@ -38,7 +38,7 @@ test('dependentes de titular inativo são considerados inativos e excluídos da 
 });
 
 test('o indicador financeiro não assume em dia se o histórico contém competências vencidas', () => {
-  assert.match(sociosApi, /atrasos\.get\(alvo\)\?\.size \|\| 0/);
+  assert.match(sociosApi, /mesesAtrasoPorSocio\.get\(alvo\) \|\| 0/);
   assert.match(carteirinhasApi, /statusPorMensalidades\(mensalidades, hoje\)/);
   assert.match(carteirinhasApi, /competenciaInformada < hoje\.slice\(0, 7\)/);
 });

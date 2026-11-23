@@ -136,70 +136,109 @@ export async function GET(request: Request) {
     // estático, embora a resposta bem-sucedida seja uma lista de registros.
     // A conversão passa por unknown para manter a fronteira explícita.
     const registros = (consulta.data ?? []) as unknown as Array<Record<string, unknown>>;
-    let atrasos = new Map<string, Set<string>>();
+    const mesesAtrasoPorSocio = new Map<string, number>();
     const sociosComHistorico = new Set<string>();
     let politica = POLITICA_INADIMPLENCIA_PADRAO;
     if (podeVerFinanceiro) {
       const hoje = dataHojeBrasil();
       const config = await db.from("configuracoes_acessos").select("meses_atencao,meses_bloqueio").eq("id", 1).maybeSingle();
       if (!config.error && config.data) politica = normalizarPoliticaInadimplencia(config.data);
-      const ids = registros.map((s) => String(s.id || "")).filter(Boolean);
-      const mensalidades: Array<Record<string, unknown>> = [];
-      // Executa os lotes em paralelo: antes eram consultados um após o outro,
-      // aumentando muito o tempo de abertura quando há centenas de associados.
-      const lotes = Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => ids.slice(i * 100, (i + 1) * 100));
-      const resultadosLotes = await Promise.all(lotes.map(async (lote) => {
-        const registrosLote: Array<Record<string, unknown>> = [];
-        for (let offset = 0; ; offset += 1000) {
-          const { data, error } = await db
-            .from("mensalidades")
-            .select("id,socio_id,data_vencimento,competencia,situacao")
-            .in("socio_id", lote)
-            .order("data_vencimento", { ascending: true })
-            .order("id", { ascending: true })
-            .range(offset, offset + 999);
-          if (error) throw new Error(erroBanco(error));
-          const pagina = (data || []) as unknown as Array<Record<string, unknown>>;
-          registrosLote.push(...pagina);
-          if (pagina.length < 1000) break;
+
+      const ids = [...new Set(registros.map((s) => String(s.id || "")).filter(Boolean))];
+      const tamanhoLoteResumo = 200;
+      const resumoCompleto: Array<{ socio_id: string; quantidade_atraso: number; possui_lancamentos: boolean }> = [];
+      let resumoRpcDisponivel = true;
+
+      // O banco agrega as mensalidades e devolve somente uma linha por sócio.
+      // Se a função ainda não estiver instalada, mantemos o cálculo legado abaixo
+      // para que a implantação do código não interrompa a listagem.
+      for (let inicio = 0; inicio < ids.length; inicio += tamanhoLoteResumo) {
+        const lote = ids.slice(inicio, inicio + tamanhoLoteResumo);
+        const { data, error } = await db.rpc("socios_resumo_inadimplencia_v1", {
+          p_socio_ids: lote,
+          p_hoje: hoje,
+        });
+        const pagina = (data || []) as unknown as Array<{ socio_id: string; quantidade_atraso: number; possui_lancamentos: boolean }>;
+        if (error || pagina.length !== lote.length) {
+          resumoRpcDisponivel = false;
+          if (error) {
+            console.warn("[api/socios] Resumo SQL indisponível; usando cálculo compatível:", error.message);
+          }
+          break;
         }
-        return registrosLote;
-      }));
-      const mensalidadesPorSocio = new Map<string, Array<Record<string, unknown>>>();
-      for (const lote of resultadosLotes) {
-        mensalidades.push(...lote);
-        for (const mensalidade of lote) {
-          const idSocio = String(mensalidade.socio_id || "");
+        resumoCompleto.push(...pagina);
+      }
+
+      if (resumoRpcDisponivel) {
+        for (const item of resumoCompleto) {
+          const idSocio = String(item.socio_id || "");
           if (!idSocio) continue;
-          const lista = mensalidadesPorSocio.get(idSocio) || [];
-          lista.push(mensalidade);
-          mensalidadesPorSocio.set(idSocio, lista);
+          mesesAtrasoPorSocio.set(idSocio, Number(item.quantidade_atraso || 0));
+          if (item.possui_lancamentos === true) sociosComHistorico.add(idSocio);
+        }
+      } else {
+        // Fallback preservado: consulta paginada do histórico, com a regra
+        // de primeira competência paga e vencimento legado sem data.
+        mesesAtrasoPorSocio.clear();
+        sociosComHistorico.clear();
+        const mensalidades: Array<Record<string, unknown>> = [];
+        const lotes = Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => ids.slice(i * 100, (i + 1) * 100));
+        const resultadosLotes = await Promise.all(lotes.map(async (lote) => {
+          const registrosLote: Array<Record<string, unknown>> = [];
+          for (let offset = 0; ; offset += 1000) {
+            const { data, error } = await db
+              .from("mensalidades")
+              .select("id,socio_id,data_vencimento,competencia,situacao")
+              .in("socio_id", lote)
+              .order("data_vencimento", { ascending: true })
+              .order("id", { ascending: true })
+              .range(offset, offset + 999);
+            if (error) throw new Error(erroBanco(error));
+            const pagina = (data || []) as unknown as Array<Record<string, unknown>>;
+            registrosLote.push(...pagina);
+            if (pagina.length < 1000) break;
+          }
+          return registrosLote;
+        }));
+        const mensalidadesPorSocio = new Map<string, Array<Record<string, unknown>>>();
+        for (const lote of resultadosLotes) {
+          mensalidades.push(...lote);
+          for (const mensalidade of lote) {
+            const idSocio = String(mensalidade.socio_id || "");
+            if (!idSocio) continue;
+            const lista = mensalidadesPorSocio.get(idSocio) || [];
+            lista.push(mensalidade);
+            mensalidadesPorSocio.set(idSocio, lista);
+          }
+        }
+        const primeiraCompetenciaPagaPorSocio = new Map<string, string>();
+        for (const [idSocio, historico] of mensalidadesPorSocio) {
+          const primeira = obterPrimeiraCompetenciaPaga(historico);
+          if (primeira) primeiraCompetenciaPagaPorSocio.set(idSocio, primeira);
+        }
+        for (const mensalidade of mensalidades) {
+          const idSocio = String(mensalidade.socio_id || "");
+          const socio = registros.find((item) => String(item.id || "") === idSocio);
+          if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(
+            socio?.data_associacao,
+            mensalidade.competencia,
+            mensalidade.data_vencimento,
+            socio?.dia_vencimento,
+            primeiraCompetenciaPagaPorSocio.get(idSocio),
+          )) {
+            sociosComHistorico.add(idSocio);
+          }
+        }
+        const atrasosFallback = agruparAtrasos(
+          mensalidades,
+          hoje,
+          new Map(registros.map((s) => [String(s.id || ""), s])),
+          primeiraCompetenciaPagaPorSocio,
+        );
+        for (const [idSocio, competencias] of atrasosFallback) {
+          mesesAtrasoPorSocio.set(idSocio, competencias.size);
         }
       }
-      const primeiraCompetenciaPagaPorSocio = new Map<string, string>();
-      for (const [idSocio, historico] of mensalidadesPorSocio) {
-        const primeira = obterPrimeiraCompetenciaPaga(historico);
-        if (primeira) primeiraCompetenciaPagaPorSocio.set(idSocio, primeira);
-      }
-      for (const mensalidade of mensalidades) {
-        const idSocio = String(mensalidade.socio_id || "");
-        const socio = registros.find((item) => String(item.id || "") === idSocio);
-        if (idSocio && !mensalidadeRegistroAnteriorAAssociacao(
-          socio?.data_associacao,
-          mensalidade.competencia,
-          mensalidade.data_vencimento,
-          socio?.dia_vencimento,
-          primeiraCompetenciaPagaPorSocio.get(idSocio),
-        )) {
-          sociosComHistorico.add(idSocio);
-        }
-      }
-      atrasos = agruparAtrasos(
-        mensalidades,
-        hoje,
-        new Map(registros.map((s) => [String(s.id || ""), s])),
-        primeiraCompetenciaPagaPorSocio,
-      );
     }
 
     const socioPorMatricula = new Map(
@@ -220,7 +259,7 @@ export async function GET(request: Request) {
         const responsavelId = socio.responsavel_id || titularPorMatricula?.id || null;
         const herdaTitular = ehConjugeFamiliar || (Boolean(responsavelId) && socio.possui_mensalidade !== true);
         const alvo = String(herdaTitular ? responsavelId : socio.id);
-        const meses = atrasos.get(alvo)?.size || 0;
+        const meses = mesesAtrasoPorSocio.get(alvo) || 0;
         resultado.financeiro_status = sociosComHistorico.has(alvo)
           ? classificarStatusFinanceiroCarteirinha(meses, politica)
           : "sem_lancamentos";
