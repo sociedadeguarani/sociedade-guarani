@@ -209,6 +209,7 @@ export default function TemporadasPage() {
   const [responsavelCpf, setResponsavelCpf] = useState("");
   const [responsavelTelefone, setResponsavelTelefone] = useState("");
   const [responsavelEmail, setResponsavelEmail] = useState("");
+  const [validadeExameIndividual, setValidadeExameIndividual] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [parcelas, setParcelas] = useState<ParcelaForm[]>([]);
 
@@ -314,6 +315,7 @@ export default function TemporadasPage() {
     setResponsavelCpf("");
     setResponsavelTelefone("");
     setResponsavelEmail("");
+    setValidadeExameIndividual("");
     setInicio(hoje);
     setFim(fimPadrao);
     setValor("1100");
@@ -332,6 +334,7 @@ export default function TemporadasPage() {
   function abrirEdicaoTemporada(t: Temporada) {
     setModoCadastro("editar");
     setTemporadaEditando(t);
+    setValidadeExameIndividual(String((t.participantes || []).find((p) => p.papel === "titular")?.exame_medico_validade || "").slice(0, 10));
     setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p) => p.id).map((p) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
     setTipo(t.tipo);
     setResponsavelNome(t.responsavel_nome || "");
@@ -633,6 +636,7 @@ export default function TemporadasPage() {
           responsavel_telefone: responsavelTelefone.trim() || null,
           responsavel_email: responsavelEmail.trim() || null,
           tipo,
+          exame_medico_validade: tipo === "temporada_individual" ? validadeExameIndividual || null : null,
           inicio,
           fim,
           valor_total: total,
@@ -981,6 +985,19 @@ export default function TemporadasPage() {
                   );
                 })()}
               </div>
+
+              {tipo === "temporada_individual" && (
+                <label className="md:col-span-2 rounded-xl border border-[#f2d4bd] bg-[#fff8f2] p-3">
+                  <span className="mb-1.5 block text-xs font-bold uppercase text-[#8d430d]">Validade do exame médico do titular</span>
+                  <input
+                    type="date"
+                    value={validadeExameIndividual}
+                    onChange={(e) => setValidadeExameIndividual(e.target.value)}
+                    className="w-full rounded-xl border border-[#e8b58e] bg-white px-3 py-3 text-sm"
+                  />
+                  <span className="mt-1 block text-xs text-[#7b6b60]">Informe a data de validade do exame para a temporada individual.</span>
+                </label>
+              )}
 
               <div>
                 <span className="mb-1.5 block text-xs font-bold uppercase text-[#718078]">Tipo</span>
