@@ -109,21 +109,15 @@ async function autenticar(request: NextRequest) {
 }
 
 async function proximoCodigo(db: AdminDb) {
-  const { data, error } = await db
-    .from("temporadas")
-    .select("codigo")
-    .like("codigo", "TE%");
-
-  if (error) throw error;
-
-  let maior = 0;
-  for (const row of data || []) {
-    const match = String(row.codigo || "").match(/^TE(\d{4,})A$/i);
-    if (match) maior = Math.max(maior, Number(match[1]));
+  // A sequência no PostgreSQL reserva números atomicamente e evita códigos
+  // repetidos mesmo quando duas temporadas são criadas ao mesmo tempo.
+  const { data, error } = await db.rpc("proximo_codigo_temporada");
+  if (error) throw new Error(`Não foi possível gerar um código exclusivo para a temporada: ${error.message}`);
+  if (typeof data !== "string" || !/^TE\\d{4,}A$/i.test(data)) {
+    throw new Error("O banco retornou um código de temporada inválido.");
   }
-  return `TE${String(maior + 1).padStart(4, "0")}A`;
+  return data;
 }
-
 async function garantirTitularParticipante(db: AdminDb, temporada: TemporadaRegistro) {
   const nome = String(temporada.responsavel_nome || "").trim();
   if (!nome) return null;
