@@ -483,7 +483,21 @@ export async function POST(request: NextRequest) {
 
       try {
         // A temporada é independente de Sócios. O responsável fica como titular.
-        await garantirTitularParticipante(auth.db, temporada);
+        const titularCriado = await garantirTitularParticipante(auth.db, temporada);
+        const validadeExame = body.exame_medico_validade
+          ? String(body.exame_medico_validade).slice(0, 10)
+          : null;
+        if (validadeExame && !/^\\d{4}-\\d{2}-\\d{2}$/.test(validadeExame)) {
+          throw new Error("Data de validade do exame médico inválida.");
+        }
+        if (titularCriado?.id) {
+          const { error: erroExame } = await auth.db
+            .from("temporadas_participantes")
+            .update({ exame_medico_validade: validadeExame })
+            .eq("id", titularCriado.id)
+            .eq("temporada_id", temporada.id);
+          if (erroExame) throw erroExame;
+        }
 
         const { data: parcelasCriadas, error: erroParcelas } = await auth.db
           .from("temporadas_parcelas")
