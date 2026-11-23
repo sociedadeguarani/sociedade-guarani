@@ -172,9 +172,18 @@ export default function UsuariosPage() {
           <h3 className="text-sm font-extrabold text-[#003d2b]">Telas que o usuário pode visualizar</h3>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{PERMISSOES_TELAS.map(item)}</div>
         </div>
+        <div className="mt-4 rounded-xl border border-[#b7d8c7] bg-[#f2faf5] p-3">
+          <h3 className="text-sm font-extrabold text-[#003d2b]">Permissão para localizar sócios nos Convites</h3>
+          <p className="mt-1 text-xs text-gray-600">
+            Ative esta opção para o funcionário conseguir pesquisar e selecionar titulares e dependentes ao cadastrar um convite. Ela é independente da permissão de visualizar a tela Convites.
+          </p>
+          <div className="mt-2">
+            {item(["socios.consultar", "Consultar e pesquisar sócios para vincular aos convites"])}
+          </div>
+        </div>
         <div className="mt-4">
-          <h3 className="text-sm font-extrabold text-[#003d2b]">Ações e dados permitidos</h3>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">{PERMISSOES_ACOES.map(item)}</div>
+          <h3 className="text-sm font-extrabold text-[#003d2b]">Outras ações e dados permitidos</h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">{PERMISSOES_ACOES.filter(([chave]) => chave !== "socios.consultar").map(item)}</div>
         </div>
         {master && <p className="mt-3 text-xs text-gray-500">O Administrador Master tem acesso total e não pode ter suas permissões reduzidas por esta tela.</p>}
         <p className="mt-3 text-xs text-gray-500">O módulo Usuários fica exclusivo do Administrador Master. Para alterar as permissões de outra pessoa, use a opção Editar acesso na lista.</p>
