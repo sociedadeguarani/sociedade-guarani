@@ -988,7 +988,7 @@ export default function TemporadasPage() {
                 })()}
               </div>
 
-              {tipo === "temporada_individual" && (
+              {modoCadastro === "novo" && tipo === "temporada_individual" && (
                 <label className="md:col-span-2 rounded-xl border border-[#f2d4bd] bg-[#fff8f2] p-3">
                   <span className="mb-1.5 block text-xs font-bold uppercase text-[#8d430d]">Validade do exame médico do titular</span>
                   <input
