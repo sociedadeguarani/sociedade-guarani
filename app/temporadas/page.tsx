@@ -332,6 +332,7 @@ export default function TemporadasPage() {
   function abrirEdicaoTemporada(t: Temporada) {
     setModoCadastro("editar");
     setTemporadaEditando(t);
+    setValidadeExameRascunho(Object.fromEntries((t.participantes || []).filter((p) => p.id).map((p) => [String(p.id), String(p.exame_medico_validade || "").slice(0, 10)])));
     setTipo(t.tipo);
     setResponsavelNome(t.responsavel_nome || "");
     setResponsavelCpf(t.responsavel_cpf || "");
@@ -457,8 +458,9 @@ export default function TemporadasPage() {
     }
   }
 
-  async function salvarValidadeExame(participanteId: string, validade: string) {
-    if (!abrirParticipantes) return;
+  async function salvarValidadeExame(participanteId: string, validade: string, temporadaAlvo?: Temporada) {
+    const temporada = temporadaAlvo || abrirParticipantes;
+    if (!temporada) return;
     setSalvando(true);
     setMensagem("");
     try {
@@ -468,7 +470,7 @@ export default function TemporadasPage() {
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           acao: "atualizar_exame_participante",
-          temporada_id: abrirParticipantes.id,
+          temporada_id: temporada.id,
           participante_id: participanteId,
           exame_medico_validade: validade || null,
         }),
@@ -477,12 +479,13 @@ export default function TemporadasPage() {
       if (!resposta.ok) throw new Error(resultado?.error || "Não foi possível salvar a validade do exame.");
 
       const validadeSalva = String(resultado?.participante?.exame_medico_validade || "").slice(0, 10);
-      setAbrirParticipantes((atual) => atual && atual.id === abrirParticipantes.id ? {
-        ...atual,
-        participantes: (atual.participantes || []).map((p) => String(p.id || "") === participanteId
-          ? { ...p, exame_medico_validade: validadeSalva || null }
-          : p),
-      } : atual);
+      const atualizarParticipantes = (item: Temporada) => item.id === temporada.id
+        ? { ...item, participantes: (item.participantes || []).map((p) => String(p.id || "") === participanteId ? { ...p, exame_medico_validade: validadeSalva || null } : p) }
+        : item;
+      setTemporadas((atual) => atual.map(atualizarParticipantes));
+      setTemporadaEditando((atual) => atual ? atualizarParticipantes(atual) : atual);
+      setAbrirParticipantes((atual) => atual ? atualizarParticipantes(atual) : atual);
+      setAbrirCarteirinhas((atual) => atual ? atualizarParticipantes(atual) : atual);
       setValidadeExameRascunho((atual) => ({ ...atual, [participanteId]: validadeSalva }));
       setMensagem("Validade do exame médico salva com sucesso.");
     } catch (e) {
@@ -956,6 +959,25 @@ export default function TemporadasPage() {
                         ) : <p className="mt-2 text-xs font-semibold text-red-700">Registro do titular não encontrado nesta temporada. Atualize a lista e tente novamente.</p>}
                       </div>
                     </div>
+                    {titular?.id && (
+                      <div className="min-w-[220px] flex-1">
+                        <label className="block text-xs font-bold text-[#718078]">Validade do exame médico
+                          <input
+                            type="date"
+                            value={validadeExameRascunho[titular.id] ?? titular.exame_medico_validade ?? ""}
+                            disabled={salvando}
+                            onChange={(e) => setValidadeExameRascunho((atual) => ({ ...atual, [titular.id!]: e.target.value }))}
+                            className="mt-1 block w-full rounded-lg border border-[#d5e0da] px-3 py-2 text-sm text-[#17382c]"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={salvando}
+                          onClick={() => void salvarValidadeExame(titular.id!, validadeExameRascunho[titular.id!] ?? titular.exame_medico_validade ?? "", temporadaEditando!)}
+                          className="mt-2 rounded-lg bg-[#006044] px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                        >{salvando ? "Salvando..." : "Salvar exame médico"}</button>
+                      </div>
+                    )}
                   );
                 })()}
               </div>
