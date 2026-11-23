@@ -946,6 +946,7 @@ export default function TemporadasPage() {
                 {modoCadastro === "editar" && tipo === "temporada_individual" && (() => {
                   const titular = (temporadaEditando?.participantes || []).find((p) => p.papel === "titular");
                   return (
+                    <>
                     <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#f2d4bd] bg-white/80 p-3">
                       <div className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-[#ead8ca] bg-[#fff3e8]">
                         {titular?.foto_url ? (
@@ -982,6 +983,7 @@ export default function TemporadasPage() {
                         >{salvando ? "Salvando..." : "Salvar exame médico"}</button>
                       </div>
                     )}
+                    </>
                   );
                 })()}
               </div>
