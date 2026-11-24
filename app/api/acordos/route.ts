@@ -10,6 +10,7 @@ const erro = (message: string, status = 400) => NextResponse.json({ error: messa
 
 type ParcelaInput = { valor: number; data_vencimento: string };
 type OutraDividaInput = { descricao: string; valor: number };
+type CompetenciaFuturaInput = { competencia: string; valor: number; data_vencimento: string };
 
 export async function GET(request: Request) {
   const auth = await exigirAdministrador(request);
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const socioId = String(body.socio_id || "");
     const ids = Array.isArray(body.mensalidade_ids) ? [...new Set(body.mensalidade_ids.map(String))] : [];
-    const competenciasFuturas = Array.isArray(body.competencias_futuras) ? body.competencias_futuras : [];
+    const competenciasFuturas: CompetenciaFuturaInput[] = Array.isArray(body.competencias_futuras) ? body.competencias_futuras as CompetenciaFuturaInput[] : [];
     const outrasDividas = Array.isArray(body.outras_dividas) ? (body.outras_dividas as OutraDividaInput[]).filter(d => String(d.descricao || "").trim() && Number(d.valor) > 0) : [];
     const entrada = Number(body.valor_entrada || 0);
     const total = Number(body.valor_total || 0);
@@ -61,12 +62,11 @@ export async function POST(request: Request) {
     const contaEntrada = String(body.conta_entrada_id || "");
     const formaParcelas = String(body.forma_parcelas || "boleto");
     const contaParcelas = String(body.conta_parcelas_id || "");
-    const entradaRecebida = entrada > 0;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
     const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
     if (!socioId || (ids.length === 0 && competenciasFuturas.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as dívidas e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
-    if (competenciasFuturas.some((c: any) => String(c.competencia) !== "2026-12-01" || !Number.isFinite(Number(c.valor)) || Number(c.valor) <= 0 || !dataValida(String(c.data_vencimento)))) return erro("A competência futura deve ser dezembro/2026, com valor e vencimento válidos.");
+    if (competenciasFuturas.some((c) => String(c.competencia) !== "2026-12-01" || !Number.isFinite(Number(c.valor)) || Number(c.valor) <= 0 || !dataValida(String(c.data_vencimento)))) return erro("A competência futura deve ser dezembro/2026, com valor e vencimento válidos.");
     if (competenciasFuturas.length > 1) return erro("Dezembro/2026 pode ser incluído somente uma vez no acordo.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
     if (entrada > 0 && (!contaEntrada || !FORMAS_ENTRADA.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
         if (linkErr) throw linkErr;
       }
       if (competenciasFuturas.length) {
-        const { error: competenciaErr } = await db.from("acordos_mensalidades_competencias").insert(competenciasFuturas.map((c: any) => ({
+        const { error: competenciaErr } = await db.from("acordos_mensalidades_competencias").insert(competenciasFuturas.map((c) => ({
           acordo_id: acordo.id, socio_id: socioId, competencia: "2026-12-01",
           valor_original: Number(c.valor), data_vencimento: String(c.data_vencimento), ativo: true,
         })));
