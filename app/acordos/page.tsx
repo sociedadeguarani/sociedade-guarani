@@ -115,6 +115,7 @@ export default function AcordosPage() {
   const totalOriginal = escolhidas.reduce((s, m) => s + Number(m.valor || 0), 0);
   const totalOutrasDividas = outrasDividas.reduce((s, d) => s + Number(d.valor || 0), 0);
   const totalSelecionado = totalOriginal + totalOutrasDividas;
+  const totalComDezembro = totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0);
   const socioSelecionadoId = escolhidas[0]?.socio_id || socioManualId;
 
   function alternar(id: string) {
@@ -123,7 +124,7 @@ export default function AcordosPage() {
   function atualizarQuantidade(valor: string) {
     const n = Math.min(24, Math.max(1, Number(valor) || 1));
     setQuantidade(String(n));
-    const saldo = Math.max(0, Number(valorTotal || totalSelecionado) - Number(entrada || 0));
+    const saldo = Math.max(0, Number(valorTotal || totalComDezembro) - Number(entrada || 0));
     const base = Math.floor((saldo / n) * 100) / 100;
     setParcelas(Array.from({ length: n }, (_, i) => ({
       valor: (i === n - 1 ? saldo - base * (n - 1) : base).toFixed(2),
@@ -140,7 +141,6 @@ export default function AcordosPage() {
 
   async function salvar() {
     setErro(""); setMensagem("");
-    const totalComDezembro = totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0);
     const total = Number(valorTotal || totalComDezembro);
     if (!socioSelecionadoId) { setErro("Selecione o sócio do acordo."); return; }
     if (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d => d.descricao.trim() && Number(d.valor) > 0)) { setErro("Selecione mensalidades, dezembro/2026 ou informe ao menos outra dívida."); return; }
@@ -194,12 +194,12 @@ export default function AcordosPage() {
           {carregando ? <p className="py-8 text-center text-sm text-slate-500">Carregando mensalidades...</p> : !socioManualId ? <p className="py-8 text-center text-sm text-slate-500">Pesquise e selecione um sócio para ver as mensalidades dele.</p> : visiveis.length === 0 && !dezembro2026 ? <p className="py-8 text-center text-sm text-slate-500">Nenhuma mensalidade em aberto disponível para acordo.</p> :
           <div className="max-h-[360px] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3"></th><th className="p-3">Sócio</th><th className="p-3">Competência</th><th className="p-3">Vencimento</th><th className="p-3 text-right">Valor</th></tr></thead><tbody>{visiveis.map(m=><tr key={m.id} className="border-t hover:bg-slate-50"><td className="p-3"><input type="checkbox" checked={selecionadas.includes(m.id)} disabled={Boolean(socioSelecionadoId && socioSelecionadoId !== m.socio_id)} onChange={()=>alternar(m.id)}/></td><td className="p-3 font-medium">{m.socio?.nome || "Sócio não encontrado"}<div className="text-xs text-slate-500">{m.socio?.matricula || ""}</div></td><td className="p-3">{dataBr(m.competencia).slice(3)}</td><td className="p-3">{dataBr(m.data_vencimento)}</td><td className="p-3 text-right">{moeda(m.valor)}</td></tr>)}</tbody></table></div>}
           {socioManualId && (carregandoDezembro ? <p className="mt-3 text-sm text-slate-500">Calculando competência de dezembro/2026...</p> : dezembro2026 ? <label className="mt-3 flex items-center gap-3 rounded-lg border border-dashed border-emerald-300 bg-emerald-50 p-3 text-sm"><input type="checkbox" checked={dezembroSelecionado} onChange={e=>setDezembroSelecionado(e.target.checked)}/><span className="flex-1"><b>Dezembro/2026</b><span className="block text-xs text-slate-600">Competência ainda não gerada • Vencimento {dataBr(dezembro2026.data_vencimento)}</span></span><b>{moeda(dezembro2026.valor)}</b></label> : null)}
-          <div className="mt-3 text-sm text-slate-600">Mensalidades: <b>{escolhidas.length + (dezembroSelecionado ? 1 : 0)}</b> • Total selecionado: <b>{moeda(totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0))}</b></div>
+          <div className="mt-3 text-sm text-slate-600">Mensalidades: <b>{escolhidas.length + (dezembroSelecionado ? 1 : 0)}</b> • Total selecionado: <b>{moeda(totalComDezembro)}</b></div>
         </section>
         <section className="rounded-xl border bg-white p-4 shadow-sm">
           <h2 className="mb-4 font-bold text-slate-800">2. Condições do acordo</h2>
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="text-sm font-medium">Valor negociado total<input type="number" min="0.01" step="0.01" value={valorTotal || (totalSelecionado ? totalSelecionado.toFixed(2) : "")} onChange={e=>setValorTotal(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
+            <label className="text-sm font-medium">Valor negociado total<input type="number" min="0.01" step="0.01" value={valorTotal || (totalComDezembro ? totalComDezembro.toFixed(2) : "")} onChange={e=>setValorTotal(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
             <label className="text-sm font-medium">Entrada<input type="number" min="0" step="1" value={entrada} onChange={e=>atualizarEntrada(String(Math.max(0, Math.trunc(Number(e.target.value || 0)))))} inputMode="numeric" className="mt-1 w-full rounded-lg border p-2"/></label>
             <label className="text-sm font-medium">Quantidade de parcelas<input type="number" min="1" max="24" value={quantidade} onChange={e=>atualizarQuantidade(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
           </div>
@@ -211,7 +211,7 @@ export default function AcordosPage() {
             {Number(entrada) > 0 && <label className="mt-3 block max-w-xs text-xs font-semibold">Data do recebimento<input type="date" value={dataEntrada} onChange={e=>setDataEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"/></label>}{Number(entrada) > 0 && <div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-semibold">Conta de recebimento<select value={contaEntrada} onChange={e=>setContaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"><option value="">Selecione</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco? ` — ${c.banco}`:""}</option>)}</select></label><label className="text-xs font-semibold">Forma de pagamento<select value={formaEntrada} onChange={e=>setFormaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm">{[["pix","PIX"],["cheque","Cheque"],["debito_em_conta","Débito"],["dinheiro","Dinheiro"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>}
           </div>
           <label className="mt-4 block text-sm font-medium">Observações<textarea value={observacoes} onChange={e=>setObservacoes(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border p-2"/></label>
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalSelecionado))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalComDezembro))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
         </section>
       </main>
     </div>
