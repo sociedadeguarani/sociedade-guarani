@@ -192,44 +192,72 @@ async function verificarMensalidadesAtrasadas(
     .select("id,valor,data_vencimento,competencia,situacao")
     .eq("socio_id", socioId)
     .lt("data_vencimento", hoje);
-
   if (error) throw error;
 
+  // Mensalidades renegociadas deixam de compor a dívida original enquanto
+  // o acordo estiver ativo. O saldo passa a ser controlado pelas parcelas.
+  const [vinculosResult, acordosResult] = await Promise.all([
+    supabase.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
+    supabase.from("acordos_mensalidades").select("id").eq("socio_id", socioId).eq("situacao", "ativo"),
+  ]);
+  if (vinculosResult.error) throw vinculosResult.error;
+  if (acordosResult.error) throw acordosResult.error;
+  const acordosAtivos = new Set((acordosResult.data || []).map((a) => String(a.id)));
+  const mensalidadesEmAcordo = new Set((vinculosResult.data || [])
+    .filter((v) => acordosAtivos.has(String(v.acordo_id)))
+    .map((v) => String(v.mensalidade_id)));
+
   const itens = (data || []).filter((m: LinhaMensalidadeAcesso) =>
+    !mensalidadesEmAcordo.has(String(m.id)) &&
     !mensalidadeRegistroAnteriorAAssociacao(dataAssociacao, m.competencia, m.data_vencimento, diaVencimento) &&
     !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
-      String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
     )
   );
 
-  // Conta competências distintas em vez de contar linhas: se houver uma
-  // segunda linha acidental para o mesmo mês, ela não antecipa o bloqueio.
+  const parcelasResult = acordosAtivos.size
+    ? await supabase.from("acordos_mensalidades_parcelas")
+        .select("id,valor,data_vencimento,situacao")
+        .in("acordo_id", [...acordosAtivos])
+        .eq("situacao", "em_aberto")
+        .lt("data_vencimento", hoje)
+    : { data: [], error: null };
+  if (parcelasResult.error) throw parcelasResult.error;
+  const parcelasAcordoAtrasadas = parcelasResult.data || [];
+
+  // Mensalidades originais seguem a política por competências. Para acordo,
+  // uma única parcela vencida e não paga bloqueia a entrada imediatamente.
   const competencias = new Set<string>();
   for (const mensalidade of itens) {
     const referencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
-    if (/^\d{4}-\d{2}$/.test(referencia)) competencias.add(referencia);
+    if (/^\\d{4}-\\d{2}$/.test(referencia)) competencias.add(referencia);
   }
 
-  const valorTotal = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
+  const valorMensalidades = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
+  const valorParcelasAcordo = parcelasAcordoAtrasadas.reduce((soma, p) => soma + Number(p.valor || 0), 0);
   const quantidade = competencias.size;
   const politica = await carregarPoliticaInadimplencia(supabase);
-  const bloqueiaEntrada = quantidade >= politica.meses_bloqueio;
-  const precisaAlerta = quantidade >= politica.meses_atencao;
+  const bloqueiaPorAcordo = parcelasAcordoAtrasadas.length > 0;
+  const bloqueiaEntrada = quantidade >= politica.meses_bloqueio || bloqueiaPorAcordo;
+  const precisaAlerta = quantidade >= politica.meses_atencao || bloqueiaPorAcordo;
 
   return {
-    // "atrasado" sinaliza que há saldo pendente para exibição; não significa
-    // por si só que a entrada está bloqueada.
-    atrasado: quantidade > 0,
+    atrasado: quantidade > 0 || bloqueiaPorAcordo,
     bloqueiaEntrada,
     precisaAlerta,
-    criticoTresMesesOuMais: precisaAlerta, // compatibilidade com consumidores existentes
-    quantidade,
-    valorTotal,
+    criticoTresMesesOuMais: precisaAlerta,
+    quantidade: quantidade + parcelasAcordoAtrasadas.length,
+    quantidadeMensalidades: quantidade,
+    parcelasAcordoAtrasadas: parcelasAcordoAtrasadas.length,
+    valorTotal: valorMensalidades + valorParcelasAcordo,
     mesesAtencao: politica.meses_atencao,
     mesesBloqueio: politica.meses_bloqueio,
-    status: situacaoMensalidadePorQuantidade(quantidade, politica),
+    status: bloqueiaPorAcordo
+      ? { texto: "Crítico — parcela de acordo vencida; entrada bloqueada", cor: "vermelho" }
+      : situacaoMensalidadePorQuantidade(quantidade, politica),
   };
 }
+
 async function avisarAdministradoresInadimplencia(
   supabase: ReturnType<typeof getServiceClient>,
   socio: { nome: string; matricula: number | string | null },
