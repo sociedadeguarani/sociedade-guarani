@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     const contaEntrada = String(body.conta_entrada_id || "");
     const entradaRecebida = body.entrada_recebida === true;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
-    const dataValida = (v: string) => /^\\d{4}-\\d{2}-\\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+    const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
     if (!socioId || ids.length === 0 || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
@@ -140,7 +140,7 @@ export async function PATCH(request: Request) {
     const contaId = String(body.conta_bancaria_id || "");
     const forma = String(body.forma_pagamento || "");
     const data = String(body.data_pagamento || hojeBrasil());
-    if (!parcelaId || !contaId || !FORMAS.has(forma) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(data)) return erro("Informe parcela, conta, forma e data válidas.");
+    if (!parcelaId || !contaId || !FORMAS.has(forma) || !/^\d{4}-\d{2}-\d{2}$/.test(data)) return erro("Informe parcela, conta, forma e data válidas.");
     const { data: conta, error: contaErr } = await db.from("contas_bancarias").select("id,ativo").eq("id", contaId).maybeSingle();
     if (contaErr) throw contaErr;
     if (!conta || conta.ativo === false) return erro("Conta de recebimento inválida ou inativa.");
