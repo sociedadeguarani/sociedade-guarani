@@ -786,9 +786,16 @@ export async function POST(request: Request) {
       const idsExistentes = new Set<string>(
         (existentes || []).map((x: { socio_id: string }) => String(x.socio_id))
       );
+      const { data: reservadas, error: erroReservadas } = await db
+        .from("acordos_mensalidades_competencias")
+        .select("socio_id")
+        .eq("competencia", competencia)
+        .eq("ativo", true);
+      if (erroReservadas) throw erroReservadas;
+      const idsReservados = new Set((reservadas || []).map((x: { socio_id: string }) => String(x.socio_id)));
 
       const novos: ItemPreviaMensalidade[] = cobraveis
-        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)))
+        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)) && !idsReservados.has(String(s.id)))
         .map((s: SocioMensalidadeRow) => {
           const config = escolherConfiguracao(
             configuracoes || [],
@@ -1005,6 +1012,17 @@ export async function POST(request: Request) {
           `${String(registro.competencia).slice(0, 10)}|${String(registro.socio_id)}`
         )
       );
+      const { data: competenciasReservadas, error: erroCompetenciasReservadas } = await db
+        .from("acordos_mensalidades_competencias")
+        .select("socio_id,competencia")
+        .eq("ativo", true)
+        .in("competencia", competencias);
+      if (erroCompetenciasReservadas) throw erroCompetenciasReservadas;
+      const reservadasPorAcordo = new Set(
+        (competenciasReservadas || []).map((item: { socio_id: string; competencia: string }) =>
+          `${String(item.competencia).slice(0, 10)}|${String(item.socio_id)}`
+        )
+      );
 
       // A elegibilidade por data de associação é avaliada separadamente para
       // cada competência, inclusive quando o lote contém vários meses.
@@ -1105,7 +1123,7 @@ export async function POST(request: Request) {
       for (const competencia of competencias) {
         const cobraveisDoMes = cobraveisPorCompetencia.get(competencia) || [];
         const novosDoMes = cobraveisDoMes
-          .filter((socio) => !existentes.has(`${competencia}|${String(socio.id)}`))
+          .filter((socio) => !existentes.has(`${competencia}|${String(socio.id)}`) && !reservadasPorAcordo.has(`${competencia}|${String(socio.id)}`))
           .map((socio) => {
             const config = configuracaoParaCompetencia(socio.tipo_socio, competencia);
             const valor = valorMensalidadeEfetivo(socio, config);

@@ -14,6 +14,7 @@ export const PERMISSOES_TELAS = [
   ["menu.dependentes", "Ver tela: Dependentes"],
   ["menu.mensalidades", "Ver tela: Mensalidades"],
   ["menu.temporadas", "Ver tela: Temporada"],
+  ["menu.acordos", "Ver tela: Acordos"],
   ["menu.financeiro", "Ver tela: Financeiro"],
   ["menu.inventario", "Ver tela: Inventário"],
   ["menu.acessos", "Ver tela: Acessos"],
