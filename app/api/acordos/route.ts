@@ -72,12 +72,16 @@ export async function POST(request: Request) {
     const { data: socio, error: socioErr } = await db.from("socios").select("id,nome,ativo").eq("id", socioId).maybeSingle();
     if (socioErr) throw socioErr;
     if (!socio || socio.ativo === false) return erro("Sócio não encontrado ou inativo.", 404);
-    const { data: selecionadas, error: mensalErr } = await db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("id", ids);
-    if (mensalErr) throw mensalErr;
-    if ((selecionadas || []).length !== ids.length || (selecionadas || []).some(m => m.socio_id !== socioId || !["em_aberto", "em_atraso"].includes(String(m.situacao)) || String(m.data_vencimento || "") >= hojeBrasil())) return erro("Uma ou mais mensalidades não estão disponíveis para acordo. Atualize a tela.", 409);
-    const { data: vinculos, error: vincErr } = await db.from("acordos_mensalidades_itens").select("mensalidade_id").eq("ativo", true).in("mensalidade_id", ids);
-    if (vincErr) throw vincErr;
-    if ((vinculos || []).length) return erro("Uma ou mais mensalidades já pertencem a um acordo ativo.", 409);
+    let selecionadas: Array<{id:string;socio_id:string;dependente_id:string|null;competencia:string;valor:number;total_cobrado:number|null;data_vencimento:string;situacao:string}> = [];
+    if (ids.length) {
+      const { data, error: mensalErr } = await db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("id", ids);
+      if (mensalErr) throw mensalErr;
+      selecionadas = data || [];
+      if (selecionadas.length !== ids.length || selecionadas.some(m => m.socio_id !== socioId || !["em_aberto", "em_atraso"].includes(String(m.situacao)) || String(m.data_vencimento || "") >= hojeBrasil())) return erro("Uma ou mais mensalidades não estão disponíveis para acordo. Atualize a tela.", 409);
+      const { data: vinculos, error: vincErr } = await db.from("acordos_mensalidades_itens").select("mensalidade_id").eq("ativo", true).in("mensalidade_id", ids);
+      if (vincErr) throw vincErr;
+      if ((vinculos || []).length) return erro("Uma ou mais mensalidades já pertencem a um acordo ativo.", 409);
+    }
     const { data: acordo, error: acordoErr } = await db.from("acordos_mensalidades").insert({
       socio_id: socioId, valor_total: total, valor_entrada: entrada,
       quantidade_parcelas: parcelas.length, observacoes: String(body.observacoes || "").trim() || null,
@@ -89,8 +93,10 @@ export async function POST(request: Request) {
         acordo_id: acordo.id, mensalidade_id: m.id,
         valor_original: Number(m.total_cobrado ?? m.valor ?? 0), ativo: true,
       }));
-      const { error: linkErr } = await db.from("acordos_mensalidades_itens").insert(vinculosInsert);
-      if (linkErr) throw linkErr;
+      if (vinculosInsert.length) {
+        const { error: linkErr } = await db.from("acordos_mensalidades_itens").insert(vinculosInsert);
+        if (linkErr) throw linkErr;
+      }
       if (outrasDividas.length) {
         const { error: outrasErr } = await db.from("acordos_mensalidades_outros_itens").insert(outrasDividas.map(d => ({ acordo_id: acordo.id, descricao: String(d.descricao).trim(), valor: Number(d.valor) })));
         if (outrasErr) throw outrasErr;
