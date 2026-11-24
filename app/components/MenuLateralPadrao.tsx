@@ -124,6 +124,13 @@ const ITENS_MENU: readonly ItemMenu[] = [
     perfis: ["administrador", "administrador_master"],
   },
   {
+    nome: "Acordos",
+    permissao: "menu.acordos",
+    rota: "/acordos",
+    icone: FileText,
+    perfis: ["administrador", "administrador_master"],
+  },
+  {
     nome: "Venda de Títulos",
     rota: "/venda-titulos",
     icone: FileText,
