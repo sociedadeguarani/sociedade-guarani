@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const db = getServiceClient();
     const [socios, mensalidades, contas, acordos] = await Promise.all([
       db.from("socios").select("id,nome,matricula,cpf,ativo,possui_mensalidade,valor_mensalidade").eq("ativo", true).order("nome"),
-      db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("situacao", ["em_aberto", "em_atraso"]).lt("data_vencimento", hojeBrasil()).order("data_vencimento"),
+      db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("situacao", ["em_aberto", "em_atraso"]).order("data_vencimento"),
       db.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome"),
       db.from("acordos_mensalidades").select("id,socio_id,situacao,valor_total,valor_entrada,quantidade_parcelas,data_acordo").in("situacao", ["ativo", "concluido"]).order("created_at", { ascending: false }),
     ]);
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const entradaRecebida = entrada > 0;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
     const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
-    if (!socioId || (ids.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
+    if (!socioId || (ids.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as dívidas e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
     if (entrada > 0 && (!contaEntrada || !FORMAS_ENTRADA.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
       const { data, error: mensalErr } = await db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("id", ids);
       if (mensalErr) throw mensalErr;
       selecionadas = data || [];
-      if (selecionadas.length !== ids.length || selecionadas.some(m => m.socio_id !== socioId || !["em_aberto", "em_atraso"].includes(String(m.situacao)) || String(m.data_vencimento || "") >= hojeBrasil())) return erro("Uma ou mais mensalidades não estão disponíveis para acordo. Atualize a tela.", 409);
+      if (selecionadas.length !== ids.length || selecionadas.some(m => m.socio_id !== socioId || !["em_aberto", "em_atraso"].includes(String(m.situacao)))) return erro("Uma ou mais mensalidades não estão disponíveis para acordo. Atualize a tela.", 409);
       const { data: vinculos, error: vincErr } = await db.from("acordos_mensalidades_itens").select("mensalidade_id").eq("ativo", true).in("mensalidade_id", ids);
       if (vincErr) throw vincErr;
       if ((vinculos || []).length) return erro("Uma ou mais mensalidades já pertencem a um acordo ativo.", 409);
