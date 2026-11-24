@@ -8,6 +8,7 @@ const hojeBrasil = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/S
 const erro = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
 type ParcelaInput = { valor: number; data_vencimento: string };
+type OutraDividaInput = { descricao: string; valor: number };
 
 export async function GET(request: Request) {
   const auth = await exigirAdministrador(request);
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const socioId = String(body.socio_id || "");
     const ids = Array.isArray(body.mensalidade_ids) ? [...new Set(body.mensalidade_ids.map(String))] : [];
+    const outrasDividas = Array.isArray(body.outras_dividas) ? (body.outras_dividas as OutraDividaInput[]).filter(d => String(d.descricao || "").trim() && Number(d.valor) > 0) : [];
     const entrada = Number(body.valor_entrada || 0);
     const total = Number(body.valor_total || 0);
     const parcelas = Array.isArray(body.parcelas) ? (body.parcelas as ParcelaInput[]).filter(p => Number(p.valor) > 0) : [];
@@ -53,14 +55,14 @@ export async function POST(request: Request) {
     const contaEntrada = String(body.conta_entrada_id || "");
     const formaParcelas = "boleto";
     const contaParcelas = String(body.conta_parcelas_id || "");
-    const entradaRecebida = body.entrada_recebida === true;
+    const entradaRecebida = entrada > 0;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
     const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
-    if (!socioId || ids.length === 0 || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
+    if (!socioId || (ids.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
     if (entrada > 0 && (!contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
-    if (parcelas.length > 0 && (!contaParcelas || !FORMAS.has(formaParcelas))) return erro("Informe a conta e a forma de pagamento das parcelas.");
+    if (parcelas.length > 0 && (!contaParcelas || formaParcelas !== "boleto")) return erro("Informe a conta e a forma de pagamento das parcelas.");
     const contasNecessarias = [...new Set([...(entrada > 0 ? [contaEntrada] : []), ...(parcelas.length ? [contaParcelas] : [])])];
     if (contasNecessarias.length) {
       const { data: contasValidas, error: contasErr } = await db.from("contas_bancarias").select("id,ativo").in("id", contasNecessarias);
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
     const { data: acordo, error: acordoErr } = await db.from("acordos_mensalidades").insert({
       socio_id: socioId, valor_total: total, valor_entrada: entrada,
       quantidade_parcelas: parcelas.length, observacoes: String(body.observacoes || "").trim() || null,
-      situacao: entradaRecebida && entrada >= total ? "concluido" : "ativo", created_by: auth.usuario.id,
+      situacao: entrada >= total ? "concluido" : "ativo", created_by: auth.usuario.id,
     }).select("*").single();
     if (acordoErr) throw acordoErr;
     try {
@@ -89,6 +91,10 @@ export async function POST(request: Request) {
       }));
       const { error: linkErr } = await db.from("acordos_mensalidades_itens").insert(vinculosInsert);
       if (linkErr) throw linkErr;
+      if (outrasDividas.length) {
+        const { error: outrasErr } = await db.from("acordos_mensalidades_outros_itens").insert(outrasDividas.map(d => ({ acordo_id: acordo.id, descricao: String(d.descricao).trim(), valor: Number(d.valor) })));
+        if (outrasErr) throw outrasErr;
+      }
       const parcelasParaCriar = [
         ...(entrada > 0 && !entradaRecebida ? [{
           acordo_id: acordo.id, numero: 1, descricao: "Entrada",
@@ -106,7 +112,7 @@ export async function POST(request: Request) {
         const { error: parcErr } = await db.from("acordos_mensalidades_parcelas").insert(parcelasParaCriar);
         if (parcErr) throw parcErr;
       }
-      if (entradaRecebida) {
+      if (entrada > 0) {
         const { data: conta, error: contaErr } = await db.from("contas_bancarias").select("id,ativo").eq("id", contaEntrada).maybeSingle();
         if (contaErr) throw contaErr;
         if (!conta || conta.ativo === false) throw new Error("Conta de recebimento inválida ou inativa.");
@@ -130,6 +136,7 @@ export async function POST(request: Request) {
     } catch (e) {
       await db.from("movimentacoes_financeiras").delete().eq("origem_tipo", "acordo_mensalidades_entrada").eq("origem_id", acordo.id);
       await db.from("acordos_mensalidades_parcelas").delete().eq("acordo_id", acordo.id);
+      await db.from("acordos_mensalidades_outros_itens").delete().eq("acordo_id", acordo.id);
       await db.from("acordos_mensalidades_itens").delete().eq("acordo_id", acordo.id);
       await db.from("acordos_mensalidades").delete().eq("id", acordo.id);
       throw e;
