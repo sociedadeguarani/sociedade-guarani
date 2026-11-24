@@ -328,10 +328,19 @@ export async function POST(request: Request) {
       const { data: criados, error: erroInsert } = await db.from("convites").insert(linhas).select("*");
       if (erroInsert || !criados?.length) return NextResponse.json({ error: erroInsert?.message || "Não foi possível criar os convites." }, { status: 500 });
       const ids = criados.map((c: { id: string }) => c.id);
-      let convitesAtualizados = criados;
+      let atualizados = criados;
       let comprovanteUrl: string | null = null;
       if (arquivo instanceof File) {
-        let comprovanteUrl: string | null = null;
+        const { data: convite, error: erroConvite } = await db.from("convites").insert({
+      socio_id, dependente_id, nome_convidado: nome, documento_convidado: documento,
+      cidade_convidado: cidade, data_inicio: inicio, data_fim: fim, tipo, valor,
+      status: pagamento === "pix" ? "pendente" : "pago", forma_pagamento: pagamento,
+      comprovante_url: null, comprovante_enviado_em: null,
+      comprovante_status: pagamento === "pix" ? "pendente" : "aprovado", motivo_recusa: null,
+    }).select("*").single();
+    if (erroConvite || !convite) return NextResponse.json({ error: erroConvite?.message || "Não foi possível criar o convite." }, { status: 500 });
+
+    let comprovanteUrl: string | null = null;
     let comprovanteCaminho: string | null = null;
     let atualizado = convite;
     if (arquivo instanceof File) {
@@ -398,10 +407,10 @@ export async function POST(request: Request) {
     const comprovanteStatus = pagamento === "pix" ? "pendente" : "aprovado";
     const agora = new Date().toISOString();
     const { data: atualizado, error: ue } = await db.from("convites")
-      .update({ comprovante_url: pub.publicUrl, comprovante_enviado_em: agora, comprovante_status: comprovanteStatus })
+      .update({ comprovante_url: comprovanteUrl, comprovante_enviado_em: agora, comprovante_status: comprovanteStatus })
       .eq("id", convite.id).select("*").single();
     if (ue) {
-      await db.storage.from(BUCKET).remove([caminho]);
+      if (comprovanteCaminho) await db.storage.from(BUCKET).remove([comprovanteCaminho]);
       await db.from("convites").delete().eq("id", convite.id);
       return NextResponse.json({ error: ue.message }, { status: 500 });
     }
@@ -412,10 +421,10 @@ export async function POST(request: Request) {
         tipo: "entrada", categoria: "Convite", descricao: `Convite - ${nome}`, valor,
         data_movimentacao: dataHoje(), forma_pagamento: "dinheiro", origem_tipo: "convite",
         origem_id: convite.id, socio_id, dependente_id, comprovante_url: pub.publicUrl,
-        conciliado: false, data_conciliacao: null, observacoes: "Pagamento em dinheiro registrado pela administração. Foto do recibo anexada.",
+        conciliado: false, data_conciliacao: null, observacoes: comprovanteUrl ? "Pagamento em dinheiro registrado pela administração. Foto do recibo anexada." : "Pagamento em dinheiro registrado pela administração sem recibo anexado.",
       });
       if (me) {
-        if (comprovanteCaminho) await db.storage.from(BUCKET).remove([comprovanteCaminho]);
+        await db.storage.from(BUCKET).remove([caminho]);
         await db.from("convites").delete().eq("id", convite.id);
         return NextResponse.json({ error: `Não foi possível lançar o pagamento no financeiro: ${me.message}` }, { status: 500 });
       }
@@ -424,7 +433,7 @@ export async function POST(request: Request) {
 
     const { error: ne } = await db.from("notificacoes_admin").insert({
       tipo: "comprovante_pagamento", titulo: "Novo comprovante de convite aguardando aprovação",
-      mensagem: comprovanteUrl ? `Convite de ${nome} no valor de R$ ${valor.toFixed(2).replace(".", ",")} foi enviado para conferência.` : `Convite de ${nome} no valor de R$ ${valor.toFixed(2).replace(".", ",")} foi cadastrado sem comprovante. Aguardando envio para conferência.`,
+      mensagem: `Convite de ${nome} no valor de R$ ${valor.toFixed(2).replace(".", ",")} foi cadastrado sem comprovante ou enviado para conferência.`,
       origem_tipo: "convite", origem_id: convite.id, lida: false,
     });
     const conviteResposta = ehFuncionario
