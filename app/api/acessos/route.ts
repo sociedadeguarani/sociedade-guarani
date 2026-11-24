@@ -268,10 +268,11 @@ async function avisarAdministradoresInadimplencia(
   valorTotal: number,
   criadoPor: string,
   mesesAtencao: number,
-  mesesBloqueio: number
+  mesesBloqueio: number,
+  bloqueioPorAcordo = false
 ): Promise<boolean> {
   try {
-    const bloqueio = quantidade >= mesesBloqueio;
+    const bloqueio = bloqueioPorAcordo || quantidade >= mesesBloqueio;
     const matricula = String(socio.matricula || "—");
     const titulo = `${bloqueio ? "🔴" : "🟡"} Inadimplência na portaria — matrícula ${matricula}`;
 
@@ -286,9 +287,11 @@ async function avisarAdministradoresInadimplencia(
     if (erroBusca) throw erroBusca;
     if (existente) return true;
 
-    const faixa = bloqueio
-      ? `atingiu o limite de bloqueio (${mesesBloqueio} ou mais competências vencidas)`
-      : `está na faixa de atenção (${mesesAtencao} a ${mesesBloqueio - 1} competências vencidas; a entrada permanece liberada)`;
+    const faixa = bloqueioPorAcordo
+      ? "tem parcela de acordo vencida e não paga; a entrada foi bloqueada a partir do dia seguinte ao vencimento"
+      : bloqueio
+        ? `atingiu o limite de bloqueio (${mesesBloqueio} ou mais competências vencidas)`
+        : `está na faixa de atenção (${mesesAtencao} a ${mesesBloqueio - 1} competências vencidas; a entrada permanece liberada)`;
 
     const { error: erroInsert } = await supabase.from("avisos").insert({
       titulo,
@@ -985,7 +988,8 @@ export async function POST(request: Request) {
         inadimplenciaSocio.valorTotal,
         auth.usuario.id,
         inadimplenciaSocio.mesesAtencao,
-        inadimplenciaSocio.mesesBloqueio
+        inadimplenciaSocio.mesesBloqueio,
+        inadimplenciaSocio.parcelasAcordoAtrasadas > 0
       );
     }
 
