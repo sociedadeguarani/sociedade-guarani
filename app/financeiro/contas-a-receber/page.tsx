@@ -18,7 +18,7 @@ import MenuLateralPadrao from "../../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../../components/CabecalhoPadrao";
 
 type Conta = { id: string; nome: string; banco: string | null; ativo: boolean };
-type Origem = "temporada" | "titulo";
+type Origem = "temporada" | "titulo" | "acordo";
 type Parcela = {
   id: string;
   parcela_id: string;
@@ -186,7 +186,12 @@ export default function ContasAReceberPage() {
     setSalvando(true);
     setMensagem("");
     try {
-      if (parcelaSelecionada.origem === "temporada") {
+      if (parcelaSelecionada.origem === "acordo") {
+        await api("/api/acordos", { method: "PATCH", body: JSON.stringify({
+          parcela_id: parcelaSelecionada.parcela_id, conta_bancaria_id: contaPagamento,
+          forma_pagamento: formaPagamento, data_pagamento: dataPagamento,
+        }) });
+      } else if (parcelaSelecionada.origem === "temporada") {
         const form = new FormData();
         form.set("acao", "registrar_pagamento");
         form.set("temporada_id", parcelaSelecionada.contrato_id);
@@ -234,7 +239,7 @@ export default function ContasAReceberPage() {
             <button type="button" onClick={() => router.push("/financeiro")} className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#557166] hover:text-[#005a3c]"><ArrowLeft size={16}/> Voltar ao Financeiro</button>
             <p className="text-sm font-medium text-gray-500">Administração · Financeiro</p>
             <h1 className="mt-1 flex items-center gap-2 text-3xl font-bold text-[#005a3c]"><Wallet size={27}/> Contas a Receber</h1>
-            <p className="mt-1 text-sm text-gray-500">Parcelas de Temporadas e Vendas de Títulos em uma única lista.</p>
+            <p className="mt-1 text-sm text-gray-500">Parcelas de Temporadas, Vendas de Títulos e Acordos em uma única lista.</p>
           </div>
           <button type="button" onClick={() => void carregar()} disabled={carregando} className="inline-flex items-center gap-2 rounded-xl border border-[#cfe3d8] bg-white px-4 py-3 text-sm font-bold text-[#005a3c] disabled:opacity-60"><RefreshCw size={16} className={carregando ? "animate-spin" : ""}/> Atualizar</button>
         </div>
@@ -256,7 +261,7 @@ export default function ContasAReceberPage() {
 
         <div className="mb-4 grid gap-3 rounded-2xl border border-[#dce8e1] bg-white p-4 md:grid-cols-[minmax(220px,1fr)_200px_220px]">
           <label className="relative block"><Search size={17} className="absolute left-3 top-3 text-gray-400"/><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar associado, contrato ou parcela..." className="w-full rounded-xl border border-[#d5e0da] py-2.5 pl-10 pr-3 text-sm outline-none focus:border-[#16845b]"/></label>
-          <select value={origem} onChange={(e) => setOrigem(e.target.value as "todas" | Origem)} className="rounded-xl border border-[#d5e0da] px-3 py-2.5 text-sm"><option value="todas">Todas as origens</option><option value="temporada">Temporadas</option><option value="titulo">Vendas de Títulos</option></select>
+          <select value={origem} onChange={(e) => setOrigem(e.target.value as "todas" | Origem)} className="rounded-xl border border-[#d5e0da] px-3 py-2.5 text-sm"><option value="todas">Todas as origens</option><option value="temporada">Temporadas</option><option value="titulo">Vendas de Títulos</option><option value="acordo">Acordos</option></select>
           <select value={filtro} onChange={(e) => setFiltro(e.target.value as Filtro)} className="rounded-xl border border-[#d5e0da] px-3 py-2.5 text-sm"><option value="todas">Todas as situações</option><option value="vencidas">Vencidas</option><option value="hoje">Vencem hoje</option><option value="proximas">Próximos 7 dias</option><option value="compensacao">Em compensação</option></select>
         </div>
 
