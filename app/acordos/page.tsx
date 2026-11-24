@@ -65,6 +65,7 @@ export default function AcordosPage() {
   }), [mensalidades, busca]);
   const escolhidas = mensalidades.filter(m => selecionadas.includes(m.id));
   const totalOriginal = escolhidas.reduce((s, m) => s + Number(m.valor || 0), 0);
+  const socioSelecionadoId = escolhidas[0]?.socio_id || "";
 
   function alternar(id: string) {
     setSelecionadas(atual => atual.includes(id) ? atual.filter(x => x !== id) : [...atual, id]);
@@ -127,7 +128,7 @@ export default function AcordosPage() {
         <section className="rounded-xl border bg-white p-4 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-bold text-slate-800">1. Mensalidades vencidas</h2><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar sócio..." className="rounded-lg border py-2 pl-9 pr-3 text-sm"/></div></div>
           {carregando ? <p className="py-8 text-center text-sm text-slate-500">Carregando mensalidades...</p> : visiveis.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">Nenhuma mensalidade vencida disponível para acordo.</p> :
-          <div className="max-h-[360px] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3"></th><th className="p-3">Sócio</th><th className="p-3">Competência</th><th className="p-3">Vencimento</th><th className="p-3 text-right">Valor</th></tr></thead><tbody>{visiveis.map(m=><tr key={m.id} className="border-t hover:bg-slate-50"><td className="p-3"><input type="checkbox" checked={selecionadas.includes(m.id)} onChange={()=>alternar(m.id)}/></td><td className="p-3 font-medium">{m.socio?.nome || "Sócio não encontrado"}<div className="text-xs text-slate-500">{m.socio?.matricula || ""}</div></td><td className="p-3">{dataBr(m.competencia).slice(3)}</td><td className="p-3">{dataBr(m.data_vencimento)}</td><td className="p-3 text-right">{moeda(m.valor)}</td></tr>)}</tbody></table></div>}
+          <div className="max-h-[360px] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3"></th><th className="p-3">Sócio</th><th className="p-3">Competência</th><th className="p-3">Vencimento</th><th className="p-3 text-right">Valor</th></tr></thead><tbody>{visiveis.map(m=><tr key={m.id} className="border-t hover:bg-slate-50"><td className="p-3"><input type="checkbox" checked={selecionadas.includes(m.id)} disabled={Boolean(socioSelecionadoId && socioSelecionadoId !== m.socio_id)} onChange={()=>alternar(m.id)}/></td><td className="p-3 font-medium">{m.socio?.nome || "Sócio não encontrado"}<div className="text-xs text-slate-500">{m.socio?.matricula || ""}</div></td><td className="p-3">{dataBr(m.competencia).slice(3)}</td><td className="p-3">{dataBr(m.data_vencimento)}</td><td className="p-3 text-right">{moeda(m.valor)}</td></tr>)}</tbody></table></div>}
           <div className="mt-3 text-sm text-slate-600">Selecionadas: <b>{escolhidas.length}</b> • Total original: <b>{moeda(totalOriginal)}</b></div>
         </section>
         <section className="rounded-xl border bg-white p-4 shadow-sm">
