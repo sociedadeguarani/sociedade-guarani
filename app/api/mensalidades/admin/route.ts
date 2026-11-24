@@ -786,9 +786,16 @@ export async function POST(request: Request) {
       const idsExistentes = new Set<string>(
         (existentes || []).map((x: { socio_id: string }) => String(x.socio_id))
       );
+      const { data: reservadas, error: erroReservadas } = await db
+        .from("acordos_mensalidades_competencias")
+        .select("socio_id")
+        .eq("competencia", competencia)
+        .eq("ativo", true);
+      if (erroReservadas) throw erroReservadas;
+      const idsReservados = new Set((reservadas || []).map((x: { socio_id: string }) => String(x.socio_id)));
 
       const novos: ItemPreviaMensalidade[] = cobraveis
-        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)))
+        .filter((s: SocioMensalidadeRow) => !idsExistentes.has(String(s.id)) && !idsReservados.has(String(s.id)))
         .map((s: SocioMensalidadeRow) => {
           const config = escolherConfiguracao(
             configuracoes || [],
