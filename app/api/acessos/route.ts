@@ -198,13 +198,16 @@ async function verificarMensalidadesAtrasadas(
   // o acordo estiver ativo. O saldo passa a ser controlado pelas parcelas.
   const [vinculosResult, acordosResult] = await Promise.all([
     supabase.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
-    supabase.from("acordos_mensalidades").select("id").eq("socio_id", socioId).eq("situacao", "ativo"),
+    supabase.from("acordos_mensalidades").select("id,situacao").eq("socio_id", socioId).in("situacao", ["ativo", "concluido"]),
   ]);
   if (vinculosResult.error) throw vinculosResult.error;
   if (acordosResult.error) throw acordosResult.error;
-  const acordosAtivos = new Set((acordosResult.data || []).map((a) => String(a.id)));
+  const acordosValidos = new Set((acordosResult.data || []).map((a) => String(a.id)));
+  const acordosAtivos = new Set((acordosResult.data || [])
+    .filter((a) => a.situacao === "ativo")
+    .map((a) => String(a.id)));
   const mensalidadesEmAcordo = new Set((vinculosResult.data || [])
-    .filter((v) => acordosAtivos.has(String(v.acordo_id)))
+    .filter((v) => acordosValidos.has(String(v.acordo_id)))
     .map((v) => String(v.mensalidade_id)));
 
   const itens = (data || []).filter((m: LinhaMensalidadeAcesso) =>
