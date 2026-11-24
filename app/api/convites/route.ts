@@ -385,11 +385,6 @@ export async function POST(request: Request) {
     const arquivo = form.get("arquivo");
     const banhoInformado = String(form.get("banho") || "com_banho").trim();
     const cidadeNormalizada = normalizar(cidade);
-    const banhoIncluido = cidadeNormalizada === "augusto pestana"
-      ? false
-      : tipo === "diario"
-        ? banhoInformado === "com_banho"
-        : tipo === "semanal" ? true : null;
     // Preço diário definido no servidor: Augusto Pestana paga R$ 30, somente parque;
     // outras cidades pagam R$ 25 com banho ou R$ 15 somente parque.
     const valor = tipo === "diario"
