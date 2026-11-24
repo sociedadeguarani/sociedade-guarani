@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const ids = Array.isArray(body.mensalidade_ids) ? [...new Set(body.mensalidade_ids.map(String))] : [];
     const entrada = Number(body.valor_entrada || 0);
     const total = Number(body.valor_total || 0);
-    const parcelas = Array.isArray(body.parcelas) ? body.parcelas as ParcelaInput[] : [];
+    const parcelas = Array.isArray(body.parcelas) ? (body.parcelas as ParcelaInput[]).filter(p => Number(p.valor) > 0) : [];
     const formaEntrada = String(body.forma_entrada || "");
     const contaEntrada = String(body.conta_entrada_id || "");
     const entradaRecebida = body.entrada_recebida === true;
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     const { data: acordo, error: acordoErr } = await db.from("acordos_mensalidades").insert({
       socio_id: socioId, valor_total: total, valor_entrada: entrada,
       quantidade_parcelas: parcelas.length, observacoes: String(body.observacoes || "").trim() || null,
-      situacao: "ativo", created_by: auth.usuario.id,
+      situacao: entradaRecebida && entrada >= total ? "concluido" : "ativo", created_by: auth.usuario.id,
     }).select("*").single();
     if (acordoErr) throw acordoErr;
     try {
