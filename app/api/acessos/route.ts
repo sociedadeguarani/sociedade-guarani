@@ -214,7 +214,7 @@ async function verificarMensalidadesAtrasadas(
     !mensalidadesEmAcordo.has(String(m.id)) &&
     !mensalidadeRegistroAnteriorAAssociacao(dataAssociacao, m.competencia, m.data_vencimento, diaVencimento) &&
     !["pago", "paid", "isento", "isenta", "quitado", "recebido", "cancelado", "cancelada"].includes(
-      String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+      String(m.situacao || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     )
   );
 
@@ -233,7 +233,7 @@ async function verificarMensalidadesAtrasadas(
   const competencias = new Set<string>();
   for (const mensalidade of itens) {
     const referencia = String(mensalidade.competencia || mensalidade.data_vencimento || "").slice(0, 7);
-    if (/^\\d{4}-\\d{2}$/.test(referencia)) competencias.add(referencia);
+    if (/^\d{4}-\d{2}$/.test(referencia)) competencias.add(referencia);
   }
 
   const valorMensalidades = itens.reduce((soma, m) => soma + Number(m.valor || 0), 0);
