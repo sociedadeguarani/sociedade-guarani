@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const parcelas = Array.isArray(body.parcelas) ? (body.parcelas as ParcelaInput[]).filter(p => Number(p.valor) > 0) : [];
     const formaEntrada = String(body.forma_entrada || "");
     const contaEntrada = String(body.conta_entrada_id || "");
-    const formaParcelas = "boleto";
+    const formaParcelas = String(body.forma_parcelas || "boleto");
     const contaParcelas = String(body.conta_parcelas_id || "");
     const entradaRecebida = entrada > 0;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     if (competenciasFuturas.length > 1) return erro("Dezembro/2026 pode ser incluído somente uma vez no acordo.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
     if (entrada > 0 && (!contaEntrada || !FORMAS_ENTRADA.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
-    if (parcelas.length > 0 && (!contaParcelas || formaParcelas !== "boleto")) return erro("Informe a conta e a forma de pagamento das parcelas.");
+    if (parcelas.length > 0 && (!contaParcelas || !FORMAS.has(formaParcelas))) return erro("Informe a conta e uma forma de pagamento válida para as parcelas.");
     const contasNecessarias = [...new Set([...(entrada > 0 ? [contaEntrada] : []), ...(parcelas.length ? [contaParcelas] : [])])];
     if (contasNecessarias.length) {
       const { data: contasValidas, error: contasErr } = await db.from("contas_bancarias").select("id,ativo").in("id", contasNecessarias);
