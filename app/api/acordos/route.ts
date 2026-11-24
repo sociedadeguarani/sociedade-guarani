@@ -95,19 +95,12 @@ export async function POST(request: Request) {
         const { error: outrasErr } = await db.from("acordos_mensalidades_outros_itens").insert(outrasDividas.map(d => ({ acordo_id: acordo.id, descricao: String(d.descricao).trim(), valor: Number(d.valor) })));
         if (outrasErr) throw outrasErr;
       }
-      const parcelasParaCriar = [
-        ...(entrada > 0 && !entradaRecebida ? [{
-          acordo_id: acordo.id, numero: 1, descricao: "Entrada",
-          valor: entrada, data_vencimento: dataEntrada, situacao: "em_aberto",
-          forma_pagamento: formaEntrada, conta_bancaria_id: contaEntrada,
-        }] : []),
-        ...parcelas.map((p, i) => ({
-          acordo_id: acordo.id, numero: i + (entrada > 0 && !entradaRecebida ? 2 : 1),
-          descricao: "Parcela " + (i + 1), valor: Number(p.valor),
-          data_vencimento: p.data_vencimento, situacao: "em_aberto",
-          forma_pagamento: formaParcelas, conta_bancaria_id: contaParcelas,
-        })),
-      ];
+      const parcelasParaCriar = parcelas.map((p, i) => ({
+        acordo_id: acordo.id, numero: i + 1,
+        descricao: "Parcela " + (i + 1), valor: Number(p.valor),
+        data_vencimento: p.data_vencimento, situacao: "em_aberto",
+        forma_pagamento: formaParcelas, conta_bancaria_id: contaParcelas,
+      }));
       if (parcelasParaCriar.length) {
         const { error: parcErr } = await db.from("acordos_mensalidades_parcelas").insert(parcelasParaCriar);
         if (parcErr) throw parcErr;
