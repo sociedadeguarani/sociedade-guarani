@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     if (!socioId || ids.length === 0 || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
-    if (entradaRecebida && (!contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe conta e forma válidas para registrar a entrada.");
+    if (entradaRecebida && (entrada <= 0 || !contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe conta e forma válidas para registrar a entrada.");
     const { data: socio, error: socioErr } = await db.from("socios").select("id,nome,ativo").eq("id", socioId).maybeSingle();
     if (socioErr) throw socioErr;
     if (!socio || socio.ativo === false) return erro("Sócio não encontrado ou inativo.", 404);
