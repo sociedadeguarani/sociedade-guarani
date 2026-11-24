@@ -23,6 +23,9 @@ export default function AcordosPage() {
   const [contas, setContas] = useState<Conta[]>([]);
   const [selecionadas, setSelecionadas] = useState<string[]>([]);
   const [busca, setBusca] = useState("");
+  const [dezembro2026, setDezembro2026] = useState<{ valor: number; data_vencimento: string } | null>(null);
+  const [dezembroSelecionado, setDezembroSelecionado] = useState(false);
+  const [carregandoDezembro, setCarregandoDezembro] = useState(false);
   const [valorTotal, setValorTotal] = useState("");
   const [entrada, setEntrada] = useState("0");
   const [quantidade, setQuantidade] = useState("1");
@@ -56,6 +59,8 @@ export default function AcordosPage() {
     try {
       const result = await api();
       setMensalidades(result.mensalidades || []);
+      setDezembroSelecionado(false);
+      setDezembro2026(null);
       setSocios(result.socios || []);
       setContas(result.contas || []);
       setContaEntrada(atual => atual || result.contas?.[0]?.id || "");
@@ -66,10 +71,46 @@ export default function AcordosPage() {
 
   useEffect(() => { void carregar(); }, [carregar]);
 
-  const visiveis = useMemo(() => mensalidades.filter(m => {
-    const s = m.socio;
-    return `${s?.nome || ""} ${s?.matricula || ""} ${s?.cpf || ""}`.toLowerCase().includes(busca.toLowerCase());
-  }), [mensalidades, busca]);
+  useEffect(() => {
+    let ativo = true;
+    async function carregarDezembro() {
+      setDezembro2026(null);
+      setDezembroSelecionado(false);
+      if (!socioManualId) return;
+      if (mensalidades.some(m => m.socio_id === socioManualId && m.competencia.slice(0, 7) === "2026-12")) return;
+      setCarregandoDezembro(true);
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) throw new Error("Sessão expirada.");
+        const response = await fetch("/api/mensalidades/admin", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ acao: "previsualizar", ano: 2026, mes: 12, socio_ids: [socioManualId] }),
+          cache: "no-store",
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "Não foi possível calcular dezembro/2026.");
+        const item = (result.itens || []).find((x: { id: string }) => x.id === socioManualId);
+        if (ativo && item) setDezembro2026({ valor: Number(item.total_cobrado ?? item.valor_base ?? 0), data_vencimento: item.data_vencimento });
+      } catch (e) {
+        if (ativo) setErro(e instanceof Error ? e.message : "Falha ao calcular dezembro/2026.");
+      } finally {
+        if (ativo) setCarregandoDezembro(false);
+      }
+    }
+    void carregarDezembro();
+    return () => { ativo = false; };
+  }, [socioManualId, mensalidades]);
+
+  const sociosEncontrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return socios.slice(0, 30);
+    return socios.filter(s => `${s.nome} ${s.matricula || ""} ${s.cpf || ""}`.toLowerCase().includes(termo)).slice(0, 30);
+  }, [socios, busca]);
+  const visiveis = useMemo(() => mensalidades.filter(m =>
+    socioManualId ? m.socio_id === socioManualId : false
+  ), [mensalidades, socioManualId]);
   const escolhidas = mensalidades.filter(m => selecionadas.includes(m.id));
   const totalOriginal = escolhidas.reduce((s, m) => s + Number(m.valor || 0), 0);
   const totalOutrasDividas = outrasDividas.reduce((s, d) => s + Number(d.valor || 0), 0);
@@ -99,9 +140,10 @@ export default function AcordosPage() {
 
   async function salvar() {
     setErro(""); setMensagem("");
-    const total = Number(valorTotal || totalSelecionado);
+    const totalComDezembro = totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0);
+    const total = Number(valorTotal || totalComDezembro);
     if (!socioSelecionadoId) { setErro("Selecione o sócio do acordo."); return; }
-    if (!selecionadas.length && !outrasDividas.some(d => d.descricao.trim() && Number(d.valor) > 0)) { setErro("Selecione mensalidades ou informe ao menos outra dívida."); return; }
+    if (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d => d.descricao.trim() && Number(d.valor) > 0)) { setErro("Selecione mensalidades, dezembro/2026 ou informe ao menos outra dívida."); return; }
     if (!Number.isInteger(Number(entrada)) || total <= 0 || Number(entrada) > total) { setErro("Confira o valor total e a entrada."); return; }
     if (Number(entrada) > 0 && (!contaEntrada || !["pix","cheque","debito_em_conta","dinheiro"].includes(formaEntrada))) { setErro("Selecione a conta que receberá a entrada."); return; }
     if (parcelas.some(p => Number(p.valor) > 0) && !contaParcelas) { setErro("Selecione a conta que receberá as parcelas."); return; }
@@ -110,6 +152,7 @@ export default function AcordosPage() {
       const result = await api("POST", {
         socio_id: escolhidas[0]?.socio_id || socioManualId,
         mensalidade_ids: selecionadas,
+        competencias_futuras: dezembroSelecionado && dezembro2026 ? [{ competencia: "2026-12-01", valor: dezembro2026.valor, data_vencimento: dezembro2026.data_vencimento }] : [],
         outras_dividas: outrasDividas.filter(d => d.descricao.trim() && Number(d.valor) > 0).map(d => ({ descricao: d.descricao.trim(), valor: Number(d.valor) })),
         valor_total: total,
         valor_entrada: Number(entrada || 0),
@@ -122,7 +165,7 @@ export default function AcordosPage() {
         observacoes,
       });
       setMensagem(result.message || "Acordo cadastrado com sucesso.");
-      setSelecionadas([]); setSocioManualId(""); setValorTotal(""); setEntrada("0"); setQuantidade("1");
+      setSelecionadas([]); setSocioManualId(""); setBusca(""); setDezembroSelecionado(false); setDezembro2026(null); setValorTotal(""); setEntrada("0"); setQuantidade("1");
       setParcelas([{ valor: "0", data_vencimento: hoje() }]); setOutrasDividas([]); setObservacoes("");
       await carregar();
     } catch (e) { setErro(e instanceof Error ? e.message : "Não foi possível salvar o acordo."); }
@@ -140,10 +183,18 @@ export default function AcordosPage() {
         {erro && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{erro}</div>}
         {mensagem && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{mensagem}</div>}
         <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <div className="mb-4 grid gap-3 md:grid-cols-2"><label className="text-sm font-semibold">Sócio do acordo<select value={socioSelecionadoId} onChange={e=>setSocioManualId(e.target.value)} disabled={escolhidas.length>0} className="mt-1 w-full rounded-lg border bg-white p-2"><option value="">Selecione o sócio</option>{socios.map(s=><option key={s.id} value={s.id}>{s.nome} — {s.matricula || "Sem matrícula"}</option>)}</select></label><div className="relative self-end"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar mensalidades..." className="w-full rounded-lg border py-2 pl-9 pr-3 text-sm"/></div></div>
-          {carregando ? <p className="py-8 text-center text-sm text-slate-500">Carregando mensalidades...</p> : visiveis.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">Nenhuma mensalidade vencida disponível para acordo.</p> :
+          <div className="mb-4 grid gap-3 md:grid-cols-2">
+            <div className="relative">
+              <label className="text-sm font-semibold">Buscar sócio por nome, matrícula ou CPF</label>
+              <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/><input value={busca} onChange={e=>{setBusca(e.target.value);setSocioManualId("");setSelecionadas([]);}} placeholder="Digite o nome ou matrícula do sócio..." className="w-full rounded-lg border py-2 pl-9 pr-3 text-sm"/></div>
+              {busca.trim() && !socioManualId && <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border bg-white shadow-lg">{sociosEncontrados.length ? sociosEncontrados.map(s=><button type="button" key={s.id} onClick={()=>{setSocioManualId(s.id);setBusca(`${s.nome} — ${s.matricula || "Sem matrícula"}`);setSelecionadas([]);}} className="block w-full border-b px-3 py-2 text-left text-sm hover:bg-slate-50">{s.nome}<span className="block text-xs text-slate-500">Matrícula: {s.matricula || "Sem matrícula"}{s.cpf ? ` • CPF: ${s.cpf}` : ""}</span></button>) : <p className="p-3 text-sm text-slate-500">Nenhum sócio encontrado.</p>}</div>}
+            </div>
+            <div className="flex items-end justify-between gap-2"><p className="text-sm text-slate-600">{socioManualId ? "Mensalidades disponíveis do sócio selecionado" : "Selecione um sócio para visualizar as mensalidades."}</p>{socioManualId && <button type="button" onClick={()=>{setSocioManualId("");setBusca("");setSelecionadas([]);}} className="text-xs font-semibold text-emerald-700">Trocar sócio</button>}</div>
+          </div>
+          {carregando ? <p className="py-8 text-center text-sm text-slate-500">Carregando mensalidades...</p> : !socioManualId ? <p className="py-8 text-center text-sm text-slate-500">Pesquise e selecione um sócio para ver as mensalidades dele.</p> : visiveis.length === 0 && !dezembro2026 ? <p className="py-8 text-center text-sm text-slate-500">Nenhuma mensalidade em aberto disponível para acordo.</p> :
           <div className="max-h-[360px] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3"></th><th className="p-3">Sócio</th><th className="p-3">Competência</th><th className="p-3">Vencimento</th><th className="p-3 text-right">Valor</th></tr></thead><tbody>{visiveis.map(m=><tr key={m.id} className="border-t hover:bg-slate-50"><td className="p-3"><input type="checkbox" checked={selecionadas.includes(m.id)} disabled={Boolean(socioSelecionadoId && socioSelecionadoId !== m.socio_id)} onChange={()=>alternar(m.id)}/></td><td className="p-3 font-medium">{m.socio?.nome || "Sócio não encontrado"}<div className="text-xs text-slate-500">{m.socio?.matricula || ""}</div></td><td className="p-3">{dataBr(m.competencia).slice(3)}</td><td className="p-3">{dataBr(m.data_vencimento)}</td><td className="p-3 text-right">{moeda(m.valor)}</td></tr>)}</tbody></table></div>}
-          <div className="mt-3 text-sm text-slate-600">Mensalidades: <b>{escolhidas.length}</b> • Total selecionado: <b>{moeda(totalSelecionado)}</b></div>
+          {socioManualId && (carregandoDezembro ? <p className="mt-3 text-sm text-slate-500">Calculando competência de dezembro/2026...</p> : dezembro2026 ? <label className="mt-3 flex items-center gap-3 rounded-lg border border-dashed border-emerald-300 bg-emerald-50 p-3 text-sm"><input type="checkbox" checked={dezembroSelecionado} onChange={e=>setDezembroSelecionado(e.target.checked)}/><span className="flex-1"><b>Dezembro/2026</b><span className="block text-xs text-slate-600">Competência ainda não gerada • Vencimento {dataBr(dezembro2026.data_vencimento)}</span></span><b>{moeda(dezembro2026.valor)}</b></label> : null)}
+          <div className="mt-3 text-sm text-slate-600">Mensalidades: <b>{escolhidas.length + (dezembroSelecionado ? 1 : 0)}</b> • Total selecionado: <b>{moeda(totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0))}</b></div>
         </section>
         <section className="rounded-xl border bg-white p-4 shadow-sm">
           <h2 className="mb-4 font-bold text-slate-800">2. Condições do acordo</h2>
@@ -160,7 +211,7 @@ export default function AcordosPage() {
             {Number(entrada) > 0 && <label className="mt-3 block max-w-xs text-xs font-semibold">Data do recebimento<input type="date" value={dataEntrada} onChange={e=>setDataEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"/></label>}{Number(entrada) > 0 && <div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-semibold">Conta de recebimento<select value={contaEntrada} onChange={e=>setContaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"><option value="">Selecione</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco? ` — ${c.banco}`:""}</option>)}</select></label><label className="text-xs font-semibold">Forma de pagamento<select value={formaEntrada} onChange={e=>setFormaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm">{[["pix","PIX"],["cheque","Cheque"],["debito_em_conta","Débito"],["dinheiro","Dinheiro"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>}
           </div>
           <label className="mt-4 block text-sm font-medium">Observações<textarea value={observacoes} onChange={e=>setObservacoes(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border p-2"/></label>
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalSelecionado))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalSelecionado))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
         </section>
       </main>
     </div>
