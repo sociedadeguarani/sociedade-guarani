@@ -18,7 +18,7 @@ export async function GET(request: Request) {
       db.from("socios").select("id,nome,matricula,cpf,ativo,possui_mensalidade,valor_mensalidade").eq("ativo", true).order("nome"),
       db.from("mensalidades").select("id,socio_id,dependente_id,competencia,valor,total_cobrado,data_vencimento,situacao").in("situacao", ["em_aberto", "em_atraso"]).lt("data_vencimento", hojeBrasil()).order("data_vencimento"),
       db.from("contas_bancarias").select("id,nome,banco,ativo").eq("ativo", true).order("nome"),
-      db.from("acordos_mensalidades").select("id,socio_id,situacao,valor_total,valor_entrada,quantidade_parcelas,data_acordo").eq("situacao", "ativo").order("created_at", { ascending: false }),
+      db.from("acordos_mensalidades").select("id,socio_id,situacao,valor_total,valor_entrada,quantidade_parcelas,data_acordo").in("situacao", ["ativo", "concluido"]).order("created_at", { ascending: false }),
     ]);
     const falha = socios.error || mensalidades.error || contas.error || acordos.error;
     if (falha) throw falha;
