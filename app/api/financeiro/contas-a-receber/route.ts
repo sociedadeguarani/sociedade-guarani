@@ -16,7 +16,7 @@ export async function GET(request: Request) {
 
   try {
     const db = getServiceClient();
-    const [temporadasResult, parcelasTemporadasResult, vendasResult, parcelasVendasResult, contasResult] = await Promise.all([
+    const [temporadasResult, parcelasTemporadasResult, vendasResult, parcelasVendasResult, acordosResult, parcelasAcordosResult, sociosAcordosResult, contasResult] = await Promise.all([
       db.from("temporadas")
         .select("id,socio_id,responsavel_nome,codigo,matricula,situacao")
         .order("created_at", { ascending: false })
@@ -33,13 +33,23 @@ export async function GET(request: Request) {
         .select("id,venda_titulo_id,numero,descricao,valor,data_vencimento,situacao,data_pagamento,forma_pagamento,conta_bancaria_id,movimentacao_id")
         .order("data_vencimento", { ascending: true })
         .limit(10000),
+      db.from("acordos_mensalidades")
+        .select("id,socio_id,numero,situacao")
+        .eq("situacao", "ativo"),
+      db.from("acordos_mensalidades_parcelas")
+        .select("id,acordo_id,numero,descricao,valor,data_vencimento,situacao,data_pagamento,movimentacao_id")
+        .order("data_vencimento", { ascending: true })
+        .limit(10000),
+      db.from("socios")
+        .select("id,nome,matricula")
+        .limit(10000),
       db.from("contas_bancarias")
         .select("id,nome,banco,ativo")
         .eq("ativo", true)
         .order("nome", { ascending: true }),
     ]);
 
-    const erro = temporadasResult.error || parcelasTemporadasResult.error || vendasResult.error || parcelasVendasResult.error || contasResult.error;
+    const erro = temporadasResult.error || parcelasTemporadasResult.error || vendasResult.error || parcelasVendasResult.error || acordosResult.error || parcelasAcordosResult.error || sociosAcordosResult.error || contasResult.error;
     if (erro) throw erro;
 
     const temporadas = new Map<string, Linha>();
@@ -95,7 +105,27 @@ export async function GET(request: Request) {
       }];
     });
 
-    const parcelas = [...parcelasTemporadas, ...parcelasVendas]
+    const acordos = new Map((acordosResult.data || []).map(a => [String(a.id), a]));
+    const sociosAcordos = new Map((sociosAcordosResult.data || []).map(s => [String(s.id), s]));
+    const parcelasAcordos = (parcelasAcordosResult.data || []).flatMap(parcela => {
+      const situacao = String(parcela.situacao || "em_aberto").toLowerCase();
+      if (PAGAMENTOS_CONFIRMADOS.has(situacao)) return [];
+      const acordo = acordos.get(String(parcela.acordo_id));
+      if (!acordo) return [];
+      const socio = sociosAcordos.get(String(acordo.socio_id));
+      return [{
+        id: `acordo:${parcela.id}`, parcela_id: String(parcela.id), contrato_id: String(parcela.acordo_id),
+        origem: "acordo" as const, origem_label: "Acordo de mensalidades",
+        pessoa_nome: String(socio?.nome || "Sócio não identificado"),
+        referencia: String(socio?.matricula || acordo.numero || "Acordo"), socio_id: String(acordo.socio_id),
+        numero: Number(parcela.numero || 0), descricao: String(parcela.descricao || `Parcela ${parcela.numero || ""}`),
+        valor: Number(parcela.valor || 0), data_vencimento: String(parcela.data_vencimento || "").slice(0,10),
+        situacao, data_pagamento: parcela.data_pagamento ? String(parcela.data_pagamento).slice(0,10) : null,
+        movimentacao_id: parcela.movimentacao_id ? String(parcela.movimentacao_id) : null,
+      }];
+    });
+
+    const parcelas = [...parcelasTemporadas, ...parcelasVendas, ...parcelasAcordos]
       .filter((item) => item.data_vencimento && Number.isFinite(item.valor) && item.valor > 0)
       .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento));
 
@@ -108,6 +138,7 @@ export async function GET(request: Request) {
         valor: parcelas.reduce((soma, item) => soma + item.valor, 0),
         temporadas: parcelasTemporadas.length,
         titulos: parcelasVendas.length,
+        acordos: parcelasAcordos.length,
       },
     });
   } catch (error) {
