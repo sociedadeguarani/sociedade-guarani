@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.acordos_mensalidades (
   entrada_recebida boolean NOT NULL DEFAULT false,
   data_entrada date,
   forma_entrada text CHECK (forma_entrada IS NULL OR forma_entrada IN
-    ('pix', 'debito_em_conta', 'boleto', 'dinheiro', 'transferencia', 'cartao', 'outro')),
+    ('pix', 'cheque', 'debito_em_conta', 'boleto', 'dinheiro', 'transferencia', 'cartao', 'outro')),
   conta_entrada_id uuid REFERENCES public.contas_bancarias(id) ON DELETE RESTRICT,
   movimentacao_entrada_id uuid REFERENCES public.movimentacoes_financeiras(id) ON DELETE RESTRICT,
   quantidade_parcelas integer NOT NULL CHECK (quantidade_parcelas >= 0),
