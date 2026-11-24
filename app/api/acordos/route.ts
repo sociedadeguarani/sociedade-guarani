@@ -3,7 +3,7 @@ import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
 
 export const dynamic = "force-dynamic";
 
-const FORMAS = new Set(["pix", "debito_em_conta", "boleto", "dinheiro", "transferencia", "cartao", "outro"]);
+const FORMAS = new Set(["pix", "cheque", "debito_em_conta", "boleto", "dinheiro", "transferencia", "cartao", "outro"]);
 const hojeBrasil = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 const erro = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
@@ -51,13 +51,22 @@ export async function POST(request: Request) {
     const parcelas = Array.isArray(body.parcelas) ? (body.parcelas as ParcelaInput[]).filter(p => Number(p.valor) > 0) : [];
     const formaEntrada = String(body.forma_entrada || "");
     const contaEntrada = String(body.conta_entrada_id || "");
+    const formaParcelas = String(body.forma_parcelas || "boleto");
+    const contaParcelas = String(body.conta_parcelas_id || "");
     const entradaRecebida = body.entrada_recebida === true;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
     const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
     if (!socioId || ids.length === 0 || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
-    if (entradaRecebida && (entrada <= 0 || !contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe conta e forma válidas para registrar a entrada.");
+    if (entrada > 0 && (!contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
+    if (parcelas.length > 0 && (!contaParcelas || !FORMAS.has(formaParcelas))) return erro("Informe a conta e a forma de pagamento das parcelas.");
+    const contasNecessarias = [...new Set([...(entrada > 0 ? [contaEntrada] : []), ...(parcelas.length ? [contaParcelas] : [])])];
+    if (contasNecessarias.length) {
+      const { data: contasValidas, error: contasErr } = await db.from("contas_bancarias").select("id,ativo").in("id", contasNecessarias);
+      if (contasErr) throw contasErr;
+      if ((contasValidas || []).length !== contasNecessarias.length || (contasValidas || []).some(c => c.ativo === false)) return erro("Uma das contas selecionadas está inválida ou inativa.");
+    }
     const { data: socio, error: socioErr } = await db.from("socios").select("id,nome,ativo").eq("id", socioId).maybeSingle();
     if (socioErr) throw socioErr;
     if (!socio || socio.ativo === false) return erro("Sócio não encontrado ou inativo.", 404);
@@ -84,11 +93,13 @@ export async function POST(request: Request) {
         ...(entrada > 0 && !entradaRecebida ? [{
           acordo_id: acordo.id, numero: 1, descricao: "Entrada",
           valor: entrada, data_vencimento: dataEntrada, situacao: "em_aberto",
+          forma_pagamento: formaEntrada, conta_bancaria_id: contaEntrada,
         }] : []),
         ...parcelas.map((p, i) => ({
           acordo_id: acordo.id, numero: i + (entrada > 0 && !entradaRecebida ? 2 : 1),
           descricao: "Parcela " + (i + 1), valor: Number(p.valor),
           data_vencimento: p.data_vencimento, situacao: "em_aberto",
+          forma_pagamento: formaParcelas, conta_bancaria_id: contaParcelas,
         })),
       ];
       if (parcelasParaCriar.length) {
