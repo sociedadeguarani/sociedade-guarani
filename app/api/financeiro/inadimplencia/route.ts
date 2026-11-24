@@ -105,7 +105,7 @@ export async function GET(request: Request) {
     // O saldo passa a ser apurado pelas parcelas do acordo, evitando cobrança duplicada.
     const [vinculosResult, acordosResult] = await Promise.all([
       db.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
-      db.from("acordos_mensalidades").select("id,socio_id,numero").eq("situacao", "ativo"),
+      db.from("acordos_mensalidades").select("id,socio_id,numero,situacao").in("situacao", ["ativo", "concluido"]),
     ]);
     if (vinculosResult.error) throw vinculosResult.error;
     if (acordosResult.error) throw acordosResult.error;
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
     if (parcelasAcordosError) throw parcelasAcordosError;
     for (const parcela of parcelasAcordos || []) {
       const acordo = acordosPorId.get(String(parcela.acordo_id));
-      if (!acordo) continue;
+      if (!acordo || acordo.situacao !== "ativo") continue;
       const pessoaResumo = resumo.find(item => item.pessoa.socio_id === String(acordo.socio_id));
       if (!pessoaResumo) continue;
       pessoaResumo.meses += 1;
