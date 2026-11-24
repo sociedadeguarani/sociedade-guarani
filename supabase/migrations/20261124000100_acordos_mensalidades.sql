@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.acordos_mensalidades (
   entrada_recebida boolean NOT NULL DEFAULT false,
   data_entrada date,
   forma_entrada text CHECK (forma_entrada IS NULL OR forma_entrada IN
-    ('pix', 'cheque', 'debito_em_conta', 'boleto', 'dinheiro', 'transferencia', 'cartao', 'outro')),
+    ('pix', 'cheque', 'debito_em_conta', 'dinheiro')),
   conta_entrada_id uuid REFERENCES public.contas_bancarias(id) ON DELETE RESTRICT,
   movimentacao_entrada_id uuid REFERENCES public.movimentacoes_financeiras(id) ON DELETE RESTRICT,
   quantidade_parcelas integer NOT NULL CHECK (quantidade_parcelas >= 0),
@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_itens (
 CREATE UNIQUE INDEX IF NOT EXISTS acordo_mensalidade_unica_ativa_idx
   ON public.acordos_mensalidades_itens (mensalidade_id)
   WHERE ativo = true;
+
+CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_outros_itens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  acordo_id uuid NOT NULL REFERENCES public.acordos_mensalidades(id) ON DELETE RESTRICT,
+  descricao text NOT NULL,
+  valor numeric(12,2) NOT NULL CHECK (valor > 0),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS acordos_mensalidades_outros_itens_acordo_idx
+  ON public.acordos_mensalidades_outros_itens (acordo_id);
 
 CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_parcelas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -78,13 +89,16 @@ CREATE INDEX IF NOT EXISTS acordos_mensalidades_parcelas_acordo_idx
 ALTER TABLE public.acordos_mensalidades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.acordos_mensalidades_itens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.acordos_mensalidades_parcelas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.acordos_mensalidades_outros_itens ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.acordos_mensalidades FROM anon, authenticated;
 REVOKE ALL ON TABLE public.acordos_mensalidades_itens FROM anon, authenticated;
 REVOKE ALL ON TABLE public.acordos_mensalidades_parcelas FROM anon, authenticated;
+REVOKE ALL ON TABLE public.acordos_mensalidades_outros_itens FROM anon, authenticated;
 GRANT ALL ON TABLE public.acordos_mensalidades TO service_role;
 GRANT ALL ON TABLE public.acordos_mensalidades_itens TO service_role;
 GRANT ALL ON TABLE public.acordos_mensalidades_parcelas TO service_role;
+GRANT ALL ON TABLE public.acordos_mensalidades_outros_itens TO service_role;
 
 COMMENT ON TABLE public.acordos_mensalidades IS
   'Acordos administrativos para renegociação de mensalidades vencidas.';
@@ -92,3 +106,6 @@ COMMENT ON TABLE public.acordos_mensalidades_itens IS
   'Vínculo auditável entre mensalidades originais e acordos; não altera o histórico da mensalidade.';
 COMMENT ON TABLE public.acordos_mensalidades_parcelas IS
   'Parcelas a receber dos acordos, integradas ao financeiro por movimentacao_id.';
+
+COMMENT ON TABLE public.acordos_mensalidades_outros_itens IS
+  'Outros débitos informados manualmente e incluídos na composição do acordo.';
