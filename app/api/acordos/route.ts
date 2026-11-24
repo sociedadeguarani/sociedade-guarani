@@ -25,15 +25,19 @@ export async function GET(request: Request) {
     const falha = socios.error || mensalidades.error || contas.error || acordos.error;
     if (falha) throw falha;
     const ativos = new Set((acordos.data || []).map((a) => String(a.id)));
-    const itens = await db.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true);
+    const [itens, competenciasFuturas] = await Promise.all([
+      db.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
+      db.from("acordos_mensalidades_competencias").select("socio_id,competencia,acordo_id").eq("ativo", true),
+    ]);
     if (itens.error) throw itens.error;
+    if (competenciasFuturas.error) throw competenciasFuturas.error;
     const socioPorId = new Map((socios.data || []).map((s) => [String(s.id), s]));
     const emAcordo = new Set((itens.data || []).filter((i) => ativos.has(String(i.acordo_id))).map((i) => String(i.mensalidade_id)));
     const pendencias = (mensalidades.data || []).filter((m) => !emAcordo.has(String(m.id))).map((m) => ({
       ...m, socio: socioPorId.get(String(m.socio_id)) || null,
       valor: Number(m.total_cobrado ?? m.valor ?? 0),
     }));
-    return NextResponse.json({ socios: socios.data || [], mensalidades: pendencias, contas: contas.data || [], acordos: acordos.data || [] });
+    return NextResponse.json({ socios: socios.data || [], mensalidades: pendencias, contas: contas.data || [], acordos: acordos.data || [], competencias_futuras: competenciasFuturas.data || [] });
   } catch (e) {
     console.error("[api/acordos][GET]", e);
     return erro("Não foi possível carregar os dados dos acordos.", 500);
@@ -48,6 +52,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const socioId = String(body.socio_id || "");
     const ids = Array.isArray(body.mensalidade_ids) ? [...new Set(body.mensalidade_ids.map(String))] : [];
+    const competenciasFuturas = Array.isArray(body.competencias_futuras) ? body.competencias_futuras : [];
     const outrasDividas = Array.isArray(body.outras_dividas) ? (body.outras_dividas as OutraDividaInput[]).filter(d => String(d.descricao || "").trim() && Number(d.valor) > 0) : [];
     const entrada = Number(body.valor_entrada || 0);
     const total = Number(body.valor_total || 0);
@@ -59,8 +64,10 @@ export async function POST(request: Request) {
     const entradaRecebida = entrada > 0;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
     const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
-    if (!socioId || (ids.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as dívidas e os valores válidos.");
+    if (!socioId || (ids.length === 0 && competenciasFuturas.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as dívidas e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
+    if (competenciasFuturas.some((c: any) => String(c.competencia) !== "2026-12-01" || !Number.isFinite(Number(c.valor)) || Number(c.valor) <= 0 || !dataValida(String(c.data_vencimento)))) return erro("A competência futura deve ser dezembro/2026, com valor e vencimento válidos.");
+    if (competenciasFuturas.length > 1) return erro("Dezembro/2026 pode ser incluído somente uma vez no acordo.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
     if (entrada > 0 && (!contaEntrada || !FORMAS_ENTRADA.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
     if (parcelas.length > 0 && (!contaParcelas || formaParcelas !== "boleto")) return erro("Informe a conta e a forma de pagamento das parcelas.");
@@ -83,6 +90,13 @@ export async function POST(request: Request) {
       if (vincErr) throw vincErr;
       if ((vinculos || []).length) return erro("Uma ou mais mensalidades já pertencem a um acordo ativo.", 409);
     }
+    if (competenciasFuturas.length) {
+      const { data: existentesFuturos, error: futurosErr } = await db.from("acordos_mensalidades_competencias").select("id").eq("socio_id", socioId).eq("competencia", "2026-12-01").eq("ativo", true);
+      if (futurosErr) throw futurosErr;
+      const { data: mensalidadeDezembro, error: mensalidadeDezembroErr } = await db.from("mensalidades").select("id").eq("socio_id", socioId).eq("competencia", "2026-12-01").limit(1);
+      if (mensalidadeDezembroErr) throw mensalidadeDezembroErr;
+      if ((existentesFuturos || []).length || (mensalidadeDezembro || []).length) return erro("Dezembro/2026 já foi gerado ou já está vinculado a outro acordo.", 409);
+    }
     const { data: acordo, error: acordoErr } = await db.from("acordos_mensalidades").insert({
       socio_id: socioId, valor_total: total, valor_entrada: entrada,
       quantidade_parcelas: parcelas.length, observacoes: String(body.observacoes || "").trim() || null,
@@ -97,6 +111,13 @@ export async function POST(request: Request) {
       if (vinculosInsert.length) {
         const { error: linkErr } = await db.from("acordos_mensalidades_itens").insert(vinculosInsert);
         if (linkErr) throw linkErr;
+      }
+      if (competenciasFuturas.length) {
+        const { error: competenciaErr } = await db.from("acordos_mensalidades_competencias").insert(competenciasFuturas.map((c: any) => ({
+          acordo_id: acordo.id, socio_id: socioId, competencia: "2026-12-01",
+          valor_original: Number(c.valor), data_vencimento: String(c.data_vencimento), ativo: true,
+        })));
+        if (competenciaErr) throw competenciaErr;
       }
       if (outrasDividas.length) {
         const { error: outrasErr } = await db.from("acordos_mensalidades_outros_itens").insert(outrasDividas.map(d => ({ acordo_id: acordo.id, descricao: String(d.descricao).trim(), valor: Number(d.valor) })));
@@ -138,6 +159,7 @@ export async function POST(request: Request) {
       await db.from("acordos_mensalidades_parcelas").delete().eq("acordo_id", acordo.id);
       await db.from("acordos_mensalidades_outros_itens").delete().eq("acordo_id", acordo.id);
       await db.from("acordos_mensalidades_itens").delete().eq("acordo_id", acordo.id);
+      await db.from("acordos_mensalidades_competencias").delete().eq("acordo_id", acordo.id);
       await db.from("acordos_mensalidades").delete().eq("id", acordo.id);
       throw e;
     }
