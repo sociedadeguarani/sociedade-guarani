@@ -69,7 +69,11 @@ export default function AcordosPage() {
     finally { setCarregando(false); }
   }, [api]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => {
+    let ativo = true;
+    Promise.resolve().then(() => { if (ativo) void carregar(); });
+    return () => { ativo = false; };
+  }, [carregar]);
 
   useEffect(() => {
     let ativo = true;
@@ -116,21 +120,7 @@ export default function AcordosPage() {
   const totalOutrasDividas = outrasDividas.reduce((s, d) => s + Number(d.valor || 0), 0);
   const totalSelecionado = totalOriginal + totalOutrasDividas;
   const totalComDezembro = totalSelecionado + (dezembroSelecionado && dezembro2026 ? dezembro2026.valor : 0);
-  const totalBaseAcordo = Number(valorTotal || totalComDezembro);
   const socioSelecionadoId = escolhidas[0]?.socio_id || socioManualId;
-
-  useEffect(() => {
-    const saldo = Math.max(0, totalBaseAcordo - Number(entrada || 0));
-    const n = Math.max(1, parcelas.length);
-    const base = Math.floor((saldo / n) * 100) / 100;
-    setParcelas(atual => {
-      const ajustadas = atual.map((p, i) => ({
-        ...p,
-        valor: (i === n - 1 ? saldo - base * (n - 1) : base).toFixed(2),
-      }));
-      return ajustadas.every((p, i) => p.valor === atual[i]?.valor) ? atual : ajustadas;
-    });
-  }, [totalBaseAcordo, entrada, parcelas.length]);
 
   function alternar(id: string) {
     setSelecionadas(atual => atual.includes(id) ? atual.filter(x => x !== id) : [...atual, id]);
@@ -147,7 +137,7 @@ export default function AcordosPage() {
   }
   function atualizarEntrada(valor: string) {
     setEntrada(valor);
-    const saldo = Math.max(0, Number(valorTotal || totalSelecionado) - Number(valor || 0));
+    const saldo = Math.max(0, Number(valorTotal || totalComDezembro) - Number(valor || 0));
     const n = parcelas.length || 1;
     const base = Math.floor((saldo / n) * 100) / 100;
     setParcelas(atual => atual.map((p, i) => ({ ...p, valor: (i === n - 1 ? saldo - base * (n - 1) : base).toFixed(2) })));
