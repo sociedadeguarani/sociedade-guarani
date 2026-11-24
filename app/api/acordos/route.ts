@@ -4,6 +4,7 @@ import { exigirAdministrador, getServiceClient } from "@/lib/guaraniAuth";
 export const dynamic = "force-dynamic";
 
 const FORMAS = new Set(["pix", "cheque", "debito_em_conta", "boleto", "dinheiro", "transferencia", "cartao", "outro"]);
+const FORMAS_ENTRADA = new Set(["pix", "cheque", "debito_em_conta", "dinheiro"]);
 const hojeBrasil = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 const erro = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     if (!socioId || (ids.length === 0 && outrasDividas.length === 0) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(entrada) || !Number.isInteger(entrada) || entrada < 0 || entrada > total) return erro("Informe o sócio, as mensalidades e os valores válidos.");
     if (Math.abs(parcelas.reduce((s, p) => s + Number(p.valor || 0), 0) - (total - entrada)) > 0.01 || parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento)))) return erro("As parcelas devem somar o saldo do acordo e ter vencimentos válidos.");
     if (entrada > 0 && !dataValida(dataEntrada)) return erro("Informe uma data válida para vencimento ou recebimento da entrada.");
-    if (entrada > 0 && (!contaEntrada || !FORMAS.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
+    if (entrada > 0 && (!contaEntrada || !FORMAS_ENTRADA.has(formaEntrada))) return erro("Informe a conta e a forma de pagamento da entrada.");
     if (parcelas.length > 0 && (!contaParcelas || formaParcelas !== "boleto")) return erro("Informe a conta e a forma de pagamento das parcelas.");
     const contasNecessarias = [...new Set([...(entrada > 0 ? [contaEntrada] : []), ...(parcelas.length ? [contaParcelas] : [])])];
     if (contasNecessarias.length) {
