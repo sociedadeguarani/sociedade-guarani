@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS public.acordos_mensalidades (
   data_acordo date NOT NULL DEFAULT (timezone('America/Sao_Paulo', now())::date),
   valor_total numeric(12,2) NOT NULL CHECK (valor_total > 0),
   valor_entrada numeric(12,2) NOT NULL DEFAULT 0 CHECK (valor_entrada >= 0),
+  entrada_recebida boolean NOT NULL DEFAULT false,
+  data_entrada date,
+  forma_entrada text CHECK (forma_entrada IS NULL OR forma_entrada IN
+    ('pix', 'debito_em_conta', 'boleto', 'dinheiro', 'transferencia', 'cartao', 'outro')),
+  conta_entrada_id uuid REFERENCES public.contas_bancarias(id) ON DELETE RESTRICT,
+  movimentacao_entrada_id uuid REFERENCES public.movimentacoes_financeiras(id) ON DELETE RESTRICT,
   quantidade_parcelas integer NOT NULL CHECK (quantidade_parcelas >= 0),
   observacoes text,
   situacao text NOT NULL DEFAULT 'ativo'
