@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     const parcelas = Array.isArray(body.parcelas) ? (body.parcelas as ParcelaInput[]).filter(p => Number(p.valor) > 0) : [];
     const formaEntrada = String(body.forma_entrada || "");
     const contaEntrada = String(body.conta_entrada_id || "");
-    const formaParcelas = String(body.forma_parcelas || "boleto");
+    const formaParcelas = "boleto";
     const contaParcelas = String(body.conta_parcelas_id || "");
     const entradaRecebida = body.entrada_recebida === true;
     const dataEntrada = String(body.data_entrada || hojeBrasil());
