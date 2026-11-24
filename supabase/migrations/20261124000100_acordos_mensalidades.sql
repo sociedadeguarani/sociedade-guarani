@@ -109,3 +109,32 @@ COMMENT ON TABLE public.acordos_mensalidades_parcelas IS
 
 COMMENT ON TABLE public.acordos_mensalidades_outros_itens IS
   'Outros débitos informados manualmente e incluídos na composição do acordo.';
+
+
+-- Reserva competências ainda não geradas que foram incluídas em um acordo.
+-- A geração automática consulta esta tabela para não criar uma segunda cobrança.
+CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_competencias (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  acordo_id uuid NOT NULL REFERENCES public.acordos_mensalidades(id) ON DELETE RESTRICT,
+  socio_id uuid NOT NULL REFERENCES public.socios(id) ON DELETE RESTRICT,
+  competencia date NOT NULL,
+  valor_original numeric(12,2) NOT NULL CHECK (valor_original > 0),
+  data_vencimento date NOT NULL,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT acordo_competencia_mes_unico_por_acordo UNIQUE (acordo_id, competencia)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS acordo_competencia_unica_ativa_idx
+  ON public.acordos_mensalidades_competencias (socio_id, competencia)
+  WHERE ativo = true;
+
+CREATE INDEX IF NOT EXISTS acordo_competencias_acordo_idx
+  ON public.acordos_mensalidades_competencias (acordo_id);
+
+ALTER TABLE public.acordos_mensalidades_competencias ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.acordos_mensalidades_competencias FROM anon, authenticated;
+GRANT ALL ON TABLE public.acordos_mensalidades_competencias TO service_role;
+
+COMMENT ON TABLE public.acordos_mensalidades_competencias IS
+  'Competências futuras reservadas em acordos para impedir geração de cobrança mensal duplicada.';
