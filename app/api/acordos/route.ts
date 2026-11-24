@@ -119,3 +119,63 @@ export async function POST(request: Request) {
     return erro(e instanceof Error ? e.message : "Não foi possível cadastrar o acordo.", 500);
   }
 }
+
+
+export async function PATCH(request: Request) {
+  const auth = await exigirAdministrador(request);
+  if ("error" in auth) return erro(String(auth.error || "Acesso não autorizado."), auth.status ?? 401);
+  const db = getServiceClient();
+  try {
+    const body = await request.json();
+    const parcelaId = String(body.parcela_id || "");
+    const contaId = String(body.conta_bancaria_id || "");
+    const forma = String(body.forma_pagamento || "");
+    const data = String(body.data_pagamento || hojeBrasil());
+    if (!parcelaId || !contaId || !FORMAS.has(forma) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(data)) return erro("Informe parcela, conta, forma e data válidas.");
+    const { data: conta, error: contaErr } = await db.from("contas_bancarias").select("id,ativo").eq("id", contaId).maybeSingle();
+    if (contaErr) throw contaErr;
+    if (!conta || conta.ativo === false) return erro("Conta de recebimento inválida ou inativa.");
+    const { data: parcela, error: parcelaErr } = await db.from("acordos_mensalidades_parcelas").select("*").eq("id", parcelaId).maybeSingle();
+    if (parcelaErr) throw parcelaErr;
+    if (!parcela) return erro("Parcela não encontrada.", 404);
+    if (parcela.situacao === "pago" || parcela.situacao === "cancelado") return erro("Esta parcela já foi baixada ou cancelada.", 409);
+    const { data: acordo, error: acordoErr } = await db.from("acordos_mensalidades").select("id,socio_id,numero,situacao").eq("id", parcela.acordo_id).maybeSingle();
+    if (acordoErr) throw acordoErr;
+    if (!acordo || acordo.situacao !== "ativo") return erro("Acordo não está ativo.", 409);
+    const { data: socio, error: socioErr } = await db.from("socios").select("nome").eq("id", acordo.socio_id).maybeSingle();
+    if (socioErr) throw socioErr;
+    const { data: atualizada, error: updateErr } = await db.from("acordos_mensalidades_parcelas")
+      .update({ situacao: "pago", data_pagamento: data, forma_pagamento: forma, conta_bancaria_id: contaId })
+      .eq("id", parcelaId).neq("situacao", "pago").select("*").maybeSingle();
+    if (updateErr) throw updateErr;
+    if (!atualizada) return erro("Esta parcela já foi recebida. Atualize a tela.", 409);
+    try {
+      const { data: movimento, error: movErr } = await db.from("movimentacoes_financeiras").insert({
+        conta_bancaria_id: contaId, conta_destino_id: null, tipo: "entrada",
+        categoria: "Acordo de mensalidades",
+        descricao: `Acordo de mensalidades — ${socio?.nome || "Sócio"} — Parcela ${parcela.numero}`,
+        valor: Number(parcela.valor), data_movimentacao: data, forma_pagamento: forma,
+        origem_tipo: "acordo_mensalidades_parcela", origem_id: parcelaId,
+        socio_id: acordo.socio_id, dependente_id: null, created_by: auth.usuario.id,
+        conciliado: false, observacoes: `Recebimento da parcela ${parcela.numero} do acordo ${acordo.numero || acordo.id}.`,
+      }).select("id").single();
+      if (movErr) throw movErr;
+      const { error: vinculoErr } = await db.from("acordos_mensalidades_parcelas").update({ movimentacao_id: movimento.id }).eq("id", parcelaId);
+      if (vinculoErr) throw vinculoErr;
+      const { count, error: abertasErr } = await db.from("acordos_mensalidades_parcelas").select("id", { count: "exact", head: true }).eq("acordo_id", acordo.id).neq("situacao", "pago").neq("situacao", "cancelado");
+      if (abertasErr) throw abertasErr;
+      if ((count || 0) === 0) {
+        const { error: quitarErr } = await db.from("acordos_mensalidades").update({ situacao: "concluido" }).eq("id", acordo.id);
+        if (quitarErr) throw quitarErr;
+      }
+      return NextResponse.json({ ok: true, message: "Parcela recebida e lançada no Financeiro." });
+    } catch (e) {
+      await db.from("movimentacoes_financeiras").delete().eq("origem_tipo", "acordo_mensalidades_parcela").eq("origem_id", parcelaId);
+      await db.from("acordos_mensalidades_parcelas").update({ situacao: "em_aberto", data_pagamento: null, forma_pagamento: null, conta_bancaria_id: null, movimentacao_id: null }).eq("id", parcelaId);
+      throw e;
+    }
+  } catch (e) {
+    console.error("[api/acordos][PATCH]", e);
+    return erro(e instanceof Error ? e.message : "Não foi possível registrar o recebimento.", 500);
+  }
+}
