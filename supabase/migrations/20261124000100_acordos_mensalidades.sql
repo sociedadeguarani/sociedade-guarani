@@ -25,9 +25,12 @@ CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_itens (
   mensalidade_id uuid NOT NULL REFERENCES public.mensalidades(id) ON DELETE RESTRICT,
   valor_original numeric(12,2) NOT NULL CHECK (valor_original >= 0),
   ativo boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT acordo_mensalidade_unica_ativa UNIQUE (mensalidade_id, ativo)
+  created_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS acordo_mensalidade_unica_ativa_idx
+  ON public.acordos_mensalidades_itens (mensalidade_id)
+  WHERE ativo = true;
 
 CREATE TABLE IF NOT EXISTS public.acordos_mensalidades_parcelas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
