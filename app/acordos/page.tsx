@@ -27,6 +27,8 @@ export default function AcordosPage() {
   const [entradaRecebida, setEntradaRecebida] = useState(false);
   const [formaEntrada, setFormaEntrada] = useState("pix");
   const [contaEntrada, setContaEntrada] = useState("");
+  const [formaParcelas, setFormaParcelas] = useState("boleto");
+  const [contaParcelas, setContaParcelas] = useState("");
   const [dataEntrada, setDataEntrada] = useState(hoje());
   const [observacoes, setObservacoes] = useState("");
   const [carregando, setCarregando] = useState(true);
@@ -52,7 +54,7 @@ export default function AcordosPage() {
     try {
       const result = await api();
       setMensalidades(result.mensalidades || []);
-      setContas(result.contas || []);
+      setContas(result.contas || []);\n      setContaEntrada(atual => atual || result.contas?.[0]?.id || "");\n      setContaParcelas(atual => atual || result.contas?.[0]?.id || "");
     } catch (e) { setErro(e instanceof Error ? e.message : "Falha ao carregar acordos."); }
     finally { setCarregando(false); }
   }, [api]);
@@ -92,7 +94,7 @@ export default function AcordosPage() {
     setErro(""); setMensagem("");
     const total = Number(valorTotal || totalOriginal);
     if (!selecionadas.length) { setErro("Selecione ao menos uma mensalidade vencida."); return; }
-    if (total <= 0 || Number(entrada) > total) { setErro("Confira o valor total e a entrada."); return; }
+    if (total <= 0 || Number(entrada) > total) { setErro("Confira o valor total e a entrada."); return; }\n    if (Number(entrada) > 0 && !contaEntrada) { setErro("Selecione a conta que receberá a entrada."); return; }\n    if (parcelas.some(p => Number(p.valor) > 0) && !contaParcelas) { setErro("Selecione a conta que receberá as parcelas."); return; }
     setSalvando(true);
     try {
       const result = await api("POST", {
@@ -139,10 +141,10 @@ export default function AcordosPage() {
             <label className="text-sm font-medium">Quantidade de parcelas<input type="number" min="1" max="24" value={quantidade} onChange={e=>atualizarQuantidade(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
           </div>
           <div className="mt-4 space-y-2">{parcelas.map((p,i)=><div key={i} className="grid items-end gap-3 rounded-lg bg-slate-50 p-3 md:grid-cols-3"><div className="text-sm font-semibold">Parcela {i+1}</div><label className="text-xs font-semibold text-slate-600">Valor<input type="number" min="0.01" step="0.01" value={p.valor} onChange={e=>setParcelas(a=>a.map((x,j)=>j===i?{...x,valor:e.target.value}:x))} className="mt-1 w-full rounded border bg-white p-2 text-sm"/></label><label className="text-xs font-semibold text-slate-600">Vencimento<input type="date" value={p.data_vencimento} onChange={e=>setParcelas(a=>a.map((x,j)=>j===i?{...x,data_vencimento:e.target.value}:x))} className="mt-1 w-full rounded border bg-white p-2 text-sm"/></label></div>)}</div>
-          <div className="mt-3 text-right text-sm text-slate-600">Saldo parcelado: <b>{moeda(parcelas.reduce((s,p)=>s+Number(p.valor||0),0))}</b></div>
+          <div className="mt-3 text-right text-sm text-slate-600">Saldo parcelado: <b>{moeda(parcelas.reduce((s,p)=>s+Number(p.valor||0),0))}</b></div>\n          <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-2"><label className="text-xs font-semibold">Forma de pagamento das parcelas<select value={formaParcelas} onChange={e=>setFormaParcelas(e.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm">{[["boleto","Boleto"],["pix","PIX"],["cheque","Cheque"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label className="text-xs font-semibold">Conta de destino das parcelas<select value={contaParcelas} onChange={e=>setContaParcelas(e.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm"><option value="">Selecione a conta</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco?` — ${c.banco}`:""}</option>)}</select></label></div>
           <div className="mt-5 rounded-lg border p-3">
             <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={entradaRecebida} disabled={Number(entrada) <= 0} onChange={e=>setEntradaRecebida(e.target.checked)}/> Registrar a entrada como já recebida</label>
-            {Number(entrada) > 0 && <label className="mt-3 block max-w-xs text-xs font-semibold">{entradaRecebida ? "Data do recebimento" : "Vencimento da entrada"}<input type="date" value={dataEntrada} onChange={e=>setDataEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"/></label>}{entradaRecebida && <div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-semibold">Conta de recebimento<select value={contaEntrada} onChange={e=>setContaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"><option value="">Selecione</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco? ` — ${c.banco}`:""}</option>)}</select></label><label className="text-xs font-semibold">Forma de pagamento<select value={formaEntrada} onChange={e=>setFormaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm">{[["pix","PIX"],["dinheiro","Dinheiro"],["transferencia","Transferência"],["debito_em_conta","Débito em conta"],["boleto","Boleto"],["cartao","Cartão"],["outro","Outro"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>}
+            {Number(entrada) > 0 && <label className="mt-3 block max-w-xs text-xs font-semibold">{entradaRecebida ? "Data do recebimento" : "Vencimento da entrada"}<input type="date" value={dataEntrada} onChange={e=>setDataEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"/></label>}{Number(entrada) > 0 && <div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-semibold">Conta de recebimento<select value={contaEntrada} onChange={e=>setContaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"><option value="">Selecione</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco? ` — ${c.banco}`:""}</option>)}</select></label><label className="text-xs font-semibold">Forma de pagamento<select value={formaEntrada} onChange={e=>setFormaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm">{[["pix","PIX"],["cheque","Cheque"],["boleto","Boleto"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>}
           </div>
           <label className="mt-4 block text-sm font-medium">Observações<textarea value={observacoes} onChange={e=>setObservacoes(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border p-2"/></label>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalOriginal))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !selecionadas.length} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
