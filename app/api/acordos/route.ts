@@ -187,6 +187,31 @@ export async function PATCH(request: Request) {
   const db = getServiceClient();
   try {
     const body = await request.json();
+    if (body.acao === "cancelar") {
+      const acordoId = String(body.acordo_id || "");
+      if (!acordoId) return erro("Acordo não informado.");
+      const { data: acordoCancelar, error: acordoCancelarErr } = await db
+        .from("acordos_mensalidades").select("id,situacao").eq("id", acordoId).maybeSingle();
+      if (acordoCancelarErr) throw acordoCancelarErr;
+      if (!acordoCancelar || acordoCancelar.situacao !== "ativo") return erro("Somente acordos ativos podem ser desfeitos.", 409);
+      const { data: recebidas, error: recebidasErr } = await db
+        .from("acordos_mensalidades_parcelas").select("id").eq("acordo_id", acordoId).eq("situacao", "pago").limit(1);
+      if (recebidasErr) throw recebidasErr;
+      if ((recebidas || []).length) return erro("Este acordo já possui recebimentos. Não é possível desfazê-lo automaticamente; é necessário estornar os recebimentos primeiro.", 409);
+      const { data: entradaMov, error: entradaErr } = await db.from("acordos_mensalidades")
+        .select("movimentacao_entrada_id").eq("id", acordoId).maybeSingle();
+      if (entradaErr) throw entradaErr;
+      if (entradaMov?.movimentacao_entrada_id) return erro("Este acordo possui entrada recebida. Não é possível desfazê-lo automaticamente; é necessário estornar a entrada primeiro.", 409);
+      const { error: itensErr } = await db.from("acordos_mensalidades_itens").update({ ativo: false }).eq("acordo_id", acordoId).eq("ativo", true);
+      if (itensErr) throw itensErr;
+      const { error: competenciasErr } = await db.from("acordos_mensalidades_competencias").update({ ativo: false }).eq("acordo_id", acordoId).eq("ativo", true);
+      if (competenciasErr) throw competenciasErr;
+      const { error: parcelasErr } = await db.from("acordos_mensalidades_parcelas").update({ situacao: "cancelado" }).eq("acordo_id", acordoId).eq("situacao", "em_aberto");
+      if (parcelasErr) throw parcelasErr;
+      const { error: cancelarErr } = await db.from("acordos_mensalidades").update({ situacao: "cancelado" }).eq("id", acordoId);
+      if (cancelarErr) throw cancelarErr;
+      return NextResponse.json({ ok: true, message: "Acordo desfeito. As mensalidades originais voltaram a ficar disponíveis, sem apagar o histórico." });
+    }
     const parcelaId = String(body.parcela_id || "");
     const contaId = String(body.conta_bancaria_id || "");
     const forma = String(body.forma_pagamento || "");
