@@ -582,6 +582,17 @@ export async function GET(request: Request) {
     if (erroCobrancas) throw erroCobrancas;
     if (erroContas) throw erroContas;
 
+    const [vinculosAcordoResult, acordosAtivosResult] = await Promise.all([
+      db.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
+      db.from("acordos_mensalidades").select("id").in("situacao", ["ativo", "concluido"]),
+    ]);
+    if (vinculosAcordoResult.error) throw vinculosAcordoResult.error;
+    if (acordosAtivosResult.error) throw acordosAtivosResult.error;
+    const idsAcordosVigentes = new Set((acordosAtivosResult.data || []).map((a) => String(a.id)));
+    const mensalidadesEmAcordo = new Set((vinculosAcordoResult.data || [])
+      .filter((v) => idsAcordosVigentes.has(String(v.acordo_id)))
+      .map((v) => String(v.mensalidade_id)));
+
     const primeiraCompetenciaPagaPorSocio = await carregarMapaPrimeiraCompetenciaPaga(
       db,
       (socios || []).map((s: SocioMensalidadeRow) => s.id),
@@ -605,6 +616,7 @@ export async function GET(request: Request) {
     const mensalidadesComSocio = mensalidadesCompletas.map((m: MensalidadeRow) => {
       const mensalidadeAtualizada = atualizarSituacaoAtraso(m);
       const socio = mapaSocios.get(String(m.socio_id)) || null;
+      const emAcordo = mensalidadesEmAcordo.has(String(m.id));
 
       // Lançamentos ainda em aberto acompanham a forma de cobrança atual do
       // associado. A tarifa antiga permanece somente nos pagamentos já feitos
@@ -628,6 +640,7 @@ export async function GET(request: Request) {
 
         return {
           ...mensalidadeAtualizada,
+          em_acordo: emAcordo,
           tipo_pagamento: tipoPagamentoPersistivel(socio.tipo_pagamento),
           tarifa_pagamento: Number(tarifaAtual.toFixed(2)),
           total_cobrado: Number(Math.max(0, valorBase + tarifaAtual + multa + juros - desconto).toFixed(2)),
@@ -640,7 +653,7 @@ export async function GET(request: Request) {
         };
       }
 
-      return { ...mensalidadeAtualizada, socio };
+      return { ...mensalidadeAtualizada, em_acordo: emAcordo, socio };
     });
 
     return NextResponse.json({
