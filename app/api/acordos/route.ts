@@ -193,7 +193,7 @@ export async function PATCH(request: Request) {
       const parcelas = Array.isArray(body.parcelas) ? body.parcelas as ParcelaInput[] : [];
       const formaParcelas = String(body.forma_parcelas || "boleto");
       const contaParcelas = String(body.conta_parcelas_id || "");
-      const dataValida = (v: string) => /^\\d{4}-\\d{2}-\\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+      const dataValida = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
       if (!acordoId || !Number.isFinite(total) || total <= 0 || !parcelas.length ||
           parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento))) ||
           !FORMAS.has(formaParcelas) || !contaParcelas) return erro("Confira o total, as parcelas, os vencimentos e a conta de destino.");
