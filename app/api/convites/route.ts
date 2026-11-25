@@ -468,16 +468,17 @@ export async function POST(request: Request) {
 
     let atualizado = convite;
     let comprovanteUrl: string | null = null;
+    let caminhoComprovante: string | null = null;
     if (arquivo instanceof File && arquivo.size > 0) {
       await garantirBucket(db);
       const ext = arquivo.name.split(".").pop()?.toLowerCase() || "bin";
-      const caminho = `pagamentos/convite/${convite.id}-${Date.now()}.${ext}`;
-      const up = await db.storage.from(BUCKET).upload(caminho, new Uint8Array(await arquivo.arrayBuffer()), { contentType: arquivo.type, upsert: false });
+      caminhoComprovante = `pagamentos/convite/${convite.id}-${Date.now()}.${ext}`;
+      const up = await db.storage.from(BUCKET).upload(caminhoComprovante, new Uint8Array(await arquivo.arrayBuffer()), { contentType: arquivo.type, upsert: false });
       if (up.error) {
         await db.from("convites").delete().eq("id", convite.id);
         return NextResponse.json({ error: `Não foi possível salvar o comprovante: ${up.error.message}` }, { status: 500 });
       }
-      const { data: pub } = db.storage.from(BUCKET).getPublicUrl(caminho);
+      const { data: pub } = db.storage.from(BUCKET).getPublicUrl(caminhoComprovante);
       comprovanteUrl = pub.publicUrl;
       const comprovanteStatus = pagamento === "pix" ? "pendente" : "aprovado";
       const agora = new Date().toISOString();
@@ -485,7 +486,7 @@ export async function POST(request: Request) {
         .update({ comprovante_url: comprovanteUrl, comprovante_enviado_em: agora, comprovante_status: comprovanteStatus })
         .eq("id", convite.id).select("*").single();
       if (ue) {
-        await db.storage.from(BUCKET).remove([caminho]);
+        await db.storage.from(BUCKET).remove([caminhoComprovante]);
         await db.from("convites").delete().eq("id", convite.id);
         return NextResponse.json({ error: ue.message }, { status: 500 });
       }
@@ -501,7 +502,7 @@ export async function POST(request: Request) {
         conciliado: false, data_conciliacao: null, observacoes: comprovanteUrl ? "Pagamento em dinheiro registrado pela administração. Foto do recibo anexada." : "Pagamento em dinheiro registrado pela administração. Comprovante não anexado.",
       });
       if (me) {
-        await db.storage.from(BUCKET).remove([caminho]);
+        if (caminhoComprovante) await db.storage.from(BUCKET).remove([caminhoComprovante]);
         await db.from("convites").delete().eq("id", convite.id);
         return NextResponse.json({ error: `Não foi possível lançar o pagamento no financeiro: ${me.message}` }, { status: 500 });
       }
