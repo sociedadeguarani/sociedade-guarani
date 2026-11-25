@@ -360,7 +360,7 @@ export async function POST(request: Request) {
         const notificacoes = criados.map((c: { id: string; nome_convidado: string; valor: number }) => ({ tipo: "comprovante_pagamento", titulo: "Novo convite aguardando aprovação", mensagem: `Convite de ${c.nome_convidado} no valor de R$ ${Number(c.valor).toFixed(2).replace(".", ",")} foi cadastrado para conferência${comprovanteUrl ? " com comprovante anexado" : " sem comprovante anexado"}.`, origem_tipo: "convite", origem_id: c.id, lida: false }));
         await db.from("notificacoes_admin").insert(notificacoes);
       }
-      return NextResponse.json({ ok: true, id: ids[0], convites: (atualizados || criados || []).map((convite) => normalizarConvite(convite)), total: linhas.reduce((s, c) => s + c.valor, 0) });
+      return NextResponse.json({ ok: true, id: ids[0], convites: (criados || []).map((convite: ConviteComBanho) => normalizarConvite(convite)), total: linhas.reduce((s, c) => s + c.valor, 0) });
     }
     const socio_id = String(form.get("socio_id") || "").trim() || null;
     const dependente_id = String(form.get("dependente_id") || "").trim() || null;
