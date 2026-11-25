@@ -11,6 +11,7 @@ type Mensalidade = { id: string; socio_id: string; competencia: string; valor: n
 type Conta = { id: string; nome: string; banco: string | null };
 type ParcelaInput = { valor: string; data_vencimento: string };
 type OutraDividaInput = { descricao: string; valor: string };
+type Acordo = { id: string; numero: number | null; socio_id: string; situacao: string; valor_total: number; valor_entrada: number; quantidade_parcelas: number; data_acordo: string; parcelas: Array<{ id: string; numero: number; valor: number; data_vencimento: string; situacao: string; data_pagamento: string | null }>; mensalidades: Array<{ mensalidade_id: string }>; competencias_futuras: Array<{ competencia: string }>; outras_dividas: Array<{ descricao: string; valor: number }> };
 
 const hoje = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 const moeda = (v: number) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -21,6 +22,7 @@ export default function AcordosPage() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [socioManualId, setSocioManualId] = useState("");
   const [contas, setContas] = useState<Conta[]>([]);
+  const [acordos, setAcordos] = useState<Acordo[]>([]);
   const [selecionadas, setSelecionadas] = useState<string[]>([]);
   const [busca, setBusca] = useState("");
   const [dezembro2026, setDezembro2026] = useState<{ valor: number; data_vencimento: string } | null>(null);
@@ -64,6 +66,7 @@ export default function AcordosPage() {
       setDezembro2026(null);
       setSocios(result.socios || []);
       setContas(result.contas || []);
+      setAcordos(result.acordos || []);
       setContaEntrada(atual => atual || result.contas?.[0]?.id || "");
       setContaParcelas(atual => atual || result.contas?.[0]?.id || "");
     } catch (e) { setErro(e instanceof Error ? e.message : "Falha ao carregar acordos."); }
@@ -185,6 +188,19 @@ export default function AcordosPage() {
           <div><p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Financeiro • Administração</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-bold text-slate-900"><Handshake className="h-7 w-7" /> Acordos de mensalidades</h1><p className="mt-1 text-sm text-slate-600">Selecione as mensalidades vencidas e organize a renegociação.</p></div>
           <button onClick={() => void carregar()} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm font-semibold"><RefreshCw className="h-4 w-4" /> Atualizar</button>
         </div>
+        <section className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between"><h2 className="font-bold text-slate-800">Acordos cadastrados</h2><span className="text-xs text-slate-500">{acordos.length} registro(s)</span></div>
+          {acordos.length === 0 ? <p className="py-5 text-center text-sm text-slate-500">Nenhum acordo cadastrado.</p> : <div className="space-y-3">
+            {acordos.map(a => <article key={a.id} className="rounded-lg border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div><p className="font-semibold">Acordo {a.numero ? `#${a.numero}` : ""} • {socios.find(s => s.id === a.socio_id)?.nome || "Sócio"}</p><p className="text-xs text-slate-500">Data: {dataBr(a.data_acordo)} • {a.mensalidades?.length || 0} mensalidade(s) vinculada(s) • {a.quantidade_parcelas} parcela(s)</p></div>
+                <div className="text-right"><p className="font-bold">{moeda(Number(a.valor_total || 0))}</p><span className={`text-xs font-semibold ${a.situacao === "ativo" ? "text-amber-700" : a.situacao === "concluido" ? "text-emerald-700" : "text-slate-500"}`}>{a.situacao === "ativo" ? "Ativo" : a.situacao === "concluido" ? "Concluído" : "Cancelado"}</span></div>
+              </div>
+              {a.parcelas?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{a.parcelas.map(p => <div key={p.id} className="rounded bg-slate-50 p-2 text-xs"><div className="flex justify-between gap-2"><b>Parcela {p.numero}</b><b>{moeda(Number(p.valor))}</b></div><div className="mt-1 text-slate-500">Vencimento: {dataBr(p.data_vencimento)} • {p.situacao === "pago" ? `Pago em ${dataBr(p.data_pagamento || "")}` : p.situacao === "cancelado" ? "Cancelada" : "Em aberto"}</div></div>)}</div>}
+              {a.situacao === "ativo" && <div className="mt-3 flex justify-end"><button type="button" onClick={async () => { if (!window.confirm("Deseja desfazer este acordo? Só será possível se não houver recebimentos.")) return; try { const r = await api("PATCH", { acao: "cancelar", acordo_id: a.id }); setMensagem(r.message || "Acordo desfeito."); await carregar(); } catch (e) { setErro(e instanceof Error ? e.message : "Não foi possível desfazer o acordo."); } }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Desfazer acordo</button></div>}
+            </article>)}
+          </div>}
+        </section>
         {erro && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{erro}</div>}
         {mensagem && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{mensagem}</div>}
         <section className="rounded-xl border bg-white p-4 shadow-sm">
