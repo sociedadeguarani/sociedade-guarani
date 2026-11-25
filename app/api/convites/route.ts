@@ -349,6 +349,7 @@ export async function POST(request: Request) {
           conta_bancaria_id: contaDinheiroId, conta_destino_id: null, grupo_transferencia: null, tipo: "entrada", categoria: "Convite", descricao: `Convite - ${c.nome_convidado}`, valor: Number(c.valor),
           data_movimentacao: dataHoje(), forma_pagamento: "dinheiro", origem_tipo: "convite", origem_id: c.id, socio_id: c.socio_id, dependente_id: c.dependente_id, comprovante_url: comprovanteUrl, conciliado: false, data_conciliacao: null,
           observacoes: comprovanteUrl ? "Pagamento em dinheiro registrado automaticamente no Escritório A&C. Comprovante anexado." : "Pagamento em dinheiro registrado automaticamente no Escritório A&C. Comprovante não anexado.",
+          created_by: auth.usuario.id,
         }));
         const { error: erroMovimentos } = await db.from("movimentacoes_financeiras").insert(movimentos);
         if (erroMovimentos) {
@@ -495,7 +496,7 @@ export async function POST(request: Request) {
         tipo: "entrada", categoria: "Convite", descricao: `Convite - ${nome}`, valor,
         data_movimentacao: dataHoje(), forma_pagamento: "dinheiro", origem_tipo: "convite",
         origem_id: convite.id, socio_id, dependente_id, comprovante_url: pub.publicUrl,
-        conciliado: false, data_conciliacao: null, observacoes: "Pagamento em dinheiro registrado pela administração. Foto do recibo anexada.",
+        conciliado: false, data_conciliacao: null, created_by: auth.usuario.id, observacoes: "Pagamento em dinheiro registrado pela administração. Foto do recibo anexada.",
       });
       if (me) {
         await db.storage.from(BUCKET).remove([caminho]);
