@@ -11,7 +11,7 @@ type Mensalidade = { id: string; socio_id: string; competencia: string; valor: n
 type Conta = { id: string; nome: string; banco: string | null };
 type ParcelaInput = { valor: string; data_vencimento: string };
 type OutraDividaInput = { descricao: string; valor: string };
-type Acordo = { id: string; numero: number | null; socio_id: string; situacao: string; valor_total: number; valor_entrada: number; quantidade_parcelas: number; data_acordo: string; parcelas: Array<{ id: string; numero: number; valor: number; data_vencimento: string; situacao: string; data_pagamento: string | null }>; mensalidades: Array<{ mensalidade_id: string }>; competencias_futuras: Array<{ competencia: string }>; outras_dividas: Array<{ descricao: string; valor: number }> };
+type Acordo = { id: string; numero: number | null; socio_id: string; situacao: string; valor_total: number; valor_entrada: number; quantidade_parcelas: number; data_acordo: string; parcelas: Array<{ id: string; numero: number; valor: number; data_vencimento: string; situacao: string; data_pagamento: string | null }>; mensalidades: Array<{ mensalidade_id: string }>; competencias_futuras: Array<{ competencia: string; valor_original: number; data_vencimento: string }>; outras_dividas: Array<{ descricao: string; valor: number }> };
 
 const hoje = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 const moeda = (v: number) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
