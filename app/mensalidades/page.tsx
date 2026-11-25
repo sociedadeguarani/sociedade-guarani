@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Settings2, X, Save, CreditCard, Percent } from "lucide-react";
+import { Search, Settings2, X, Save, CreditCard, Percent, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import MenuLateralPadrao from "../components/MenuLateralPadrao";
 import CabecalhoPadrao from "../components/CabecalhoPadrao";
@@ -1581,7 +1581,7 @@ export default function Page() {
                           <p className="mt-1 break-words text-xs font-bold text-[#005a3c]">Competência: {String(x.competencia || "").slice(5, 7)}/{String(x.competencia || "").slice(0, 4)}</p>
                           <p className="mt-1 break-words text-sm text-gray-700">{nomes[x.socio?.tipo_socio ?? ""] || x.socio?.tipo_socio || "Tipo não informado"}</p>
                         </div>
-                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${st[1]}`}>{st[0]}</span>
+                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold ${st[1]}`}>{x.em_acordo && <AlertTriangle className="h-3.5 w-3.5 text-amber-700" aria-label="Aguardando acordo" />}{st[0]}</span>
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-gray-100 pt-3 text-sm">
                         <div><p className="text-xs text-gray-500">Vencimento</p><p className="font-medium">{data(x.data_vencimento)}</p></div>
@@ -1732,8 +1732,9 @@ export default function Page() {
 
                         <td className="p-3">
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-bold ${st[1]}`}
+                            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${st[1]}`}
                           >
+                            {x.em_acordo && <AlertTriangle className="h-3.5 w-3.5 text-amber-700" aria-label="Aguardando acordo" />}
                             {st[0]}
                           </span>
                         </td>
@@ -1959,6 +1960,7 @@ export default function Page() {
                         const registro = historicoPorMes.get(numeroMes);
                         const situacao = registro?.situacao || "nao_gerada";
                         const semSaldo = Boolean(registro && ehSemSaldo(registro) && podeMarcarSemSaldo(registro));
+                        const emAcordo = Boolean(registro?.em_acordo);
                         const pago = Boolean(registro && !semSaldo && situacao === "pago");
                         const isento = Boolean(registro && !semSaldo && situacao === "isento");
                         const naoGerada = !registro;
@@ -1970,9 +1972,11 @@ export default function Page() {
                             type="button"
                             onClick={() => setMesHistoricoSelecionado(numeroMes)}
                             title={
-                              pago
-                                ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Pago`
-                                : semSaldo
+                              emAcordo
+                                ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Aguardando acordo`
+                                : pago
+                                  ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Pago`
+                                  : semSaldo
                                   ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Sem saldo`
                                   : naoGerada
                                     ? `${String(numeroMes).padStart(2, "0")}/${anoHistoricoSocio}: Não gerada`
@@ -1984,9 +1988,11 @@ export default function Page() {
                           >
                             <span
                               className={`mx-auto flex h-8 w-8 items-center justify-center rounded-lg text-sm font-black ${
-                                pago
-                                  ? "bg-green-100 text-green-700"
-                                  : semSaldo
+                                emAcordo
+                                  ? "bg-amber-100 text-amber-700"
+                                  : pago
+                                    ? "bg-green-100 text-green-700"
+                                    : semSaldo
                                     ? "bg-amber-100 text-amber-700"
                                     : isento
                                       ? "bg-gray-100 text-gray-500"
@@ -1995,7 +2001,7 @@ export default function Page() {
                                         : "bg-white text-gray-300"
                               }`}
                             >
-                              {pago ? "X" : semSaldo ? "SS" : isento ? "I" : ""}
+                              {emAcordo ? <AlertTriangle className="h-5 w-5" aria-label="Aguardando acordo" /> : pago ? "X" : semSaldo ? "SS" : isento ? "I" : ""}
                             </span>
                           </button>
                         );
