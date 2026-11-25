@@ -187,6 +187,46 @@ export async function PATCH(request: Request) {
   const db = getServiceClient();
   try {
     const body = await request.json();
+    if (body.acao === "editar") {
+      const acordoId = String(body.acordo_id || "");
+      const total = Number(body.valor_total);
+      const parcelas = Array.isArray(body.parcelas) ? body.parcelas as ParcelaInput[] : [];
+      const formaParcelas = String(body.forma_parcelas || "boleto");
+      const contaParcelas = String(body.conta_parcelas_id || "");
+      const dataValida = (v: string) => /^\\d{4}-\\d{2}-\\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+      if (!acordoId || !Number.isFinite(total) || total <= 0 || !parcelas.length ||
+          parcelas.some(p => !Number.isFinite(Number(p.valor)) || Number(p.valor) <= 0 || !dataValida(String(p.data_vencimento))) ||
+          !FORMAS.has(formaParcelas) || !contaParcelas) return erro("Confira o total, as parcelas, os vencimentos e a conta de destino.");
+      const { data: acordoEditar, error: acordoEditarErr } = await db.from("acordos_mensalidades")
+        .select("id,situacao,valor_entrada,movimentacao_entrada_id").eq("id", acordoId).maybeSingle();
+      if (acordoEditarErr) throw acordoEditarErr;
+      if (!acordoEditar || acordoEditar.situacao !== "ativo") return erro("Somente acordos ativos podem ser editados.", 409);
+      if (acordoEditar.movimentacao_entrada_id || Number(acordoEditar.valor_entrada || 0) > 0)
+        return erro("Este acordo possui entrada registrada. Para proteger o histórico financeiro, não é possível alterar suas condições por aqui.", 409);
+      const { data: pagas, error: pagasErr } = await db.from("acordos_mensalidades_parcelas")
+        .select("id").eq("acordo_id", acordoId).eq("situacao", "pago").limit(1);
+      if (pagasErr) throw pagasErr;
+      if ((pagas || []).length) return erro("Este acordo já possui parcelas recebidas. Não é possível alterar suas condições.", 409);
+      if (Math.abs(parcelas.reduce((s,p)=>s+Number(p.valor || 0),0)-total) > 0.01)
+        return erro("A soma das parcelas deve ser igual ao valor total do acordo.");
+      const { data: contaEdit, error: contaEditErr } = await db.from("contas_bancarias")
+        .select("id,ativo").eq("id", contaParcelas).maybeSingle();
+      if (contaEditErr) throw contaEditErr;
+      if (!contaEdit || contaEdit.ativo === false) return erro("Conta de destino inválida ou inativa.");
+      const { error: removeParcelasErr } = await db.from("acordos_mensalidades_parcelas")
+        .delete().eq("acordo_id", acordoId).eq("situacao", "em_aberto");
+      if (removeParcelasErr) throw removeParcelasErr;
+      const { error: criaParcelasErr } = await db.from("acordos_mensalidades_parcelas").insert(parcelas.map((p,i)=>({
+        acordo_id: acordoId, numero: i+1, descricao: "Parcela " + (i+1),
+        valor: Number(p.valor), data_vencimento: p.data_vencimento,
+        situacao: "em_aberto", forma_pagamento: formaParcelas, conta_bancaria_id: contaParcelas,
+      })));
+      if (criaParcelasErr) throw criaParcelasErr;
+      const { error: atualizaAcordoErr } = await db.from("acordos_mensalidades")
+        .update({ valor_total: total, quantidade_parcelas: parcelas.length }).eq("id", acordoId);
+      if (atualizaAcordoErr) throw atualizaAcordoErr;
+      return NextResponse.json({ ok: true, message: "Condições do acordo atualizadas." });
+    }
     if (body.acao === "cancelar") {
       const acordoId = String(body.acordo_id || "");
       if (!acordoId) return erro("Acordo não informado.");
