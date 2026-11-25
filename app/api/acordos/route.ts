@@ -26,19 +26,30 @@ export async function GET(request: Request) {
     const falha = socios.error || mensalidades.error || contas.error || acordos.error;
     if (falha) throw falha;
     const ativos = new Set((acordos.data || []).map((a) => String(a.id)));
-    const [itens, competenciasFuturas] = await Promise.all([
-      db.from("acordos_mensalidades_itens").select("mensalidade_id,acordo_id").eq("ativo", true),
-      db.from("acordos_mensalidades_competencias").select("socio_id,competencia,acordo_id").eq("ativo", true),
+    const [itens, competenciasFuturas, parcelas, outrosItens] = await Promise.all([
+      db.from("acordos_mensalidades_itens").select("id,mensalidade_id,acordo_id,valor_original,ativo").eq("ativo", true),
+      db.from("acordos_mensalidades_competencias").select("id,socio_id,competencia,acordo_id,valor_original,data_vencimento,ativo").eq("ativo", true),
+      db.from("acordos_mensalidades_parcelas").select("*").order("numero"),
+      db.from("acordos_mensalidades_outros_itens").select("*"),
     ]);
     if (itens.error) throw itens.error;
     if (competenciasFuturas.error) throw competenciasFuturas.error;
+    if (parcelas.error) throw parcelas.error;
+    if (outrosItens.error) throw outrosItens.error;
     const socioPorId = new Map((socios.data || []).map((s) => [String(s.id), s]));
     const emAcordo = new Set((itens.data || []).filter((i) => ativos.has(String(i.acordo_id))).map((i) => String(i.mensalidade_id)));
     const pendencias = (mensalidades.data || []).filter((m) => !emAcordo.has(String(m.id))).map((m) => ({
       ...m, socio: socioPorId.get(String(m.socio_id)) || null,
       valor: Number(m.total_cobrado ?? m.valor ?? 0),
     }));
-    return NextResponse.json({ socios: socios.data || [], mensalidades: pendencias, contas: contas.data || [], acordos: acordos.data || [], competencias_futuras: competenciasFuturas.data || [] });
+    const acordosComDetalhes = (acordos.data || []).map((a) => ({
+      ...a,
+      parcelas: (parcelas.data || []).filter((p) => String(p.acordo_id) === String(a.id)),
+      mensalidades: (itens.data || []).filter((i) => String(i.acordo_id) === String(a.id)),
+      competencias_futuras: (competenciasFuturas.data || []).filter((i) => String(i.acordo_id) === String(a.id)),
+      outras_dividas: (outrosItens.data || []).filter((i) => String(i.acordo_id) === String(a.id)),
+    }));
+    return NextResponse.json({ socios: socios.data || [], mensalidades: pendencias, contas: contas.data || [], acordos: acordosComDetalhes, competencias_futuras: competenciasFuturas.data || [] });
   } catch (e) {
     console.error("[api/acordos][GET]", e);
     return erro("Não foi possível carregar os dados dos acordos.", 500);
@@ -214,6 +225,22 @@ export async function PATCH(request: Request) {
       const { count, error: abertasErr } = await db.from("acordos_mensalidades_parcelas").select("id", { count: "exact", head: true }).eq("acordo_id", acordo.id).neq("situacao", "pago").neq("situacao", "cancelado");
       if (abertasErr) throw abertasErr;
       if ((count || 0) === 0) {
+        // As parcelas do acordo já geraram as entradas financeiras. Aqui apenas
+        // quitamos os registros originais, sem criar uma segunda movimentação.
+        const { data: vinculos, error: vinculosErr } = await db
+          .from("acordos_mensalidades_itens")
+          .select("mensalidade_id")
+          .eq("acordo_id", acordo.id)
+          .eq("ativo", true);
+        if (vinculosErr) throw vinculosErr;
+        const idsMensalidades = (vinculos || []).map((v) => String(v.mensalidade_id));
+        if (idsMensalidades.length) {
+          const { error: mensalidadesErr } = await db.from("mensalidades")
+            .update({ situacao: "pago", data_pagamento: data })
+            .in("id", idsMensalidades)
+            .in("situacao", ["em_aberto", "em_atraso"]);
+          if (mensalidadesErr) throw mensalidadesErr;
+        }
         const { error: quitarErr } = await db.from("acordos_mensalidades").update({ situacao: "concluido" }).eq("id", acordo.id);
         if (quitarErr) throw quitarErr;
       }
