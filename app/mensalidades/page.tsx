@@ -60,6 +60,7 @@ type M = {
   total_cobrado?: number | null;
   data_vencimento: string | null;
   situacao: string | null;
+  em_acordo?: boolean;
   data_pagamento: string | null;
   tipo_pagamento: string | null;
   observacoes: string | null;
@@ -291,6 +292,7 @@ function situacaoVisual(item: M) {
 }
 
 function statusMensalidade(item: M, semSaldoPermitido = false) {
+  if (item.em_acordo) return ["Aguardando acordo", "bg-blue-100 text-blue-800"];
   if (mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)) {
     return ["Anterior à associação", "bg-gray-100 text-gray-600"];
   }
@@ -493,7 +495,7 @@ export default function Page() {
 
   function alternarMesHistoricoParaBaixa(numeroMes: number) {
     const registro = historicoPorMes.get(numeroMes);
-    if (!registro || registro.situacao === "pago" || registro.situacao === "isento" || String(registro.id).startsWith("virtual-")) {
+    if (!registro || registro.em_acordo || registro.situacao === "pago" || registro.situacao === "isento" || String(registro.id).startsWith("virtual-")) {
       return;
     }
     setMesesHistoricoSelecionadosBaixa((atuais) => {
@@ -516,7 +518,7 @@ export default function Page() {
     if (!socioSelecionado || processandoBaixaHistorico) return;
     const registros = mesesHistoricoSelecionadosBaixa
       .map((numeroMes) => historicoPorMes.get(numeroMes))
-      .filter((item): item is M => Boolean(item && item.situacao !== "pago" && item.situacao !== "isento" && !String(item.id).startsWith("virtual-")));
+      .filter((item): item is M => Boolean(item && !item.em_acordo && item.situacao !== "pago" && item.situacao !== "isento" && !String(item.id).startsWith("virtual-")));
     if (!registros.length) {
       setErro("Selecione pelo menos uma mensalidade gerada e ainda não paga.");
       return;
@@ -1003,7 +1005,7 @@ export default function Page() {
   // A seleção em massa respeita exatamente os filtros visíveis na tela.
   // Mensalidades pagas ou ainda não geradas não podem ser selecionadas.
   const linhasSelecionaveis = filtrada.filter(
-    (item) => item.situacao !== "pago" && item.situacao !== "nao_gerada" &&
+    (item) => !item.em_acordo && item.situacao !== "pago" && item.situacao !== "nao_gerada" &&
       !mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)
   );
   const todosSelecionaveisMarcados =
@@ -1020,6 +1022,7 @@ export default function Page() {
       filtrada.filter(
         (item) =>
           sel.includes(item.id) &&
+          !item.em_acordo &&
           item.situacao !== "pago" &&
           item.situacao !== "nao_gerada" &&
           !mensalidadeRegistroAnteriorAAssociacao(item.socio?.data_associacao, item.competencia, item.data_vencimento, item.socio?.dia_vencimento)
@@ -1562,11 +1565,11 @@ export default function Page() {
                         <input
                           type="checkbox"
                           className="mt-1 h-5 w-5 shrink-0 accent-[#005a3c]"
-                          disabled={x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
+                          disabled={x.em_acordo || x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
                           checked={marcado && !mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
                           aria-label={`Selecionar mensalidade de ${x.socio?.nome || "associado"}`}
                           onChange={() => {
-                            if (x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
+                            if (x.em_acordo || x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
                             setSel((atual) => atual.includes(x.id) ? atual.filter((id) => id !== x.id) : [...atual, x.id]);
                           }}
                         />
@@ -1663,11 +1666,11 @@ export default function Page() {
                         <td className="p-3">
                           <input
                             type="checkbox"
-                            disabled={x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
-                            checked={x.situacao !== "pago" && x.situacao !== "nao_gerada" && !mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento) && sel.includes(x.id)}
+                            disabled={x.em_acordo || x.situacao === "pago" || x.situacao === "nao_gerada" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)}
+                            checked={!x.em_acordo && x.situacao !== "pago" && x.situacao !== "nao_gerada" && !mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento) && sel.includes(x.id)}
                             onChange={() => {
 
-                              if (x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
+                              if (x.em_acordo || x.situacao === "pago" || mensalidadeRegistroAnteriorAAssociacao(x.socio?.data_associacao, x.competencia, x.data_vencimento, x.socio?.dia_vencimento)) return;
 
                               setSel((s) =>
                                 s.includes(x.id)
@@ -2009,7 +2012,7 @@ export default function Page() {
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-12">
                     {Array.from({ length: 12 }, (_, index) => index + 1).map((numeroMes) => {
                       const registro = historicoPorMes.get(numeroMes);
-                      const elegivel = Boolean(registro && registro.situacao !== "pago" && registro.situacao !== "isento" && !String(registro.id).startsWith("virtual-"));
+                      const elegivel = Boolean(registro && !registro.em_acordo && registro.situacao !== "pago" && registro.situacao !== "isento" && !String(registro.id).startsWith("virtual-"));
                       const marcado = mesesHistoricoSelecionadosBaixa.includes(numeroMes);
                       return (
                         <label key={`baixa-${numeroMes}`} className={`flex items-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold ${elegivel ? "cursor-pointer border-gray-200" : "cursor-not-allowed border-gray-100 text-gray-300"} ${marcado ? "border-[#00704a] bg-[#eaf4ee] text-[#005a3c]" : "bg-white"}`}>
@@ -2109,7 +2112,9 @@ export default function Page() {
                       </div>
 
                       <div className="mt-4 border-t pt-4">
-                        {registroMes.situacao === "pago" ? (
+                        {registroMes.em_acordo ? (
+                          <p className="text-sm font-semibold text-blue-800">Esta mensalidade está vinculada a um acordo ativo. O recebimento deve ser registrado nas parcelas do acordo, em Contas a Receber.</p>
+                        ) : registroMes.situacao === "pago" ? (
                           <button
                             type="button"
                             onClick={() => void alterarMensalidadeDoModal("estornar")}
