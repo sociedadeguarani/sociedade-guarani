@@ -361,7 +361,64 @@ export async function GET(request: Request) {
         primeiraCompetenciaPagaPorSocio.get(idSocio),
       );
     });
-    const atrasosPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidades, hoje) : new Map();
+    // Mensalidades vinculadas a acordos ativos não podem manter o bloqueio
+    // financeiro original na carteirinha. Enquanto o acordo estiver em dia,
+    // o associado permanece liberado; parcelas do acordo vencidas voltam a
+    // aplicar o bloqueio, conforme a regra da portaria.
+    let mensalidadesParaCalculo = mensalidades;
+    let parcelasAcordoAtrasadasPorSocio = new Map<string, { quantidade: number; dias: number; valor: number }>();
+    if (podeVerFinanceiro && ids.length) {
+      const [vinculosResult, acordosResult] = await Promise.all([
+        supabase.from("acordos_mensalidades_itens")
+          .select("mensalidade_id,acordo_id").eq("ativo", true),
+        supabase.from("acordos_mensalidades")
+          .select("id,socio_id").in("socio_id", ids).eq("situacao", "ativo"),
+      ]);
+      if (vinculosResult.error) throw vinculosResult.error;
+      if (acordosResult.error) throw acordosResult.error;
+      const acordosAtivos = acordosResult.data || [];
+      const idsAcordosAtivos = new Set(acordosAtivos.map((a) => String(a.id)));
+      const mensalidadesEmAcordo = new Set((vinculosResult.data || [])
+        .filter((v) => idsAcordosAtivos.has(String(v.acordo_id)))
+        .map((v) => String(v.mensalidade_id)));
+      mensalidadesParaCalculo = mensalidades.filter((m) => !mensalidadesEmAcordo.has(String((m as MensalidadeCarteirinha & { id?: string }).id || "")));
+
+      if (acordosAtivos.length) {
+        const { data: parcelasAtrasadas, error: parcelasError } = await supabase
+          .from("acordos_mensalidades_parcelas")
+          .select("acordo_id,valor,data_vencimento")
+          .in("acordo_id", [...idsAcordosAtivos])
+          .eq("situacao", "em_aberto")
+          .lt("data_vencimento", hoje);
+        if (parcelasError) throw parcelasError;
+        const socioPorAcordo = new Map(acordosAtivos.map((a) => [String(a.id), String(a.socio_id)]));
+        const acumulado = new Map<string, { quantidade: number; dias: number; valor: number }>();
+        for (const parcela of parcelasAtrasadas || []) {
+          const socioId = socioPorAcordo.get(String(parcela.acordo_id));
+          if (!socioId) continue;
+          const atual = acumulado.get(socioId) || { quantidade: 0, dias: 0, valor: 0 };
+          atual.quantidade += 1;
+          atual.valor += Number(parcela.valor || 0);
+          const vencimento = String(parcela.data_vencimento || "").slice(0, 10);
+          if (vencimento) {
+            const dias = Math.max(0, Math.floor((new Date(`${hoje}T00:00:00`).getTime() - new Date(`${vencimento}T00:00:00`).getTime()) / 86400000));
+            atual.dias = Math.max(atual.dias, dias);
+          }
+          acumulado.set(socioId, atual);
+        }
+        parcelasAcordoAtrasadasPorSocio = acumulado;
+      }
+    }
+    const atrasosOriginaisPorSocio = podeVerFinanceiro ? statusPorMensalidades(mensalidadesParaCalculo, hoje) : new Map();
+    const atrasosPorSocio = new Map<string, { quantidade: number; dias: number; valor: number }>(atrasosOriginaisPorSocio as Map<string, { quantidade: number; dias: number; valor: number }>);
+    for (const [socioId, parcelas] of parcelasAcordoAtrasadasPorSocio) {
+      const atual = atrasosPorSocio.get(socioId) || { quantidade: 0, dias: 0, valor: 0 };
+      atrasosPorSocio.set(socioId, {
+        quantidade: atual.quantidade + parcelas.quantidade,
+        dias: Math.max(atual.dias, parcelas.dias),
+        valor: atual.valor + parcelas.valor,
+      });
+    }
     // A matrícula familiar é uma segunda forma de vínculo: A = titular, B = cônjuge.
     // Alguns cadastros antigos não têm responsavel_id ou mantêm possui_mensalidade=true
     // por legado; o cônjuge familiar deve mesmo assim herdar o financeiro do titular.
