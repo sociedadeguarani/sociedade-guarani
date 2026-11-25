@@ -41,6 +41,7 @@ export default function AcordosPage() {
   const [observacoes, setObservacoes] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [editandoAcordoId, setEditandoAcordoId] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
 
@@ -147,6 +148,39 @@ export default function AcordosPage() {
     setParcelas(atual => atual.map((p, i) => ({ ...p, valor: (i === n - 1 ? saldo - base * (n - 1) : base).toFixed(2) })));
   }
 
+  function iniciarEdicao(a: Acordo) {
+    if (a.situacao !== "ativo" || Number(a.valor_entrada || 0) > 0 || a.parcelas.some(p => p.situacao === "pago")) {
+      setErro("Este acordo possui recebimentos ou não está ativo. A edição fica bloqueada para proteger o financeiro.");
+      return;
+    }
+    setEditandoAcordoId(a.id);
+    setSocioManualId(a.socio_id);
+    const socio = socios.find(s => s.id === a.socio_id);
+    setBusca(socio ? `${socio.nome} — ${socio.matricula || "Sem matrícula"}` : "");
+    setSelecionadas(a.mensalidades.map(m => m.mensalidade_id));
+    setDezembroSelecionado(a.competencias_futuras.length > 0);
+    setDezembro2026(a.competencias_futuras[0] ? {
+      valor: Number(a.competencias_futuras[0].valor_original),
+      data_vencimento: a.competencias_futuras[0].data_vencimento,
+    } : null);
+    setValorTotal(String(a.valor_total));
+    setEntrada(String(a.valor_entrada || 0));
+    setQuantidade(String(a.parcelas.length || 1));
+    setParcelas(a.parcelas.map(p => ({ valor: String(p.valor), data_vencimento: p.data_vencimento })));
+    setOutrasDividas(a.outras_dividas.map(d => ({ descricao: d.descricao, valor: String(d.valor) })));
+    setMensagem("Editando condições do acordo. As mensalidades e outras dívidas vinculadas serão preservadas.");
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+
+  function cancelarEdicao() {
+    setEditandoAcordoId("");
+    setSocioManualId(""); setBusca(""); setSelecionadas([]);
+    setDezembroSelecionado(false); setDezembro2026(null);
+    setValorTotal(""); setEntrada("0"); setQuantidade("1");
+    setParcelas([{ valor: "0", data_vencimento: hoje() }]);
+    setOutrasDividas([]); setFormaParcelas("boleto"); setObservacoes("");
+  }
+
   async function salvar() {
     setErro(""); setMensagem("");
     const total = Number(valorTotal || totalComDezembro);
@@ -157,7 +191,7 @@ export default function AcordosPage() {
     if (parcelas.some(p => Number(p.valor) > 0) && !contaParcelas) { setErro("Selecione a conta que receberá as parcelas."); return; }
     setSalvando(true);
     try {
-      const result = await api("POST", {
+      const payload = {
         socio_id: escolhidas[0]?.socio_id || socioManualId,
         mensalidade_ids: selecionadas,
         competencias_futuras: dezembroSelecionado && dezembro2026 ? [{ competencia: "2026-12-01", valor: dezembro2026.valor, data_vencimento: dezembro2026.data_vencimento }] : [],
@@ -169,10 +203,15 @@ export default function AcordosPage() {
         forma_entrada: formaEntrada,
         conta_entrada_id: contaEntrada,
         conta_parcelas_id: contaParcelas,
+        forma_parcelas: formaParcelas,
         data_entrada: dataEntrada,
         observacoes,
-      });
-      setMensagem(result.message || "Acordo cadastrado com sucesso.");
+      };
+      const result = editandoAcordoId
+        ? await api("PATCH", { ...payload, acao: "editar", acordo_id: editandoAcordoId })
+        : await api("POST", payload);
+      setMensagem(result.message || (editandoAcordoId ? "Acordo atualizado." : "Acordo cadastrado com sucesso."));
+      setEditandoAcordoId("");
       setSelecionadas([]); setSocioManualId(""); setBusca(""); setDezembroSelecionado(false); setDezembro2026(null); setValorTotal(""); setEntrada("0"); setQuantidade("1");
       setParcelas([{ valor: "0", data_vencimento: hoje() }]); setOutrasDividas([]); setFormaParcelas("boleto"); setObservacoes("");
       await carregar();
@@ -197,7 +236,9 @@ export default function AcordosPage() {
                 <div className="text-right"><p className="font-bold">{moeda(Number(a.valor_total || 0))}</p><span className={`text-xs font-semibold ${a.situacao === "ativo" ? "text-amber-700" : a.situacao === "concluido" ? "text-emerald-700" : "text-slate-500"}`}>{a.situacao === "ativo" ? "Ativo" : a.situacao === "concluido" ? "Concluído" : "Cancelado"}</span></div>
               </div>
               {a.parcelas?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{a.parcelas.map(p => <div key={p.id} className="rounded bg-slate-50 p-2 text-xs"><div className="flex justify-between gap-2"><b>Parcela {p.numero}</b><b>{moeda(Number(p.valor))}</b></div><div className="mt-1 text-slate-500">Vencimento: {dataBr(p.data_vencimento)} • {p.situacao === "pago" ? `Pago em ${dataBr(p.data_pagamento || "")}` : p.situacao === "cancelado" ? "Cancelada" : "Em aberto"}</div></div>)}</div>}
-              {a.situacao === "ativo" && <div className="mt-3 flex justify-end"><button type="button" onClick={async () => { if (!window.confirm("Deseja desfazer este acordo? Só será possível se não houver recebimentos.")) return; try { const r = await api("PATCH", { acao: "cancelar", acordo_id: a.id }); setMensagem(r.message || "Acordo desfeito."); await carregar(); } catch (e) { setErro(e instanceof Error ? e.message : "Não foi possível desfazer o acordo."); } }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Desfazer acordo</button></div>}
+              {a.situacao === "ativo" && <div className="mt-3 flex flex-wrap justify-end gap-2">
+                {Number(a.valor_entrada || 0) === 0 && !a.parcelas.some(p => p.situacao === "pago") && <button type="button" onClick={() => iniciarEdicao(a)} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">Editar acordo</button>}
+                <button type="button" onClick={async () => { if (!window.confirm("Deseja desfazer este acordo? Só será possível se não houver recebimentos.")) return; try { const r = await api("PATCH", { acao: "cancelar", acordo_id: a.id }); setMensagem(r.message || "Acordo desfeito."); await carregar(); } catch (e) { setErro(e instanceof Error ? e.message : "Não foi possível desfazer o acordo."); } }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Desfazer acordo</button></div>}
             </article>)}
           </div>}
         </section>
@@ -218,7 +259,8 @@ export default function AcordosPage() {
           <div className="mt-3 text-sm text-slate-600">Mensalidades: <b>{escolhidas.length + (dezembroSelecionado ? 1 : 0)}</b> • Total selecionado: <b>{moeda(totalComDezembro)}</b></div>
         </section>
         <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <h2 className="mb-4 font-bold text-slate-800">2. Condições do acordo</h2>
+          <h2 className="mb-4 font-bold text-slate-800">{editandoAcordoId ? "Editar condições do acordo" : "2. Condições do acordo"}</h2>
+          {editandoAcordoId && <p className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Modo de edição: os vínculos das mensalidades e outras dívidas serão mantidos. A edição é permitida somente antes de qualquer recebimento.</p>}
           <div className="grid gap-4 md:grid-cols-3">
             <label className="text-sm font-medium">Valor negociado total<input type="number" min="0.01" step="0.01" value={valorTotal || (totalComDezembro ? totalComDezembro.toFixed(2) : "")} onChange={e=>setValorTotal(e.target.value)} className="mt-1 w-full rounded-lg border p-2"/></label>
             <label className="text-sm font-medium">Entrada<input type="number" min="0" step="1" value={entrada} onChange={e=>atualizarEntrada(String(Math.max(0, Math.trunc(Number(e.target.value || 0)))))} inputMode="numeric" className="mt-1 w-full rounded-lg border p-2"/></label>
@@ -232,7 +274,7 @@ export default function AcordosPage() {
             {Number(entrada) > 0 && <label className="mt-3 block max-w-xs text-xs font-semibold">Data do recebimento<input type="date" value={dataEntrada} onChange={e=>setDataEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"/></label>}{Number(entrada) > 0 && <div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-semibold">Conta de recebimento<select value={contaEntrada} onChange={e=>setContaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm"><option value="">Selecione</option>{contas.map(c=><option key={c.id} value={c.id}>{c.nome}{c.banco? ` — ${c.banco}`:""}</option>)}</select></label><label className="text-xs font-semibold">Forma de pagamento<select value={formaEntrada} onChange={e=>setFormaEntrada(e.target.value)} className="mt-1 w-full rounded border p-2 text-sm">{[["pix","PIX"],["cheque","Cheque"],["debito_em_conta","Débito"],["dinheiro","Dinheiro"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>}
           </div>
           <label className="mt-4 block text-sm font-medium">Observações<textarea value={observacoes} onChange={e=>setObservacoes(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border p-2"/></label>
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalComDezembro))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":"Cadastrar acordo"}</button></div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">{editandoAcordoId && <button type="button" onClick={cancelarEdicao} className="rounded-lg border px-4 py-2 text-sm font-semibold">Cancelar edição</button>}<div className="text-sm text-slate-600">Valor total: <b>{moeda(Number(valorTotal || totalComDezembro))}</b> • Entrada: <b>{moeda(Number(entrada || 0))}</b></div><button disabled={salvando || carregando || !socioSelecionadoId || (!selecionadas.length && !dezembroSelecionado && !outrasDividas.some(d=>d.descricao.trim() && Number(d.valor)>0))} onClick={()=>void salvar()} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{salvando?"Salvando...":editandoAcordoId?"Salvar alterações":"Cadastrar acordo"}</button></div>
         </section>
       </main>
     </div>
