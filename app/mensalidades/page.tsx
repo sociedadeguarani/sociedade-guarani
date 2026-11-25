@@ -2057,6 +2057,7 @@ export default function Page() {
 
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                   <span className="rounded-full bg-green-100 px-3 py-1 text-green-700">X Pago</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-amber-800"><AlertTriangle className="h-3.5 w-3.5" /> Aguardando acordo</span>
                   <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">SS Sem saldo</span>
                   <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-500">I Isento</span>
                   <span className="rounded-full border bg-white px-3 py-1 text-gray-400">Em aberto / PIX pendente</span>
@@ -2089,9 +2090,11 @@ export default function Page() {
                                   : "bg-yellow-100 text-yellow-700"
                       }`}>
                         {registroMes
-                          ? (ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
-                              ? "S.S"
-                              : status(situacaoVisual(registroMes))[0])
+                          ? (registroMes.em_acordo
+                              ? "Aguardando acordo"
+                              : ehSemSaldo(registroMes) && podeMarcarSemSaldo(registroMes)
+                                ? "S.S"
+                                : status(situacaoVisual(registroMes))[0])
                           : "Não gerada"}
                       </span>
                     </div>
